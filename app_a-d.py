@@ -811,7 +811,13 @@ if not df_main.empty:
                     
                     for i, date_label in enumerate(date_tabs_m):
                         with date_tabs_m[i]:
-                            current_selected_date_dt_str = date_label.replace("📅 ", "") 
+                            # Validar que date_label sea un string válido antes de usar .replace
+                            if not isinstance(date_label, str):
+                                st.error("⚠️ Error interno: la fecha seleccionada no es válida.")
+                                st.stop()
+
+                            current_selected_date_dt_str = date_label.replace("📅 ", "")
+
                             current_selected_date_dt = pd.to_datetime(current_selected_date_dt_str, format='%d/%m/%Y')
                             
                             pedidos_fecha = pedidos_m_display[pedidos_m_display["Fecha_Entrega_dt"] == current_selected_date_dt].copy()
