@@ -1,91 +1,83 @@
-# app_a.py
 import streamlit as st
 import pandas as pd
 from datetime import datetime, timedelta
+import json # Aunque ya no se usa para cargar el archivo, se mantiene si otras partes lo usan
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 import boto3
 import re
+# import os # Ya no es necesario si no se lee el archivo localmente
 import gspread.utils
-# from streamlit_autorefresh import st_autorefresh # Línea comentada/eliminada
-
 
 st.set_page_config(page_title="Recepción de Pedidos TD", layout="wide")
 
 st.title("📬 Bandeja de Pedidos TD")
 
-# 🔄 La recarga automática cada 5 segundos ha sido eliminada por tu solicitud.
-# st_autorefresh(interval=5 * 1000, key="datarefresh_app_a") # Línea comentada/eliminada
-
-# --- Google Sheets Configuration ---
-try:
-    # Lee las credenciales de gsheets desde st.secrets
-    GSHEETS_CREDENTIALS = st.secrets["gsheets"]
-    GOOGLE_SHEET_ID = '1aWkSelodaz0nWfQx7FZAysGnIYGQFJxAN7RO3YgCiZY'
-    GOOGLE_SHEET_WORKSHEET_NAME = 'datos_pedidos'
-except KeyError as e:
-    st.error(f"❌ Error: Las credenciales de Google Sheets no se encontraron en Streamlit secrets. Asegúrate de que tu archivo .streamlit/secrets.toml esté configurado correctamente con la sección [gsheets]. Falta la clave: {e}")
-    st.stop()
-
+# --- Google Sheets Constants (pueden venir de st.secrets si se prefiere) ---
+# Se asumen estos valores de tu código original.
+GOOGLE_SHEET_ID = '1aWkSelodaz0nWfQx7FZAysGnIYGQFJxAN7RO3YgCiZY'
+GOOGLE_SHEET_WORKSHEET_NAME = 'datos_pedidos'
 
 # --- AWS S3 Configuration ---
 try:
-    AWS_ACCESS_KEY_ID = st.secrets["aws"]["aws_access_key_id"]
-    AWS_SECRET_ACCESS_KEY = st.secrets["aws"]["aws_secret_access_key"]
-    AWS_REGION = st.secrets["aws"]["aws_region"]
-    S3_BUCKET_NAME = st.secrets["aws"]["s3_bucket_name"]
+    if "aws" not in st.secrets:
+        st.error("❌ Las credenciales de AWS S3 no se encontraron en Streamlit secrets. Asegúrate de que tu archivo .streamlit/secrets.toml esté configurado correctamente con la sección [aws].")
+        st.info("Falta la clave: 'st.secrets has no key \"aws\". Did you forget to add it to secrets.toml, mount it to secret directory, or the app settings on Streamlit Cloud? More info: https://docs.streamlit.io/deploy/streamlit-community-cloud/deploy-your-app/secrets-management'")
+        st.stop()
+
+    AWS_CREDENTIALS = st.secrets["aws"]
+    AWS_ACCESS_KEY_ID = AWS_CREDENTIALS["aws_access_key_id"]
+    AWS_SECRET_ACCESS_KEY = AWS_CREDENTIALS["aws_secret_access_key"]
+    AWS_REGION = AWS_CREDENTIALS["aws_region"]
+    S3_BUCKET_NAME = AWS_CREDENTIALS["s3_bucket_name"]
 except KeyError as e:
-    st.error(f"❌ Error: Las credenciales de AWS S3 no se encontraron en Streamlit secrets. Asegúrate de que tu archivo .streamlit/secrets.toml esté configurado correctamente con la sección [aws]. Falta la clave: {e}")
+    st.error(f"❌ Error: Problema al acceder a una clave de AWS S3 en Streamlit secrets. Falta la clave: {e}")
+    st.info("Asegúrate de que todas las claves (aws_access_key_id, aws_secret_access_key, aws_region, s3_bucket_name) estén presentes en la sección [aws].")
     st.stop()
 
 S3_ATTACHMENT_PREFIX = 'adjuntos_pedidos/'
 
 # --- Initialize Session State for tab persistence ---
-# Con st.tabs, Streamlit maneja la persistencia por sí mismo en gran medida,
-# pero aún podemos usar session_state para controlar el índice inicial o recalcularlo si es necesario.
 if "active_main_tab_index" not in st.session_state:
-    st.session_state["active_main_tab_index"] = 0 # Default to the first tab
-
+    st.session_state["active_main_tab_index"] = 0
 if "active_subtab_local_index" not in st.session_state:
     st.session_state["active_subtab_local_index"] = 0
-
 if "active_date_tab_m_index" not in st.session_state:
-    st.session_state["active_date_tab_m_index"] = 0 # Será dinámico
-
+    st.session_state["active_date_tab_m_index"] = 0
 if "active_date_tab_t_index" not in st.session_state:
-    st.session_state["active_date_tab_t_index"] = 0 # Será dinámico
-
+    st.session_state["active_date_tab_t_index"] = 0
 if "expanded_attachments" not in st.session_state:
     st.session_state["expanded_attachments"] = {}
 
 
 # --- Cached Clients for Google Sheets and AWS S3 ---
 
-# Eliminamos la función load_credentials_from_file ya que ahora leeremos de st.secrets
-
 @st.cache_resource
-def get_gspread_client(_credentials_json_dict): # <--- Added underscore here
+def get_gspread_client(_credentials_json_dict):
     """
     Autentica con Google Sheets usando las credenciales de la cuenta de servicio
-    y retorna un cliente de gspread, compatible con oauth2client.
-    Este método es idéntico al usado en app_admin.py.
+    y retorna un cliente de gspread.
     """
     try:
         scope = ['https://spreadsheets.google.com/feeds', 'https://www.googleapis.com/auth/drive']
-        # Pasa el diccionario de credenciales directamente
-        creds = ServiceAccountCredentials.from_json_keyfile_dict(_credentials_json_dict, scope) # <--- Use the underscored variable here too
+
+        # **MODIFICACIÓN CRÍTICA AQUÍ para manejar private_key de st.secrets**
+        creds_dict = _credentials_json_dict.copy()
+        if "private_key" in creds_dict and isinstance(creds_dict["private_key"], str):
+            creds_dict["private_key"] = creds_dict["private_key"].replace("\\n", "\n")
+
+        creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
         client = gspread.authorize(creds)
         return client
     except Exception as e:
         st.error(f"❌ Error al autenticar con Google Sheets: {e}")
-        st.info("ℹ️ Verifica que las APIs de Google Sheets y Drive estén habilitadas para tu proyecto de Google Cloud y que tus credenciales de servicio sean válidas.")
+        st.info("ℹ️ Verifica que las APIs de Google Sheets y Drive estén habilitadas para tu proyecto de Google Cloud y que tus credenciales de servicio en `secrets.toml` sean válidas.")
         st.stop()
 
 @st.cache_resource
 def get_s3_client():
     """
     Inicializa y retorna un cliente de S3, usando credenciales globales.
-    Este método es idéntico al usado en app_admin.py.
     """
     try:
         s3 = boto3.client(
@@ -102,31 +94,47 @@ def get_s3_client():
 
 # Initialize clients globally
 try:
-    # Usa las credenciales directamente de st.secrets para Google Sheets
-    g_spread_client = get_gspread_client(GSHEETS_CREDENTIALS)
+    # Obtener credenciales de Google Sheets de st.secrets
+    if "gsheets" not in st.secrets:
+        st.error("❌ Las credenciales de Google Sheets no se encontraron en Streamlit secrets. Asegúrate de que tu archivo .streamlit/secrets.toml esté configurado correctamente con la sección [gsheets].")
+        st.info("Falta la clave: 'st.secrets has no key \"gsheets\". Did you forget to add it to secrets.toml, mount it to secret directory, or the app settings on Streamlit Cloud? More info: https://docs.streamlit.io/deploy/streamlit-community-cloud/deploy-your-app/secrets-management'")
+        st.stop()
+
+    GSHEETS_CREDENTIALS = st.secrets["gsheets"]
+
+    g_spread_client = get_gspread_client(_credentials_json_dict=GSHEETS_CREDENTIALS)
     s3_client = get_s3_client()
+
+    # Abrir la hoja de cálculo por ID y nombre de pestaña
+    try:
+        spreadsheet = g_spread_client.open_by_key(GOOGLE_SHEET_ID)
+        worksheet_main = spreadsheet.worksheet(GOOGLE_SHEET_WORKSHEET_NAME)
+    except gspread.exceptions.SpreadsheetNotFound:
+        st.error(f"❌ Error: La hoja de cálculo con ID '{GOOGLE_SHEET_ID}' no se encontró. Verifica el ID y los permisos de la cuenta de servicio.")
+        st.stop()
+    except gspread.exceptions.WorksheetNotFound:
+        st.error(f"❌ Error: La pestaña '{GOOGLE_SHEET_WORKSHEET_NAME}' no se encontró en la hoja de cálculo. Verifica el nombre de la pestaña y los permisos.")
+        st.stop()
+
 except Exception as e:
     st.error(f"❌ Error general al autenticarse o inicializar clientes: {e}")
-    st.info("ℹ️ Asegúrate de que las APIs de Google Sheets y Drive estén habilitadas. También, revisa tus credenciales de AWS S3 y Google Sheets en `.streamlit/secrets.toml`.")
+    st.info("ℹ️ Asegúrate de que las APIs de Google Sheets y Drive estén habilitadas para tu proyecto de Google Cloud. También, revisa tus credenciales de AWS S3 y Google Sheets en `.streamlit/secrets.toml` o en la interfaz de Streamlit Cloud.")
     st.stop()
 
 
 # --- Data Loading from Google Sheets (Cached) ---
-@st.cache_resource(ttl=60) # Carga cada 60 segundos o cuando se invalide la caché
-def load_data_from_gsheets(sheet_id, worksheet_name):
+@st.cache_data(ttl=60) # Carga cada 60 segundos o cuando se invalide la caché
+def load_data_from_gsheets(worksheet_obj):
     """
     Carga todos los datos de una hoja de cálculo de Google Sheets en un DataFrame de Pandas
     y añade el índice de fila de la hoja de cálculo.
-    Retorna el DataFrame, el objeto worksheet y los encabezados.
+    Retorna el DataFrame y los encabezados.
     """
     try:
-        spreadsheet = g_spread_client.open_by_key(sheet_id)
-        worksheet = spreadsheet.worksheet(worksheet_name)
-
         # Obtener todos los valores incluyendo los encabezados para poder calcular el índice de fila
-        all_data = worksheet.get_all_values()
+        all_data = worksheet_obj.get_all_values()
         if not all_data:
-            return pd.DataFrame(), worksheet, [] # Devolver también los encabezados vacíos
+            return pd.DataFrame(), [] # Devolver también los encabezados vacíos
 
         headers = all_data[0]
         data_rows = all_data[1:]
@@ -164,17 +172,11 @@ def load_data_from_gsheets(sheet_id, worksheet_name):
         df['Turno'] = df['Turno'].astype(str).str.strip()
         df['Estado'] = df['Estado'].astype(str).str.strip()
 
-        return df, worksheet, headers # Devolver también los encabezados
+        return df, headers # Devolver también los encabezados
 
-    except gspread.exceptions.SpreadsheetNotFound:
-        st.error(f"❌ Error: La hoja de cálculo con ID '{sheet_id}' no se encontró. Verifica el ID.")
-        st.stop()
-    except gspread.exceptions.WorksheetNotFound:
-        st.error(f"❌ Error: La pestaña '{worksheet_name}' no se encontró en la hoja de cálculo. Verifica el nombre de la pestaña.")
-        st.stop()
     except Exception as e:
         st.error(f"❌ Error al cargar los datos desde Google Sheets: {e}")
-        st.stop()
+        return pd.DataFrame(), []
 
 # --- Data Saving/Updating to Google Sheets ---
 
@@ -191,7 +193,7 @@ def update_gsheet_cell(worksheet, headers, row_index, col_name, value):
             return False
         col_index = headers.index(col_name) + 1 # Convertir a índice base 1 de gspread
         worksheet.update_cell(row_index, col_index, value)
-        # st.cache_resource.clear() # ELIMINADO para evitar recargas constantes
+        # st.cache_data.clear() # Limpiar solo si hay un cambio que justifique una recarga completa
         return True
     except Exception as e:
         st.error(f"❌ Error al actualizar la celda ({row_index}, {col_name}) en Google Sheets: {e}")
@@ -220,7 +222,7 @@ def batch_update_gsheet_cells(worksheet, updates_list):
 
         if cell_list:
             worksheet.update_cells(cell_list) # Este es el método correcto para batch update en el worksheet
-            # st.cache_resource.clear() # ELIMINADO para evitar recargas constantes
+            # st.cache_data.clear() # Limpiar solo si hay un cambio que justifique una recarga completa
             return True
         return False
     except Exception as e:
@@ -259,7 +261,7 @@ def find_pedido_subfolder_prefix(s3_client_param, parent_prefix, folder_name):
     try:
         response = s3_client_param.list_objects_v2(
             Bucket=S3_BUCKET_NAME,
-            MaxKeys=100
+            MaxKeys=100 # Revisar si esto es suficiente o si se necesita paginación
         )
 
         if 'Contents' in response:
@@ -356,59 +358,60 @@ def ordenar_pedidos_custom(df_pedidos_filtrados):
     df_sorted = df_sorted.drop(columns=['custom_sort_key', 'Hora_Registro_dt'])
     return df_sorted
 
-def check_and_update_demorados(df_to_check, worksheet, headers): # Añadir 'headers'
+def check_and_update_demorados(df_to_check, worksheet, headers):
     """
     Checks for orders in 'En Proceso' status that have exceeded 1 hour and
     updates their status to 'Demorado' in the DataFrame and Google Sheets.
     Utiliza actualización por lotes para mayor eficiencia.
     """
     updates_to_perform = []
-    updated_indices_df = []
     current_time = datetime.now()
     one_hour_ago = current_time - timedelta(hours=1)
 
     try:
         estado_col_index = headers.index('Estado') + 1
+        hora_proceso_col_index = headers.index('Hora_Proceso') + 1 # Obtener índice de columna Hora_Proceso
     except ValueError:
-        st.error("❌ Error interno: Columna 'Estado' no encontrada en los encabezados de Google Sheets.")
+        st.error("❌ Error interno: Columna 'Estado' o 'Hora_Proceso' no encontrada en los encabezados de Google Sheets.")
         return df_to_check, False
-    
+
+    changes_made = False # Flag para indicar si hubo cambios en los estados
+
     for idx, row in df_to_check.iterrows():
         if row['Estado'] == "🔵 En Proceso" and pd.notna(row['Hora_Proceso']):
             hora_proceso_dt = pd.to_datetime(row['Hora_Proceso'], errors='coerce')
 
             if pd.notna(hora_proceso_dt) and hora_proceso_dt < one_hour_ago:
-                gsheet_row_index = row.get('_gsheet_row_index') # Usar el índice pre-calculado
+                gsheet_row_index = row.get('_gsheet_row_index')
 
                 if gsheet_row_index is not None:
+                    # Preparar actualización a "🔴 Demorado"
                     updates_to_perform.append({
                         'range': f"{gspread.utils.rowcol_to_a1(gsheet_row_index, estado_col_index)}",
                         'values': [["🔴 Demorado"]]
                     })
+                    # Actualizar DataFrame en memoria
                     df_to_check.loc[idx, "Estado"] = "🔴 Demorado"
-                    updated_indices_df.append(idx)
+                    changes_made = True
                 else:
-                    st.warning(f"⚠️ ID_Pedido '{row['ID_Pedido']}' no tiene '_gsheet_row_index' o no se encontró en Google Sheets. No se pudo actualizar el estado a 'Demorado'.")
+                    st.warning(f"⚠️ ID_Pedido '{row['ID_Pedido']}' no tiene '_gsheet_row_index'. No se pudo actualizar el estado a 'Demorado'.")
 
     if updates_to_perform:
         if batch_update_gsheet_cells(worksheet, updates_to_perform):
             st.toast(f"✅ Se actualizaron {len(updates_to_perform)} pedidos a 'Demorado'.", icon="✅")
-            # st.cache_resource.clear() # ELIMINADO para evitar recargas constantes, se mantiene df_to_check en memoria
-            return df_to_check, True
+            # st.cache_data.clear() # Limpiar la caché de datos para que se recargue si es necesario
+            return df_to_check, changes_made
         else:
             st.error("Falló la actualización por lotes de estados 'Demorado'.")
             return df_to_check, False
+    
+    return df_to_check, False # No hubo actualizaciones
 
-    return df_to_check, False
-
-def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, worksheet, headers): # Añadir 'headers'
+def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, worksheet, headers, s3_client_param):
     """
     Muestra los detalles de un pedido y permite acciones.
     """
-    # Initialize pedido_folder_prefix to None to prevent UnboundLocalError
-    pedido_folder_prefix = None
-
-    gsheet_row_index = row.get('_gsheet_row_index') # Obtener el índice de fila de GSheet del DataFrame
+    gsheet_row_index = row.get('_gsheet_row_index')
     if gsheet_row_index is None:
         st.error(f"❌ Error interno: No se pudo obtener el índice de fila de Google Sheets para el pedido '{row['ID_Pedido']}'. No se puede actualizar este pedido.")
         return
@@ -420,7 +423,6 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
             st.warning(f"⚠ ¡MODIFICACIÓN DE SURTIDO DETECTADA! Pedido #{orden}")
 
         # --- Sección "Cambiar Fecha y Turno" ---
-        # Se muestra si el estado no es Completado Y (es Pedido Local O es Pedido Foráneo)
         if row['Estado'] != "🟢 Completado" and \
            (row.get("Tipo_Envio") == "📍 Pedido Local" or row.get("Tipo_Envio") == "🚚 Pedido Foráneo"):
             st.markdown("##### 📅 Cambiar Fecha y Turno")
@@ -431,13 +433,11 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
             fecha_mostrar = fecha_actual_dt.strftime('%d/%m/%Y') if pd.notna(fecha_actual_dt) else "Sin fecha"
             col_current_info_date.info(f"**Fecha de envío actual:** {fecha_mostrar}")
 
-            # Mostrar el turno actual solo si es un Pedido Local
-            current_turno = row.get("Turno", "") # Obtener el turno actual para uso posterior
+            current_turno = row.get("Turno", "")
             if row.get("Tipo_Envio") == "📍 Pedido Local":
                 col_current_info_turno.info(f"**Turno actual:** {current_turno}")
-            else: # Para foráneos, esta columna no es relevante para el "turno"
-                col_current_info_turno.empty() # O podrías poner un mensaje como "No aplica"
-
+            else:
+                col_current_info_turno.empty()
 
             today = datetime.now().date()
             date_input_value = today
@@ -451,10 +451,8 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
                 disabled=(row['Estado'] == "🟢 Completado")
             )
 
-            # Inicializar new_turno con el valor actual por defecto
             new_turno = current_turno
 
-            # Mostrar el selector de turno solo para Pedidos Locales (Mañana/Tarde)
             if row.get("Tipo_Envio") == "📍 Pedido Local" and origen_tab in ["Mañana", "Tarde"]:
                 turno_options = ["", "☀️ Local Mañana", "🌙 Local Tarde", "🌵 Saltillo", "📦 Pasa a Bodega"]
                 try:
@@ -469,43 +467,51 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
                     key=f"new_turno_{row['ID_Pedido']}_{origen_tab}",
                     disabled=(row['Estado'] == "🟢 Completado")
                 )
-            # Para Saltillo, Pasa a Bodega, y Foráneos, el new_turno ya se inicializó con el current_turno
-            # y no se mostrará un selectbox para modificarlo.
 
             if st.button("✅ Aplicar Cambios de Fecha/Turno", key=f"apply_changes_{row['ID_Pedido']}_{origen_tab}", disabled=(row['Estado'] == "🟢 Completado")):
                 changes_made = False
+                updates_to_gsheet = []
 
                 new_fecha_entrega_str = new_fecha_entrega_dt.strftime('%Y-%m-%d')
                 if new_fecha_entrega_str != fecha_actual_str:
-                    if update_gsheet_cell(worksheet, headers, gsheet_row_index, "Fecha_Entrega", new_fecha_entrega_str):
-                        df.loc[idx, "Fecha_Entrega"] = new_fecha_entrega_str # Actualizar DataFrame en memoria
+                    try:
+                        col_idx_fecha = headers.index("Fecha_Entrega") + 1
+                        updates_to_gsheet.append({
+                            'range': gspread.utils.rowcol_to_a1(gsheet_row_index, col_idx_fecha),
+                            'values': [[new_fecha_entrega_str]]
+                        })
+                        df.loc[idx, "Fecha_Entrega"] = new_fecha_entrega_str
                         changes_made = True
-                    else:
-                        st.error("Falló la actualización de la fecha de entrega.")
+                    except ValueError:
+                        st.error("Error interno: Columna 'Fecha_Entrega' no encontrada.")
 
-                # Solo intentar actualizar el turno si el selector de turno fue visible y su valor ha cambiado
-                # (es decir, solo para Pedidos Locales en "Mañana" o "Tarde")
                 if row.get("Tipo_Envio") == "📍 Pedido Local" and origen_tab in ["Mañana", "Tarde"] and new_turno != current_turno:
-                    if update_gsheet_cell(worksheet, headers, gsheet_row_index, "Turno", new_turno):
-                        df.loc[idx, "Turno"] = new_turno # Actualizar DataFrame en memoria
+                    try:
+                        col_idx_turno = headers.index("Turno") + 1
+                        updates_to_gsheet.append({
+                            'range': gspread.utils.rowcol_to_a1(gsheet_row_index, col_idx_turno),
+                            'values': [[new_turno]]
+                        })
+                        df.loc[idx, "Turno"] = new_turno
                         changes_made = True
-                    else:
-                        st.error("Falló la actualización del turno.")
-                elif row.get("Tipo_Envio") == "📍 Pedido Local" and origen_tab not in ["Mañana", "Tarde"] and new_turno != current_turno:
-                    # En Saltillo o Pasa a Bodega, si por alguna razón el turno cambió (aunque no debería con esta UI)
-                    # Este caso es para asegurar que si hay una diferencia en new_turno vs current_turno, se maneje.
-                    # Sin embargo, con la UI actual, new_turno === current_turno para estos casos.
-                    pass # No se realiza ninguna actualización de turno si no hay un selectbox para ello.
+                    except ValueError:
+                        st.error("Error interno: Columna 'Turno' no encontrada.")
 
-                if changes_made:
-                    st.success(f"✅ Cambios aplicados para el pedido {row['ID_Pedido']}!")
-                    # st.rerun() # ELIMINADO: Ya no es necesario, los cambios se reflejan en memoria
+                if updates_to_gsheet:
+                    if batch_update_gsheet_cells(worksheet, updates_to_gsheet):
+                        st.success(f"✅ Cambios aplicados para el pedido {row['ID_Pedido']}!")
+                        st.cache_data.clear() # Forzar recarga de datos para reflejar los cambios de fecha/turno en las pestañas
+                        st.rerun() # Necesario para que el pedido se mueva a la pestaña correcta
+                    else:
+                        st.error("Falló la aplicación de cambios de fecha/turno.")
+                elif changes_made: # Esto ocurre si cambios_made es True pero updates_to_gsheet está vacío (ej. error interno)
+                    st.error("No se pudieron preparar las actualizaciones para Google Sheets.")
                 else:
                     st.info("No se realizaron cambios en la fecha o turno.")
 
         st.markdown("---")
 
-        # --- Layout Principal del Pedido (como en la imagen original) ---
+        # --- Layout Principal del Pedido ---
         disabled_if_completed = (row['Estado'] == "🟢 Completado")
 
         col_order_num, col_client, col_time, col_status, col_surtidor, col_print_btn, col_complete_btn = st.columns([0.5, 2, 1.5, 1, 1.2, 1, 1])
@@ -522,13 +528,12 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
         col_status.write(f"{row['Estado']}")
 
         surtidor_current = row.get("Surtidor", "")
-        # Usamos on_change para manejar la actualización del surtidor
-        def update_surtidor_callback(current_idx, current_gsheet_row_index, current_surtidor_key, df_param): # Añadir df_param
+        def update_surtidor_callback(current_idx, current_gsheet_row_index, current_surtidor_key, df_param):
             new_surtidor_val = st.session_state[current_surtidor_key]
             if new_surtidor_val != surtidor_current:
                 if update_gsheet_cell(worksheet, headers, current_gsheet_row_index, "Surtidor", new_surtidor_val):
-                    df_param.loc[current_idx, "Surtidor"] = new_surtidor_val # Actualizar DataFrame en memoria
-                    # st.toast("Surtidor actualizado", icon="✅") # ELIMINADO para evitar mensajes redundantes en cada keystroke
+                    df_param.loc[current_idx, "Surtidor"] = new_surtidor_val
+                    st.toast("Surtidor actualizado", icon="✅")
                 else:
                     st.error("Falló la actualización del surtidor.")
 
@@ -541,79 +546,82 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
             key=surtidor_key,
             disabled=disabled_if_completed,
             on_change=update_surtidor_callback,
-            args=(idx, gsheet_row_index, surtidor_key, df) # Pasar df_main para actualizar en memoria
+            args=(idx, gsheet_row_index, surtidor_key, df)
         )
 
 
         # Imprimir/Ver Adjuntos and change to "En Proceso"
         if col_print_btn.button("🖨 Imprimir", key=f"print_button_{row['ID_Pedido']}_{origen_tab}", disabled=disabled_if_completed):
             if row['Estado'] != "🔵 En Proceso":
-                
                 updates_for_print_button = []
-                estado_col_idx = headers.index('Estado') + 1
-                hora_proceso_col_idx = headers.index('Hora_Proceso') + 1
-                fecha_completado_col_idx = headers.index('Fecha_Completado') + 1
+                try:
+                    estado_col_idx = headers.index('Estado') + 1
+                    hora_proceso_col_idx = headers.index('Hora_Proceso') + 1
+                    fecha_completado_col_idx = headers.index('Fecha_Completado') + 1
 
-                updates_for_print_button.append({
-                    'range': gspread.utils.rowcol_to_a1(gsheet_row_index, estado_col_idx),
-                    'values': [["🔵 En Proceso"]]
-                })
-                updates_for_print_button.append({
-                    'range': gspread.utils.rowcol_to_a1(gsheet_row_index, hora_proceso_col_idx),
-                    'values': [[datetime.now().strftime("%Y-%m-%d %H:%M:%S")]]
-                })
-                updates_for_print_button.append({
-                    'range': gspread.utils.rowcol_to_a1(gsheet_row_index, fecha_completado_col_idx),
-                    'values': [[""]]
-                })
+                    updates_for_print_button.append({
+                        'range': gspread.utils.rowcol_to_a1(gsheet_row_index, estado_col_idx),
+                        'values': [["🔵 En Proceso"]]
+                    })
+                    updates_for_print_button.append({
+                        'range': gspread.utils.rowcol_to_a1(gsheet_row_index, hora_proceso_col_idx),
+                        'values': [[datetime.now().strftime("%Y-%m-%d %H:%M:%S")]]
+                    })
+                    updates_for_print_button.append({
+                        'range': gspread.utils.rowcol_to_a1(gsheet_row_index, fecha_completado_col_idx),
+                        'values': [[""]]
+                    })
 
-                if batch_update_gsheet_cells(worksheet, updates_for_print_button):
-                    df.loc[idx, "Estado"] = "🔵 En Proceso" # Actualizar DataFrame en memoria
-                    df.loc[idx, "Hora_Proceso"] = datetime.now() # Actualizar DataFrame en memoria
-                    df.loc[idx, "Fecha_Completado"] = pd.NaT # Actualizar DataFrame en memoria
-                    st.toast(f"✅ Pedido {orden} marcado como 'En Proceso' y adjuntos desplegados.", icon="✅")
-                    # st.cache_resource.clear() # ELIMINADO para evitar recargas constantes
-                else:
-                    st.error("Falló la actualización del estado a 'En Proceso' al imprimir.")
+                    if batch_update_gsheet_cells(worksheet, updates_for_print_button):
+                        df.loc[idx, "Estado"] = "🔵 En Proceso"
+                        df.loc[idx, "Hora_Proceso"] = datetime.now()
+                        df.loc[idx, "Fecha_Completado"] = pd.NaT
+                        st.toast(f"✅ Pedido {orden} marcado como 'En Proceso' y adjuntos desplegados.", icon="✅")
+                        # No st.rerun() aquí, solo actualiza la sesión para adjuntos
+                    else:
+                        st.error("Falló la actualización del estado a 'En Proceso' al imprimir.")
+                except ValueError as ve:
+                    st.error(f"Error de columna al imprimir: {ve}")
 
             st.session_state["expanded_attachments"][row['ID_Pedido']] = not st.session_state["expanded_attachments"].get(row['ID_Pedido'], False)
-            # st.rerun() # ELIMINADO: Ya no es necesario, los cambios se reflejan en memoria
 
 
         # Completar
         if col_complete_btn.button("🟢 Completar", key=f"done_{row['ID_Pedido']}_{origen_tab}", disabled=disabled_if_completed):
             surtidor_final = row.get("Surtidor", "")
-            if surtidor_final:
-                
+            if surtidor_final and str(surtidor_final).strip() != "": # Asegurarse de que no sea solo espacio en blanco
                 updates_for_complete_button = []
-                estado_col_idx = headers.index('Estado') + 1
-                fecha_completado_col_idx = headers.index('Fecha_Completado') + 1
-                hora_proceso_col_idx = headers.index('Hora_Proceso') + 1
+                try:
+                    estado_col_idx = headers.index('Estado') + 1
+                    fecha_completado_col_idx = headers.index('Fecha_Completado') + 1
+                    hora_proceso_col_idx = headers.index('Hora_Proceso') + 1
 
-                updates_for_complete_button.append({
-                    'range': gspread.utils.rowcol_to_a1(gsheet_row_index, estado_col_idx),
-                    'values': [["🟢 Completado"]]
-                })
-                updates_for_complete_button.append({
-                    'range': gspread.utils.rowcol_to_a1(gsheet_row_index, fecha_completado_col_idx),
-                    'values': [[datetime.now().strftime("%Y-%m-%d %H:%M:%S")]]
-                })
-                updates_for_complete_button.append({
-                    'range': gspread.utils.rowcol_to_a1(gsheet_row_index, hora_proceso_col_idx),
-                    'values': [[""]]
-                })
+                    updates_for_complete_button.append({
+                        'range': gspread.utils.rowcol_to_a1(gsheet_row_index, estado_col_idx),
+                        'values': [["🟢 Completado"]]
+                    })
+                    updates_for_complete_button.append({
+                        'range': gspread.utils.rowcol_to_a1(gsheet_row_index, fecha_completado_col_idx),
+                        'values': [[datetime.now().strftime("%Y-%m-%d %H:%M:%S")]]
+                    })
+                    updates_for_complete_button.append({
+                        'range': gspread.utils.rowcol_to_a1(gsheet_row_index, hora_proceso_col_idx),
+                        'values': [[""]]
+                    })
 
-                if batch_update_gsheet_cells(worksheet, updates_for_complete_button):
-                    df.loc[idx, "Estado"] = "🟢 Completado" # Actualizar DataFrame en memoria
-                    df.loc[idx, "Fecha_Completado"] = datetime.now() # Actualizar DataFrame en memoria
-                    df.loc[idx, "Hora_Proceso"] = pd.NaT # Actualizar DataFrame en memoria
-                    st.toast(f"✅ Pedido {orden} marcado como completado", icon="✅")
-                    # st.cache_resource.clear() # ELIMINADO para evitar recargas constantes
-                    if row['ID_Pedido'] in st.session_state["expanded_attachments"]:
-                        del st.session_state["expanded_attachments"][row['ID_Pedido']]
-                    # st.rerun() # ELIMINADO: Ya no es necesario, los cambios se reflejan en memoria
-                else:
-                    st.error("Falló la actualización del estado a 'Completado'.")
+                    if batch_update_gsheet_cells(worksheet, updates_for_complete_button):
+                        df.loc[idx, "Estado"] = "🟢 Completado"
+                        df.loc[idx, "Fecha_Completado"] = datetime.now()
+                        df.loc[idx, "Hora_Proceso"] = pd.NaT
+                        st.toast(f"✅ Pedido {orden} marcado como completado", icon="✅")
+                        st.cache_data.clear() # Forzar recarga de datos para que el pedido desaparezca de la vista actual
+                        if row['ID_Pedido'] in st.session_state["expanded_attachments"]:
+                            del st.session_state["expanded_attachments"][row['ID_Pedido']]
+                        st.rerun() # Necesario para que el pedido se elimine de la vista actual
+                    else:
+                        st.error("Falló la actualización del estado a 'Completado'.")
+                except ValueError as ve:
+                    st.error(f"Error de columna al completar: {ve}")
             else:
                 st.warning("⚠ Por favor, ingrese el Surtidor antes de completar el pedido.")
 
@@ -621,10 +629,11 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
         if st.session_state["expanded_attachments"].get(row['ID_Pedido'], False):
             st.markdown(f"##### Adjuntos para ID: {row['ID_Pedido']}")
 
-            pedido_folder_prefix = find_pedido_subfolder_prefix(s3_client, S3_ATTACHMENT_PREFIX, row['ID_Pedido'])
+            # Initialize pedido_folder_prefix
+            pedido_folder_prefix = find_pedido_subfolder_prefix(s3_client_param, S3_ATTACHMENT_PREFIX, row['ID_Pedido'])
 
             if pedido_folder_prefix:
-                files_in_folder = get_files_in_s3_prefix(s3_client, pedido_folder_prefix)
+                files_in_folder = get_files_in_s3_prefix(s3_client_param, pedido_folder_prefix)
 
                 if files_in_folder:
                     filtered_files_to_display = [
@@ -634,7 +643,7 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
 
                     if filtered_files_to_display:
                         for file_info in filtered_files_to_display:
-                            file_url = get_s3_file_download_url(s3_client, file_info['key'])
+                            file_url = get_s3_file_download_url(s3_client_param, file_info['key'])
                             display_name = file_info['title']
                             if row['ID_Pedido'] in display_name:
                                 display_name = display_name.replace(row['ID_Pedido'], "").replace("__", "_").replace("_-", "_").replace("-_", "_").strip('_').strip('-')
@@ -655,13 +664,12 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
             st.info(f"💬 Comentario: {info_text_comment}")
 
         current_notas = row.get("Notas", "")
-        # Usamos on_change para manejar la actualización de las notas
-        def update_notas_callback(current_idx, current_gsheet_row_index, current_notas_key, df_param): # Añadir df_param
+        def update_notas_callback(current_idx, current_gsheet_row_index, current_notas_key, df_param):
             new_notas_val = st.session_state[current_notas_key]
             if new_notas_val != current_notas:
                 if update_gsheet_cell(worksheet, headers, current_gsheet_row_index, "Notas", new_notas_val):
-                    df_param.loc[current_idx, "Notas"] = new_notas_val # Actualizar DataFrame en memoria
-                    # st.toast("Notas actualizadas", icon="✅") # ELIMINADO
+                    df_param.loc[current_idx, "Notas"] = new_notas_val
+                    st.toast("Notas actualizadas", icon="✅")
                 else:
                     st.error("Falló la actualización de las notas.")
 
@@ -673,7 +681,7 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
             height=70,
             disabled=disabled_if_completed,
             on_change=update_notas_callback,
-            args=(idx, gsheet_row_index, notas_key, df) # Pasar df_main para actualizar en memoria
+            args=(idx, gsheet_row_index, notas_key, df)
         )
 
         if tiene_modificacion:
@@ -686,11 +694,11 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
                     mod_surtido_archivos_mencionados_raw.extend([f.strip() for f in match.group(1).split(',')])
 
             surtido_files_in_s3 = []
-            if pedido_folder_prefix is None:
-                pedido_folder_prefix = find_pedido_subfolder_prefix(s3_client, S3_ATTACHMENT_PREFIX, row['ID_Pedido'])
+            if pedido_folder_prefix is None: # Asegurarse de que el prefijo se haya encontrado
+                pedido_folder_prefix = find_pedido_subfolder_prefix(s3_client_param, S3_ATTACHMENT_PREFIX, row['ID_Pedido'])
 
             if pedido_folder_prefix:
-                all_files_in_folder = get_files_in_s3_prefix(s3_client, pedido_folder_prefix)
+                all_files_in_folder = get_files_in_s3_prefix(s3_client_param, pedido_folder_prefix)
                 surtido_files_in_s3 = [
                     f for f in all_files_in_folder
                     if "surtido" in f['title'].lower()
@@ -698,12 +706,15 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
 
             all_surtido_related_files = []
             for f_name in mod_surtido_archivos_mencionados_raw:
+                # Asegurarse de que el archivo no sea una URL completa en el texto, solo el nombre
+                cleaned_f_name = f_name.split('/')[-1] # Tomar solo el nombre del archivo
                 all_surtido_related_files.append({
-                    'title': f_name,
-                    'key': f"{pedido_folder_prefix}{f_name}"
+                    'title': cleaned_f_name,
+                    'key': f"{pedido_folder_prefix}{cleaned_f_name}" # Construir la clave S3 completa
                 })
 
             for s_file in surtido_files_in_s3:
+                # Evitar duplicados si ya se añadió por mención en el texto
                 if not any(s_file['title'] == existing_f['title'] for existing_f in all_surtido_related_files):
                     all_surtido_related_files.append(s_file)
 
@@ -720,11 +731,17 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
                         continue
 
                     try:
-                        if not object_key_to_download.startswith(S3_ATTACHMENT_PREFIX):
+                        # Si la clave S3 no se construyó correctamente antes, intentar reconstruirla aquí
+                        if not object_key_to_download.startswith(S3_ATTACHMENT_PREFIX) and pedido_folder_prefix:
                             object_key_to_download = f"{pedido_folder_prefix}{file_name_to_display}"
+                        
+                        # Fallback si no se encontró prefix o la key no parece válida
+                        if not pedido_folder_prefix and not object_key_to_download.startswith(S3_BUCKET_NAME):
+                             st.warning(f"⚠️ No se pudo determinar la ruta S3 para: {file_name_to_display}")
+                             continue
 
-                        presigned_url = get_s3_file_download_url(s3_client, object_key_to_download)
-                        if presigned_url:
+                        presigned_url = get_s3_file_download_url(s3_client_param, object_key_to_download)
+                        if presigned_url and presigned_url != "#":
                             st.markdown(f"- 📄 [{file_name_to_display}]({presigned_url})")
                         else:
                             st.warning(f"⚠️ No se pudo generar el enlace para: {file_name_to_display}")
@@ -737,11 +754,12 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
 
 # --- Main Application Logic ---
 
-df_main, worksheet_main, headers_main = load_data_from_gsheets(GOOGLE_SHEET_ID, GOOGLE_SHEET_WORKSHEET_NAME)
+df_main, headers_main = load_data_from_gsheets(worksheet_main)
 
 if not df_main.empty:
     df_main, changes_made_by_demorado_check = check_and_update_demorados(df_main, worksheet_main, headers_main)
     if changes_made_by_demorado_check:
+        st.cache_data.clear() # Limpiar caché para forzar recarga si hay cambios de estado
         st.rerun() # Se mantiene para asegurar que los pedidos demorados se muevan de inmediato
 
     df_pendientes_proceso_demorado = df_main[df_main["Estado"].isin(["🟡 Pendiente", "🔵 En Proceso", "🔴 Demorado"])].copy()
@@ -759,7 +777,7 @@ if not df_main.empty:
     col3.metric("🔴 Demorados", estado_counts.get('🔴 Demorado', 0))
     col4.metric("🟢 Completados", estado_counts.get('🟢 Completado', 0))
 
-    # --- Implementación de Pestañas con st.tabs (revertido) ---
+    # --- Implementación de Pestañas con st.tabs ---
     tab_options = ["📍 Pedidos Locales", "🚚 Pedidos Foráneos", "🛠 Garantías", "🔁 Devoluciones", "📬 Solicitud de Guía", "✅ Historial Completados"]
 
     main_tabs = st.tabs(tab_options)
@@ -793,7 +811,7 @@ if not df_main.empty:
                             pedidos_fecha = ordenar_pedidos_custom(pedidos_fecha)
                             st.markdown(f"#### 🌅 Pedidos Locales - Mañana - {date_label}")
                             for orden, (idx, row) in enumerate(pedidos_fecha.iterrows(), start=1):
-                                mostrar_pedido(df_main, idx, row, orden, "Mañana", "📍 Pedidos Locales", worksheet_main, headers_main)
+                                mostrar_pedido(df_main, idx, row, orden, "Mañana", "📍 Pedidos Locales", worksheet_main, headers_main, s3_client)
                 else:
                     st.info("No hay pedidos para el turno mañana.")
             else:
@@ -821,7 +839,7 @@ if not df_main.empty:
                             pedidos_fecha = ordenar_pedidos_custom(pedidos_fecha)
                             st.markdown(f"#### 🌇 Pedidos Locales - Tarde - {date_label}")
                             for orden, (idx, row) in enumerate(pedidos_fecha.iterrows(), start=1):
-                                mostrar_pedido(df_main, idx, row, orden, "Tarde", "📍 Pedidos Locales", worksheet_main, headers_main)
+                                mostrar_pedido(df_main, idx, row, orden, "Tarde", "📍 Pedidos Locales", worksheet_main, headers_main, s3_client)
                 else:
                     st.info("No hay pedidos para el turno tarde.")
             else:
@@ -836,7 +854,7 @@ if not df_main.empty:
                 pedidos_s_display = ordenar_pedidos_custom(pedidos_s_display)
                 st.markdown("#### ⛰️ Pedidos Locales - Saltillo")
                 for orden, (idx, row) in enumerate(pedidos_s_display.iterrows(), start=1):
-                    mostrar_pedido(df_main, idx, row, orden, "Saltillo", "📍 Pedidos Locales", worksheet_main, headers_main)
+                    mostrar_pedido(df_main, idx, row, orden, "Saltillo", "📍 Pedidos Locales", worksheet_main, headers_main, s3_client)
             else:
                 st.info("No hay pedidos para Saltillo.")
 
@@ -849,7 +867,7 @@ if not df_main.empty:
                 pedidos_b_display = ordenar_pedidos_custom(pedidos_b_display)
                 st.markdown("#### 📦 Pedidos Locales - En Bodega")
                 for orden, (idx, row) in enumerate(pedidos_b_display.iterrows(), start=1):
-                    mostrar_pedido(df_main, idx, row, orden, "Pasa a Bodega", "📍 Pedidos Locales", worksheet_main, headers_main)
+                    mostrar_pedido(df_main, idx, row, orden, "Pasa a Bodega", "📍 Pedidos Locales", worksheet_main, headers_main, s3_client)
             else:
                 st.info("No hay pedidos para pasar a bodega.")
 
@@ -860,7 +878,7 @@ if not df_main.empty:
         if not pedidos_foraneos_display.empty:
             pedidos_foraneos_display = ordenar_pedidos_custom(pedidos_foraneos_display)
             for orden, (idx, row) in enumerate(pedidos_foraneos_display.iterrows(), start=1):
-                mostrar_pedido(df_main, idx, row, orden, "Foráneo", "🚚 Pedidos Foráneos", worksheet_main, headers_main)
+                mostrar_pedido(df_main, idx, row, orden, "Foráneo", "🚚 Pedidos Foráneos", worksheet_main, headers_main, s3_client)
         else:
             st.info("No hay pedidos foráneos.")
 
@@ -869,7 +887,7 @@ if not df_main.empty:
         if not garantias_display.empty:
             garantias_display = ordenar_pedidos_custom(garantias_display)
             for orden, (idx, row) in enumerate(garantias_display.iterrows(), start=1):
-                mostrar_pedido(df_main, idx, row, orden, "Garantía", "🛠 Garantías", worksheet_main, headers_main)
+                mostrar_pedido(df_main, idx, row, orden, "Garantía", "🛠 Garantías", worksheet_main, headers_main, s3_client)
         else:
             st.info("No hay garantías.")
 
@@ -878,7 +896,7 @@ if not df_main.empty:
         if not devoluciones_display.empty:
             devoluciones_display = ordenar_pedidos_custom(devoluciones_display)
             for orden, (idx, row) in enumerate(devoluciones_display.iterrows(), start=1):
-                mostrar_pedido(df_main, idx, row, orden, "Devolución", "🔁 Devoluciones", worksheet_main, headers_main)
+                mostrar_pedido(df_main, idx, row, orden, "Devolución", "🔁 Devoluciones", worksheet_main, headers_main, s3_client)
         else:
             st.info("No hay devoluciones.")
 
@@ -887,19 +905,23 @@ if not df_main.empty:
         if not solicitudes_display.empty:
             solicitudes_display = ordenar_pedidos_custom(solicitudes_display)
             for orden, (idx, row) in enumerate(solicitudes_display.iterrows(), start=1):
-                mostrar_pedido(df_main, idx, row, orden, "Solicitud de Guía", "📬 Solicitud de Guía", worksheet_main, headers_main)
+                mostrar_pedido(df_main, idx, row, orden, "Solicitud de Guía", "📬 Solicitud de Guía", worksheet_main, headers_main, s3_client)
         else:
             st.info("No hay solicitudes de guía.")
 
     with main_tabs[5]: # ✅ Historial Completados
         st.markdown("### Historial de Pedidos Completados")
         if not df_completados_historial.empty:
+            # Ordenar por Fecha_Completado en orden descendente para mostrar los más recientes
+            df_completados_historial['Fecha_Completado_dt'] = pd.to_datetime(df_completados_historial['Fecha_Completado'], errors='coerce')
+            df_completados_historial = df_completados_historial.sort_values(by="Fecha_Completado_dt", ascending=False).reset_index(drop=True)
+
             st.dataframe(
                 df_completados_historial[[
                     'ID_Pedido', 'Folio_Factura', 'Cliente', 'Estado', 'Vendedor_Registro',
                     'Tipo_Envio', 'Fecha_Entrega', 'Fecha_Completado', 'Notas', 'Modificacion_Surtido',
                     'Adjuntos', 'Adjuntos_Surtido', 'Turno'
-                ]].head(50),
+                ]].head(50), # Mostrar los 50 más recientes
                 use_container_width=True, hide_index=True
             )
             st.info("Mostrando los 50 pedidos completados más recientes. Puedes ajustar este límite si es necesario.")
