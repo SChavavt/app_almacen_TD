@@ -1,12 +1,10 @@
 import streamlit as st
 import pandas as pd
 from datetime import datetime, timedelta
-import json
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 import boto3
 import re
-# import os # Ya no es necesario si no se lee el archivo localmente
 import gspread.utils
 
 st.set_page_config(page_title="Recepción de Pedidos TD", layout="wide")
@@ -14,7 +12,6 @@ st.set_page_config(page_title="Recepción de Pedidos TD", layout="wide")
 st.title("📬 Bandeja de Pedidos TD")
 
 # --- Google Sheets Constants (pueden venir de st.secrets si se prefiere) ---
-# Se asumen estos valores de tu código original.
 GOOGLE_SHEET_ID = '1aWkSelodaz0nWfQx7FZAysGnIYGQFJxAN7RO3YgCiZY'
 GOOGLE_SHEET_WORKSHEET_NAME = 'datos_pedidos'
 
@@ -61,13 +58,12 @@ def get_gspread_client(_credentials_json_dict):
     try:
         scope = ['https://spreadsheets.google.com/feeds', 'https://www.googleapis.com/auth/drive']
 
-        # **CORRECCIÓN AQUÍ: Convierte _credentials_json_dict a un diccionario normal antes de copiarlo**
-        # _credentials_json_dict ya es un diccionario (o un objeto de tipo diccionario de st.secrets)
-        # La forma correcta de asegurarnos de que sea un dict modificable es crearlo a partir de él.
-        creds_dict = dict(_credentials_json_dict) 
-        
+        creds_dict = dict(_credentials_json_dict)
+
+        # Ensure private_key has actual newlines and no surrounding whitespace.
+        # This is CRITICAL for 'Incorrect padding' error.
         if "private_key" in creds_dict and isinstance(creds_dict["private_key"], str):
-            creds_dict["private_key"] = creds_dict["private_key"].replace("\\n", "\n")
+            creds_dict["private_key"] = creds_dict["private_key"].replace("\\n", "\n").strip()
 
         creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
         client = gspread.authorize(creds)
@@ -373,7 +369,7 @@ def check_and_update_demorados(df_to_check, worksheet, headers):
 
     try:
         estado_col_index = headers.index('Estado') + 1
-        hora_proceso_col_index = headers.index('Hora_Proceso') + 1 # Obtener índice de columna Hora_Proceso
+        headers.index('Hora_Proceso') + 1 # Obtener índice de columna Hora_Proceso
     except ValueError:
         st.error("❌ Error interno: Columna 'Estado' o 'Hora_Proceso' no encontrada en los encabezados de Google Sheets.")
         return df_to_check, False
@@ -805,7 +801,7 @@ if not df_main.empty:
                     
                     date_tabs_m = st.tabs(date_tab_labels)
                     
-                    for i, date_label in enumerate(date_tab_labels):
+                    for i, date_label in enumerate(date_tabs_m):
                         with date_tabs_m[i]:
                             current_selected_date_dt_str = date_label.replace("📅 ", "") 
                             current_selected_date_dt = pd.to_datetime(current_selected_date_dt_str, format='%d/%m/%Y')
@@ -833,7 +829,7 @@ if not df_main.empty:
                     date_tab_labels = [f"📅 {pd.to_datetime(fecha).strftime('%d/%m/%Y')}" for fecha in fechas_unicas_dt]
                     
                     date_tabs_t = st.tabs(date_tab_labels)
-                    for i, date_label in enumerate(date_tab_labels):
+                    for i, date_label in enumerate(date_tabs_t):
                         with date_tabs_t[i]:
                             current_selected_date_dt_str = date_label.replace("📅 ", "")
                             current_selected_date_dt = pd.to_datetime(current_selected_date_dt_str, format='%d/%m/%Y')
