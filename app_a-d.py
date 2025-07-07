@@ -64,7 +64,7 @@ if "expanded_attachments" not in st.session_state:
 # Eliminamos la función load_credentials_from_file ya que ahora leeremos de st.secrets
 
 @st.cache_resource
-def get_gspread_client(credentials_json_dict):
+def get_gspread_client(_credentials_json_dict): # <--- Added underscore here
     """
     Autentica con Google Sheets usando las credenciales de la cuenta de servicio
     y retorna un cliente de gspread, compatible con oauth2client.
@@ -73,7 +73,7 @@ def get_gspread_client(credentials_json_dict):
     try:
         scope = ['https://spreadsheets.google.com/feeds', 'https://www.googleapis.com/auth/drive']
         # Pasa el diccionario de credenciales directamente
-        creds = ServiceAccountCredentials.from_json_keyfile_dict(credentials_json_dict, scope)
+        creds = ServiceAccountCredentials.from_json_keyfile_dict(_credentials_json_dict, scope) # <--- Use the underscored variable here too
         client = gspread.authorize(creds)
         return client
     except Exception as e:
