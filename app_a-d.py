@@ -4,6 +4,7 @@ from datetime import datetime, timedelta
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 import boto3
+import re
 import gspread.utils
 
 st.set_page_config(page_title="Recepción de Pedidos TD", layout="wide")
@@ -408,13 +409,13 @@ def check_and_update_demorados(df_to_check, worksheet, headers):
     return df_to_check, False # No hubo actualizaciones
 
 def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, worksheet, headers, s3_client_param):
+    """
+    Muestra los detalles de un pedido y permite acciones.
+    """
     gsheet_row_index = row.get('_gsheet_row_index')
     if gsheet_row_index is None:
         st.error(f"❌ Error interno: No se pudo obtener el índice de fila de Google Sheets para el pedido '{row['ID_Pedido']}'. No se puede actualizar este pedido.")
         return
-
-    safe_fecha = str(row.get("Fecha_Entrega", "")).replace("-", "_").replace("/", "_")
-    widget_key_base = f"{row['ID_Pedido']}_{origen_tab}_{safe_fecha}_{orden}"
 
     with st.container():
         st.markdown("---")
@@ -422,7 +423,9 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
         if tiene_modificacion:
             st.warning(f"⚠ ¡MODIFICACIÓN DE SURTIDO DETECTADA! Pedido #{orden}")
 
-        if row['Estado'] != "🟢 Completado" and row.get("Tipo_Envio") in ["📍 Pedido Local", "🚚 Pedido Foráneo"]:
+        # --- Sección "Cambiar Fecha y Turno" ---
+        if row['Estado'] != "🟢 Completado" and \
+           (row.get("Tipo_Envio") == "📍 Pedido Local" or row.get("Tipo_Envio") == "🚚 Pedido Foráneo"):
             st.markdown("##### 📅 Cambiar Fecha y Turno")
             col_current_info_date, col_current_info_turno, col_inputs = st.columns([1, 1, 2])
 
@@ -445,7 +448,7 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
             new_fecha_entrega_dt = col_inputs.date_input(
                 "Nueva fecha de envío:",
                 value=date_input_value,
-                key=f"new_date_{widget_key_base}",
+                key=f"new_date_{row['ID_Pedido']}_{origen_tab}_{str(row.get('Fecha_Entrega', '')).replace('-', '_').replace('/', '_')}_{orden}",
                 disabled=(row['Estado'] == "🟢 Completado")
             )
 
@@ -462,11 +465,11 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
                     "Clasificar Turno como:",
                     options=turno_options,
                     index=default_index_turno,
-                    key=f"new_turno_{widget_key_base}",
+                    key=f"new_turno_{row['ID_Pedido']}_{origen_tab}_{str(row.get('Fecha_Entrega', '')).replace('-', '_').replace('/', '_')}_{orden}",
                     disabled=(row['Estado'] == "🟢 Completado")
                 )
 
-            if st.button("✅ Aplicar Cambios de Fecha/Turno", key=f"apply_changes_{widget_key_base}", disabled=(row['Estado'] == "🟢 Completado")):
+            if st.button("✅ Aplicar Cambios de Fecha/Turno", key=f"apply_changes_{row['ID_Pedido']}_{origen_tab}_{str(row.get('Fecha_Entrega', '')).replace('-', '_').replace('/', '_')}_{orden}", disabled=(row['Estado'] == "🟢 Completado")):
                 changes_made = False
                 updates_to_gsheet = []
 
@@ -498,14 +501,19 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
                 if updates_to_gsheet:
                     if batch_update_gsheet_cells(worksheet, updates_to_gsheet):
                         st.success(f"✅ Cambios aplicados para el pedido {row['ID_Pedido']}!")
-                        st.cache_data.clear()
-                        st.rerun()
+                        st.cache_data.clear() # Forzar recarga de datos para reflejar los cambios de fecha/turno en las pestañas
+                        st.rerun() # Necesario para que el pedido se mueva a la pestaña correcta
                     else:
                         st.error("Falló la aplicación de cambios de fecha/turno.")
-                elif changes_made:
+                elif changes_made: # Esto ocurre si cambios_made es True pero updates_to_gsheet está vacío (ej. error interno)
                     st.error("No se pudieron preparar las actualizaciones para Google Sheets.")
                 else:
                     st.info("No se realizaron cambios en la fecha o turno.")
+
+        st.markdown("---")
+
+        # --- Layout Principal del Pedido ---
+        disabled_if_completed = (row['Estado'] == "🟢 Completado")
 
         col_order_num, col_client, col_time, col_status, col_surtidor, col_print_btn, col_complete_btn = st.columns([0.5, 2, 1.5, 1, 1.2, 1, 1])
 
@@ -521,7 +529,6 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
         col_status.write(f"{row['Estado']}")
 
         surtidor_current = row.get("Surtidor", "")
-
         def update_surtidor_callback(current_idx, current_gsheet_row_index, current_surtidor_key, df_param):
             new_surtidor_val = st.session_state[current_surtidor_key]
             if new_surtidor_val != surtidor_current:
@@ -531,26 +538,133 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
                 else:
                     st.error("Falló la actualización del surtidor.")
 
-        surtidor_key = f"surtidor_{widget_key_base}"
+        surtidor_key = f"surtidor_{row['ID_Pedido']}_{origen_tab}"
         col_surtidor.text_input(
             "Surtidor",
             value=surtidor_current,
             label_visibility="collapsed",
             placeholder="Surtidor",
             key=surtidor_key,
-            disabled=(row['Estado'] == "🟢 Completado"),
+            disabled=disabled_if_completed,
             on_change=update_surtidor_callback,
             args=(idx, gsheet_row_index, surtidor_key, df)
         )
 
-        if col_print_btn.button("🖨 Imprimir", key=f"print_button_{widget_key_base}", disabled=(row['Estado'] == "🟢 Completado")):
-            st.write("Aquí iría la lógica para imprimir el pedido.")
 
-        if col_complete_btn.button("🟢 Completar", key=f"done_button_{widget_key_base}", disabled=(row['Estado'] == "🟢 Completado")):
-            st.write("Aquí iría la lógica para completar el pedido.")
+        # Imprimir/Ver Adjuntos and change to "En Proceso"
+        if col_print_btn.button("🖨 Imprimir", key=f"print_button_{row['ID_Pedido']}_{origen_tab}_{str(row.get('Fecha_Entrega', '')).replace('-', '_').replace('/', '_')}_{orden}", disabled=disabled_if_completed):
+            if row['Estado'] != "🔵 En Proceso":
+                updates_for_print_button = []
+                try:
+                    estado_col_idx = headers.index('Estado') + 1
+                    hora_proceso_col_idx = headers.index('Hora_Proceso') + 1
+                    fecha_completado_col_idx = headers.index('Fecha_Completado') + 1
+
+                    updates_for_print_button.append({
+                        'range': gspread.utils.rowcol_to_a1(gsheet_row_index, estado_col_idx),
+                        'values': [["🔵 En Proceso"]]
+                    })
+                    updates_for_print_button.append({
+                        'range': gspread.utils.rowcol_to_a1(gsheet_row_index, hora_proceso_col_idx),
+                        'values': [[datetime.now().strftime("%Y-%m-%d %H:%M:%S")]]
+                    })
+                    updates_for_print_button.append({
+                        'range': gspread.utils.rowcol_to_a1(gsheet_row_index, fecha_completado_col_idx),
+                        'values': [[""]]
+                    })
+
+                    if batch_update_gsheet_cells(worksheet, updates_for_print_button):
+                        df.loc[idx, "Estado"] = "🔵 En Proceso"
+                        df.loc[idx, "Hora_Proceso"] = datetime.now()
+                        df.loc[idx, "Fecha_Completado"] = pd.NaT
+                        st.toast(f"✅ Pedido {orden} marcado como 'En Proceso' y adjuntos desplegados.", icon="✅")
+                        # No st.rerun() aquí, solo actualiza la sesión para adjuntos
+                    else:
+                        st.error("Falló la actualización del estado a 'En Proceso' al imprimir.")
+                except ValueError as ve:
+                    st.error(f"Error de columna al imprimir: {ve}")
+
+            st.session_state["expanded_attachments"][row['ID_Pedido']] = not st.session_state["expanded_attachments"].get(row['ID_Pedido'], False)
+
+
+        # Completar
+        if col_complete_btn.button("🟢 Completar", key=f"done_{row['ID_Pedido']}_{origen_tab}_{str(row.get('Fecha_Entrega', '')).replace('-', '_').replace('/', '_')}_{orden}", disabled=disabled_if_completed):
+            surtidor_final = row.get("Surtidor", "")
+            if surtidor_final and str(surtidor_final).strip() != "": # Asegurarse de que no sea solo espacio en blanco
+                updates_for_complete_button = []
+                try:
+                    estado_col_idx = headers.index('Estado') + 1
+                    fecha_completado_col_idx = headers.index('Fecha_Completado') + 1
+                    hora_proceso_col_idx = headers.index('Hora_Proceso') + 1
+
+                    updates_for_complete_button.append({
+                        'range': gspread.utils.rowcol_to_a1(gsheet_row_index, estado_col_idx),
+                        'values': [["🟢 Completado"]]
+                    })
+                    updates_for_complete_button.append({
+                        'range': gspread.utils.rowcol_to_a1(gsheet_row_index, fecha_completado_col_idx),
+                        'values': [[datetime.now().strftime("%Y-%m-%d %H:%M:%S")]]
+                    })
+                    updates_for_complete_button.append({
+                        'range': gspread.utils.rowcol_to_a1(gsheet_row_index, hora_proceso_col_idx),
+                        'values': [[""]]
+                    })
+
+                    if batch_update_gsheet_cells(worksheet, updates_for_complete_button):
+                        df.loc[idx, "Estado"] = "🟢 Completado"
+                        df.loc[idx, "Fecha_Completado"] = datetime.now()
+                        df.loc[idx, "Hora_Proceso"] = pd.NaT
+                        st.toast(f"✅ Pedido {orden} marcado como completado", icon="✅")
+                        st.cache_data.clear() # Forzar recarga de datos para que el pedido desaparezca de la vista actual
+                        if row['ID_Pedido'] in st.session_state["expanded_attachments"]:
+                            del st.session_state["expanded_attachments"][row['ID_Pedido']]
+                        st.rerun() # Necesario para que el pedido se elimine de la vista actual
+                    else:
+                        st.error("Falló la actualización del estado a 'Completado'.")
+                except ValueError as ve:
+                    st.error(f"Error de columna al completar: {ve}")
+            else:
+                st.warning("⚠ Por favor, ingrese el Surtidor antes de completar el pedido.")
+
+        # --- Adjuntos desplegados (if expanded) ---
+        if st.session_state["expanded_attachments"].get(row['ID_Pedido'], False):
+            st.markdown(f"##### Adjuntos para ID: {row['ID_Pedido']}")
+
+            # Initialize pedido_folder_prefix
+            pedido_folder_prefix = find_pedido_subfolder_prefix(s3_client_param, S3_ATTACHMENT_PREFIX, row['ID_Pedido'])
+
+            if pedido_folder_prefix:
+                files_in_folder = get_files_in_s3_prefix(s3_client_param, pedido_folder_prefix)
+
+                if files_in_folder:
+                    filtered_files_to_display = [
+                        f for f in files_in_folder
+                        if "comprobante" not in f['title'].lower() and "surtido" not in f['title'].lower()
+                    ]
+
+                    if filtered_files_to_display:
+                        for file_info in filtered_files_to_display:
+                            file_url = get_s3_file_download_url(s3_client_param, file_info['key'])
+                            display_name = file_info['title']
+                            if row['ID_Pedido'] in display_name:
+                                display_name = display_name.replace(row['ID_Pedido'], "").replace("__", "_").replace("_-", "_").replace("-_", "_").strip('_').strip('-')
+
+                            st.markdown(f"- 📄 **{display_name}** ([🔗 Ver/Descargar]({file_url}))")
+                    else:
+                        st.info("No hay adjuntos para mostrar (excluyendo comprobantes y surtidos).")
+                else:
+                    st.info("No se encontraron archivos en la carpeta del pedido en S3.")
+            else:
+                st.error(f"❌ No se encontró la carpeta (prefijo S3) del pedido '{row['ID_Pedido']}'.")
+
+
+        # --- Campo de Notas editable y Comentario ---
+        st.markdown("---")
+        info_text_comment = row.get("Comentario")
+        if pd.notna(info_text_comment) and str(info_text_comment).strip() != '':
+            st.info(f"💬 Comentario: {info_text_comment}")
 
         current_notas = row.get("Notas", "")
-
         def update_notas_callback(current_idx, current_gsheet_row_index, current_notas_key, df_param):
             new_notas_val = st.session_state[current_notas_key]
             if new_notas_val != current_notas:
@@ -560,17 +674,84 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
                 else:
                     st.error("Falló la actualización de las notas.")
 
-        notas_key = f"notas_edit_{widget_key_base}"
+        notas_key = f"notas_edit_{row['ID_Pedido']}_{origen_tab}"
         st.text_area(
             "📝 Notas (editable)",
             value=current_notas,
             key=notas_key,
             height=70,
-            disabled=(row['Estado'] == "🟢 Completado"),
+            disabled=disabled_if_completed,
             on_change=update_notas_callback,
             args=(idx, gsheet_row_index, notas_key, df)
         )
 
+        if tiene_modificacion:
+            st.warning(f"🟡 Modificación de Surtido:\n{row['Modificacion_Surtido']}")
+
+            mod_surtido_archivos_mencionados_raw = []
+            for linea in str(row['Modificacion_Surtido']).split('\n'):
+                match = re.search(r'\(Adjunto: (.+?)\)', linea)
+                if match:
+                    mod_surtido_archivos_mencionados_raw.extend([f.strip() for f in match.group(1).split(',')])
+
+            surtido_files_in_s3 = []
+            if pedido_folder_prefix is None: # Asegurarse de que el prefijo se haya encontrado
+                pedido_folder_prefix = find_pedido_subfolder_prefix(s3_client_param, S3_ATTACHMENT_PREFIX, row['ID_Pedido'])
+
+            if pedido_folder_prefix:
+                all_files_in_folder = get_files_in_s3_prefix(s3_client_param, pedido_folder_prefix)
+                surtido_files_in_s3 = [
+                    f for f in all_files_in_folder
+                    if "surtido" in f['title'].lower()
+                ]
+
+            all_surtido_related_files = []
+            for f_name in mod_surtido_archivos_mencionados_raw:
+                # Asegurarse de que el archivo no sea una URL completa en el texto, solo el nombre
+                cleaned_f_name = f_name.split('/')[-1] # Tomar solo el nombre del archivo
+                all_surtido_related_files.append({
+                    'title': cleaned_f_name,
+                    'key': f"{pedido_folder_prefix}{cleaned_f_name}" # Construir la clave S3 completa
+                })
+
+            for s_file in surtido_files_in_s3:
+                # Evitar duplicados si ya se añadió por mención en el texto
+                if not any(s_file['title'] == existing_f['title'] for existing_f in all_surtido_related_files):
+                    all_surtido_related_files.append(s_file)
+
+
+            if all_surtido_related_files:
+                st.markdown("Adjuntos de Modificación (Surtido/Relacionados):")
+                archivos_ya_mostrados_para_mod = set()
+
+                for file_info in all_surtido_related_files:
+                    file_name_to_display = file_info['title']
+                    object_key_to_download = file_info['key']
+
+                    if file_name_to_display in archivos_ya_mostrados_para_mod:
+                        continue
+
+                    try:
+                        # Si la clave S3 no se construyó correctamente antes, intentar reconstruirla aquí
+                        if not object_key_to_download.startswith(S3_ATTACHMENT_PREFIX) and pedido_folder_prefix:
+                            object_key_to_download = f"{pedido_folder_prefix}{file_name_to_display}"
+                        
+                        # Fallback si no se encontró prefix o la key no parece válida
+                        if not pedido_folder_prefix and not object_key_to_download.startswith(S3_BUCKET_NAME):
+                             st.warning(f"⚠️ No se pudo determinar la ruta S3 para: {file_name_to_display}")
+                             continue
+
+                        presigned_url = get_s3_file_download_url(s3_client_param, object_key_to_download)
+                        if presigned_url and presigned_url != "#":
+                            st.markdown(f"- 📄 [{file_name_to_display}]({presigned_url})")
+                        else:
+                            st.warning(f"⚠️ No se pudo generar el enlace para: {file_name_to_display}")
+                    except Exception as e:
+                        st.warning(f"⚠️ Error al procesar adjunto de modificación '{file_name_to_display}': {e}")
+
+                    archivos_ya_mostrados_para_mod.add(file_name_to_display)
+            else:
+                st.info("No hay adjuntos específicos para esta modificación de surtido mencionados en el texto.")
 
 # --- Main Application Logic ---
 
