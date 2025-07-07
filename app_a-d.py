@@ -409,13 +409,13 @@ def check_and_update_demorados(df_to_check, worksheet, headers):
     return df_to_check, False # No hubo actualizaciones
 
 def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, worksheet, headers, s3_client_param):
-    """
-    Muestra los detalles de un pedido y permite acciones.
-    """
     gsheet_row_index = row.get('_gsheet_row_index')
     if gsheet_row_index is None:
         st.error(f"❌ Error interno: No se pudo obtener el índice de fila de Google Sheets para el pedido '{row['ID_Pedido']}'. No se puede actualizar este pedido.")
         return
+
+    safe_fecha = str(row.get("Fecha_Entrega", "")).replace("-", "_").replace("/", "_")
+    widget_key_base = f"{row['ID_Pedido']}_{origen_tab}_{safe_fecha}_{orden}"
 
     with st.container():
         st.markdown("---")
@@ -423,9 +423,7 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
         if tiene_modificacion:
             st.warning(f"⚠ ¡MODIFICACIÓN DE SURTIDO DETECTADA! Pedido #{orden}")
 
-        # --- Sección "Cambiar Fecha y Turno" ---
-        if row['Estado'] != "🟢 Completado" and \
-           (row.get("Tipo_Envio") == "📍 Pedido Local" or row.get("Tipo_Envio") == "🚚 Pedido Foráneo"):
+        if row['Estado'] != "🟢 Completado" and row.get("Tipo_Envio") in ["📍 Pedido Local", "🚚 Pedido Foráneo"]:
             st.markdown("##### 📅 Cambiar Fecha y Turno")
             col_current_info_date, col_current_info_turno, col_inputs = st.columns([1, 1, 2])
 
@@ -448,8 +446,7 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
             new_fecha_entrega_dt = col_inputs.date_input(
                 "Nueva fecha de envío:",
                 value=date_input_value,
-                key=f"new_date_{row['ID_Pedido']}_{origen_tab}_{row.get('Fecha_Entrega', '')}",
-
+                key=f"new_date_{widget_key_base}",
                 disabled=(row['Estado'] == "🟢 Completado")
             )
 
@@ -466,11 +463,11 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
                     "Clasificar Turno como:",
                     options=turno_options,
                     index=default_index_turno,
-                    key=f"new_turno_{row['ID_Pedido']}_{origen_tab}",
+                    key=f"new_turno_{widget_key_base}",
                     disabled=(row['Estado'] == "🟢 Completado")
                 )
 
-            if st.button("✅ Aplicar Cambios de Fecha/Turno", key=f"apply_changes_{row['ID_Pedido']}_{origen_tab}", disabled=(row['Estado'] == "🟢 Completado")):
+            if st.button("✅ Aplicar Cambios de Fecha/Turno", key=f"apply_changes_{widget_key_base}", disabled=(row['Estado'] == "🟢 Completado")):
                 changes_made = False
                 updates_to_gsheet = []
 
@@ -502,11 +499,11 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
                 if updates_to_gsheet:
                     if batch_update_gsheet_cells(worksheet, updates_to_gsheet):
                         st.success(f"✅ Cambios aplicados para el pedido {row['ID_Pedido']}!")
-                        st.cache_data.clear() # Forzar recarga de datos para reflejar los cambios de fecha/turno en las pestañas
-                        st.rerun() # Necesario para que el pedido se mueva a la pestaña correcta
+                        st.cache_data.clear()
+                        st.rerun()
                     else:
                         st.error("Falló la aplicación de cambios de fecha/turno.")
-                elif changes_made: # Esto ocurre si cambios_made es True pero updates_to_gsheet está vacío (ej. error interno)
+                elif changes_made:
                     st.error("No se pudieron preparar las actualizaciones para Google Sheets.")
                 else:
                     st.info("No se realizaron cambios en la fecha o turno.")
