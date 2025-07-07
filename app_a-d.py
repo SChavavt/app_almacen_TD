@@ -829,14 +829,8 @@ if not df_main.empty:
                             pedidos_fecha = pedidos_m_display[pedidos_m_display["Fecha_Entrega_dt"] == current_selected_date_dt].copy()
                             pedidos_fecha = ordenar_pedidos_custom(pedidos_fecha)
                             st.markdown(f"#### 🌅 Pedidos Locales - Mañana - {date_label}")
-                            for orden, (idx, row) in enumerate(pedidos_fecha.iterrows(), start=1):
-                                mostrar_pedido(df_main, idx, row, orden, "Mañana", "📍 Pedidos Locales", worksheet_main, headers_main, s3_client)
-                else:
-                    st.info("No hay pedidos para el turno mañana.")
-            else:
-                st.info("No hay pedidos para el turno mañana.")
-
-        with subtabs_local[1]: # 🌇 Tarde
+                                
+        with subtabs_local[1]:  # 🌇 Tarde
             pedidos_t_display = df_pendientes_proceso_demorado[
                 (df_pendientes_proceso_demorado["Tipo_Envio"] == "📍 Pedido Local") &
                 (df_pendientes_proceso_demorado["Turno"] == "🌙 Local Tarde")
@@ -849,7 +843,7 @@ if not df_main.empty:
                     date_tab_labels = [f"📅 {pd.to_datetime(fecha).strftime('%d/%m/%Y')}" for fecha in fechas_unicas_dt]
                     
                     date_tabs_t = st.tabs(date_tab_labels)
-                    for i, date_label in enumerate(date_tabs_t):
+                    for i, date_label in enumerate(date_tab_labels):
                         with date_tabs_t[i]:
                             current_selected_date_dt_str = date_label.replace("📅 ", "")
                             current_selected_date_dt = pd.to_datetime(current_selected_date_dt_str, format='%d/%m/%Y')
