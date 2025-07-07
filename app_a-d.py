@@ -809,12 +809,15 @@ if not df_main.empty:
                     
                     date_tabs_m = st.tabs(date_tab_labels)
                     
-                    for i, date_label in enumerate(date_tabs_m):
+                    for i, fecha_dt in enumerate(fechas_unicas_dt):
+                        date_label = f"📅 {fecha_dt.strftime('%d/%m/%Y')}"
                         with date_tabs_m[i]:
-                            # Validar que date_label sea un string válido antes de usar .replace
-                            if not isinstance(date_label, str):
-                                st.error("⚠️ Error interno: la fecha seleccionada no es válida.")
-                                st.stop()
+                            pedidos_fecha = pedidos_m_display[pedidos_m_display["Fecha_Entrega_dt"] == fecha_dt].copy()
+                            pedidos_fecha = ordenar_pedidos_custom(pedidos_fecha)
+                            st.markdown(f"#### 🌅 Pedidos Locales - Mañana - {date_label}")
+                            for orden, (idx, row) in enumerate(pedidos_fecha.iterrows(), start=1):
+                                mostrar_pedido(df_main, idx, row, orden, "Mañana", "📍 Pedidos Locales", worksheet_main, headers_main, s3_client)
+
 
                             current_selected_date_dt_str = date_label.replace("📅 ", "")
 
