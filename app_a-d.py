@@ -99,7 +99,11 @@ try:
         st.info("Falta la clave: 'st.secrets has no key \"gsheets\". Did you forget to add it to secrets.toml, mount it to secret directory, or the app settings on Streamlit Cloud? More info: https://docs.streamlit.io/deploy/streamlit-community-cloud/deploy-your-app/secrets-management'")
         st.stop()
 
-    GSHEETS_CREDENTIALS = st.secrets["gsheets"]
+    import json
+
+    GSHEETS_CREDENTIALS = json.loads(st.secrets["gsheets"]["google_credentials"])
+    GSHEETS_CREDENTIALS["private_key"] = GSHEETS_CREDENTIALS["private_key"].replace("\\n", "\n")
+
 
     g_spread_client = get_gspread_client(_credentials_json_dict=GSHEETS_CREDENTIALS)
     s3_client = get_s3_client()
