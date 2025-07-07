@@ -556,37 +556,40 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
 
         # Imprimir/Ver Adjuntos and change to "En Proceso"
         
+        
         if col_print_btn.button("🖨 Imprimir", key=f"print_button_{row['ID_Pedido']}_{origen_tab}", disabled=disabled_if_completed):
             if row['Estado'] != "🔵 En Proceso":
                 updates_for_print_button = []
-                estado_col_idx = headers.index('Estado') + 1
-                hora_proceso_col_idx = headers.index('Hora_Proceso') + 1
-                fecha_completado_col_idx = headers.index('Fecha_Completado') + 1
+                try:
+                    estado_col_idx = headers.index('Estado') + 1
+                    hora_proceso_col_idx = headers.index('Hora_Proceso') + 1
+                    fecha_completado_col_idx = headers.index('Fecha_Completado') + 1
 
-                updates_for_print_button.append({
-                    'range': gspread.utils.rowcol_to_a1(gsheet_row_index, estado_col_idx),
-                    'values': [["🔵 En Proceso"]]
-                })
-                updates_for_print_button.append({
-                    'range': gspread.utils.rowcol_to_a1(gsheet_row_index, hora_proceso_col_idx),
-                    'values': [[datetime.now().strftime("%Y-%m-%d %H:%M:%S")]]
-                })
-                updates_for_print_button.append({
-                    'range': gspread.utils.rowcol_to_a1(gsheet_row_index, fecha_completado_col_idx),
-                    'values': [[""]]
-                })
+                    updates_for_print_button.append({
+                        'range': gspread.utils.rowcol_to_a1(gsheet_row_index, estado_col_idx),
+                        'values': [["🔵 En Proceso"]]
+                    })
+                    updates_for_print_button.append({
+                        'range': gspread.utils.rowcol_to_a1(gsheet_row_index, hora_proceso_col_idx),
+                        'values': [[datetime.now().strftime("%Y-%m-%d %H:%M:%S")]]
+                    })
+                    updates_for_print_button.append({
+                        'range': gspread.utils.rowcol_to_a1(gsheet_row_index, fecha_completado_col_idx),
+                        'values': [[""]]
+                    })
 
-                if batch_update_gsheet_cells(worksheet, updates_for_print_button):
-                    df.loc[idx, "Estado"] = "🔵 En Proceso"
-                    df.loc[idx, "Hora_Proceso"] = datetime.now()
-                    df.loc[idx, "Fecha_Completado"] = pd.NaT
-                    st.toast(f"✅ Pedido {orden} marcado como 'En Proceso'", icon="✅")
-                else:
-                    st.error("Falló la actualización del estado a 'En Proceso' al imprimir.")
+                    if batch_update_gsheet_cells(worksheet, updates_for_print_button):
+                        df.loc[idx, "Estado"] = "🔵 En Proceso"
+                        df.loc[idx, "Hora_Proceso"] = datetime.now()
+                        df.loc[idx, "Fecha_Completado"] = pd.NaT
+                        st.toast(f"✅ Pedido {orden} marcado como 'En Proceso' y adjuntos desplegados.", icon="✅")
+                    else:
+                        st.error("Falló la actualización del estado a 'En Proceso' al imprimir.")
+                except ValueError as ve:
+                    st.error(f"Error de columna al imprimir: {ve}")
 
-            # ✅ Forzar expansión del panel de adjuntos y recarga
-            st.session_state["expanded_attachments"][row["ID_Pedido"]] = True
-            st.experimental_rerun()
+            st.session_state["expanded_attachments"][row['ID_Pedido']] = not st.session_state["expanded_attachments"].get(row['ID_Pedido'], False)
+
 
             st.markdown(f"##### Adjuntos para ID: {row['ID_Pedido']}")
 
