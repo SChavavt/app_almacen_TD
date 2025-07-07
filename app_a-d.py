@@ -126,62 +126,59 @@ except Exception as e:
 
 
 # --- Data Loading from Google Sheets (Cached) ---
-@st.cache_data(ttl=60) # Carga cada 60 segundos o cuando se invalide la caché
-def load_data_from_gsheets(worksheet_obj):
+@st.cache_data(ttl=60)
+def get_raw_sheet_data(sheet_id: str, worksheet_name: str, credentials: dict) -> list[list[str]]:
     """
-    Carga todos los datos de una hoja de cálculo de Google Sheets en un DataFrame de Pandas
-    y añade el índice de fila de la hoja de cálculo.
-    Retorna el DataFrame y los encabezados.
+    Lee todos los valores desde una hoja de Google Sheets.
+    Se cachea porque solo recibe tipos hasheables (str, dict).
     """
-    try:
-        # Obtener todos los valores incluyendo los encabezados para poder calcular el índice de fila
-        all_data = worksheet_obj.get_all_values()
-        if not all_data:
-            return pd.DataFrame(), [] # Devolver también los encabezados vacíos
+    scope = ['https://spreadsheets.google.com/feeds', 'https://www.googleapis.com/auth/drive']
+    credentials["private_key"] = credentials["private_key"].replace("\\n", "\n")
+    creds = ServiceAccountCredentials.from_json_keyfile_dict(credentials, scope)
+    client = gspread.authorize(creds)
 
-        headers = all_data[0]
-        data_rows = all_data[1:]
+    sheet = client.open_by_key(sheet_id)
+    worksheet = sheet.worksheet(worksheet_name)
+    return worksheet.get_all_values()
 
-        df = pd.DataFrame(data_rows, columns=headers)
-
-        # Añadir el índice de fila de Google Sheet (basado en 1)
-        # Asumiendo que el encabezado está en la fila 1, la primera fila de datos es la fila 2.
-        df['_gsheet_row_index'] = df.index + 2
-
-        # Define las columnas esperadas y asegúrate de que existan
-        expected_columns = [
-            'ID_Pedido', 'Folio_Factura', 'Hora_Registro', 'Vendedor_Registro', 'Cliente',
-            'Tipo_Envio', 'Fecha_Entrega', 'Comentario', 'Notas', 'Modificacion_Surtido',
-            'Adjuntos', 'Adjuntos_Surtido', 'Estado', 'Estado_Pago', 'Fecha_Completado',
-            'Hora_Proceso', 'Turno', 'Surtidor'
-        ]
-
-        for col in expected_columns:
-            if col not in df.columns:
-                df[col] = '' # Inicializa columnas faltantes como cadena vacía
-
-        # Asegura que las columnas de fecha/hora se manejen correctamente
-        df['Fecha_Entrega'] = df['Fecha_Entrega'].apply(
-            lambda x: str(x) if pd.notna(x) and str(x).strip() != '' else ''
-        )
-
-        df['Hora_Registro'] = pd.to_datetime(df['Hora_Registro'], errors='coerce')
-        df['Fecha_Completado'] = pd.to_datetime(df['Fecha_Completado'], errors='coerce')
-        df['Hora_Proceso'] = pd.to_datetime(df['Hora_Proceso'], errors='coerce') # Ensure Hora_Proceso is datetime
-
-        # IMPORTANT: Strip whitespace from key columns to ensure correct filtering and finding
-        df['ID_Pedido'] = df['ID_Pedido'].astype(str).str.strip()
-        df['Tipo_Envio'] = df['Tipo_Envio'].astype(str).str.strip()
-        df['Turno'] = df['Turno'].astype(str).str.strip()
-        df['Estado'] = df['Estado'].astype(str).str.strip()
-
-        return df, headers # Devolver también los encabezados
-
-    except Exception as e:
-        st.error(f"❌ Error al cargar los datos desde Google Sheets: {e}")
+def process_sheet_data(all_data: list[list[str]]) -> tuple[pd.DataFrame, list[str]]:
+    """
+    Convierte los datos en crudo de Google Sheets en un DataFrame procesado.
+    """
+    if not all_data:
         return pd.DataFrame(), []
 
-# --- Data Saving/Updating to Google Sheets ---
+    headers = all_data[0]
+    data_rows = all_data[1:]
+    df = pd.DataFrame(data_rows, columns=headers)
+    df['_gsheet_row_index'] = df.index + 2
+
+    expected_columns = [
+        'ID_Pedido', 'Folio_Factura', 'Hora_Registro', 'Vendedor_Registro', 'Cliente',
+        'Tipo_Envio', 'Fecha_Entrega', 'Comentario', 'Notas', 'Modificacion_Surtido',
+        'Adjuntos', 'Adjuntos_Surtido', 'Estado', 'Estado_Pago', 'Fecha_Completado',
+        'Hora_Proceso', 'Turno', 'Surtidor'
+    ]
+
+    for col in expected_columns:
+        if col not in df.columns:
+            df[col] = ''
+
+    df['Fecha_Entrega'] = df['Fecha_Entrega'].apply(
+        lambda x: str(x) if pd.notna(x) and str(x).strip() != '' else ''
+    )
+
+    df['Hora_Registro'] = pd.to_datetime(df['Hora_Registro'], errors='coerce')
+    df['Fecha_Completado'] = pd.to_datetime(df['Fecha_Completado'], errors='coerce')
+    df['Hora_Proceso'] = pd.to_datetime(df['Hora_Proceso'], errors='coerce')
+
+    df['ID_Pedido'] = df['ID_Pedido'].astype(str).str.strip()
+    df['Tipo_Envio'] = df['Tipo_Envio'].astype(str).str.strip()
+    df['Turno'] = df['Turno'].astype(str).str.strip()
+    df['Estado'] = df['Estado'].astype(str).str.strip()
+
+    return df, headers
+
 
 def update_gsheet_cell(worksheet, headers, row_index, col_name, value):
     """
@@ -757,7 +754,13 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
 
 # --- Main Application Logic ---
 
-df_main, headers_main = load_data_from_gsheets(worksheet_main)
+raw_data = get_raw_sheet_data(
+    sheet_id=GOOGLE_SHEET_ID,
+    worksheet_name=GOOGLE_SHEET_WORKSHEET_NAME,
+    credentials=GSHEETS_CREDENTIALS
+)
+df_main, headers_main = process_sheet_data(raw_data)
+
 
 if not df_main.empty:
     df_main, changes_made_by_demorado_check = check_and_update_demorados(df_main, worksheet_main, headers_main)
