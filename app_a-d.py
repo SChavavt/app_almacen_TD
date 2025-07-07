@@ -555,82 +555,39 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
 
 
         # Imprimir/Ver Adjuntos and change to "En Proceso"
-        if col_print_btn.button("🖨 Imprimir", key=f"print_button_{row['ID_Pedido']}_{origen_tab}_{key_suffix}", disabled=disabled_if_completed):
+        
+        if col_print_btn.button("🖨 Imprimir", key=f"print_button_{row['ID_Pedido']}_{origen_tab}", disabled=disabled_if_completed):
             if row['Estado'] != "🔵 En Proceso":
                 updates_for_print_button = []
-                try:
-                    estado_col_idx = headers.index('Estado') + 1
-                    hora_proceso_col_idx = headers.index('Hora_Proceso') + 1
-                    fecha_completado_col_idx = headers.index('Fecha_Completado') + 1
+                estado_col_idx = headers.index('Estado') + 1
+                hora_proceso_col_idx = headers.index('Hora_Proceso') + 1
+                fecha_completado_col_idx = headers.index('Fecha_Completado') + 1
 
-                    updates_for_print_button.append({
-                        'range': gspread.utils.rowcol_to_a1(gsheet_row_index, estado_col_idx),
-                        'values': [["🔵 En Proceso"]]
-                    })
-                    updates_for_print_button.append({
-                        'range': gspread.utils.rowcol_to_a1(gsheet_row_index, hora_proceso_col_idx),
-                        'values': [[datetime.now().strftime("%Y-%m-%d %H:%M:%S")]]
-                    })
-                    updates_for_print_button.append({
-                        'range': gspread.utils.rowcol_to_a1(gsheet_row_index, fecha_completado_col_idx),
-                        'values': [[""]]
-                    })
+                updates_for_print_button.append({
+                    'range': gspread.utils.rowcol_to_a1(gsheet_row_index, estado_col_idx),
+                    'values': [["🔵 En Proceso"]]
+                })
+                updates_for_print_button.append({
+                    'range': gspread.utils.rowcol_to_a1(gsheet_row_index, hora_proceso_col_idx),
+                    'values': [[datetime.now().strftime("%Y-%m-%d %H:%M:%S")]]
+                })
+                updates_for_print_button.append({
+                    'range': gspread.utils.rowcol_to_a1(gsheet_row_index, fecha_completado_col_idx),
+                    'values': [[""]]
+                })
 
-                    if batch_update_gsheet_cells(worksheet, updates_for_print_button):
-                        df.loc[idx, "Estado"] = "🔵 En Proceso"
-                        df.loc[idx, "Hora_Proceso"] = datetime.now()
-                        df.loc[idx, "Fecha_Completado"] = pd.NaT
-                        st.toast(f"✅ Pedido {orden} marcado como 'En Proceso' y adjuntos desplegados.", icon="✅")
-                        # No st.rerun() aquí, solo actualiza la sesión para adjuntos
-                    else:
-                        st.error("Falló la actualización del estado a 'En Proceso' al imprimir.")
-                except ValueError as ve:
-                    st.error(f"Error de columna al imprimir: {ve}")
+                if batch_update_gsheet_cells(worksheet, updates_for_print_button):
+                    df.loc[idx, "Estado"] = "🔵 En Proceso"
+                    df.loc[idx, "Hora_Proceso"] = datetime.now()
+                    df.loc[idx, "Fecha_Completado"] = pd.NaT
+                    st.toast(f"✅ Pedido {orden} marcado como 'En Proceso'", icon="✅")
+                else:
+                    st.error("Falló la actualización del estado a 'En Proceso' al imprimir.")
 
-            st.session_state["expanded_attachments"][row['ID_Pedido']] = not st.session_state["expanded_attachments"].get(row['ID_Pedido'], False)
+            # ✅ Forzar expansión del panel de adjuntos y recarga
+            st.session_state["expanded_attachments"][row["ID_Pedido"]] = True
+            st.experimental_rerun()
 
-
-        # Completar
-        if col_complete_btn.button("🟢 Completar", key=f"done_{row['ID_Pedido']}_{origen_tab}_{key_suffix}", disabled=disabled_if_completed):
-            surtidor_final = row.get("Surtidor", "")
-            if surtidor_final and str(surtidor_final).strip() != "": # Asegurarse de que no sea solo espacio en blanco
-                updates_for_complete_button = []
-                try:
-                    estado_col_idx = headers.index('Estado') + 1
-                    fecha_completado_col_idx = headers.index('Fecha_Completado') + 1
-                    hora_proceso_col_idx = headers.index('Hora_Proceso') + 1
-
-                    updates_for_complete_button.append({
-                        'range': gspread.utils.rowcol_to_a1(gsheet_row_index, estado_col_idx),
-                        'values': [["🟢 Completado"]]
-                    })
-                    updates_for_complete_button.append({
-                        'range': gspread.utils.rowcol_to_a1(gsheet_row_index, fecha_completado_col_idx),
-                        'values': [[datetime.now().strftime("%Y-%m-%d %H:%M:%S")]]
-                    })
-                    updates_for_complete_button.append({
-                        'range': gspread.utils.rowcol_to_a1(gsheet_row_index, hora_proceso_col_idx),
-                        'values': [[""]]
-                    })
-
-                    if batch_update_gsheet_cells(worksheet, updates_for_complete_button):
-                        df.loc[idx, "Estado"] = "🟢 Completado"
-                        df.loc[idx, "Fecha_Completado"] = datetime.now()
-                        df.loc[idx, "Hora_Proceso"] = pd.NaT
-                        st.toast(f"✅ Pedido {orden} marcado como completado", icon="✅")
-                        st.cache_data.clear() # Forzar recarga de datos para que el pedido desaparezca de la vista actual
-                        if row['ID_Pedido'] in st.session_state["expanded_attachments"]:
-                            del st.session_state["expanded_attachments"][row['ID_Pedido']]
-                        st.rerun() # Necesario para que el pedido se elimine de la vista actual
-                    else:
-                        st.error("Falló la actualización del estado a 'Completado'.")
-                except ValueError as ve:
-                    st.error(f"Error de columna al completar: {ve}")
-            else:
-                st.warning("⚠ Por favor, ingrese el Surtidor antes de completar el pedido.")
-
-        # --- Adjuntos desplegados (if expanded) ---
-        if st.session_state["expanded_attachments"].get(row['ID_Pedido'], False):
             st.markdown(f"##### Adjuntos para ID: {row['ID_Pedido']}")
 
             # Initialize pedido_folder_prefix
