@@ -448,7 +448,8 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
             new_fecha_entrega_dt = col_inputs.date_input(
                 "Nueva fecha de envío:",
                 value=date_input_value,
-                key=f"new_date_{row['ID_Pedido']}_{origen_tab}",
+                key=f"new_date_{row['ID_Pedido']}_{origen_tab}_{row.get('Fecha_Entrega', '')}",
+
                 disabled=(row['Estado'] == "🟢 Completado")
             )
 
