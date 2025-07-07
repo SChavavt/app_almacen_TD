@@ -409,6 +409,10 @@ def check_and_update_demorados(df_to_check, worksheet, headers):
     return df_to_check, False # No hubo actualizaciones
 
 def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, worksheet, headers, s3_client_param):
+    import hashlib
+    def generar_key_hash(row, origen_tab, orden):
+        base = f"{row['ID_Pedido']}_{origen_tab}_{row.get('Fecha_Entrega', '')}_{orden}"
+        return hashlib.md5(base.encode()).hexdigest()[:10]
     """
     Muestra los detalles de un pedido y permite acciones.
     """
@@ -448,7 +452,7 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
             new_fecha_entrega_dt = col_inputs.date_input(
                 "Nueva fecha de envío:",
                 value=date_input_value,
-                key=f"new_date_{row['ID_Pedido']}_{origen_tab}_{str(row.get('Fecha_Entrega', '')).replace('-', '_').replace('/', '_')}_{orden}",
+                key=f"new_date_{generar_key_hash(row, origen_tab, orden)}",
                 disabled=(row['Estado'] == "🟢 Completado")
             )
 
@@ -465,11 +469,11 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
                     "Clasificar Turno como:",
                     options=turno_options,
                     index=default_index_turno,
-                    key=f"new_turno_{row['ID_Pedido']}_{origen_tab}_{str(row.get('Fecha_Entrega', '')).replace('-', '_').replace('/', '_')}_{orden}",
+                    key=f"new_turno_{generar_key_hash(row, origen_tab, orden)}",
                     disabled=(row['Estado'] == "🟢 Completado")
                 )
 
-            if st.button("✅ Aplicar Cambios de Fecha/Turno", key=f"apply_changes_{row['ID_Pedido']}_{origen_tab}_{str(row.get('Fecha_Entrega', '')).replace('-', '_').replace('/', '_')}_{orden}", disabled=(row['Estado'] == "🟢 Completado")):
+            if st.button("✅ Aplicar Cambios de Fecha/Turno", key=f"apply_changes_{generar_key_hash(row, origen_tab, orden)}", disabled=(row['Estado'] == "🟢 Completado")):
                 changes_made = False
                 updates_to_gsheet = []
 
@@ -552,7 +556,7 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
 
 
         # Imprimir/Ver Adjuntos and change to "En Proceso"
-        if col_print_btn.button("🖨 Imprimir", key=f"print_button_{row['ID_Pedido']}_{origen_tab}_{str(row.get('Fecha_Entrega', '')).replace('-', '_').replace('/', '_')}_{orden}", disabled=disabled_if_completed):
+        if col_print_btn.button("🖨 Imprimir", key=f"print_button_{generar_key_hash(row, origen_tab, orden)}", disabled=disabled_if_completed):
             if row['Estado'] != "🔵 En Proceso":
                 updates_for_print_button = []
                 try:
@@ -588,7 +592,7 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
 
 
         # Completar
-        if col_complete_btn.button("🟢 Completar", key=f"done_{row['ID_Pedido']}_{origen_tab}_{str(row.get('Fecha_Entrega', '')).replace('-', '_').replace('/', '_')}_{orden}", disabled=disabled_if_completed):
+        if col_complete_btn.button("🟢 Completar", key=f"done_{generar_key_hash(row, origen_tab, orden)}", disabled=disabled_if_completed):
             surtidor_final = row.get("Surtidor", "")
             if surtidor_final and str(surtidor_final).strip() != "": # Asegurarse de que no sea solo espacio en blanco
                 updates_for_complete_button = []
