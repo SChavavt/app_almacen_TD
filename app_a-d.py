@@ -1,7 +1,7 @@
 import streamlit as st
 import pandas as pd
 from datetime import datetime, timedelta
-import json # Aunque ya no se usa para cargar el archivo, se mantiene si otras partes lo usan
+import json
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 import boto3
@@ -61,8 +61,11 @@ def get_gspread_client(_credentials_json_dict):
     try:
         scope = ['https://spreadsheets.google.com/feeds', 'https://www.googleapis.com/auth/drive']
 
-        # **MODIFICACIÓN CRÍTICA AQUÍ para manejar private_key de st.secrets**
-        creds_dict = _credentials_json_dict.copy()
+        # **CORRECCIÓN AQUÍ: Convierte _credentials_json_dict a un diccionario normal antes de copiarlo**
+        # _credentials_json_dict ya es un diccionario (o un objeto de tipo diccionario de st.secrets)
+        # La forma correcta de asegurarnos de que sea un dict modificable es crearlo a partir de él.
+        creds_dict = dict(_credentials_json_dict) 
+        
         if "private_key" in creds_dict and isinstance(creds_dict["private_key"], str):
             creds_dict["private_key"] = creds_dict["private_key"].replace("\\n", "\n")
 
