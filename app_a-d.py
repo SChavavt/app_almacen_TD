@@ -409,8 +409,8 @@ def check_and_update_demorados(df_to_check, worksheet, headers):
     return df_to_check, False # No hubo actualizaciones
 
 def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, worksheet, headers, s3_client_param):
-    from uuid import uuid4
-    key_suffix = str(uuid4()).replace("-", "")[:8]
+    # from uuid import uuid4 # REMOVED: No longer needed for button key
+    # key_suffix = str(uuid4()).replace("-", "")[:8] # REMOVED: No longer needed for button key
 
     gsheet_row_index = row.get('_gsheet_row_index')
     if gsheet_row_index is None:
@@ -477,7 +477,9 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
             if row.get("Tipo_Envio") == "📍 Pedido Local" and origen_tab in ["Mañana", "Tarde"]:
                 st.write(f"DEBUG (before button check): st.session_state[{turno_key}] = '{st.session_state[turno_key]}'")
 
-            if st.button("✅ Aplicar Cambios de Fecha/Turno", key=f"btn_apply_{row['ID_Pedido']}_{key_suffix}"):
+            # MODIFIED: Simplified button key and added simple debug print
+            if st.button("✅ Aplicar Cambios de Fecha/Turno", key=f"btn_apply_{row['ID_Pedido']}"):
+                st.write("BUTTON CLICKED! Executing update logic...") # NEW DEBUG LINE
                 st.write(f"DEBUG (inside button click): Fecha actual de fila: '{fecha_actual_str}'")
                 st.write(f"DEBUG (inside button click): Turno actual de fila: '{current_turno}'")
                 st.write(f"DEBUG (inside button click): Nueva fecha de session_state: '{st.session_state[fecha_key].strftime('%Y-%m-%d')}'")
