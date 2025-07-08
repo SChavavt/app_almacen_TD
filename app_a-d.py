@@ -423,7 +423,7 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
         if tiene_modificacion:
             st.warning(f"⚠ ¡MODIFICACIÓN DE SURTIDO DETECTADA! Pedido #{orden}")
 
-        # --- Cambiar Fecha y Turno (This is the section to keep and modify slightly) ---
+        # --- Cambiar Fecha y Turno ---
         if row['Estado'] != "🟢 Completado" and row.get("Tipo_Envio") in ["📍 Pedido Local", "🚚 Pedido Foráneo"]:
             st.markdown("##### 📅 Cambiar Fecha y Turno")
             col_current_info_date, col_current_info_turno, col_inputs = st.columns([1, 1, 2])
@@ -445,79 +445,61 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
             fecha_key = f"new_fecha_{row['ID_Pedido']}"
             turno_key = f"new_turno_{row['ID_Pedido']}"
 
-            # Initialize session state for these keys if not already present
             if fecha_key not in st.session_state:
                 st.session_state[fecha_key] = default_fecha
             if turno_key not in st.session_state:
                 st.session_state[turno_key] = current_turno
 
-            # Define on_change callbacks
-            def update_fecha_turno_callback():
-                # This function will be called when date or selectbox changes
-                # The state values are already updated by Streamlit
-                pass # No explicit action needed here, changes are handled by the button
+            def on_fecha_change():
+                st.session_state[fecha_key + "_changed"] = True
 
-            new_fecha_dt = st.date_input(
+            def on_turno_change():
+                st.session_state[turno_key + "_changed"] = True
+
+            st.date_input(
                 "Nueva fecha:",
                 value=st.session_state[fecha_key],
                 min_value=today,
                 max_value=today + timedelta(days=365),
                 format="DD/MM/YYYY",
                 key=fecha_key,
-                on_change=update_fecha_turno_callback # Use a generic callback or remove if not needed for immediate action
+                on_change=on_fecha_change
             )
 
-            new_turno_val = current_turno
             if row.get("Tipo_Envio") == "📍 Pedido Local" and origen_tab in ["Mañana", "Tarde"]:
                 turno_options = ["", "☀️ Local Mañana", "🌙 Local Tarde", "🌵 Saltillo", "📦 Pasa a Bodega"]
                 if st.session_state[turno_key] not in turno_options:
-                    # If current_turno is not in options (e.g., empty string), default to the first valid option or empty
-                    try:
-                        default_idx = turno_options.index(st.session_state[turno_key])
-                    except ValueError:
-                        default_idx = 0 # Default to empty or first option if current_turno is not found
-                    new_turno_val = st.selectbox(
-                        "Clasificar turno como:",
-                        options=turno_options,
-                        index=default_idx,
-                        key=turno_key,
-                        on_change=update_fecha_turno_callback
-                    )
-                else:
-                    new_turno_val = st.selectbox(
-                        "Clasificar turno como:",
-                        options=turno_options,
-                        index=turno_options.index(st.session_state[turno_key]),
-                        key=turno_key,
-                        on_change=update_fecha_turno_callback
-                    )
-            # Ensure the session state is updated from the widget value if changed by user directly
-            st.session_state[fecha_key] = new_fecha_dt
-            if row.get("Tipo_Envio") == "📍 Pedido Local" and origen_tab in ["Mañana", "Tarde"]:
-                st.session_state[turno_key] = new_turno_val
+                    st.session_state[turno_key] = turno_options[0]
+
+                st.selectbox(
+                    "Clasificar turno como:",
+                    options=turno_options,
+                    key=turno_key,
+                    on_change=on_turno_change
+                )
 
             if st.button("✅ Aplicar Cambios de Fecha/Turno", key=f"btn_apply_{row['ID_Pedido']}_{key_suffix}"):
                 cambios = []
-                # Use the values from session state for comparison and update
                 nueva_fecha_str = st.session_state[fecha_key].strftime('%Y-%m-%d')
-                
+
                 if nueva_fecha_str != fecha_actual_str:
                     col_idx = headers.index("Fecha_Entrega") + 1
                     cambios.append({'range': gspread.utils.rowcol_to_a1(gsheet_row_index, col_idx), 'values': [[nueva_fecha_str]]})
-                    df.loc[idx, "Fecha_Entrega"] = nueva_fecha_str # Update DataFrame in memory
-                    
+                    df.loc[idx, "Fecha_Entrega"] = nueva_fecha_str
+
                 if row.get("Tipo_Envio") == "📍 Pedido Local" and origen_tab in ["Mañana", "Tarde"]:
                     nuevo_turno = st.session_state[turno_key]
                     if nuevo_turno != current_turno:
                         col_idx = headers.index("Turno") + 1
                         cambios.append({'range': gspread.utils.rowcol_to_a1(gsheet_row_index, col_idx), 'values': [[nuevo_turno]]})
-                        df.loc[idx, "Turno"] = nuevo_turno # Update DataFrame in memory
+                        df.loc[idx, "Turno"] = nuevo_turno
 
                 if cambios:
                     if batch_update_gsheet_cells(worksheet, cambios):
                         st.success(f"✅ Pedido {row['ID_Pedido']} actualizado.")
-                        # No need to store these in session_state, as a rerun will reload everything
-                        # and the correct tab/date will be automatically selected based on the updated data.
+                        st.session_state["pedido_editado"] = row['ID_Pedido']
+                        st.session_state["fecha_seleccionada"] = nueva_fecha_str
+                        st.session_state["subtab_local"] = origen_tab
                         st.cache_data.clear()
                         st.rerun()
                     else:
@@ -525,10 +507,7 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
                 else:
                     st.info("No hubo cambios para aplicar.")
         
-        st.markdown("---") # This separates the Date/Turno section from the rest
-
-        # Removed the duplicate "Cambiar Fecha y Turno" section here.
-        # The content that was here has been removed to prevent duplication.
+        st.markdown("---")
 
         # --- Layout Principal del Pedido ---
         disabled_if_completed = (row['Estado'] == "🟢 Completado")
@@ -630,40 +609,6 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
                         st.error("❌ No se pudo completar el pedido.")
                 except Exception as e:
                     st.error(f"Error al completar el pedido: {e}")
-
-
-            st.session_state["expanded_attachments"][row['ID_Pedido']] = not st.session_state["expanded_attachments"].get(row['ID_Pedido'], False)
-
-
-            st.markdown(f"##### Adjuntos para ID: {row['ID_Pedido']}")
-
-            # Initialize pedido_folder_prefix
-            pedido_folder_prefix = find_pedido_subfolder_prefix(s3_client_param, S3_ATTACHMENT_PREFIX, row['ID_Pedido'])
-
-            if pedido_folder_prefix:
-                files_in_folder = get_files_in_s3_prefix(s3_client_param, pedido_folder_prefix)
-
-                if files_in_folder:
-                    filtered_files_to_display = [
-                        f for f in files_in_folder
-                        if "comprobante" not in f['title'].lower() and "surtido" not in f['title'].lower()
-                    ]
-
-                    if filtered_files_to_display:
-                        for file_info in filtered_files_to_display:
-                            file_url = get_s3_file_download_url(s3_client_param, file_info['key'])
-                            display_name = file_info['title']
-                            if row['ID_Pedido'] in display_name:
-                                display_name = display_name.replace(row['ID_Pedido'], "").replace("__", "_").replace("_-", "_").replace("-_", "_").strip('_').strip('-')
-
-                            st.markdown(f"- 📄 **{display_name}** ([🔗 Ver/Descargar]({file_url}))")
-                    else:
-                        st.info("No hay adjuntos para mostrar (excluyendo comprobantes y surtidos).")
-                else:
-                    st.info("No se encontraron archivos en la carpeta del pedido en S3.")
-            else:
-                st.error(f"❌ No se encontró la carpeta (prefijo S3) del pedido '{row['ID_Pedido']}'.")
-
 
         # --- Campo de Notas editable y Comentario ---
         st.markdown("---")
@@ -817,7 +762,7 @@ if not df_main.empty:
                     date_tabs_m = st.tabs(date_tab_labels)
                     
                     for i, fecha_dt in enumerate(fechas_unicas_dt):
-                        date_label = f"📅 {pd.to_datetime(fecha_dt).strftime('%d/%m/%Y')}" # Ensure fecha_dt is a datetime object here
+                        date_label = f"📅 {fecha_dt.strftime('%d/%m/%Y')}"
                         with date_tabs_m[i]:
                             pedidos_fecha = pedidos_m_display[pedidos_m_display["Fecha_Entrega_dt"] == fecha_dt].copy()
                             pedidos_fecha = ordenar_pedidos_custom(pedidos_fecha)
@@ -825,10 +770,14 @@ if not df_main.empty:
                             for orden, (idx, row) in enumerate(pedidos_fecha.iterrows(), start=1):
                                 mostrar_pedido(df_main, idx, row, orden, "Mañana", "📍 Pedidos Locales", worksheet_main, headers_main, s3_client)
 
-                else:
-                    st.info("No hay pedidos para el turno mañana.") # Added this else block for clarity
-            else:
-                st.info("No hay pedidos para el turno mañana.") # Added this else block for clarity
+
+                            current_selected_date_dt_str = date_label.replace("📅 ", "")
+
+                            current_selected_date_dt = pd.to_datetime(current_selected_date_dt_str, format='%d/%m/%Y')
+                            
+                            pedidos_fecha = pedidos_m_display[pedidos_m_display["Fecha_Entrega_dt"] == current_selected_date_dt].copy()
+                            pedidos_fecha = ordenar_pedidos_custom(pedidos_fecha)
+                            st.markdown(f"#### 🌅 Pedidos Locales - Mañana - {date_label}")
                                 
         with subtabs_local[1]:  # 🌇 Tarde
             pedidos_t_display = df_pendientes_proceso_demorado[
@@ -843,10 +792,12 @@ if not df_main.empty:
                     date_tab_labels = [f"📅 {pd.to_datetime(fecha).strftime('%d/%m/%Y')}" for fecha in fechas_unicas_dt]
                     
                     date_tabs_t = st.tabs(date_tab_labels)
-                    for i, fecha_dt in enumerate(fechas_unicas_dt): # Iterate over datetime objects directly
-                        date_label = f"📅 {pd.to_datetime(fecha_dt).strftime('%d/%m/%Y')}"
+                    for i, date_label in enumerate(date_tab_labels):
                         with date_tabs_t[i]:
-                            pedidos_fecha = pedidos_t_display[pedidos_t_display["Fecha_Entrega_dt"] == fecha_dt].copy()
+                            current_selected_date_dt_str = date_label.replace("📅 ", "")
+                            current_selected_date_dt = pd.to_datetime(current_selected_date_dt_str, format='%d/%m/%Y')
+                            
+                            pedidos_fecha = pedidos_t_display[pedidos_t_display["Fecha_Entrega_dt"] == current_selected_date_dt].copy()
                             pedidos_fecha = ordenar_pedidos_custom(pedidos_fecha)
                             st.markdown(f"#### 🌇 Pedidos Locales - Tarde - {date_label}")
                             for orden, (idx, row) in enumerate(pedidos_fecha.iterrows(), start=1):
