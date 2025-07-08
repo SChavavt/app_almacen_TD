@@ -412,16 +412,96 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
     from uuid import uuid4
     key_suffix = str(uuid4()).replace("-", "")[:8]
 
-    """
-    Muestra los detalles de un pedido y permite acciones.
-    """
     gsheet_row_index = row.get('_gsheet_row_index')
     if gsheet_row_index is None:
-        st.error(f"❌ Error interno: No se pudo obtener el índice de fila de Google Sheets para el pedido '{row['ID_Pedido']}'. No se puede actualizar este pedido.")
+        st.error(f"❌ Error interno: No se pudo obtener el índice de fila de Google Sheets para el pedido '{row['ID_Pedido']}'.")
         return
 
     with st.container():
         st.markdown("---")
+        tiene_modificacion = row.get("Modificacion_Surtido") and pd.notna(row["Modificacion_Surtido"]) and str(row["Modificacion_Surtido"]).strip() != ''
+        if tiene_modificacion:
+            st.warning(f"⚠ ¡MODIFICACIÓN DE SURTIDO DETECTADA! Pedido #{orden}")
+
+        # --- Cambiar Fecha y Turno ---
+        if row['Estado'] != "🟢 Completado" and row.get("Tipo_Envio") in ["📍 Pedido Local", "🚚 Pedido Foráneo"]:
+            st.markdown("##### 📅 Cambiar Fecha y Turno")
+            col_current_info_date, col_current_info_turno, col_inputs = st.columns([1, 1, 2])
+
+            fecha_actual_str = row.get("Fecha_Entrega", "")
+            fecha_actual_dt = pd.to_datetime(fecha_actual_str, errors='coerce') if fecha_actual_str else None
+            fecha_mostrar = fecha_actual_dt.strftime('%d/%m/%Y') if pd.notna(fecha_actual_dt) else "Sin fecha"
+            col_current_info_date.info(f"**Fecha actual:** {fecha_mostrar}")
+
+            current_turno = row.get("Turno", "")
+            if row.get("Tipo_Envio") == "📍 Pedido Local":
+                col_current_info_turno.info(f"**Turno actual:** {current_turno}")
+            else:
+                col_current_info_turno.empty()
+
+            today = datetime.now().date()
+            default_fecha = fecha_actual_dt.date() if pd.notna(fecha_actual_dt) and fecha_actual_dt.date() >= today else today
+
+            # 💡 Usamos session_state para preservar la selección tras recarga
+            fecha_key = f"new_fecha_{row['ID_Pedido']}"
+            turno_key = f"new_turno_{row['ID_Pedido']}"
+
+            if fecha_key not in st.session_state:
+                st.session_state[fecha_key] = default_fecha
+            if turno_key not in st.session_state:
+                st.session_state[turno_key] = current_turno
+
+            st.session_state[fecha_key] = col_inputs.date_input(
+                "Nueva fecha:",
+                value=st.session_state[fecha_key],
+                min_value=today,
+                max_value=today + timedelta(days=365),
+                format="DD/MM/YYYY",
+                key=fecha_key
+            )
+
+            if row.get("Tipo_Envio") == "📍 Pedido Local" and origen_tab in ["Mañana", "Tarde"]:
+                turno_options = ["", "☀️ Local Mañana", "🌙 Local Tarde", "🌵 Saltillo", "📦 Pasa a Bodega"]
+                try:
+                    default_index = turno_options.index(st.session_state[turno_key])
+                except ValueError:
+                    default_index = 0
+
+                st.session_state[turno_key] = col_inputs.selectbox(
+                    "Clasificar turno como:",
+                    options=turno_options,
+                    index=default_index,
+                    key=turno_key
+                )
+
+            if st.button("✅ Aplicar Cambios de Fecha/Turno", key=f"btn_apply_{row['ID_Pedido']}_{key_suffix}"):
+                cambios = []
+                nueva_fecha_str = st.session_state[fecha_key].strftime('%Y-%m-%d')
+
+                if nueva_fecha_str != fecha_actual_str:
+                    col_idx = headers.index("Fecha_Entrega") + 1
+                    cambios.append({'range': gspread.utils.rowcol_to_a1(gsheet_row_index, col_idx), 'values': [[nueva_fecha_str]]})
+                    df.loc[idx, "Fecha_Entrega"] = nueva_fecha_str
+
+                if row.get("Tipo_Envio") == "📍 Pedido Local" and origen_tab in ["Mañana", "Tarde"]:
+                    nuevo_turno = st.session_state[turno_key]
+                    if nuevo_turno != current_turno:
+                        col_idx = headers.index("Turno") + 1
+                        cambios.append({'range': gspread.utils.rowcol_to_a1(gsheet_row_index, col_idx), 'values': [[nuevo_turno]]})
+                        df.loc[idx, "Turno"] = nuevo_turno
+
+                if cambios:
+                    if batch_update_gsheet_cells(worksheet, cambios):
+                        st.success(f"✅ Pedido {row['ID_Pedido']} actualizado.")
+                        st.session_state["pedido_editado"] = row['ID_Pedido']
+                        st.session_state["fecha_seleccionada"] = nueva_fecha_str
+                        st.session_state["subtab_local"] = origen_tab
+                        st.cache_data.clear()
+                        st.rerun()
+                    else:
+                        st.error("❌ Falló la actualización en Google Sheets.")
+                else:
+                    st.info("No hubo cambios para aplicar.")
         tiene_modificacion = row.get("Modificacion_Surtido") and pd.notna(row["Modificacion_Surtido"]) and str(row["Modificacion_Surtido"]).strip() != ''
         if tiene_modificacion:
             st.warning(f"⚠ ¡MODIFICACIÓN DE SURTIDO DETECTADA! Pedido #{orden}")
