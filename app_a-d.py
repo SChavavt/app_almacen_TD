@@ -448,68 +448,31 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
             if pd.notna(fecha_actual_dt) and fecha_actual_dt.date() >= today:
                 date_input_value = fecha_actual_dt.date()
 
-            
-            with col_inputs:
-                with st.form(key=f"form_fecha_turno_{row['ID_Pedido']}"):
-                    new_fecha_entrega_dt = st.date_input(
-                        "Nueva fecha de envío:",
-                        value=date_input_value,
-                        key=f"new_date_{row['ID_Pedido']}_{origen_tab}_{key_suffix}",
-                        disabled=(row['Estado'] == "🟢 Completado")
-                    )
+            new_fecha_entrega_dt = col_inputs.date_input(
+                "Nueva fecha de envío:",
+                value=date_input_value,
+                key=f"new_date_{row['ID_Pedido']}_{origen_tab}_{key_suffix}",
+                disabled=(row['Estado'] == "🟢 Completado")
+            )
 
-                    new_turno = current_turno
-                    if row.get("Tipo_Envio") == "📍 Pedido Local" and origen_tab in ["Mañana", "Tarde"]:
-                        turno_options = ["", "☀️ Local Mañana", "🌙 Local Tarde", "🌵 Saltillo", "📦 Pasa a Bodega"]
-                        try:
-                            default_index_turno = turno_options.index(current_turno)
-                        except ValueError:
-                            default_index_turno = 0
-                        new_turno = st.selectbox(
-                            "Clasificar Turno como:",
-                            options=turno_options,
-                            index=default_index_turno,
-                            key=f"new_turno_{row['ID_Pedido']}_{origen_tab}_{key_suffix}",
-                            disabled=(row['Estado'] == "🟢 Completado")
-                        )
+            new_turno = current_turno
 
-                    aplicar_cambios = st.form_submit_button("✅ Aplicar Cambios")
+            if row.get("Tipo_Envio") == "📍 Pedido Local" and origen_tab in ["Mañana", "Tarde"]:
+                turno_options = ["", "☀️ Local Mañana", "🌙 Local Tarde", "🌵 Saltillo", "📦 Pasa a Bodega"]
+                try:
+                    default_index_turno = turno_options.index(current_turno)
+                except ValueError:
+                    default_index_turno = 0
 
-                    if aplicar_cambios:
-                        changes_made = False
-                        updates_to_gsheet = []
+                new_turno = col_inputs.selectbox(
+                    "Clasificar Turno como:",
+                    options=turno_options,
+                    index=default_index_turno,
+                    key=f"new_turno_{row['ID_Pedido']}_{origen_tab}_{key_suffix}",
+                    disabled=(row['Estado'] == "🟢 Completado")
+                )
 
-                        new_fecha_entrega_str = new_fecha_entrega_dt.strftime('%Y-%m-%d')
-                        if new_fecha_entrega_str != fecha_actual_str:
-                            try:
-                                col_idx_fecha = headers.index("Fecha_Entrega") + 1
-                                updates_to_gsheet.append({
-                                    'range': gspread.utils.rowcol_to_a1(gsheet_row_index, col_idx_fecha),
-                                    'values': [[new_fecha_entrega_str]]
-                                })
-                                df.loc[idx, "Fecha_Entrega"] = new_fecha_entrega_str
-                                changes_made = True
-                            except ValueError:
-                                st.error("Error interno: Columna 'Fecha_Entrega' no encontrada.")
-
-                        if row.get("Tipo_Envio") == "📍 Pedido Local" and origen_tab in ["Mañana", "Tarde"] and new_turno != current_turno:
-                            try:
-                                col_idx_turno = headers.index("Turno") + 1
-                                updates_to_gsheet.append({
-                                    'range': gspread.utils.rowcol_to_a1(gsheet_row_index, col_idx_turno),
-                                    'values': [[new_turno]]
-                                })
-                                df.loc[idx, "Turno"] = new_turno
-                                changes_made = True
-                            except ValueError:
-                                st.error("Error interno: Columna 'Turno' no encontrada.")
-
-                        if updates_to_gsheet:
-                            if batch_update_gsheet_cells(worksheet, updates_to_gsheet):
-                                st.toast(f"✅ Pedido {row['ID_Pedido']} actualizado", icon="✅")
-                                st.success("Cambios guardados.")
-                            else:
-                                st.error("Falló la actualización en Google Sheets.")
+            if st.button("✅ Aplicar Cambios de Fecha/Turno", key=f"apply_changes_{row['ID_Pedido']}_{origen_tab}_{key_suffix}", disabled=(row['Estado'] == "🟢 Completado")):
                 changes_made = False
                 updates_to_gsheet = []
 
@@ -542,7 +505,7 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
                     if batch_update_gsheet_cells(worksheet, updates_to_gsheet):
                         st.success(f"✅ Cambios aplicados para el pedido {row['ID_Pedido']}!")
                         st.cache_data.clear() # Forzar recarga de datos para reflejar los cambios de fecha/turno en las pestañas
-                        # st.rerun()  # Eliminado para permitir que se mantenga el cambio sin recargar
+                        st.rerun() # Necesario para que el pedido se mueva a la pestaña correcta
                     else:
                         st.error("Falló la aplicación de cambios de fecha/turno.")
                 elif changes_made: # Esto ocurre si cambios_made es True pero updates_to_gsheet está vacío (ej. error interno)
@@ -592,36 +555,6 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
 
 
         # Imprimir/Ver Adjuntos and change to "En Proceso"
-        
-        if col_print_btn.button("🖨 Imprimir", key=f"print_{row['ID_Pedido']}_{origen_tab}"):
-            st.session_state["expanded_attachments"][row['ID_Pedido']] = not st.session_state["expanded_attachments"].get(row['ID_Pedido'], False)
-
-        if st.session_state["expanded_attachments"].get(row["ID_Pedido"], False):
-            st.markdown(f"##### Adjuntos para ID: {row['ID_Pedido']}")
-            pedido_folder_prefix = find_pedido_subfolder_prefix(s3_client_param, S3_ATTACHMENT_PREFIX, row['ID_Pedido'])
-
-            if pedido_folder_prefix:
-                files_in_folder = get_files_in_s3_prefix(s3_client_param, pedido_folder_prefix)
-                if files_in_folder:
-                    filtered_files_to_display = [
-                        f for f in files_in_folder
-                        if "comprobante" not in f['title'].lower() and "surtido" not in f['title'].lower()
-                    ]
-                    if filtered_files_to_display:
-                        for file_info in filtered_files_to_display:
-                            file_url = get_s3_file_download_url(s3_client_param, file_info['key'])
-                            display_name = file_info['title']
-                            if row['ID_Pedido'] in display_name:
-                                display_name = display_name.replace(row['ID_Pedido'], "").replace("__", "_").replace("_-", "_").replace("-_", "_").strip('_').strip('-')
-                            st.markdown(f"- 📄 **{display_name}** ([🔗 Ver/Descargar]({file_url}))")
-                    else:
-                        st.info("No hay adjuntos para mostrar (excluyendo comprobantes y surtidos).")
-                else:
-                    st.info("No se encontraron archivos en la carpeta del pedido en S3.")
-            else:
-                st.error(f"❌ No se encontró la carpeta (prefijo S3) del pedido '{row['ID_Pedido']}'.")
-
-
         # Botón Completar
         if col_complete_btn.button("🟢 Completar", key=f"complete_button_{row['ID_Pedido']}_{origen_tab}", disabled=disabled_if_completed):
             surtidor_val = st.session_state.get(surtidor_key, "").strip()
