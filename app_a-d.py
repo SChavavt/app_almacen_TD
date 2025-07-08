@@ -439,6 +439,9 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
             else:
                 col_current_info_turno.empty()
 
+            st.write(f"DEBUG (start of func call): fecha_actual_str = '{fecha_actual_str}', current_turno = '{current_turno}'")
+
+
             today = datetime.now().date()
             default_fecha = fecha_actual_dt.date() if pd.notna(fecha_actual_dt) and fecha_actual_dt.date() >= today else today
 
@@ -450,12 +453,6 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
             if turno_key not in st.session_state:
                 st.session_state[turno_key] = current_turno
 
-            def on_fecha_change():
-                st.session_state[fecha_key + "_changed"] = True
-
-            def on_turno_change():
-                st.session_state[turno_key + "_changed"] = True
-
             st.date_input(
                 "Nueva fecha:",
                 value=st.session_state[fecha_key],
@@ -463,7 +460,6 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
                 max_value=today + timedelta(days=365),
                 format="DD/MM/YYYY",
                 key=fecha_key,
-                on_change=on_fecha_change
             )
 
             if row.get("Tipo_Envio") == "📍 Pedido Local" and origen_tab in ["Mañana", "Tarde"]:
@@ -475,24 +471,41 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
                     "Clasificar turno como:",
                     options=turno_options,
                     key=turno_key,
-                    on_change=on_turno_change
                 )
 
+            st.write(f"DEBUG (before button check): st.session_state[{fecha_key}] = '{st.session_state[fecha_key].strftime('%Y-%m-%d')}'")
+            if row.get("Tipo_Envio") == "📍 Pedido Local" and origen_tab in ["Mañana", "Tarde"]:
+                st.write(f"DEBUG (before button check): st.session_state[{turno_key}] = '{st.session_state[turno_key]}'")
+
             if st.button("✅ Aplicar Cambios de Fecha/Turno", key=f"btn_apply_{row['ID_Pedido']}_{key_suffix}"):
+                st.write(f"DEBUG (inside button click): Fecha actual de fila: '{fecha_actual_str}'")
+                st.write(f"DEBUG (inside button click): Turno actual de fila: '{current_turno}'")
+                st.write(f"DEBUG (inside button click): Nueva fecha de session_state: '{st.session_state[fecha_key].strftime('%Y-%m-%d')}'")
+                if row.get("Tipo_Envio") == "📍 Pedido Local" and origen_tab in ["Mañana", "Tarde"]:
+                    st.write(f"DEBUG (inside button click): Nuevo turno de session_state: '{st.session_state[turno_key]}'")
+
                 cambios = []
                 nueva_fecha_str = st.session_state[fecha_key].strftime('%Y-%m-%d')
 
                 if nueva_fecha_str != fecha_actual_str:
+                    st.write("DEBUG: Fecha ha cambiado. Agregando a cambios.")
                     col_idx = headers.index("Fecha_Entrega") + 1
                     cambios.append({'range': gspread.utils.rowcol_to_a1(gsheet_row_index, col_idx), 'values': [[nueva_fecha_str]]})
                     df.loc[idx, "Fecha_Entrega"] = nueva_fecha_str
+                else:
+                    st.write("DEBUG: Fecha no ha cambiado.")
 
                 if row.get("Tipo_Envio") == "📍 Pedido Local" and origen_tab in ["Mañana", "Tarde"]:
                     nuevo_turno = st.session_state[turno_key]
                     if nuevo_turno != current_turno:
+                        st.write("DEBUG: Turno ha cambiado. Agregando a cambios.")
                         col_idx = headers.index("Turno") + 1
                         cambios.append({'range': gspread.utils.rowcol_to_a1(gsheet_row_index, col_idx), 'values': [[nuevo_turno]]})
                         df.loc[idx, "Turno"] = nuevo_turno
+                    else:
+                        st.write("DEBUG: Turno no ha cambiado.")
+
+                st.write(f"DEBUG: Cambios a aplicar: {cambios}")
 
                 if cambios:
                     if batch_update_gsheet_cells(worksheet, cambios):
@@ -762,7 +775,7 @@ if not df_main.empty:
                     date_tabs_m = st.tabs(date_tab_labels)
                     
                     for i, fecha_dt in enumerate(fechas_unicas_dt):
-                        date_label = f"📅 {fecha_dt.strftime('%d/%m/%Y')}"
+                        date_label = f"📅 {pd.to_datetime(fecha_dt).strftime('%d/%m/%Y')}"
                         with date_tabs_m[i]:
                             pedidos_fecha = pedidos_m_display[pedidos_m_display["Fecha_Entrega_dt"] == fecha_dt].copy()
                             pedidos_fecha = ordenar_pedidos_custom(pedidos_fecha)
