@@ -442,7 +442,6 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
             today = datetime.now().date()
             default_fecha = fecha_actual_dt.date() if pd.notna(fecha_actual_dt) and fecha_actual_dt.date() >= today else today
 
-            # 💡 Usamos session_state para preservar la selección tras recarga
             fecha_key = f"new_fecha_{row['ID_Pedido']}"
             turno_key = f"new_turno_{row['ID_Pedido']}"
 
@@ -451,27 +450,32 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
             if turno_key not in st.session_state:
                 st.session_state[turno_key] = current_turno
 
-            st.session_state[fecha_key] = col_inputs.date_input(
+            def on_fecha_change():
+                st.session_state[fecha_key + "_changed"] = True
+
+            def on_turno_change():
+                st.session_state[turno_key + "_changed"] = True
+
+            st.date_input(
                 "Nueva fecha:",
                 value=st.session_state[fecha_key],
                 min_value=today,
                 max_value=today + timedelta(days=365),
                 format="DD/MM/YYYY",
-                key=fecha_key
+                key=fecha_key,
+                on_change=on_fecha_change
             )
 
             if row.get("Tipo_Envio") == "📍 Pedido Local" and origen_tab in ["Mañana", "Tarde"]:
                 turno_options = ["", "☀️ Local Mañana", "🌙 Local Tarde", "🌵 Saltillo", "📦 Pasa a Bodega"]
-                try:
-                    default_index = turno_options.index(st.session_state[turno_key])
-                except ValueError:
-                    default_index = 0
+                if st.session_state[turno_key] not in turno_options:
+                    st.session_state[turno_key] = turno_options[0]
 
-                st.session_state[turno_key] = col_inputs.selectbox(
+                st.selectbox(
                     "Clasificar turno como:",
                     options=turno_options,
-                    index=default_index,
-                    key=turno_key
+                    key=turno_key,
+                    on_change=on_turno_change
                 )
 
             if st.button("✅ Aplicar Cambios de Fecha/Turno", key=f"btn_apply_{row['ID_Pedido']}_{key_suffix}"):
