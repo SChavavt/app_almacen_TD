@@ -409,9 +409,6 @@ def check_and_update_demorados(df_to_check, worksheet, headers):
     return df_to_check, False # No hubo actualizaciones
 
 def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, worksheet, headers, s3_client_param):
-    # from uuid import uuid4 # REMOVED: No longer needed for button key
-    # key_suffix = str(uuid4()).replace("-", "")[:8] # REMOVED: No longer needed for button key
-
     gsheet_row_index = row.get('_gsheet_row_index')
     if gsheet_row_index is None:
         st.error(f"❌ Error interno: No se pudo obtener el índice de fila de Google Sheets para el pedido '{row['ID_Pedido']}'.")
@@ -439,8 +436,6 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
             else:
                 col_current_info_turno.empty()
 
-            st.write(f"DEBUG (start of func call): fecha_actual_str = '{fecha_actual_str}', current_turno = '{current_turno}'")
-
 
             today = datetime.now().date()
             default_fecha = fecha_actual_dt.date() if pd.notna(fecha_actual_dt) and fecha_actual_dt.date() >= today else today
@@ -463,7 +458,8 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
             )
 
             if row.get("Tipo_Envio") == "📍 Pedido Local" and origen_tab in ["Mañana", "Tarde"]:
-                turno_options = ["", "☀️ Local Mañana", "🌙 Local Tarde", "🌵 Saltillo", "📦 Pasa a Bodega"]
+                # MODIFIED: Only these two options for local turns
+                turno_options = ["", "☀️ Local Mañana", "🌙 Local Tarde"]
                 if st.session_state[turno_key] not in turno_options:
                     st.session_state[turno_key] = turno_options[0]
 
@@ -473,41 +469,22 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
                     key=turno_key,
                 )
 
-            st.write(f"DEBUG (before button check): st.session_state[{fecha_key}] = '{st.session_state[fecha_key].strftime('%Y-%m-%d')}'")
-            if row.get("Tipo_Envio") == "📍 Pedido Local" and origen_tab in ["Mañana", "Tarde"]:
-                st.write(f"DEBUG (before button check): st.session_state[{turno_key}] = '{st.session_state[turno_key]}'")
-
-            # MODIFIED: Simplified button key and added simple debug print
             if st.button("✅ Aplicar Cambios de Fecha/Turno", key=f"btn_apply_{row['ID_Pedido']}"):
-                st.write("BUTTON CLICKED! Executing update logic...") # NEW DEBUG LINE
-                st.write(f"DEBUG (inside button click): Fecha actual de fila: '{fecha_actual_str}'")
-                st.write(f"DEBUG (inside button click): Turno actual de fila: '{current_turno}'")
-                st.write(f"DEBUG (inside button click): Nueva fecha de session_state: '{st.session_state[fecha_key].strftime('%Y-%m-%d')}'")
-                if row.get("Tipo_Envio") == "📍 Pedido Local" and origen_tab in ["Mañana", "Tarde"]:
-                    st.write(f"DEBUG (inside button click): Nuevo turno de session_state: '{st.session_state[turno_key]}'")
-
+                # Removed all debug prints from here
                 cambios = []
                 nueva_fecha_str = st.session_state[fecha_key].strftime('%Y-%m-%d')
 
                 if nueva_fecha_str != fecha_actual_str:
-                    st.write("DEBUG: Fecha ha cambiado. Agregando a cambios.")
                     col_idx = headers.index("Fecha_Entrega") + 1
                     cambios.append({'range': gspread.utils.rowcol_to_a1(gsheet_row_index, col_idx), 'values': [[nueva_fecha_str]]})
                     df.loc[idx, "Fecha_Entrega"] = nueva_fecha_str
-                else:
-                    st.write("DEBUG: Fecha no ha cambiado.")
 
                 if row.get("Tipo_Envio") == "📍 Pedido Local" and origen_tab in ["Mañana", "Tarde"]:
                     nuevo_turno = st.session_state[turno_key]
                     if nuevo_turno != current_turno:
-                        st.write("DEBUG: Turno ha cambiado. Agregando a cambios.")
                         col_idx = headers.index("Turno") + 1
                         cambios.append({'range': gspread.utils.rowcol_to_a1(gsheet_row_index, col_idx), 'values': [[nuevo_turno]]})
                         df.loc[idx, "Turno"] = nuevo_turno
-                    else:
-                        st.write("DEBUG: Turno no ha cambiado.")
-
-                st.write(f"DEBUG: Cambios a aplicar: {cambios}")
 
                 if cambios:
                     if batch_update_gsheet_cells(worksheet, cambios):
