@@ -555,10 +555,10 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
 
 
         # Imprimir/Ver Adjuntos and change to "En Proceso"
-                # Botón Completar
+        # Botón Completar
         if col_complete_btn.button("🟢 Completar", key=f"complete_button_{row['ID_Pedido']}_{origen_tab}", disabled=disabled_if_completed):
-            surtidor_val = df.loc[idx, "Surtidor"]
-            if not surtidor_val or str(surtidor_val).strip() == "":
+            surtidor_val = st.session_state.get(surtidor_key, "").strip()
+            if not surtidor_val:
                 st.warning("⚠️ Debes ingresar el nombre del surtidor antes de completar el pedido.")
             else:
                 try:
@@ -580,11 +580,12 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
                         df.loc[idx, "Fecha_Completado"] = datetime.now()
                         st.success(f"✅ Pedido {row['ID_Pedido']} completado exitosamente.")
                         st.cache_data.clear()
-                        st.experimental_rerun()
+                        st.rerun()
                     else:
                         st.error("❌ No se pudo completar el pedido.")
                 except Exception as e:
                     st.error(f"Error al completar el pedido: {e}")
+
 
             st.session_state["expanded_attachments"][row['ID_Pedido']] = not st.session_state["expanded_attachments"].get(row['ID_Pedido'], False)
 
