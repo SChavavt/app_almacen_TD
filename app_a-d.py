@@ -505,7 +505,7 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
                     if batch_update_gsheet_cells(worksheet, updates_to_gsheet):
                         st.success(f"✅ Cambios aplicados para el pedido {row['ID_Pedido']}!")
                         st.cache_data.clear() # Forzar recarga de datos para reflejar los cambios de fecha/turno en las pestañas
-                        st.rerun() # Necesario para que el pedido se mueva a la pestaña correcta
+                        # st.rerun()  # Eliminado para permitir que se mantenga el cambio sin recargar
                     else:
                         st.error("Falló la aplicación de cambios de fecha/turno.")
                 elif changes_made: # Esto ocurre si cambios_made es True pero updates_to_gsheet está vacío (ej. error interno)
