@@ -448,31 +448,68 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
             if pd.notna(fecha_actual_dt) and fecha_actual_dt.date() >= today:
                 date_input_value = fecha_actual_dt.date()
 
-            new_fecha_entrega_dt = col_inputs.date_input(
-                "Nueva fecha de envío:",
-                value=date_input_value,
-                key=f"new_date_{row['ID_Pedido']}_{origen_tab}_{key_suffix}",
-                disabled=(row['Estado'] == "🟢 Completado")
-            )
+            
+            with col_inputs:
+                with st.form(key=f"form_fecha_turno_{row['ID_Pedido']}"):
+                    new_fecha_entrega_dt = st.date_input(
+                        "Nueva fecha de envío:",
+                        value=date_input_value,
+                        key=f"new_date_{row['ID_Pedido']}_{origen_tab}_{key_suffix}",
+                        disabled=(row['Estado'] == "🟢 Completado")
+                    )
 
-            new_turno = current_turno
+                    new_turno = current_turno
+                    if row.get("Tipo_Envio") == "📍 Pedido Local" and origen_tab in ["Mañana", "Tarde"]:
+                        turno_options = ["", "☀️ Local Mañana", "🌙 Local Tarde", "🌵 Saltillo", "📦 Pasa a Bodega"]
+                        try:
+                            default_index_turno = turno_options.index(current_turno)
+                        except ValueError:
+                            default_index_turno = 0
+                        new_turno = st.selectbox(
+                            "Clasificar Turno como:",
+                            options=turno_options,
+                            index=default_index_turno,
+                            key=f"new_turno_{row['ID_Pedido']}_{origen_tab}_{key_suffix}",
+                            disabled=(row['Estado'] == "🟢 Completado")
+                        )
 
-            if row.get("Tipo_Envio") == "📍 Pedido Local" and origen_tab in ["Mañana", "Tarde"]:
-                turno_options = ["", "☀️ Local Mañana", "🌙 Local Tarde", "🌵 Saltillo", "📦 Pasa a Bodega"]
-                try:
-                    default_index_turno = turno_options.index(current_turno)
-                except ValueError:
-                    default_index_turno = 0
+                    aplicar_cambios = st.form_submit_button("✅ Aplicar Cambios")
 
-                new_turno = col_inputs.selectbox(
-                    "Clasificar Turno como:",
-                    options=turno_options,
-                    index=default_index_turno,
-                    key=f"new_turno_{row['ID_Pedido']}_{origen_tab}_{key_suffix}",
-                    disabled=(row['Estado'] == "🟢 Completado")
-                )
+                    if aplicar_cambios:
+                        changes_made = False
+                        updates_to_gsheet = []
 
-            if st.button("✅ Aplicar Cambios de Fecha/Turno", key=f"apply_changes_{row['ID_Pedido']}_{origen_tab}_{key_suffix}", disabled=(row['Estado'] == "🟢 Completado")):
+                        new_fecha_entrega_str = new_fecha_entrega_dt.strftime('%Y-%m-%d')
+                        if new_fecha_entrega_str != fecha_actual_str:
+                            try:
+                                col_idx_fecha = headers.index("Fecha_Entrega") + 1
+                                updates_to_gsheet.append({
+                                    'range': gspread.utils.rowcol_to_a1(gsheet_row_index, col_idx_fecha),
+                                    'values': [[new_fecha_entrega_str]]
+                                })
+                                df.loc[idx, "Fecha_Entrega"] = new_fecha_entrega_str
+                                changes_made = True
+                            except ValueError:
+                                st.error("Error interno: Columna 'Fecha_Entrega' no encontrada.")
+
+                        if row.get("Tipo_Envio") == "📍 Pedido Local" and origen_tab in ["Mañana", "Tarde"] and new_turno != current_turno:
+                            try:
+                                col_idx_turno = headers.index("Turno") + 1
+                                updates_to_gsheet.append({
+                                    'range': gspread.utils.rowcol_to_a1(gsheet_row_index, col_idx_turno),
+                                    'values': [[new_turno]]
+                                })
+                                df.loc[idx, "Turno"] = new_turno
+                                changes_made = True
+                            except ValueError:
+                                st.error("Error interno: Columna 'Turno' no encontrada.")
+
+                        if updates_to_gsheet:
+                            if batch_update_gsheet_cells(worksheet, updates_to_gsheet):
+                                st.toast(f"✅ Pedido {row['ID_Pedido']} actualizado", icon="✅")
+                                st.success("Cambios guardados.")
+                            else:
+                                st.error("Falló la actualización en Google Sheets.")
                 changes_made = False
                 updates_to_gsheet = []
 
