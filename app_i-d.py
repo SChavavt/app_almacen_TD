@@ -273,12 +273,21 @@ def display_dataframe_with_formatting(df_to_display):
 # Cargar todos los datos
 df_all_data = load_data_from_gsheets(GOOGLE_SHEET_ID, GOOGLE_SHEET_WORKSHEET_NAME)
 
-# Convertir 'Hora_Registro' y 'Fecha_Entrega' a datetime
+# Convertir 'ID_Pedido' y columnas de fecha/hora
+if 'ID_Pedido' in df_all_data.columns:
+    df_all_data['ID_Pedido'] = df_all_data['ID_Pedido'].astype(str)
 if 'Hora_Registro' in df_all_data.columns:
     df_all_data['Hora_Registro'] = pd.to_datetime(df_all_data['Hora_Registro'], errors='coerce')
 if 'Fecha_Entrega' in df_all_data.columns:
     df_all_data['Fecha_Entrega'] = pd.to_datetime(df_all_data['Fecha_Entrega'], errors='coerce')
+if 'Fecha_Completado' in df_all_data.columns:
+    df_all_data['Fecha_Completado'] = pd.to_datetime(df_all_data['Fecha_Completado'], errors='coerce')
 
+# Procesar adjuntos para crear enlaces
+if 'Adjuntos' in df_all_data.columns:
+    df_all_data['Adjuntos_Enlaces'] = df_all_data['Adjuntos'].apply(
+        lambda x: display_attachments(x, s3_client)
+    )
 
 # --- Visualización de Datos ---
 st.header("Todos los Pedidos por Tipo de Envío y Turno")
@@ -286,80 +295,89 @@ st.header("Todos los Pedidos por Tipo de Envío y Turno")
 if not df_all_data.empty:
     st.info(f"Mostrando todos los {len(df_all_data)} pedidos.")
 
-    # Convertir 'ID_Pedido' a string
-    if 'ID_Pedido' in df_all_data.columns:
-        df_all_data['ID_Pedido'] = df_all_data['ID_Pedido'].astype(str)
+    # --- Definir las categorías para el diseño de columnas 2x2 ---
+    # Estas son las categorías que el usuario quiere ver en columnas específicas, según la imagen.
+    # 'Local Mañana' y 'Local Tarde' son Turnos bajo Tipo_Envio='Local'.
+    # 'Foráneos' y 'Pasa a Bodega' se asumen como Tipo_Envio directamente.
+    
+    display_categories_2x2 = [
+        {"header": "☀️ Local Mañana", "filter_func": lambda df: (df['Tipo_Envio'] == 'Local') & (df['Turno'] == '☀️ Local Mañana')},
+        {"header": "🌙 Local Tarde", "filter_func": lambda df: (df['Tipo_Envio'] == 'Local') & (df['Turno'] == '🌙 Local Tarde')},
+        {"header": "Foráneos", "filter_func": lambda df: df['Tipo_Envio'] == 'Foráneos'},
+        {"header": "📦 Pasa a Bodega", "filter_func": lambda df: df['Tipo_Envio'] == 'Pasa a Bodega'}
+    ]
 
-    # Procesar adjuntos para crear enlaces
-    if 'Adjuntos' in df_all_data.columns:
-        df_all_data['Adjuntos_Enlaces'] = df_all_data['Adjuntos'].apply(
-            lambda x: display_attachments(x, s3_client)
-        )
+    # Crear las filas y columnas para la cuadrícula 2x2
+    num_categories = len(display_categories_2x2)
+    num_rows = (num_categories + 1) // 2 # Calcula el número de filas necesarias (ej. 4 categorías -> 2 filas)
+    
+    # Mantener un registro de los Tipo_Envio que ya han sido cubiertos en la cuadrícula 2x2.
+    # Esto asegura que no se vuelvan a mostrar en la sección de "categorías restantes".
+    handled_tipo_envios_in_2x2 = set()
+    handled_tipo_envios_in_2x2.add('Local') # 'Local' es manejado por sus turnos
+    handled_tipo_envios_in_2x2.add('Foráneos')
+    handled_tipo_envios_in_2x2.add('Pasa a Bodega')
 
-    # Convertir a datetime antes de formatear para todas las columnas de tiempo
-    if 'Hora_Registro' in df_all_data.columns:
-        df_all_data['Hora_Registro'] = pd.to_datetime(df_all_data['Hora_Registro'], errors='coerce')
-    if 'Fecha_Completado' in df_all_data.columns:
-        df_all_data['Fecha_Completado'] = pd.to_datetime(df_all_data['Fecha_Completado'], errors='coerce')
-
-    # Obtener tipos de envío únicos y ordenarlos para una visualización consistente
-    unique_tipos_envio = sorted(df_all_data['Tipo_Envio'].dropna().unique().tolist())
-
-    if not unique_tipos_envio:
-        st.warning("No se encontraron tipos de envío definidos en los pedidos.")
-    else:
-        for tipo_envio in unique_tipos_envio:
-            if tipo_envio == 'Local':
-                st.subheader(f"🚚 Pedidos: {tipo_envio}") # General header for all local
-                
-                # Define the specific turnos and map them to columns
-                # Asegúrate de que estos nombres de turno coincidan exactamente con tus datos en Google Sheets
-                local_turnos_order = ['☀️ Local Mañana', '🌙 Local Tarde', '🌵 Saltillo', '📦 Pasa a Bodega']
-                
-                # Crear columnas para cada turno específico
-                # Se crean 4 columnas ya que son 4 tipos de turnos específicos
-                cols = st.columns(len(local_turnos_order))
-                
-                for i, turno_name in enumerate(local_turnos_order):
-                    with cols[i]:
-                        st.markdown(f"**{turno_name}**") # Un encabezado más pequeño dentro de la columna
-                        df_current_turno = df_all_data[
-                            (df_all_data['Tipo_Envio'] == 'Local') & 
-                            (df_all_data['Turno'] == turno_name)
-                        ].copy()
-
-                        if not df_current_turno.empty:
-                            if 'Hora_Registro' in df_current_turno.columns:
-                                df_current_turno = df_current_turno.sort_values(by='Hora_Registro', ascending=False).reset_index(drop=True)
-                            display_dataframe_with_formatting(df_current_turno)
-                        else:
-                            st.info("No hay pedidos.")
-                
-                # Manejar pedidos 'Local' con turnos faltantes o no listados explícitamente
-                # Filtra todos los turnos que son 'Local' pero que NO están en `local_turnos_order`
-                other_local_turnos_df = df_all_data[
-                    (df_all_data['Tipo_Envio'] == 'Local') &
-                    (~df_all_data['Turno'].isin(local_turnos_order) | df_all_data['Turno'].isna())
-                ].copy()
-                
-                if not other_local_turnos_df.empty:
-                    st.markdown("---") # Separador visual
-                    st.subheader(f"🚚 Pedidos: {tipo_envio} - Otros Turnos/Sin Turno Definido")
-                    if 'Hora_Registro' in other_local_turnos_df.columns:
-                        other_local_turnos_df = other_local_turnos_df.sort_values(by='Hora_Registro', ascending=False).reset_index(drop=True)
-                    display_dataframe_with_formatting(other_local_turnos_df)
-                # else: No es necesario un st.info aquí, ya que si está vacío, no se mostrará nada.
-
+    # Iterar a través de las categorías y mostrarlas en la cuadrícula
+    for i in range(num_rows):
+        cols = st.columns(2) # Crea dos columnas por cada fila
+        for j in range(2):
+            category_idx = i * 2 + j
+            if category_idx < num_categories:
+                category = display_categories_2x2[category_idx]
+                with cols[j]:
+                    st.markdown(f"**{category['header']}**") # Título de la columna
+                    df_filtered = df_all_data[category["filter_func"](df_all_data)].copy()
+                    
+                    if not df_filtered.empty:
+                        if 'Hora_Registro' in df_filtered.columns:
+                            df_filtered = df_filtered.sort_values(by='Hora_Registro', ascending=False).reset_index(drop=True)
+                        display_dataframe_with_formatting(df_filtered)
+                    else:
+                        st.info("No hay pedidos.")
             else:
-                # Para otros tipos de envío (ej. Foráneos), mostrar directamente en secciones verticales
-                st.subheader(f"🚚 Pedidos: {tipo_envio}")
-                df_tipo_envio_group = df_all_data[df_all_data['Tipo_Envio'] == tipo_envio].copy()
-                if not df_tipo_envio_group.empty:
-                    if 'Hora_Registro' in df_tipo_envio_group.columns:
-                        df_tipo_envio_group = df_tipo_envio_group.sort_values(by='Hora_Registro', ascending=False).reset_index(drop=True)
-                    display_dataframe_with_formatting(df_tipo_envio_group)
-                else:
-                    st.info(f"No hay pedidos para el tipo de envío '{tipo_envio}'.")
+                # Rellenar columnas vacías si el número de categorías es impar
+                with cols[j]:
+                    pass # Columna vacía
+
+    # --- Manejar las categorías restantes (Tipo_Envio no cubiertas en la cuadrícula 2x2) ---
+    st.markdown("---") # Separador visual
+
+    unique_tipos_envio_all = sorted(df_all_data['Tipo_Envio'].dropna().unique().tolist())
+
+    for tipo_envio in unique_tipos_envio_all:
+        # Si este Tipo_Envio ya fue manejado en la cuadrícula 2x2, lo saltamos.
+        if tipo_envio in handled_tipo_envios_in_2x2:
+            continue
+        
+        # Manejo especial para pedidos 'Local' con valores de 'Turno' no listados o NaN.
+        # Esta sección capturaría, por ejemplo, "Local" sin un turno específico (Local Mañana/Tarde/Saltillo/Pasa a Bodega)
+        # o con un turno diferente que no está en la cuadrícula 2x2.
+        if tipo_envio == 'Local': # Aunque 'Local' ya se marcó como manejado, esta es una seguridad extra
+            st.subheader(f"🚚 Pedidos: {tipo_envio} (Otros Turnos/Sin Turno Definido)")
+            # Filtramos todos los pedidos 'Local' cuyo 'Turno' NO esté en los turnos específicos de la cuadrícula
+            # o cuyo 'Turno' sea NaN.
+            specific_local_turnos = ['☀️ Local Mañana', '🌙 Local Tarde', '🌵 Saltillo', '📦 Pasa a Bodega']
+            df_other_local_turnos = df_all_data[
+                (df_all_data['Tipo_Envio'] == 'Local') &
+                (~df_all_data['Turno'].isin(specific_local_turnos) | df_all_data['Turno'].isna())
+            ].copy()
+            
+            if not df_other_local_turnos.empty:
+                if 'Hora_Registro' in df_other_local_turnos.columns:
+                    df_other_local_turnos = df_other_local_turnos.sort_values(by='Hora_Registro', ascending=False).reset_index(drop=True)
+                display_dataframe_with_formatting(df_other_local_turnos)
+            else:
+                st.info(f"No hay pedidos de '{tipo_envio}' con otros turnos o sin turno definido.")
+        else: # Para otros valores de Tipo_Envio que no están en la cuadrícula 2x2 (ej. 'Saltillo' si es un Tipo_Envio directo)
+            st.subheader(f"🚚 Pedidos: {tipo_envio}")
+            df_tipo_envio_group = df_all_data[df_all_data['Tipo_Envio'] == tipo_envio].copy()
+            if not df_tipo_envio_group.empty:
+                if 'Hora_Registro' in df_tipo_envio_group.columns:
+                    df_tipo_envio_group = df_tipo_envio_group.sort_values(by='Hora_Registro', ascending=False).reset_index(drop=True)
+                display_dataframe_with_formatting(df_tipo_envio_group)
+            else:
+                st.info(f"No hay pedidos para el tipo de envío '{tipo_envio}'.")
 else:
     st.info("No hay pedidos para mostrar en la hoja de cálculo.")
 
