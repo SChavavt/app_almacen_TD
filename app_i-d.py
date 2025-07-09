@@ -89,7 +89,11 @@ def mostrar_resumen_estados(df):
 
 # --- MAIN ---
 df = cargar_datos()
-df_pedidos = df[df["Tipo"] == "📦 Pedido"].copy()
+if "Tipo" in df.columns:
+    df_pedidos = df[df["Tipo"] == "📦 Pedido"].copy()
+else:
+    st.warning("La columna 'Tipo' no existe en los datos. Se mostrarán todos los registros.")
+    df_pedidos = df.copy()
 
 if not df_pedidos.empty:
     df_completados_hoy = df_pedidos[
