@@ -39,17 +39,8 @@ st.markdown(
 )
 
 # --- Google Sheets Constants ---
-# VERIFICA Y REEMPLAZA ESTOS VALORES CON LOS REALES DE TU HOJA DE CÁLCULO.
-# 1. GOOGLE_SHEET_ID: Se encuentra en la URL de tu hoja de cálculo.
-#    Ejemplo: Si tu URL es https://docs.google.com/spreadsheets/d/12345ABCDE_YOUR_ID_HERE_FGHIJKL/edit#gid=0
-#    Entonces el ID es '12345ABCDE_YOUR_ID_HERE_FGHIJKL'
-# 2. GOOGLE_SHEET_WORKSHEET_NAME: Es el nombre EXACTO de la pestaña (hoja) dentro de tu documento de Google Sheets.
-#    Ejemplo: Si la pestaña se llama "DatosPedidos", usa 'DatosPedidos'. ¡Respeta mayúsculas y minúsculas!
-# 3. PERMISOS: Asegúrate de haber COMPARTIDO tu Google Sheet con la dirección de correo electrónico
-#    de la "client_email" que se encuentra dentro de tus credenciales de servicio.
-#    Dale al menos permiso de "Lector" o "Editor".
-GOOGLE_SHEET_ID = '1aWkSelodaz0nWfQx7FZAysGnIYGQFJxAN7RO3YgCiZY' # <--- ¡VERIFICA Y REEMPLAZA SI ES NECESARIO!
-GOOGLE_SHEET_WORKSHEET_NAME = 'datos_pedidos' # <--- ¡VERIFICA Y REEMPLAZA SI ES NECESARIO!
+GOOGLE_SHEET_ID = '1aWkSelodaz0nWfQx7FZAysGnIYGQFJxAN7RO3YgCiZY'
+GOOGLE_SHEET_WORKSHEET_NAME = 'datos_pedidos'
 
 @st.cache_resource
 def get_gspread_client(_credentials_json_dict):
@@ -61,8 +52,6 @@ def get_gspread_client(_credentials_json_dict):
         scope = ['https://spreadsheets.google.com/feeds', 'https://www.googleapis.com/auth/drive']
         creds_dict = dict(_credentials_json_dict)
 
-        # Asegúrate de que private_key tenga los saltos de línea correctos y sin espacios en blanco alrededor.
-        # Esto es CRÍTICO para evitar el error 'Incorrect padding'.
         if "private_key" in creds_dict and isinstance(creds_dict["private_key"], str):
             creds_dict["private_key"] = creds_dict["private_key"].replace("\\n", "\n").strip()
 
@@ -110,20 +99,17 @@ def get_s3_client():
 
 # Inicializar clientes globalmente
 try:
-    # Obtener credenciales de Google Sheets de st.secrets
     if "gsheets" not in st.secrets:
         st.error("❌ Las credenciales de Google Sheets no se encontraron en Streamlit secrets. Asegúrate de que tu archivo .streamlit/secrets.toml esté configurado correctamente con la sección [gsheets].")
         st.info("Falta la clave: 'st.secrets has no key \"gsheets\". Did you forget to add it to secrets.toml, mount it to secret directory, or the app settings on Streamlit Cloud? More info: https://docs.streamlit.io/deploy/streamlit-community-cloud/deploy-your-app/secrets-management'")
         st.stop()
 
     GSHEETS_CREDENTIALS = json.loads(st.secrets["gsheets"]["google_credentials"])
-    # Asegurarse de que la clave privada tenga los saltos de línea correctos
     GSHEETS_CREDENTIALS["private_key"] = GSHEETS_CREDENTIALS["private_key"].replace("\\n", "\n")
 
     g_spread_client = get_gspread_client(_credentials_json_dict=GSHEETS_CREDENTIALS)
     s3_client = get_s3_client()
 
-    # Abrir la hoja de cálculo por ID y nombre de pestaña
     try:
         spreadsheet = g_spread_client.open_by_key(GOOGLE_SHEET_ID)
         worksheet_main = spreadsheet.worksheet(GOOGLE_SHEET_WORKSHEET_NAME)
@@ -139,7 +125,6 @@ except Exception as e:
     st.info("ℹ️ Asegúrate de que las APIs de Google Sheets y Drive estén habilitadas para tu proyecto de Google Cloud. También, revisa tus credenciales de AWS S3 y Google Sheets en `.streamlit/secrets.toml` o en la interfaz de Streamlit Cloud.")
     st.stop()
 
-# Eliminamos @st.cache_resource para que siempre cargue lo último
 def load_data_from_gsheets(sheet_id, worksheet_name):
     """
     Carga todos los datos de una hoja de cálculo de Google Sheets en un DataFrame de Pandas
@@ -156,11 +141,9 @@ def load_data_from_gsheets(sheet_id, worksheet_name):
         headers = data[0]
         df = pd.DataFrame(data[1:], columns=headers)
 
-        # Añadir el índice de fila de gsheets
-        df['gsheet_row_index'] = df.index + 2 # +2 porque los headers están en la fila 1 y el índice de pandas es 0-based
+        df['gsheet_row_index'] = df.index + 2
 
-        # Convertir columnas a tipos apropiados
-        numerical_cols = ['ID_Pedido'] # Añade aquí más columnas numéricas si es necesario
+        numerical_cols = ['ID_Pedido']
         for col in numerical_cols:
             if col in df.columns:
                 df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0).astype(int)
@@ -185,7 +168,6 @@ def get_s3_file_url(s3_object_key):
     if not s3_object_key:
         return None
     try:
-        # La URL pre-firmada expirará en 1 hora (3600 segundos)
         url = s3_client.generate_presigned_url(
             'get_object',
             Params={'Bucket': S3_BUCKET_NAME, 'Key': s3_object_key},
@@ -196,22 +178,16 @@ def get_s3_file_url(s3_object_key):
         st.error(f"❌ Error al generar URL pre-firmada para {s3_object_key}: {e}")
         return None
 
-# Función para cargar adjuntos
 def display_attachments(adjuntos_str, s3_client_instance):
     if pd.isna(adjuntos_str) or not adjuntos_str.strip():
         return "N/A"
     try:
-        # Asumiendo que los adjuntos están separados por coma y espacio, como "file1.pdf, file2.jpg"
         file_keys = [fk.strip() for fk in adjuntos_str.split(',') if fk.strip()]
         links = []
         for fk in file_keys:
-            # Asegurarse de que el key sea completo si está usando subcarpetas por ID de pedido
-            # Por ejemplo, si los adjuntos están en 'adjuntos/ID_PEDIDO/nombre_archivo.ext'
-            # y adjuntos_str solo contiene 'nombre_archivo.ext', se necesitaría reconstruir el key completo.
-            # Por simplicidad, asumiremos que adjuntos_str ya contiene el key completo de S3.
             url = get_s3_file_url(fk)
             if url:
-                file_name = fk.split('/')[-1] # Obtener solo el nombre del archivo
+                file_name = fk.split('/')[-1]
                 links.append(f"[{file_name}]({url})")
             else:
                 links.append(f"❌ {fk} (Error URL)")
@@ -219,51 +195,38 @@ def display_attachments(adjuntos_str, s3_client_instance):
     except Exception as e:
         return f"Error al procesar adjuntos: {e}"
 
-# Helper function to encapsulate dataframe display logic
+# Helper function to encapsulate dataframe display logic, mimicking app_almacen.py's column display
 def display_dataframe_with_formatting(df_to_display):
-    display_cols_mapping = {
-        'ID_Pedido': 'ID_Pedido',
-        'Cliente': 'Cliente',
-        'Estado': 'Estado',
-        'Vendedor_Registro': 'Vendedor',
-        'Tipo_Envio': 'Envío',
-        'Fecha_Entrega': 'Entrega',
-        'Hora_Registro': 'Registro',
-        'Notas': 'Notas',
-        'Adjuntos_Enlaces': 'Adjuntos',
-        'Turno': 'Turno' # Incluir Turno en el mapeo
+    # Columnas a mostrar, reflejando app_almacen.py: Cliente, Hora, Estado, Surtidor
+    # Usamos los nombres originales de las columnas del DF cargado y luego renombramos para la visualización
+    columnas_originales_a_mostrar = ["Cliente", "Hora_Registro", "Estado", "Vendedor_Registro"]
+    
+    # Asegurarse de que todas las columnas existan antes de seleccionarlas
+    existing_columns = [col for col in columnas_originales_a_mostrar if col in df_to_display.columns]
+    
+    if not existing_columns:
+        st.info("No hay columnas relevantes para mostrar en este subgrupo.")
+        return
+
+    df_display_final = df_to_display[existing_columns].copy()
+
+    # Renombrar columnas para la visualización, como en app_almacen.py
+    rename_map = {
+        "Hora_Registro": "Fecha",
+        "Vendedor_Registro": "Surtidor"
     }
+    df_display_final = df_display_final.rename(columns={k: v for k, v in rename_map.items() if k in df_display_final.columns})
 
-    # Añadir 'Fecha_Completado' si existe en el DataFrame específico
-    if 'Fecha_Completado' in df_to_display.columns:
-        display_cols_mapping['Fecha_Completado'] = 'Completado'
-
-    # Filtrar las columnas que no existen en el DataFrame actual antes de renombrar
-    cols_to_use = {original: new for original, new in display_cols_mapping.items() if original in df_to_display.columns}
-    df_display_final = df_to_display[list(cols_to_use.keys())].rename(columns=cols_to_use)
-
-    # Formatear la columna de registro a solo hora si es del día actual, sino fecha y hora
-    if 'Registro' in df_display_final.columns:
-        df_display_final['Registro'] = df_display_final['Registro'].apply(
+    # Formatear la columna de 'Fecha' (originalmente 'Hora_Registro')
+    if 'Fecha' in df_display_final.columns:
+        df_display_final['Fecha'] = df_display_final['Fecha'].apply(
             lambda x: x.strftime("%H:%M") if pd.notna(x) and x.date() == date.today() else x.strftime("%d/%m %H:%M") if pd.notna(x) else ""
         )
-    # Formatear la columna de completado a solo fecha
-    if 'Completado' in df_display_final.columns:
-        df_display_final['Completado'] = df_display_final['Completado'].apply(
-            lambda x: x.strftime("%d/%m/%Y") if pd.notna(x) else ""
-        )
-
+    
     st.dataframe(
         df_display_final,
         use_container_width=True,
-        column_config={
-            "Adjuntos": st.column_config.Column(
-                "Adjuntos",
-                help="Enlaces a los archivos adjuntos en S3",
-                width="large"
-            ),
-            **{col: st.column_config.Column(width="small") for col in df_display_final.columns if col != "Adjuntos"}
-        },
+        column_config={col: st.column_config.Column(width="small") for col in df_display_final.columns},
         hide_index=True
     )
 
@@ -295,106 +258,83 @@ st.header("Todos los Pedidos por Tipo de Envío y Turno")
 if not df_all_data.empty:
     st.info(f"Mostrando todos los {len(df_all_data)} pedidos.")
 
-    # Definir las categorías y a qué columna pertenecen
-    # Esto sigue la lógica de la imagen proporcionada: dos columnas principales
-    # y las tablas se apilan dentro de ellas.
-    categories_col1 = [
-        {"header": "☀️ Local Mañana", "filter_func": lambda df: (df['Tipo_Envio'] == 'Local') & (df['Turno'] == '☀️ Local Mañana')},
-        {"header": "Foráneos", "filter_func": lambda df: df['Tipo_Envio'] == 'Foráneos'},
-        {"header": "🌵 Saltillo", "filter_func": lambda df: df['Tipo_Envio'] == 'Saltillo'} # Agregado aquí según mención anterior
-    ]
+    # Definir las categorías para el diseño de 2 columnas principales con apilamiento (según image_4f345c.png)
+    # y la asignación explícita de cada tabla a una columna.
+    # Orden importa para que coincida con la imagen y la expectativa del usuario.
+    primary_display_structure = [
+        # Columna 1
+        {"header": "☀️ Local Mañana", "filter_func": lambda df: (df['Tipo_Envio'] == 'Local') & (df['Turno'] == '☀️ Local Mañana'), "target_col_idx": 0},
+        {"header": "Foráneos", "filter_func": lambda df: df['Tipo_Envio'] == 'Foráneos', "target_col_idx": 0},
+        {"header": "🌵 Saltillo", "filter_func": lambda df: df['Tipo_Envio'] == 'Saltillo', "target_col_idx": 0}, # Añadido aquí explícitamente
 
-    categories_col2 = [
-        {"header": "🌙 Local Tarde", "filter_func": lambda df: (df['Tipo_Envio'] == 'Local') & (df['Turno'] == '🌙 Local Tarde')},
-        {"header": "📦 Pasa a Bodega", "filter_func": lambda df: df['Tipo_Envio'] == 'Pasa a Bodega'}
+        # Columna 2
+        {"header": "🌙 Local Tarde", "filter_func": lambda df: (df['Tipo_Envio'] == 'Local') & (df['Turno'] == '🌙 Local Tarde'), "target_col_idx": 1},
+        {"header": "📦 Pasa a Bodega", "filter_func": lambda df: df['Tipo_Envio'] == 'Pasa a Bodega', "target_col_idx": 1}
     ]
 
     # Crear las dos columnas principales
     col1, col2 = st.columns(2)
+    
+    # Mapeo de índices de columna a objetos de columna Streamlit
+    cols_map = {0: col1, 1: col2}
 
-    # Conjunto para rastrear los Tipo_Envio que ya se han mostrado
-    handled_tipo_envios = set()
-    handled_tipo_envios.add('Local') # Porque 'Local Mañana' y 'Local Tarde' lo cubren
+    # Conjunto para rastrear los ID_Pedido que ya han sido mostrados
+    handled_order_ids = set()
 
-    with col1:
-        for category in categories_col1:
-            st.markdown(f"**{category['header']}**")
+    # Procesar las categorías de visualización principales
+    for category in primary_display_structure:
+        with cols_map[category["target_col_idx"]]:
+            st.markdown(f"#### {category['header']}") # Usar #### para el título como en app_almacen.py
             df_filtered = df_all_data[category["filter_func"](df_all_data)].copy()
             
-            # Añadir los Tipo_Envio manejados al conjunto
-            if 'Tipo_Envio' in category['filter_func'].__repr__(): # Forma sencilla de checar si es un filtro de Tipo_Envio directo
-                # Extraer el valor literal del Tipo_Envio de la función lambda
-                import re
-                match = re.search(r"df\['Tipo_Envio'\] == '([^']+)'", category['filter_func'].__repr__())
-                if match:
-                    handled_tipo_envios.add(match.group(1))
-
             if not df_filtered.empty:
+                # Ordenar por Hora_Registro
                 if 'Hora_Registro' in df_filtered.columns:
                     df_filtered = df_filtered.sort_values(by='Hora_Registro', ascending=False).reset_index(drop=True)
-                display_dataframe_with_formatting(df_filtered)
+                
+                display_dataframe_with_formatting(df_filtered) # Usar la función de formato simplificada
+                handled_order_ids.update(df_filtered['ID_Pedido'].tolist()) # Registrar los IDs de pedido mostrados
             else:
                 st.info("No hay pedidos.")
             st.markdown("---") # Separador entre tablas dentro de la columna
 
-    with col2:
-        for category in categories_col2:
-            st.markdown(f"**{category['header']}**")
-            df_filtered = df_all_data[category["filter_func"](df_all_data)].copy()
-
-            # Añadir los Tipo_Envio manejados al conjunto
-            if 'Tipo_Envio' in category['filter_func'].__repr__():
-                import re
-                match = re.search(r"df\['Tipo_Envio'\] == '([^']+)'", category['filter_func'].__repr__())
-                if match:
-                    handled_tipo_envios.add(match.group(1))
-
-            if not df_filtered.empty:
-                if 'Hora_Registro' in df_filtered.columns:
-                    df_filtered = df_filtered.sort_values(by='Hora_Registro', ascending=False).reset_index(drop=True)
-                display_dataframe_with_formatting(df_filtered)
-            else:
-                st.info("No hay pedidos.")
-            st.markdown("---") # Separador entre tablas dentro de la columna
-
-    # --- Manejar las categorías restantes (Tipo_Envio no cubiertas en las columnas principales) ---
-    # Esto asegura que cualquier otro Tipo_Envio o Turno local se muestre.
-    st.subheader("Otros Pedidos / Categorías Adicionales")
-
-    unique_tipos_envio_all = sorted(df_all_data['Tipo_Envio'].dropna().unique().tolist())
+    # --- Manejar cualquier otro pedido que no fue clasificado en la estructura principal ---
+    st.subheader("Otros Pedidos / Categorías No Clasificadas")
     
-    # Lista de turnos locales específicos ya manejados
-    specific_local_turnos_handled = ['☀️ Local Mañana', '🌙 Local Tarde', '🌵 Saltillo', '📦 Pasa a Bodega']
+    # Filtrar pedidos que no han sido mostrados
+    df_unhandled = df_all_data[~df_all_data['ID_Pedido'].isin(handled_order_ids)].copy()
 
-    for tipo_envio in unique_tipos_envio_all:
-        if tipo_envio in handled_tipo_envios:
-            # Si el tipo de envío ya fue mostrado completamente (como 'Foráneos', 'Pasa a Bodega', 'Saltillo'), lo saltamos.
-            # Si es 'Local', aún necesitamos verificar si hay turnos no cubiertos.
-            if tipo_envio != 'Local':
-                continue
-            else: # Es 'Local', necesitamos ver si hay turnos *no* especificados arriba
-                df_other_local_turnos = df_all_data[
-                    (df_all_data['Tipo_Envio'] == 'Local') &
-                    (~df_all_data['Turno'].isin(specific_local_turnos_handled) | df_all_data['Turno'].isna())
-                ].copy()
-                if not df_other_local_turnos.empty:
-                    st.markdown(f"**🚚 Pedidos: {tipo_envio} (Otros Turnos/Sin Turno Definido)**")
-                    if 'Hora_Registro' in df_other_local_turnos.columns:
-                        df_other_local_turnos = df_other_local_turnos.sort_values(by='Hora_Registro', ascending=False).reset_index(drop=True)
-                    display_dataframe_with_formatting(df_other_local_turnos)
-                # else: no hay pedidos 'Local' con otros turnos
-        else: # Si el Tipo_Envio no se manejó en las columnas principales (ej. un nuevo Tipo_Envio)
-            st.markdown(f"**🚚 Pedidos: {tipo_envio}**")
-            df_tipo_envio_group = df_all_data[df_all_data['Tipo_Envio'] == tipo_envio].copy()
-            if not df_tipo_envio_group.empty:
-                if 'Hora_Registro' in df_tipo_envio_group.columns:
-                    df_tipo_envio_group = df_tipo_envio_group.sort_values(by='Hora_Registro', ascending=False).reset_index(drop=True)
-                display_dataframe_with_formatting(df_tipo_envio_group)
-            else:
-                st.info(f"No hay pedidos para el tipo de envío '{tipo_envio}'.")
+    if not df_unhandled.empty:
+        # Agrupar por Tipo_Envio y luego por Turno (si aplica) para los no manejados
+        unique_unhandled_types = df_unhandled['Tipo_Envio'].dropna().unique().tolist()
+        
+        for tipo_envio in sorted(unique_unhandled_types):
+            df_remaining_by_tipo = df_unhandled[df_unhandled['Tipo_Envio'] == tipo_envio].copy()
+            
+            if tipo_envio == 'Local' and 'Turno' in df_remaining_by_tipo.columns:
+                # Para pedidos 'Local' no manejados, agrupar por Turno
+                unique_unhandled_turns = df_remaining_by_tipo['Turno'].dropna().unique().tolist()
+                if not unique_unhandled_turns: # Si hay 'Local' pero sin Turno definido
+                    st.markdown(f"**🚚 Pedidos: {tipo_envio} (Sin Turno Definido)**")
+                    if 'Hora_Registro' in df_remaining_by_tipo.columns:
+                        df_remaining_by_tipo = df_remaining_by_tipo.sort_values(by='Hora_Registro', ascending=False).reset_index(drop=True)
+                    display_dataframe_with_formatting(df_remaining_by_tipo)
+                else:
+                    for turno in sorted(unique_unhandled_turns):
+                        st.markdown(f"**🚚 Pedidos: {tipo_envio} - Turno: {turno}**")
+                        df_remaining_by_turno = df_remaining_by_tipo[df_remaining_by_tipo['Turno'] == turno].copy()
+                        if 'Hora_Registro' in df_remaining_by_turno.columns:
+                            df_remaining_by_turno = df_remaining_by_turno.sort_values(by='Hora_Registro', ascending=False).reset_index(drop=True)
+                        display_dataframe_with_formatting(df_remaining_by_turno)
+            else: # Para otros Tipo_Envio no manejados
+                st.markdown(f"**🚚 Pedidos: {tipo_envio}**")
+                if 'Hora_Registro' in df_remaining_by_tipo.columns:
+                    df_remaining_by_tipo = df_remaining_by_tipo.sort_values(by='Hora_Registro', ascending=False).reset_index(drop=True)
+                display_dataframe_with_formatting(df_remaining_by_tipo)
+    else:
+        st.info("Todos los pedidos han sido clasificados en las categorías principales.")
 else:
     st.info("No hay pedidos para mostrar en la hoja de cálculo.")
 
 if __name__ == '__main__':
-    # No hay código adicional aquí, la aplicación de Streamlit se ejecuta directamente.
     pass
