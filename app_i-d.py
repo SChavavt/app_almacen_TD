@@ -219,6 +219,54 @@ def display_attachments(adjuntos_str, s3_client_instance):
     except Exception as e:
         return f"Error al procesar adjuntos: {e}"
 
+# Helper function to encapsulate dataframe display logic
+def display_dataframe_with_formatting(df_to_display):
+    display_cols_mapping = {
+        'ID_Pedido': 'ID_Pedido',
+        'Cliente': 'Cliente',
+        'Estado': 'Estado',
+        'Vendedor_Registro': 'Vendedor',
+        'Tipo_Envio': 'Envío',
+        'Fecha_Entrega': 'Entrega',
+        'Hora_Registro': 'Registro',
+        'Notas': 'Notas',
+        'Adjuntos_Enlaces': 'Adjuntos',
+        'Turno': 'Turno' # Incluir Turno en el mapeo
+    }
+
+    # Añadir 'Fecha_Completado' si existe en el DataFrame específico
+    if 'Fecha_Completado' in df_to_display.columns:
+        display_cols_mapping['Fecha_Completado'] = 'Completado'
+
+    # Filtrar las columnas que no existen en el DataFrame actual antes de renombrar
+    cols_to_use = {original: new for original, new in display_cols_mapping.items() if original in df_to_display.columns}
+    df_display_final = df_to_display[list(cols_to_use.keys())].rename(columns=cols_to_use)
+
+    # Formatear la columna de registro a solo hora si es del día actual, sino fecha y hora
+    if 'Registro' in df_display_final.columns:
+        df_display_final['Registro'] = df_display_final['Registro'].apply(
+            lambda x: x.strftime("%H:%M") if pd.notna(x) and x.date() == date.today() else x.strftime("%d/%m %H:%M") if pd.notna(x) else ""
+        )
+    # Formatear la columna de completado a solo fecha
+    if 'Completado' in df_display_final.columns:
+        df_display_final['Completado'] = df_display_final['Completado'].apply(
+            lambda x: x.strftime("%d/%m/%Y") if pd.notna(x) else ""
+        )
+
+    st.dataframe(
+        df_display_final,
+        use_container_width=True,
+        column_config={
+            "Adjuntos": st.column_config.Column(
+                "Adjuntos",
+                help="Enlaces a los archivos adjuntos en S3",
+                width="large"
+            ),
+            **{col: st.column_config.Column(width="small") for col in df_display_final.columns if col != "Adjuntos"}
+        },
+        hide_index=True
+    )
+
 
 # --- Lógica principal de la aplicación ---
 
@@ -233,7 +281,7 @@ if 'Fecha_Entrega' in df_all_data.columns:
 
 
 # --- Visualización de Datos ---
-st.header("Todos los Pedidos por Tipo de Envío")
+st.header("Todos los Pedidos por Tipo de Envío y Turno")
 
 if not df_all_data.empty:
     st.info(f"Mostrando todos los {len(df_all_data)} pedidos.")
@@ -261,62 +309,39 @@ if not df_all_data.empty:
         st.warning("No se encontraron tipos de envío definidos en los pedidos.")
     else:
         for tipo_envio in unique_tipos_envio:
-            st.subheader(f"🚚 Pedidos: {tipo_envio}")
+            df_tipo_envio_group = df_all_data[df_all_data['Tipo_Envio'] == tipo_envio].copy()
 
-            df_current_tipo = df_all_data[df_all_data['Tipo_Envio'] == tipo_envio].copy()
-
-            if not df_current_tipo.empty:
-                # Ordenar por Hora_Registro más reciente
-                if 'Hora_Registro' in df_current_tipo.columns:
-                    df_current_tipo = df_current_tipo.sort_values(by='Hora_Registro', ascending=False).reset_index(drop=True)
-
-                # Columnas a mostrar y sus nuevos nombres
-                display_cols_mapping = {
-                    'ID_Pedido': 'ID_Pedido',
-                    'Cliente': 'Cliente',
-                    'Estado': 'Estado',
-                    'Vendedor_Registro': 'Vendedor',
-                    'Tipo_Envio': 'Envío',
-                    'Fecha_Entrega': 'Entrega',
-                    'Hora_Registro': 'Registro',
-                    'Notas': 'Notas',
-                    'Adjuntos_Enlaces': 'Adjuntos'
-                }
-
-                # Añadir 'Fecha_Completado' si existe en el DataFrame específico del tipo de envío
-                if 'Fecha_Completado' in df_current_tipo.columns:
-                    display_cols_mapping['Fecha_Completado'] = 'Completado'
-
-                # Filtrar las columnas que no existen en el DataFrame actual antes de renombrar
-                cols_to_use = {original: new for original, new in display_cols_mapping.items() if original in df_current_tipo.columns}
-                df_display_final = df_current_tipo[list(cols_to_use.keys())].rename(columns=cols_to_use)
-
-                # Formatear la columna de registro a solo hora si es del día actual, sino fecha y hora
-                if 'Registro' in df_display_final.columns:
-                    df_display_final['Registro'] = df_display_final['Registro'].apply(
-                        lambda x: x.strftime("%H:%M") if pd.notna(x) and x.date() == date.today() else x.strftime("%d/%m %H:%M") if pd.notna(x) else ""
-                    )
-                # Formatear la columna de completado a solo fecha
-                if 'Completado' in df_display_final.columns:
-                    df_display_final['Completado'] = df_display_final['Completado'].apply(
-                        lambda x: x.strftime("%d/%m/%Y") if pd.notna(x) else ""
-                    )
-
-                st.dataframe(
-                    df_display_final,
-                    use_container_width=True,
-                    column_config={
-                        "Adjuntos": st.column_config.Column(
-                            "Adjuntos",
-                            help="Enlaces a los archivos adjuntos en S3",
-                            width="large"
-                        ),
-                        **{col: st.column_config.Column(width="small") for col in df_display_final.columns if col != "Adjuntos"}
-                    },
-                    hide_index=True
-                )
+            if tipo_envio == 'Local':
+                # Si es 'Local', subdividir por 'Turno'
+                unique_turnos = sorted(df_tipo_envio_group['Turno'].dropna().unique().tolist())
+                if not unique_turnos:
+                    st.subheader(f"🚚 Pedidos: {tipo_envio} (Sin Turno definido)")
+                    if not df_tipo_envio_group.empty:
+                        # Ordenar por Hora_Registro más reciente
+                        if 'Hora_Registro' in df_tipo_envio_group.columns:
+                            df_tipo_envio_group = df_tipo_envio_group.sort_values(by='Hora_Registro', ascending=False).reset_index(drop=True)
+                        display_dataframe_with_formatting(df_tipo_envio_group)
+                    else:
+                        st.info(f"No hay pedidos para '{tipo_envio}' sin turno definido.")
+                else:
+                    for turno in unique_turnos:
+                        st.subheader(f"🚚 Pedidos: {tipo_envio} - {turno}")
+                        df_final_display = df_tipo_envio_group[df_tipo_envio_group['Turno'] == turno].copy()
+                        if not df_final_display.empty:
+                            if 'Hora_Registro' in df_final_display.columns:
+                                df_final_display = df_final_display.sort_values(by='Hora_Registro', ascending=False).reset_index(drop=True)
+                            display_dataframe_with_formatting(df_final_display)
+                        else:
+                            st.info(f"No hay pedidos para '{tipo_envio}' en el turno '{turno}'.")
             else:
-                st.info(f"No hay pedidos para el tipo de envío '{tipo_envio}'.")
+                # Para otros tipos de envío, mostrar directamente
+                st.subheader(f"🚚 Pedidos: {tipo_envio}")
+                if not df_tipo_envio_group.empty:
+                    if 'Hora_Registro' in df_tipo_envio_group.columns:
+                        df_tipo_envio_group = df_tipo_envio_group.sort_values(by='Hora_Registro', ascending=False).reset_index(drop=True)
+                    display_dataframe_with_formatting(df_tipo_envio_group)
+                else:
+                    st.info(f"No hay pedidos para el tipo de envío '{tipo_envio}'.")
 else:
     st.info("No hay pedidos para mostrar en la hoja de cálculo.")
 
