@@ -1,15 +1,15 @@
 
 import streamlit as st
 import pandas as pd
-from datetime import datetime, date
 import json
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 from streamlit_autorefresh import st_autorefresh
+from datetime import datetime, date
 
 # --- Configuración inicial ---
-st.set_page_config(page_title="Panel de Almacén Integrado", layout="wide")
-st_autorefresh(interval=5 * 1000, key="autorefresh")
+st.set_page_config(page_title="Panel de Almacén", layout="wide")
+st_autorefresh(interval=5 * 1000, key="auto_refresh")
 
 st.markdown("""
     <h1 style="color: white; font-size: 2.5rem; margin-bottom: 2rem;">
@@ -26,9 +26,9 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# --- Cargar credenciales desde secrets ---
+# --- Autenticación con Google Sheets desde secrets ---
 if "gsheets" not in st.secrets:
-    st.error("❌ No se encontraron credenciales de Google Sheets en secrets.")
+    st.error("Faltan credenciales de Google Sheets.")
     st.stop()
 
 creds_dict = json.loads(st.secrets["gsheets"]["google_credentials"])
@@ -40,13 +40,13 @@ def get_gspread_client():
     creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
     return gspread.authorize(creds)
 
-def formatear_fecha(fecha_str):
+def formatear_fecha_consistente(fecha_str):
     if pd.isna(fecha_str) or str(fecha_str).strip() in ["", "Sin fecha"]:
         return "Sin fecha"
     try:
-        if isinstance(fecha_str, str) and '/' in fecha_str:
+        if isinstance(fecha_str, str) and "/" in fecha_str:
             return fecha_str
-        elif isinstance(fecha_str, str) and '-' in fecha_str:
+        elif isinstance(fecha_str, str) and "-" in fecha_str:
             return datetime.strptime(fecha_str, "%Y-%m-%d").strftime("%d/%m/%Y")
         elif hasattr(fecha_str, 'strftime'):
             return fecha_str.strftime("%d/%m/%Y")
@@ -54,104 +54,129 @@ def formatear_fecha(fecha_str):
         return "Sin fecha"
     return "Sin fecha"
 
-@st.cache_data(ttl=60)
-def cargar_datos_gsheets():
+def cargar_datos():
     SHEET_ID = "1aWkSelodaz0nWfQx7FZAysGnIYGQFJxAN7RO3YgCiZY"
     SHEET_NAME = "datos_pedidos"
     client = get_gspread_client()
-    sheet = client.open_by_key(SHEET_ID).worksheet(SHEET_NAME)
-    data = sheet.get_all_records()
+    worksheet = client.open_by_key(SHEET_ID).worksheet(SHEET_NAME)
+    data = worksheet.get_all_records()
     df = pd.DataFrame(data)
 
-    if df.empty:
-        return df
-
-    if "Fecha_Entrega" in df.columns:
-        df["Fecha_Entrega"] = df["Fecha_Entrega"].apply(formatear_fecha)
-
-    df["Fecha_Completado"] = pd.to_datetime(df["Fecha_Completado"], errors='coerce')
-    df["Hora_Registro"] = pd.to_datetime(df["Hora_Registro"], errors='coerce')
-
+    if 'Fecha_Entrega' in df.columns:
+        df['Fecha_Entrega'] = df['Fecha_Entrega'].apply(formatear_fecha_consistente)
+    if 'Fecha_Completado' in df.columns:
+        df['Fecha_Completado'] = pd.to_datetime(df['Fecha_Completado'], errors='coerce')
+    if 'Hora' in df.columns:
+        df['Hora'] = pd.to_datetime(df['Hora'], errors='coerce')
     return df
 
-def mostrar_resumen(df):
+def mostrar_resumen_estados(df):
     st.markdown("### 📊 Resumen General")
     hoy = date.today()
-
     total_demorados = df[df["Estado"] == "🔴 Demorado"].shape[0]
-    total_proceso = df[df["Estado"] == "🔵 En proceso"].shape[0]
+    total_en_proceso = df[df["Estado"] == "🔵 En proceso"].shape[0]
     total_pendientes = df[df["Estado"] == "📥 Pendiente"].shape[0]
-    total_hoy = df[(df["Estado"] == "🟢 Completado") & (df["Fecha_Completado"].dt.date == hoy)].shape[0]
+    total_completados_hoy = df[
+        (df["Estado"] == "🟢 Completado") & 
+        (pd.to_datetime(df["Fecha_Completado"]).dt.date == hoy)
+    ].shape[0]
 
-    c1, c2, c3, c4 = st.columns(4)
-    c1.metric("🔴 Demorados", total_demorados)
-    c2.metric("🔵 En proceso", total_proceso)
-    c3.metric("📥 Pendientes", total_pendientes)
-    c4.metric("🟢 Completados Hoy", total_hoy)
-
-def visualizar_pedidos(df):
-    activos = df[df["Estado"].isin(["📥 Pendiente", "🔵 En proceso", "🔴 Demorado"])].copy()
-    completados_hoy = df[(df["Estado"] == "🟢 Completado") & (df["Fecha_Completado"].dt.date == date.today())].copy()
-    df_vis = pd.concat([activos, completados_hoy], ignore_index=True)
-
-    if df_vis.empty:
-        st.info("No hay pedidos activos ni completados hoy.")
-        return
-
-    df_vis["Orden"] = df_vis["Estado"].map({
-        "🔴 Demorado": 0, "🔵 En proceso": 1, "📥 Pendiente": 2
-    }).fillna(3)
-
-    tipo_envio_orden = {
-        "Local-Mañana": 0, "Local-Tarde": 1, "Saltillo": 2,
-        "Pasa a Bodega": 3, "Foráneo": 4
-    }
-
-    df_vis["Tipo_Orden"] = df_vis["Tipo_Envio"].map(tipo_envio_orden).fillna(5)
-    df_vis = df_vis.sort_values(by=["Orden", "Tipo_Orden", "Hora_Registro"])
-
-    locales = {
-        "☀️ Local Mañana": df_vis[df_vis["Tipo_Envio"] == "Local-Mañana"],
-        "🌙 Local Tarde": df_vis[df_vis["Tipo_Envio"] == "Local-Tarde"]
-    }
-
-    otros = df_vis[~df_vis["Tipo_Envio"].isin(["Local-Mañana", "Local-Tarde"])]
-
-    grupos = []
-    for titulo, df_local in locales.items():
-        for fecha, grupo in df_local.groupby("Fecha_Entrega"):
-            fecha_fmt = formatear_fecha(fecha)
-            grupos.append((f"{titulo} ({fecha_fmt})", grupo.copy()))
-
-    for tipo, grupo in otros.groupby("Tipo_Envio"):
-        if tipo == "Saltillo":
-            grupos.append(("⛰️ Saltillo", grupo))
-        elif tipo == "Pasa a Bodega":
-            grupos.append(("📦 Pasa a Bodega", grupo))
-        elif tipo == "Foráneo":
-            grupos.append(("🌍 Pedidos Foráneos", grupo))
-
-    if not grupos:
-        st.info("No hay grupos para mostrar.")
-        return
-
-    cols = st.columns(len(grupos))
-    for i, (titulo, grupo) in enumerate(grupos):
-        with cols[i]:
-            st.markdown(f"#### {titulo}")
-            mostrar = ["Cliente", "Hora_Registro", "Estado", "Surtidor"]
-            df_disp = grupo[mostrar].copy()
-            df_disp.rename(columns={"Hora_Registro": "Fecha"}, inplace=True)
-            st.dataframe(
-                df_disp.reset_index(drop=True),
-                use_container_width=True,
-                hide_index=True
-            )
+    col1, col2, col3, col4 = st.columns(4)
+    col1.metric("🔴 Demorados", total_demorados)
+    col2.metric("🔵 En proceso", total_en_proceso)
+    col3.metric("📥 Pendientes", total_pendientes)
+    col4.metric("🟢 Completados Hoy", total_completados_hoy)
 
 # --- MAIN ---
-df = cargar_datos_gsheets()
-if not df.empty:
-    mostrar_resumen(df)
-    visualizar_pedidos(df)
+df = cargar_datos()
+df_pedidos = df[df["Tipo"] == "📦 Pedido"].copy()
+
+if not df_pedidos.empty:
+    df_completados_hoy = df_pedidos[
+        (df_pedidos["Estado"] == "🟢 Completado") & 
+        (pd.to_datetime(df_pedidos["Fecha_Completado"]).dt.date == date.today())
+    ].copy()
+
+    df_activos = df_pedidos[
+        df_pedidos["Estado"].isin(["📥 Pendiente", "🔵 En proceso", "🔴 Demorado"])
+    ].copy()
+
+    df_visualizacion = pd.concat([df_activos, df_completados_hoy], ignore_index=True)
+
+    if not df_visualizacion.empty:
+        df_visualizacion["Orden"] = df_visualizacion["Estado"].apply(
+            lambda x: 0 if x == "🔴 Demorado" else (
+                1 if x == "🔵 En proceso" else (
+                    2 if x == "📥 Pendiente" else 3
+                )
+            )
+        )
+        df_visualizacion["Fecha_Entrega"] = df_visualizacion["Fecha_Entrega"].apply(formatear_fecha_consistente)
+        df_visualizacion["Tipo_Orden"] = df_visualizacion["Tipo_Envio"].apply(
+            lambda x: 0 if x == "Local-Mañana" else (
+                1 if x == "Local-Tarde" else (
+                    2 if x == "Saltillo" else (
+                        3 if x == "Pasa a Bodega" else (
+                            4 if x == "Foráneo" else 5
+                        )
+                    )
+                )
+            )
+        )
+        df_visualizacion = df_visualizacion.sort_values(by=["Orden", "Tipo_Orden", "Hora"])
+        mostrar_resumen_estados(df_visualizacion)
+
+        locales_manana = df_visualizacion[df_visualizacion["Tipo_Envio"] == "Local-Mañana"]
+        locales_tarde = df_visualizacion[df_visualizacion["Tipo_Envio"] == "Local-Tarde"]
+
+        grupos_locales = []
+        for tipo_local, emoji, df_local in [
+            ("Local-Mañana", "☀️", locales_manana),
+            ("Local-Tarde", "🌙", locales_tarde)
+        ]:
+            for fecha, grupo in df_local.groupby("Fecha_Entrega"):
+                fecha_fmt = formatear_fecha_consistente(fecha)
+                titulo = f"{emoji} {tipo_local.replace('-', ' ')} ({fecha_fmt})"
+                grupos_locales.append((titulo, grupo.copy()))
+
+        otros = df_visualizacion[
+            ~df_visualizacion["Tipo_Envio"].isin(["Local-Mañana", "Local-Tarde"])
+        ]
+        otros_grupos = []
+        for tipo, grupo in otros.groupby("Tipo_Envio"):
+            if tipo == "Saltillo":
+                emoji = "⛰️"
+                titulo = f"{emoji} Saltillo"
+            elif tipo == "Pasa a Bodega":
+                emoji = "📦"
+                titulo = f"{emoji} Pasa a Bodega"
+            elif tipo == "Foráneo":
+                emoji = "🌍"
+                titulo = f"{emoji} Pedidos Foráneos"
+            else:
+                emoji = "❓"
+                titulo = f"{emoji} Local Sin clasificar"
+            otros_grupos.append((titulo, grupo.copy()))
+
+        todos_grupos = grupos_locales + otros_grupos
+        if todos_grupos:
+            cols = st.columns(len(todos_grupos))
+            for i, (titulo, df_grupo) in enumerate(todos_grupos):
+                with cols[i]:
+                    st.markdown(f"#### {titulo}")
+                    columnas_mostrar = ["Cliente", "Hora", "Estado", "Surtidor"] 
+                    if "Tipo_Envio" in df_grupo.columns and "❓" in titulo:
+                        columnas_mostrar.append("Tipo_Envio")
+                    st.dataframe(
+                        df_grupo[columnas_mostrar]
+                        .rename(columns={"Hora": "Fecha", "Tipo_Envio": "Envío"})
+                        .reset_index(drop=True),
+                        use_container_width=True,
+                        hide_index=True
+                    )
+        else:
+            st.info("No hay pedidos para mostrar según los criterios.")
+    else:
+        st.info("No hay pedidos activos ni completados hoy.")
 else:
-    st.info("No hay datos cargados.")
+    st.info("No hay pedidos cargados.")
