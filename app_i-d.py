@@ -309,33 +309,51 @@ if not df_all_data.empty:
         st.warning("No se encontraron tipos de envío definidos en los pedidos.")
     else:
         for tipo_envio in unique_tipos_envio:
-            df_tipo_envio_group = df_all_data[df_all_data['Tipo_Envio'] == tipo_envio].copy()
-
             if tipo_envio == 'Local':
-                # Si es 'Local', subdividir por 'Turno'
-                unique_turnos = sorted(df_tipo_envio_group['Turno'].dropna().unique().tolist())
-                if not unique_turnos:
-                    st.subheader(f"🚚 Pedidos: {tipo_envio} (Sin Turno definido)")
-                    if not df_tipo_envio_group.empty:
-                        # Ordenar por Hora_Registro más reciente
-                        if 'Hora_Registro' in df_tipo_envio_group.columns:
-                            df_tipo_envio_group = df_tipo_envio_group.sort_values(by='Hora_Registro', ascending=False).reset_index(drop=True)
-                        display_dataframe_with_formatting(df_tipo_envio_group)
-                    else:
-                        st.info(f"No hay pedidos para '{tipo_envio}' sin turno definido.")
-                else:
-                    for turno in unique_turnos:
-                        st.subheader(f"🚚 Pedidos: {tipo_envio} - {turno}")
-                        df_final_display = df_tipo_envio_group[df_tipo_envio_group['Turno'] == turno].copy()
-                        if not df_final_display.empty:
-                            if 'Hora_Registro' in df_final_display.columns:
-                                df_final_display = df_final_display.sort_values(by='Hora_Registro', ascending=False).reset_index(drop=True)
-                            display_dataframe_with_formatting(df_final_display)
+                st.subheader(f"🚚 Pedidos: {tipo_envio}") # General header for all local
+                
+                # Define the specific turnos and map them to columns
+                # Asegúrate de que estos nombres de turno coincidan exactamente con tus datos en Google Sheets
+                local_turnos_order = ['☀️ Local Mañana', '🌙 Local Tarde', '🌵 Saltillo', '📦 Pasa a Bodega']
+                
+                # Crear columnas para cada turno específico
+                # Se crean 4 columnas ya que son 4 tipos de turnos específicos
+                cols = st.columns(len(local_turnos_order))
+                
+                for i, turno_name in enumerate(local_turnos_order):
+                    with cols[i]:
+                        st.markdown(f"**{turno_name}**") # Un encabezado más pequeño dentro de la columna
+                        df_current_turno = df_all_data[
+                            (df_all_data['Tipo_Envio'] == 'Local') & 
+                            (df_all_data['Turno'] == turno_name)
+                        ].copy()
+
+                        if not df_current_turno.empty:
+                            if 'Hora_Registro' in df_current_turno.columns:
+                                df_current_turno = df_current_turno.sort_values(by='Hora_Registro', ascending=False).reset_index(drop=True)
+                            display_dataframe_with_formatting(df_current_turno)
                         else:
-                            st.info(f"No hay pedidos para '{tipo_envio}' en el turno '{turno}'.")
+                            st.info("No hay pedidos.")
+                
+                # Manejar pedidos 'Local' con turnos faltantes o no listados explícitamente
+                # Filtra todos los turnos que son 'Local' pero que NO están en `local_turnos_order`
+                other_local_turnos_df = df_all_data[
+                    (df_all_data['Tipo_Envio'] == 'Local') &
+                    (~df_all_data['Turno'].isin(local_turnos_order) | df_all_data['Turno'].isna())
+                ].copy()
+                
+                if not other_local_turnos_df.empty:
+                    st.markdown("---") # Separador visual
+                    st.subheader(f"🚚 Pedidos: {tipo_envio} - Otros Turnos/Sin Turno Definido")
+                    if 'Hora_Registro' in other_local_turnos_df.columns:
+                        other_local_turnos_df = other_local_turnos_df.sort_values(by='Hora_Registro', ascending=False).reset_index(drop=True)
+                    display_dataframe_with_formatting(other_local_turnos_df)
+                # else: No es necesario un st.info aquí, ya que si está vacío, no se mostrará nada.
+
             else:
-                # Para otros tipos de envío, mostrar directamente
+                # Para otros tipos de envío (ej. Foráneos), mostrar directamente en secciones verticales
                 st.subheader(f"🚚 Pedidos: {tipo_envio}")
+                df_tipo_envio_group = df_all_data[df_all_data['Tipo_Envio'] == tipo_envio].copy()
                 if not df_tipo_envio_group.empty:
                     if 'Hora_Registro' in df_tipo_envio_group.columns:
                         df_tipo_envio_group = df_tipo_envio_group.sort_values(by='Hora_Registro', ascending=False).reset_index(drop=True)
