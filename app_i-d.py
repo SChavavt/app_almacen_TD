@@ -28,12 +28,12 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # --- Autenticación con Google Sheets desde secrets ---
-if "gsheets" not in st.secrets:
-    st.error("❌ Faltan credenciales de Google Sheets. Asegúrate de definirlas en .streamlit/secrets.toml")
+try:
+    creds_dict = json.loads(st.secrets["gsheets"]["google_credentials"])
+    creds_dict["private_key"] = creds_dict["private_key"].replace("\\n", "\n")
+except Exception as e:
+    st.error("❌ Error: Las credenciales de Google Sheets no se encontraron o son inválidas. Asegúrate de definir [gsheets] y google_credentials en .streamlit/secrets.toml")
     st.stop()
-
-creds_dict = json.loads(st.secrets["gsheets"]["google_credentials"])
-creds_dict["private_key"] = creds_dict["private_key"].replace("\\n", "\n")
 
 @st.cache_resource
 def get_gspread_client():
