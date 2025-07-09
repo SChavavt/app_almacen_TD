@@ -8,6 +8,16 @@ import re
 import gspread.utils
 
 st.set_page_config(page_title="Recepción de Pedidos TD", layout="wide")
+# --- Manejo de pestañas activas ---
+if "active_tab_label" not in st.session_state:
+    st.session_state["active_tab_label"] = "📍 Pedidos Locales"
+if "active_subtab_label" not in st.session_state:
+    st.session_state["active_subtab_label"] = "🌅 Mañana"
+
+if "active_date_label" not in st.session_state:
+    st.session_state["active_date_label"] = None
+
+
 
 
 st.title("📬 Bandeja de Pedidos TD")
@@ -493,7 +503,7 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
                         st.session_state["fecha_seleccionada"] = nueva_fecha_str
                         st.session_state["subtab_local"] = origen_tab
                         st.cache_data.clear()
-                        st.rerun()
+                        ## st.rerun()  # ← Revisión: ¿Es necesario este rerun?
                     else:
                         st.error("❌ Falló la actualización en Google Sheets.")
                 else:
@@ -596,7 +606,7 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
                         df.loc[idx, "Fecha_Completado"] = datetime.now()
                         st.success(f"✅ Pedido {row['ID_Pedido']} completado exitosamente.")
                         st.cache_data.clear()
-                        st.rerun()
+                        ## st.rerun()  # ← Revisión: ¿Es necesario este rerun?
                     else:
                         st.error("❌ No se pudo completar el pedido.")
                 except Exception as e:
@@ -711,7 +721,7 @@ if not df_main.empty:
     df_main, changes_made_by_demorado_check = check_and_update_demorados(df_main, worksheet_main, headers_main)
     if changes_made_by_demorado_check:
         st.cache_data.clear() # Limpiar caché para forzar recarga si hay cambios de estado
-        st.rerun() # Se mantiene para asegurar que los pedidos demorados se muevan de inmediato
+        ## st.rerun()  # ← Revisión: ¿Es necesario este rerun? # Se mantiene para asegurar que los pedidos demorados se muevan de inmediato
 
     df_pendientes_proceso_demorado = df_main[df_main["Estado"].isin(["🟡 Pendiente", "🔵 En Proceso", "🔴 Demorado"])].copy()
     df_completados_historial = df_main[df_main["Estado"] == "🟢 Completado"].copy()
