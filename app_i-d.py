@@ -5,7 +5,6 @@ import json
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 import boto3
-import os
 import gspread.utils
 from streamlit_autorefresh import st_autorefresh
 
@@ -13,6 +12,7 @@ from streamlit_autorefresh import st_autorefresh
 st.set_page_config(page_title="Panel de Almacén Integrado", layout="wide")
 
 # 🔄 Refrescar cada 5 segundos automáticamente
+# Esto asegura que la aplicación cargue los datos más recientes de Google Sheets y S3
 st_autorefresh(interval=5 * 1000, key="datarefresh_integrated")
 
 # Título con emoji colorido
@@ -38,32 +38,18 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-# --- Google Sheets Configuration ---
-# GOOGLE_SHEET_ID y GOOGLE_SHEET_WORKSHEET_NAME pueden venir de st.secrets si se prefiere
-GOOGLE_SHEET_ID = '1aWkSelodaz0nWfQx7FZAysGnIYGQFJxAN7RO3YgCiZY'
-GOOGLE_SHEET_WORKSHEET_NAME = 'datos_pedidos'
-
-# --- AWS S3 Configuration ---
-try:
-    # Asegúrate de que la sección 'aws' esté en .streamlit/secrets.toml
-    if "aws" not in st.secrets:
-        st.error("❌ Las credenciales de AWS S3 no se encontraron en Streamlit secrets. Asegúrate de que tu archivo .streamlit/secrets.toml esté configurado correctamente con la sección [aws].")
-        st.info("Falta la clave: 'st.secrets has no key \"aws\". Did you forget to add it to secrets.toml, mount it to secret directory, or the app settings on Streamlit Cloud? Más información: https://docs.streamlit.io/deploy/streamlit-community-cloud/deploy-your-app/secrets-management'")
-        st.stop()
-
-    AWS_CREDENTIALS = st.secrets["aws"]
-    AWS_ACCESS_KEY_ID = AWS_CREDENTIALS["aws_access_key_id"]
-    AWS_SECRET_ACCESS_KEY = AWS_CREDENTIALS["aws_secret_access_key"]
-    AWS_REGION = AWS_CREDENTIALS["aws_region"]
-    S3_BUCKET_NAME = AWS_CREDENTIALS["s3_bucket_name"]
-except KeyError as e:
-    st.error(f"❌ Error: Problema al acceder a una clave de AWS S3 en Streamlit secrets. Falta la clave: {e}")
-    st.info("Asegúrate de que todas las claves (aws_access_key_id, aws_secret_access_key, aws_region, s3_bucket_name) estén presentes en la sección [aws].")
-    st.stop()
-
-S3_ATTACHMENT_PREFIX = 'adjuntos_pedidos/'
-
-# --- Cached Clients for Google Sheets and AWS S3 ---
+# --- Google Sheets Constants ---
+# VERIFICA Y REEMPLAZA ESTOS VALORES CON LOS REALES DE TU HOJA DE CÁLCULO.
+# 1. GOOGLE_SHEET_ID: Se encuentra en la URL de tu hoja de cálculo.
+#    Ejemplo: Si tu URL es https://docs.google.com/spreadsheets/d/12345ABCDE_YOUR_ID_HERE_FGHIJKL/edit#gid=0
+#    Entonces el ID es '12345ABCDE_YOUR_ID_HERE_FGHIJKL'
+# 2. GOOGLE_SHEET_WORKSHEET_NAME: Es el nombre EXACTO de la pestaña (hoja) dentro de tu documento de Google Sheets.
+#    Ejemplo: Si la pestaña se llama "DatosPedidos", usa 'DatosPedidos'. ¡Respeta mayúsculas y minúsculas!
+# 3. PERMISOS: Asegúrate de haber COMPARTIDO tu Google Sheet con la dirección de correo electrónico
+#    de la "client_email" que se encuentra dentro de tus credenciales de servicio.
+#    Dale al menos permiso de "Lector" o "Editor".
+GOOGLE_SHEET_ID = '1aWkSelodaz0nWfQx7FZAysGnIYGQFJxAN7RO3YgCiZY' # <--- ¡VERIFICA Y REEMPLAZA SI ES NECESARIO!
+GOOGLE_SHEET_WORKSHEET_NAME = 'datos_pedidos' # <--- ¡VERIFICA Y REEMPLAZA SI ES NECESARIO!
 
 @st.cache_resource
 def get_gspread_client(_credentials_json_dict):
@@ -73,11 +59,10 @@ def get_gspread_client(_credentials_json_dict):
     """
     try:
         scope = ['https://spreadsheets.google.com/feeds', 'https://www.googleapis.com/auth/drive']
-
         creds_dict = dict(_credentials_json_dict)
 
-        # Es CRÍTICO para el error 'Incorrect padding' asegurarse de que la clave privada
-        # tenga saltos de línea reales y no espacios en blanco circundantes.
+        # Asegúrate de que private_key tenga los saltos de línea correctos y sin espacios en blanco alrededor.
+        # Esto es CRÍTICO para evitar el error 'Incorrect padding'.
         if "private_key" in creds_dict and isinstance(creds_dict["private_key"], str):
             creds_dict["private_key"] = creds_dict["private_key"].replace("\\n", "\n").strip()
 
@@ -89,10 +74,27 @@ def get_gspread_client(_credentials_json_dict):
         st.info("ℹ️ Verifica que las APIs de Google Sheets y Drive estén habilitadas para tu proyecto de Google Cloud y que tus credenciales de servicio en `secrets.toml` sean válidas.")
         st.stop()
 
+# --- AWS S3 Configuration ---
+try:
+    if "aws" not in st.secrets:
+        st.error("❌ Las credenciales de AWS S3 no se encontraron en Streamlit secrets. Asegúrate de que tu archivo .streamlit/secrets.toml esté configurado correctamente con la sección [aws].")
+        st.info("Falta la clave: 'st.secrets has no key \"aws\". Did you forget to add it to secrets.toml, mount it to secret directory, or the app settings on Streamlit Cloud? More info: https://docs.streamlit.io/deploy/streamlit-community-cloud/deploy-your-app/secrets-management'")
+        st.stop()
+
+    AWS_CREDENTIALS = st.secrets["aws"]
+    AWS_ACCESS_KEY_ID = AWS_CREDENTIALS["aws_access_key_id"]
+    AWS_SECRET_ACCESS_KEY = AWS_CREDENTIALS["aws_secret_access_key"]
+    AWS_REGION = AWS_CREDENTIALS["aws_region"]
+    S3_BUCKET_NAME = AWS_CREDENTIALS["s3_bucket_name"]
+
+except Exception as e:
+    st.error(f"❌ Error al cargar las credenciales de AWS S3: {e}")
+    st.stop()
+
 @st.cache_resource
 def get_s3_client():
     """
-    Inicializa y retorna un cliente de S3, usando credenciales globales.
+    Inicializa y retorna un cliente S3 de boto3.
     """
     try:
         s3 = boto3.client(
@@ -103,21 +105,19 @@ def get_s3_client():
         )
         return s3
     except Exception as e:
-        st.error(f"❌ Error al inicializar el cliente S3: {e}")
-        st.info("ℹ️ Revisa tus credenciales de AWS en `st.secrets['aws']` y la configuración de la región.")
+        st.error(f"❌ Error al inicializar cliente S3: {e}")
         st.stop()
 
-# Initialize clients globally
+# Inicializar clientes globalmente
 try:
     # Obtener credenciales de Google Sheets de st.secrets
     if "gsheets" not in st.secrets:
         st.error("❌ Las credenciales de Google Sheets no se encontraron en Streamlit secrets. Asegúrate de que tu archivo .streamlit/secrets.toml esté configurado correctamente con la sección [gsheets].")
-        st.info("Falta la clave: 'st.secrets has no key \"gsheets\". Did you forget to add it to secrets.toml, mount it to secret directory, or the app settings on Streamlit Cloud? Más información: https://docs.streamlit.io/deploy/streamlit-community-cloud/deploy-your-app/secrets-management'")
+        st.info("Falta la clave: 'st.secrets has no key \"gsheets\". Did you forget to add it to secrets.toml, mount it to secret directory, or the app settings on Streamlit Cloud? More info: https://docs.streamlit.io/deploy/streamlit-community-cloud/deploy-your-app/secrets-management'")
         st.stop()
 
-    # Cargar las credenciales de gsheets como JSON
     GSHEETS_CREDENTIALS = json.loads(st.secrets["gsheets"]["google_credentials"])
-    # Asegurarse de que los saltos de línea en la clave privada sean correctos
+    # Asegurarse de que la clave privada tenga los saltos de línea correctos
     GSHEETS_CREDENTIALS["private_key"] = GSHEETS_CREDENTIALS["private_key"].replace("\\n", "\n")
 
     g_spread_client = get_gspread_client(_credentials_json_dict=GSHEETS_CREDENTIALS)
@@ -139,394 +139,222 @@ except Exception as e:
     st.info("ℹ️ Asegúrate de que las APIs de Google Sheets y Drive estén habilitadas para tu proyecto de Google Cloud. También, revisa tus credenciales de AWS S3 y Google Sheets en `.streamlit/secrets.toml` o en la interfaz de Streamlit Cloud.")
     st.stop()
 
-
-# --- Data Loading from Google Sheets (Cached) ---
-@st.cache_data(ttl=60)
-def get_raw_sheet_data(sheet_id: str, worksheet_name: str, credentials: dict) -> list[list[str]]:
+# Eliminamos @st.cache_resource para que siempre cargue lo último
+def load_data_from_gsheets(sheet_id, worksheet_name):
     """
-    Lee todos los valores desde una hoja de Google Sheets.
-    Se cachea porque solo recibe tipos hasheables (str, dict).
+    Carga todos los datos de una hoja de cálculo de Google Sheets en un DataFrame de Pandas
+    y añade el índice de fila de la hoja de cálculo.
     """
-    scope = ['https://spreadsheets.google.com/feeds', 'https://www.googleapis.com/auth/drive']
-    
-    # Asegurarse de que los saltos de línea en la clave privada sean correctos
-    credentials["private_key"] = credentials["private_key"].replace("\\n", "\n")
-    
-    creds = ServiceAccountCredentials.from_json_keyfile_dict(credentials, scope)
-    client = gspread.authorize(creds)
-
-    sheet = client.open_by_key(sheet_id)
-    worksheet = sheet.worksheet(worksheet_name)
-    return worksheet.get_all_values()
-
-def process_sheet_data(all_data: list[list[str]]) -> tuple[pd.DataFrame, list[str]]:
-    """
-    Convierte los datos en crudo de Google Sheets en un DataFrame procesado.
-    """
-    if not all_data:
-        return pd.DataFrame(), []
-
-    headers = all_data[0]
-    data_rows = all_data[1:]
-    df = pd.DataFrame(data_rows, columns=headers)
-    df['_gsheet_row_index'] = df.index + 2
-
-    expected_columns = [
-        'ID_Pedido', 'Folio_Factura', 'Hora_Registro', 'Vendedor_Registro', 'Cliente',
-        'Tipo_Envio', 'Fecha_Entrega', 'Comentario', 'Notas', 'Modificacion_Surtido',
-        'Adjuntos', 'Adjuntos_Surtido', 'Estado', 'Estado_Pago', 'Fecha_Completado',
-        'Hora_Proceso', 'Turno', 'Surtidor'
-    ]
-
-    for col in expected_columns:
-        if col not in df.columns:
-            df[col] = ''
-
-    df['Fecha_Entrega'] = df['Fecha_Entrega'].apply(
-        lambda x: str(x) if pd.notna(x) and str(x).strip() != '' else ''
-    )
-
-    df['Hora_Registro'] = pd.to_datetime(df['Hora_Registro'], errors='coerce')
-    df['Fecha_Completado'] = pd.to_datetime(df['Fecha_Completado'], errors='coerce')
-    df['Hora_Proceso'] = pd.to_datetime(df['Hora_Proceso'], errors='coerce')
-
-    df['ID_Pedido'] = df['ID_Pedido'].astype(str).str.strip()
-    df['Tipo_Envio'] = df['Tipo_Envio'].astype(str).str.strip()
-    df['Turno'] = df['Turno'].astype(str).str.strip()
-    df['Estado'] = df['Estado'].astype(str).str.strip()
-
-    return df, headers
-
-
-# Cargar y procesar datos de Google Sheets
-raw_data_main = get_raw_sheet_data(GOOGLE_SHEET_ID, GOOGLE_SHEET_WORKSHEET_NAME, GSHEETS_CREDENTIALS)
-df_pedidos, headers_main = process_sheet_data(raw_data_main)
-
-# --- Funciones de S3 (desde app_a-d.py) ---
-def find_pedido_subfolder_prefix(s3_client_param, parent_prefix, folder_name):
-    if not s3_client_param:
-        return None
-    possible_prefixes = [
-        f"{parent_prefix}{folder_name}/",
-        f"{parent_prefix}{folder_name}",
-        f"adjuntos_pedidos/{folder_name}/",
-        f"adjuntos_pedidos/{folder_name}",
-        f"{folder_name}/",
-        folder_name
-    ]
-    for pedido_prefix in possible_prefixes:
-        try:
-            response = s3_client_param.list_objects_v2(
-                Bucket=S3_BUCKET_NAME,
-                Prefix=pedido_prefix,
-                MaxKeys=1
-            )
-            if 'Contents' in response and response['Contents']:
-                return pedido_prefix
-        except Exception:
-            continue
     try:
-        response = s3_client_param.list_objects_v2(
-            Bucket=S3_BUCKET_NAME,
-            MaxKeys=100
-        )
-        if 'Contents' in response:
-            for obj in response['Contents']:
-                if folder_name in obj['Key']:
-                    if '/' in obj['Key']:
-                        prefix_parts = obj['Key'].split('/')[:-1]
-                        return '/'.join(prefix_parts) + '/'
-    except Exception:
-        pass
-    return None
+        spreadsheet = g_spread_client.open_by_key(sheet_id)
+        worksheet = spreadsheet.worksheet(worksheet_name)
 
-def get_files_in_s3_prefix(s3_client_param, prefix):
-    if not s3_client_param or not prefix:
-        return []
-    try:
-        response = s3_client_param.list_objects_v2(
-            Bucket=S3_BUCKET_NAME,
-            Prefix=prefix,
-            MaxKeys=100
-        )
-        files = []
-        if 'Contents' in response:
-            for item in response['Contents']:
-                if not item['Key'].endswith('/'):
-                    file_name = item['Key'].split('/')[-1]
-                    if file_name:
-                        files.append({
-                            'title': file_name,
-                            'key': item['Key'],
-                            'size': item['Size'],
-                            'last_modified': item['LastModified']
-                        })
-        return files
+        data = worksheet.get_all_values()
+        if not data:
+            return pd.DataFrame()
+
+        headers = data[0]
+        df = pd.DataFrame(data[1:], columns=headers)
+
+        # Añadir el índice de fila de gsheets
+        df['gsheet_row_index'] = df.index + 2 # +2 porque los headers están en la fila 1 y el índice de pandas es 0-based
+
+        # Convertir columnas a tipos apropiados
+        numerical_cols = ['ID_Pedido'] # Añade aquí más columnas numéricas si es necesario
+        for col in numerical_cols:
+            if col in df.columns:
+                df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0).astype(int)
+
+        date_time_cols = ['Hora_Registro', 'Fecha_Entrega', 'Fecha_Completado']
+        for col in date_time_cols:
+            if col in df.columns:
+                df[col] = pd.to_datetime(df[col], errors='coerce')
+
+        return df
+    except gspread.exceptions.APIError as e:
+        st.error(f"❌ Error de API de Google Sheets al cargar datos: {e}")
+        st.info("Verifica los permisos de la cuenta de servicio en Google Sheets.")
+        st.stop()
     except Exception as e:
-        st.error(f"❌ Error al obtener archivos del prefijo S3 '{prefix}': {e}")
-        return []
+        st.error(f"❌ Error al cargar datos de Google Sheets: {e}")
+        st.stop()
 
-def get_s3_file_download_url(s3_client_param, object_key):
-    if not s3_client_param or not object_key:
-        return "#"
+# --- Funciones de S3 ---
+def get_s3_file_url(s3_object_key):
+    """Genera una URL pre-firmada para acceder a un objeto S3."""
+    if not s3_object_key:
+        return None
     try:
-        url = s3_client_param.generate_presigned_url(
+        # La URL pre-firmada expirará en 1 hora (3600 segundos)
+        url = s3_client.generate_presigned_url(
             'get_object',
-            Params={'Bucket': S3_BUCKET_NAME, 'Key': object_key},
-            ExpiresIn=7200
+            Params={'Bucket': S3_BUCKET_NAME, 'Key': s3_object_key},
+            ExpiresIn=3600
         )
         return url
     except Exception as e:
-        st.error(f"❌ Error al generar URL pre-firmada para '{object_key}': {e}")
-        return "#"
+        st.error(f"❌ Error al generar URL pre-firmada para {s3_object_key}: {e}")
+        return None
 
-# --- Helper Functions from app_almacen.py (adapted for GSheets data) ---
-def formatear_fecha_consistente(fecha_str):
-    """Convierte cualquier formato de fecha al formato dd/mm/yyyy"""
-    if pd.isna(fecha_str) or str(fecha_str).strip() == "Sin fecha" or str(fecha_str).strip() == "":
-        return "Sin fecha"
+# Función para cargar adjuntos
+def display_attachments(adjuntos_str, s3_client_instance):
+    if pd.isna(adjuntos_str) or not adjuntos_str.strip():
+        return "N/A"
     try:
-        # Intentar parsear como datetime si es posible, luego formatear
-        if isinstance(fecha_str, datetime):
-            return fecha_str.strftime('%d/%m/%Y')
-        # Intentar como fecha de Google Sheets (YYYY-MM-DD)
-        dt_obj = datetime.strptime(str(fecha_str).split(" ")[0], '%Y-%m-%d')
-        return dt_obj.strftime('%d/%m/%Y')
-    except ValueError:
-        try:
-            # Intentar otro formato común dd/mm/yyyy
-            dt_obj = datetime.strptime(str(fecha_str).split(" ")[0], '%d/%m/%Y')
-            return dt_obj.strftime('%d/%m/%Y')
-        except ValueError:
-            return str(fecha_str) # Retorna el original si no se puede parsear
-
-def get_attachments_for_pedido(id_pedido_str, s3_client_param):
-    """
-    Busca adjuntos en S3 para un ID de pedido dado.
-    """
-    if not id_pedido_str:
-        return []
-
-    # Se usará la lógica de find_pedido_subfolder_prefix para determinar si existe una carpeta.
-    # En app_a.py esta función no está directamente llamada, pero es la lógica detrás.
-    # Aquí simulamos su uso para obtener el prefijo correcto.
-    pedido_prefix = find_pedido_subfolder_prefix(s3_client_param, S3_ATTACHMENT_PREFIX, id_pedido_str)
-    
-    if pedido_prefix:
-        return get_files_in_s3_prefix(s3_client_param, pedido_prefix)
-    return []
-
-# --- Funciones de actualización a Google Sheets (ajustadas para _gsheet_row_index) ---
-def update_gsheet_cell(worksheet, headers, row_index, col_name, value):
-    """
-    Actualiza una celda específica en Google Sheets.
-    `row_index` es el índice de fila de gspread (base 1).
-    `col_name` es el nombre de la columna.
-    `headers` es la lista de encabezados obtenida previamente.
-    """
-    try:
-        if col_name not in headers:
-            st.error(f"❌ Error: La columna '{col_name}' no se encontró en Google Sheets para la actualización. Verifica los encabezados.")
-            return False
-        col_index = headers.index(col_name) + 1 # Convertir a índice base 1 de gspread
-        worksheet.update_cell(row_index, col_index, value)
-        return True
+        # Asumiendo que los adjuntos están separados por coma y espacio, como "file1.pdf, file2.jpg"
+        file_keys = [fk.strip() for fk in adjuntos_str.split(',') if fk.strip()]
+        links = []
+        for fk in file_keys:
+            # Asegurarse de que el key sea completo si está usando subcarpetas por ID de pedido
+            # Por ejemplo, si los adjuntos están en 'adjuntos/ID_PEDIDO/nombre_archivo.ext'
+            # y adjuntos_str solo contiene 'nombre_archivo.ext', se necesitaría reconstruir el key completo.
+            # Por simplicidad, asumiremos que adjuntos_str ya contiene el key completo de S3.
+            url = get_s3_file_url(fk)
+            if url:
+                file_name = fk.split('/')[-1] # Obtener solo el nombre del archivo
+                links.append(f"[{file_name}]({url})")
+            else:
+                links.append(f"❌ {fk} (Error URL)")
+        return " | ".join(links)
     except Exception as e:
-        st.error(f"❌ Error al actualizar la celda ({row_index}, {col_name}) en Google Sheets: {e}")
-        return False
+        return f"Error al procesar adjuntos: {e}"
 
-def batch_update_gsheet_cells(worksheet, updates_list):
-    """
-    Realiza múltiples actualizaciones de celdas en una sola solicitud por lotes a Google Sheets
-    utilizando worksheet.update_cells().
-    updates_list: Lista de diccionarios, cada uno con las claves 'range' y 'values'.
-                  Ej: [{'range': 'A1', 'values': [['nuevo_valor']]}, ...]
-    """
-    try:
-        if not updates_list:
-            return False
 
-        cell_list = []
-        for update_item in updates_list:
-            range_str = update_item['range']
-            value = update_item['values'][0][0] # Asumiendo un único valor como [['valor']]
+# --- Lógica principal de la aplicación ---
 
-            # Convertir la notación A1 (ej. 'A1') a índice de fila y columna (base 1)
-            row, col = gspread.utils.a1_to_rowcol(range_str)
-            # Crear un objeto Cell y añadirlo a la lista
-            cell_list.append(gspread.Cell(row=row, col=col, value=value))
+# Filtrar por vendedor, estado y rango de fechas
+st.sidebar.header("Filtros")
 
-        if cell_list:
-            worksheet.update_cells(cell_list) # Este es el método correcto para batch update en el worksheet
-            return True
-        return False
-    except Exception as e:
-        st.error(f"❌ Error al realizar la actualización por lotes en Google Sheets: {e}")
-        return False
+# Cargar todos los datos al inicio para obtener listas de opciones
+df_all_data = load_data_from_gsheets(GOOGLE_SHEET_ID, GOOGLE_SHEET_WORKSHEET_NAME)
 
-# --- Filtros y visualización (similar a app_a-d.py) ---
-st.markdown("### Filtros")
-col1, col2, col3, col4, col5 = st.columns([1, 1, 1, 1, 1])
+# Convertir 'Hora_Registro' a datetime para filtrar por fecha
+if 'Hora_Registro' in df_all_data.columns:
+    df_all_data['Hora_Registro'] = pd.to_datetime(df_all_data['Hora_Registro'], errors='coerce')
 
-estado_filtro = col1.selectbox(
-    "Filtrar por Estado",
-    options=["Todos", "🟡 Pendiente", "🔵 En Proceso", "🔴 Demorado", "🟢 Completado", "⚫ Cancelado"],
-    key="estado_filtro"
-)
-tipo_envio_filtro = col2.selectbox(
-    "Filtrar por Tipo de Envío",
-    options=["Todos", "📍 Pedido Local", "🚚 Pedido Foráneo", "📦 Paquetería"],
-    key="tipo_envio_filtro"
+# Convertir 'Fecha_Entrega' a datetime
+if 'Fecha_Entrega' in df_all_data.columns:
+    df_all_data['Fecha_Entrega'] = pd.to_datetime(df_all_data['Fecha_Entrega'], errors='coerce')
+
+# Opciones de filtro para Vendedor (incluir todos)
+all_vendedores = ['Todos'] + sorted(df_all_data['Vendedor_Registro'].dropna().unique().tolist())
+selected_vendedor = st.sidebar.selectbox("Filtrar por Vendedor:", all_vendedores)
+
+# Opciones de filtro para Estado (incluir todos)
+all_estados = ['Todos'] + sorted(df_all_data['Estado'].dropna().unique().tolist())
+selected_estado = st.sidebar.selectbox("Filtrar por Estado:", all_estados, index=all_estados.index('Activo') if 'Activo' in all_estados else 0)
+
+# Filtro por tipo de envío
+all_tipos_envio = ['Todos'] + sorted(df_all_data['Tipo_Envio'].dropna().unique().tolist())
+selected_tipo_envio = st.sidebar.selectbox("Filtrar por Tipo de Envío:", all_tipos_envio)
+
+# Filtro de fecha de registro
+today = date.today()
+default_start_date = today - timedelta(days=7) # Últimos 7 días por defecto
+date_range = st.sidebar.date_input(
+    "Rango de Fechas de Registro:",
+    value=(default_start_date, today),
+    max_value=today,
+    format="DD/MM/YYYY"
 )
 
-# Filtro por rango de fechas (Fecha_Entrega)
-col_date_start, col_date_end = st.columns(2)
-start_date = col_date_start.date_input("Fecha de Entrega (Desde)", value=None, key="start_date_filter")
-end_date = col_date_end.date_input("Fecha de Entrega (Hasta)", value=None, key="end_date_filter")
+start_date = date_range[0]
+end_date = date_range[1] if len(date_range) > 1 else date_range[0]
 
-# Asegurar que las fechas sean objetos datetime.date para comparación
-if start_date:
-    start_date = datetime.combine(start_date, datetime.min.time()).date()
-if end_date:
-    end_date = datetime.combine(end_date, datetime.max.time()).date() # Incluir todo el día final
+# --- Lógica de filtrado ---
+df_filtered = df_all_data.copy()
 
-df_filtrado = df_pedidos.copy()
+if selected_vendedor != 'Todos':
+    df_filtered = df_filtered[df_filtered['Vendedor_Registro'] == selected_vendedor]
 
-if estado_filtro != "Todos":
-    df_filtrado = df_filtrado[df_filtrado["Estado"] == estado_filtro]
+if selected_estado != 'Todos':
+    df_filtered = df_filtered[df_filtered['Estado'] == selected_estado]
 
-if tipo_envio_filtro != "Todos":
-    df_filtrado = df_filtrado[df_filtrado["Tipo_Envio"] == tipo_envio_filtro]
+if selected_tipo_envio != 'Todos':
+    df_filtered = df_filtered[df_filtered['Tipo_Envio'] == selected_tipo_envio]
 
-if start_date:
-    df_filtrado['Fecha_Entrega_dt'] = pd.to_datetime(df_filtrado['Fecha_Entrega'], errors='coerce').dt.date
-    df_filtrado = df_filtrado[df_filtrado['Fecha_Entrega_dt'] >= start_date]
+# Filtrar por rango de fechas de registro
+if 'Hora_Registro' in df_filtered.columns:
+    df_filtered = df_filtered[
+        (df_filtered['Hora_Registro'].dt.date >= start_date) &
+        (df_filtered['Hora_Registro'].dt.date <= end_date)
+    ]
 
-if end_date:
-    df_filtrado['Fecha_Entrega_dt'] = pd.to_datetime(df_filtrado['Fecha_Entrega'], errors='coerce').dt.date
-    df_filtrado = df_filtrado[df_filtrado['Fecha_Entrega_dt'] <= end_date]
+# Ordenar los datos: Activos primero, luego por Hora_Registro más reciente
+df_activos = df_filtered[df_filtered['Estado'] == 'Activo'].sort_values(by='Hora_Registro', ascending=False)
+df_completados = df_filtered[df_filtered['Estado'] == 'Completado'].sort_values(by='Hora_Registro', ascending=False)
 
-# Eliminar columna temporal de fecha
-if 'Fecha_Entrega_dt' in df_filtrado.columns:
-    df_filtrado = df_filtrado.drop(columns=['Fecha_Entrega_dt'])
+# Unir ambos DataFrames
+df_display = pd.concat([df_activos, df_completados])
 
-st.markdown("---")
+# --- Visualización de Datos ---
+st.header("Pedidos Filtrados")
 
-# --- Display Data ---
-if not df_filtrado.empty:
-    # Ordenar por Hora_Registro más reciente primero
-    df_filtrado['Hora_Registro_dt'] = pd.to_datetime(df_filtrado['Hora_Registro'], errors='coerce')
-    df_filtrado = df_filtrado.sort_values(by="Hora_Registro_dt", ascending=False).reset_index(drop=True)
-    df_filtrado = df_filtrado.drop(columns=['Hora_Registro_dt'])
+if not df_display.empty:
+    st.info(f"Se encontraron {len(df_display)} pedidos con los filtros aplicados.")
 
-    st.subheader("📊 Pedidos Filtrados")
+    if 'ID_Pedido' in df_display.columns:
+        df_display['ID_Pedido'] = df_display['ID_Pedido'].astype(str)
+
+    if 'Adjuntos' in df_display.columns:
+        df_display['Adjuntos_Enlaces'] = df_display['Adjuntos'].apply(
+            lambda x: display_attachments(x, s3_client)
+        )
+
+    # Convertir a datetime antes de formatear
+    if 'Hora_Registro' in df_display.columns:
+        df_display['Hora_Registro'] = pd.to_datetime(df_display['Hora_Registro'], errors='coerce')
+    if 'Fecha_Completado' in df_display.columns:
+        df_display['Fecha_Completado'] = pd.to_datetime(df_display['Fecha_Completado'], errors='coerce')
+
+    # Columnas a mostrar y sus nuevos nombres
+    display_cols_mapping = {
+        'ID_Pedido': 'ID_Pedido',
+        'Cliente': 'Cliente',
+        'Estado': 'Estado',
+        'Vendedor_Registro': 'Vendedor',
+        'Tipo_Envio': 'Envío',
+        'Fecha_Entrega': 'Entrega',
+        'Hora_Registro': 'Registro',
+        'Notas': 'Notas',
+        'Adjuntos_Enlaces': 'Adjuntos'
+    }
+
+    # Añadir 'Fecha_Completado' si existe en el DataFrame
+    if 'Fecha_Completado' in df_display.columns:
+        display_cols_mapping['Fecha_Completado'] = 'Completado'
+
+    # Filtrar las columnas que no existen en el DataFrame actual
+    cols_to_use = {original: new for original, new in display_cols_mapping.items() if original in df_display.columns}
+    df_display_renamed = df_display[list(cols_to_use.keys())].rename(columns=cols_to_use)
+
+    # Formatear la columna de registro a solo hora si es del día actual, sino fecha y hora
+    if 'Registro' in df_display_renamed.columns:
+        df_display_renamed['Registro'] = df_display_renamed['Registro'].apply(
+            lambda x: x.strftime("%H:%M") if pd.notna(x) and x.date() == date.today() else x.strftime("%d/%m %H:%M") if pd.notna(x) else ""
+        )
+    # Formatear la columna de completado a solo fecha
+    if 'Completado' in df_display_renamed.columns:
+        df_display_renamed['Completado'] = df_display_renamed['Completado'].apply(
+            lambda x: x.strftime("%d/%m/%Y") if pd.notna(x) else ""
+        )
+
     st.dataframe(
-        df_filtrado[[
-            'ID_Pedido', 'Folio_Factura', 'Cliente', 'Estado', 'Vendedor_Registro',
-            'Tipo_Envio', 'Fecha_Entrega', 'Fecha_Completado', 'Notas', 'Modificacion_Surtido',
-            'Adjuntos', 'Adjuntos_Surtido', 'Turno'
-        ]],
+        df_display_renamed.reset_index(drop=True),
         use_container_width=True,
+        column_config={
+            "Adjuntos": st.column_config.Column(
+                "Adjuntos",
+                help="Enlaces a los archivos adjuntos en S3",
+                width="large"
+            ),
+            **{col: st.column_config.Column(width="small") for col in df_display_renamed.columns if col != "Adjuntos"}
+        },
         hide_index=True
     )
-
-    st.markdown("---")
-    st.subheader("🔍 Detalles del Pedido y Acciones")
-
-    # Selección de pedido para ver detalles
-    pedido_ids = df_filtrado['ID_Pedido'].tolist()
-    selected_pedido_id = st.selectbox("Seleccionar Pedido para Detalles/Acciones", [""] + pedido_ids, key="select_pedido_detail")
-
-    if selected_pedido_id:
-        selected_pedido = df_filtrado[df_filtrado['ID_Pedido'] == selected_pedido_id].iloc[0]
-        gsheet_row_index = selected_pedido.get('_gsheet_row_index')
-
-        if gsheet_row_index is None:
-            st.error(f"❌ Error interno: No se pudo obtener el índice de fila de Google Sheets para el pedido '{selected_pedido_id}'.")
-        else:
-            with st.expander(f"Detalles del Pedido: {selected_pedido_id} - {selected_pedido['Cliente']}"):
-                col_info_1, col_info_2 = st.columns(2)
-                col_info_1.write(f"**ID Pedido:** {selected_pedido['ID_Pedido']}")
-                col_info_1.write(f"**Cliente:** {selected_pedido['Cliente']}")
-                col_info_1.write(f"**Estado:** {selected_pedido['Estado']}")
-                col_info_1.write(f"**Tipo Envío:** {selected_pedido['Tipo_Envio']}")
-                col_info_2.write(f"**Vendedor Registro:** {selected_pedido['Vendedor_Registro']}")
-                col_info_2.write(f"**Fecha Entrega:** {formatear_fecha_consistente(selected_pedido['Fecha_Entrega'])}")
-                col_info_2.write(f"**Fecha Completado:** {formatear_fecha_consistente(selected_pedido['Fecha_Completado'])}")
-                col_info_2.write(f"**Turno:** {selected_pedido['Turno']}")
-
-                st.markdown("---")
-                st.write("**Notas:**")
-                st.info(selected_pedido['Notas'] if selected_pedido['Notas'] else "Sin notas adicionales.")
-                
-                if selected_pedido.get("Modificacion_Surtido"):
-                    st.warning(f"**Modificación Surtido:** {selected_pedido['Modificacion_Surtido']}")
-
-                st.markdown("---")
-                st.subheader("Adjuntos del Pedido")
-                adjuntos = get_attachments_for_pedido(selected_pedido_id, s3_client)
-                if adjuntos:
-                    for i, file_info in enumerate(adjuntos):
-                        file_url = get_s3_file_download_url(s3_client, file_info['key'])
-                        st.markdown(f"- [{file_info['title']}]({file_url})")
-                else:
-                    st.info("No hay adjuntos para este pedido.")
-
-                st.markdown("---")
-                st.subheader("Acciones del Pedido")
-
-                # Actualizar estado a "En Proceso"
-                if selected_pedido['Estado'] == "🟡 Pendiente":
-                    if st.button("🔵 Marcar como 'En Proceso'", key=f"btn_in_process_{selected_pedido_id}"):
-                        if update_gsheet_cell(worksheet_main, headers_main, gsheet_row_index, "Estado", "🔵 En Proceso"):
-                            update_gsheet_cell(worksheet_main, headers_main, gsheet_row_index, "Hora_Proceso", datetime.now().strftime('%Y-%m-%d %H:%M:%S'))
-                            st.success(f"Pedido {selected_pedido_id} marcado como 'En Proceso'.")
-                            st.rerun()
-                        else:
-                            st.error("❌ Falló la actualización a 'En Proceso'.")
-
-                # Actualizar estado a "Completado"
-                if selected_pedido['Estado'] in ["🟡 Pendiente", "🔵 En Proceso", "🔴 Demorado"]:
-                    if st.button("🟢 Marcar como 'Completado'", key=f"btn_completed_{selected_pedido_id}"):
-                        if update_gsheet_cell(worksheet_main, headers_main, gsheet_row_index, "Estado", "🟢 Completado"):
-                            update_gsheet_cell(worksheet_main, headers_main, gsheet_row_index, "Fecha_Completado", datetime.now().strftime('%Y-%m-%d'))
-                            st.success(f"Pedido {selected_pedido_id} marcado como 'Completado'.")
-                            st.rerun()
-                        else:
-                            st.error("❌ Falló la actualización a 'Completado'.")
-                
-                # Actualizar estado a "Cancelado"
-                if selected_pedido['Estado'] != "⚫ Cancelado":
-                    if st.button("⚫ Marcar como 'Cancelado'", key=f"btn_canceled_{selected_pedido_id}"):
-                        if st.warning("¿Estás seguro de que quieres cancelar este pedido?"):
-                            if st.button("Confirmar Cancelación", key=f"confirm_cancel_{selected_pedido_id}"):
-                                if update_gsheet_cell(worksheet_main, headers_main, gsheet_row_index, "Estado", "⚫ Cancelado"):
-                                    st.success(f"Pedido {selected_pedido_id} marcado como 'Cancelado'.")
-                                    st.rerun()
-                                else:
-                                    st.error("❌ Falló la actualización a 'Cancelado'.")
-
-                # Campo para actualizar el surtidor
-                surtidor_current = selected_pedido.get("Surtidor", "")
-                new_surtidor = st.text_input(
-                    "Actualizar Surtidor", 
-                    value=surtidor_current, 
-                    key=f"surtidor_input_{selected_pedido_id}"
-                )
-                if st.button("Guardar Surtidor", key=f"save_surtidor_{selected_pedido_id}"):
-                    if new_surtidor != surtidor_current:
-                        if update_gsheet_cell(worksheet_main, headers_main, gsheet_row_index, "Surtidor", new_surtidor):
-                            st.success(f"Surtidor actualizado a '{new_surtidor}' para el pedido {selected_pedido_id}.")
-                            st.rerun()
-                        else:
-                            st.error("❌ Falló la actualización del surtidor.")
-                    else:
-                        st.info("No hay cambios en el surtidor para guardar.")
-
 else:
     st.info("No hay pedidos para mostrar según los criterios de filtro.")
 
 if __name__ == '__main__':
-    # Esto asegura que el código principal de Streamlit se ejecute.
-    # El resto del script define funciones y lógica que Streamlit usa directamente.
+    # No hay código adicional aquí, la aplicación de Streamlit se ejecuta directamente.
     pass
