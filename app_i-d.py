@@ -153,10 +153,11 @@ def load_data_from_gsheets(sheet_id, worksheet_name):
             if col in df.columns:
                 df[col] = pd.to_datetime(df[col], errors='coerce')
         
-        # Asegurarse de que 'Surtidor' esté presente y no sea None si 'Vendedor_Registro' es usado como 'Surtidor' en la vista
-        # Si 'Surtidor' ya es una columna, úsala directamente. Si no, y 'Vendedor_Registro' existe, úsala como fallback.
-        if 'Surtidor' not in df.columns and 'Vendedor_Registro' in df.columns:
-            df['Surtidor'] = df['Vendedor_Registro'] # Temporal para la lógica de abajo, será renombrada para display
+        # Asegurarse de que la columna 'Turno' se maneje correctamente como string y nulos
+        if 'Turno' in df.columns:
+            df['Turno'] = df['Turno'].astype(str).replace({'nan': '', '': None}).fillna('')
+        else:
+            df['Turno'] = '' # Si no existe, crearla vacía
 
         return df
     except gspread.exceptions.APIError as e:
@@ -200,17 +201,12 @@ def display_attachments(adjuntos_str, s3_client_instance):
     except Exception as e:
         return f"Error al procesar adjuntos: {e}"
 
-# Helper function to encapsulate dataframe display logic, mirroring app_almacen.py's column display
+# Helper function to encapsulate dataframe display logic
 def display_dataframe_with_formatting(df_to_display):
-    # Columnas a mostrar, exactamente como en app_almacen.py: Cliente, Hora, Estado, Surtidor
-    # y si tiene Tipo_Envio y es '?', se añade Tipo_Envio
-    
-    # Asegurarse de que todas las columnas existan antes de seleccionarlas
-    # Vendedor_Registro es lo que debe ser 'Surtidor' en la vista
+    # Columnas a mostrar: Cliente, Hora_Registro (como Fecha), Estado, Vendedor_Registro (como Surtidor)
     columnas_base = ["Cliente", "Hora_Registro", "Estado"]
     
-    # Si 'Surtidor' existe en el DF (directamente de GSheets), la usamos.
-    # Si no, pero existe 'Vendedor_Registro', la usamos como 'Surtidor' para la visualización.
+    # Decidir si usar 'Surtidor' o 'Vendedor_Registro'
     if 'Surtidor' in df_to_display.columns:
         columnas_base.append("Surtidor")
     elif 'Vendedor_Registro' in df_to_display.columns:
@@ -224,12 +220,11 @@ def display_dataframe_with_formatting(df_to_display):
 
     df_display_final = df_to_display[existing_columns].copy()
 
-    # Renombrar columnas para la visualización: Hora_Registro a Fecha, Vendedor_Registro a Surtidor
     rename_map = {}
     if "Hora_Registro" in df_display_final.columns:
         rename_map["Hora_Registro"] = "Fecha"
     if "Vendedor_Registro" in df_display_final.columns and "Surtidor" not in df_display_final.columns:
-        rename_map["Vendedor_Registro"] = "Surtidor" # Renombrar si Vendedor_Registro es la fuente de Surtidor
+        rename_map["Vendedor_Registro"] = "Surtidor"
 
     df_display_final = df_display_final.rename(columns=rename_map)
 
@@ -245,7 +240,6 @@ def display_dataframe_with_formatting(df_to_display):
         column_config={col: st.column_config.Column(width="small") for col in df_display_final.columns},
         hide_index=True
     )
-
 
 # --- Lógica principal de la aplicación ---
 
@@ -268,63 +262,57 @@ if 'Adjuntos' in df_all_data.columns:
         lambda x: display_attachments(x, s3_client)
     )
 
-# --- Visualización de Datos (según app_almacen.py) ---
-st.header("Todos los Pedidos por Tipo de Envío y Turno")
+# --- Visualización de Datos por columna 'Turno' ---
+st.header("Todos los Pedidos por Turno o Tipo (Foráneos)")
 
 if not df_all_data.empty:
     st.info(f"Mostrando todos los {len(df_all_data)} pedidos.")
 
-    # Reorganizar los datos en grupos lógicos para visualización, replicando app_almacen.py
     grupos_a_mostrar = []
-    handled_order_ids_for_grouping = set() # Track IDs that have been explicitly grouped
-
-    # Pedidos Locales (Mañana, Tarde)
-    df_local = df_all_data[df_all_data['Tipo_Envio'] == 'Local'].copy()
     
-    df_manana = df_local[df_local['Turno'] == '☀️ Local Mañana'].copy()
-    if not df_manana.empty:
-        grupos_a_mostrar.append((f"☀️ Local Mañana ({len(df_manana)})", df_manana))
-        handled_order_ids_for_grouping.update(df_manana['ID_Pedido'].tolist())
-
-    df_tarde = df_local[df_local['Turno'] == '🌙 Local Tarde'].copy()
-    if not df_tarde.empty:
-        grupos_a_mostrar.append((f"🌙 Local Tarde ({len(df_tarde)})", df_tarde))
-        handled_order_ids_for_grouping.update(df_tarde['ID_Pedido'].tolist())
+    # 1. Pedidos Foráneos: Si 'Turno' está vacío (None o string vacío después de limpieza)
+    df_foraneos = df_all_data[df_all_data['Turno'] == ''].copy()
+    if not df_foraneos.empty:
+        grupos_a_mostrar.append((f"🌍 Pedidos Foráneos ({len(df_foraneos)})", df_foraneos))
     
-    # Otros Tipo_Envio específicos en el orden deseado
-    ordered_other_types = ['Foráneos', 'Pasa a Bodega', 'Saltillo']
+    # 2. Otros grupos basados en valores únicos de la columna 'Turno' (excluyendo vacíos)
+    # Obtener valores únicos y ordenarlos para una visualización consistente
+    unique_turns = [t for t in df_all_data['Turno'].unique() if t != '']
+    
+    # Definir un orden preferente para las categorías conocidas
+    preferred_order = [
+        '☀️ Local Mañana',
+        '🌙 Local Tarde',
+        '📦 Pasa a Bodega',
+        '🌵 Saltillo'
+    ]
 
-    for tipo_envio_key in ordered_other_types:
-        df_grupo = df_all_data[(df_all_data['Tipo_Envio'] == tipo_envio_key) & (~df_all_data['ID_Pedido'].isin(handled_order_ids_for_grouping))].copy()
+    # Ordenar los turnos únicos según el orden preferente, los demás alfabéticamente
+    sorted_unique_turns = []
+    for p_t in preferred_order:
+        if p_t in unique_turns:
+            sorted_unique_turns.append(p_t)
+            unique_turns.remove(p_t)
+    sorted_unique_turns.extend(sorted(unique_turns)) # Añadir los restantes alfabéticamente
+
+    for turno_val in sorted_unique_turns:
+        df_grupo = df_all_data[df_all_data['Turno'] == turno_val].copy()
         if not df_grupo.empty:
-            if tipo_envio_key == 'Pasa a Bodega':
-                grupos_a_mostrar.append((f"📦 Pasa a Bodega ({len(df_grupo)})", df_grupo))
-            elif tipo_envio_key == 'Saltillo':
-                grupos_a_mostrar.append((f"🌵 Saltillo ({len(df_grupo)})", df_grupo))
-            elif tipo_envio_key == 'Foráneos':
-                grupos_a_mostrar.append((f"🌍 Pedidos Foráneos ({len(df_grupo)})", df_grupo))
-            handled_order_ids_for_grouping.update(df_grupo['ID_Pedido'].tolist())
+            # Asignar emoji según el valor del turno
+            emoji = ""
+            if "Local Mañana" in turno_val:
+                emoji = "☀️"
+            elif "Local Tarde" in turno_val:
+                emoji = "🌙"
+            elif "Pasa a Bodega" in turno_val:
+                emoji = "📦"
+            elif "Saltillo" in turno_val:
+                emoji = "🌵"
+            else:
+                emoji = "❓" # Para cualquier otro valor de Turno
+            
+            grupos_a_mostrar.append((f"{emoji} {turno_val} ({len(df_grupo)})", df_grupo))
 
-
-    # Manejar otros tipos de envío no clasificados explícitamente arriba
-    # Esto busca cualquier Tipo_Envio que tenga pedidos no manejados por los grupos anteriores.
-    df_remaining_general = df_all_data[~df_all_data['ID_Pedido'].isin(handled_order_ids_for_grouping)].copy()
-
-    if not df_remaining_general.empty:
-        unique_remaining_types = df_remaining_general['Tipo_Envio'].dropna().unique()
-        for tipo_envio in sorted(unique_remaining_types):
-            # Exclude 'Local' here as its specific turns should be handled
-            if tipo_envio == 'Local':
-                df_local_remaining = df_remaining_general[df_remaining_general['Tipo_Envio'] == 'Local'].copy()
-                unique_local_remaining_turns = df_local_remaining['Turno'].dropna().unique()
-                for turno in sorted(unique_local_remaining_turns):
-                    df_grupo_turno = df_local_remaining[df_local_remaining['Turno'] == turno].copy()
-                    if not df_grupo_turno.empty:
-                        grupos_a_mostrar.append((f"❓ Local ({turno}) ({len(df_grupo_turno)})", df_grupo_turno))
-            else: # Other general types not explicitly covered
-                df_grupo = df_remaining_general[df_remaining_general['Tipo_Envio'] == tipo_envio].copy()
-                if not df_grupo.empty:
-                    grupos_a_mostrar.append((f"❓ Otros ({tipo_envio}) ({len(df_grupo)})", df_grupo))
 
     if grupos_a_mostrar:
         # Mostrar columnas dinámicamente, una al lado de la otra
@@ -332,7 +320,7 @@ if not df_all_data.empty:
         for i, (titulo, df_grupo) in enumerate(grupos_a_mostrar):
             with cols[i]:
                 st.markdown(f"#### {titulo}")
-                # Ordenar por Hora_Registro si existe la columna
+                # Ordenar por Hora_Registro en orden descendente
                 if 'Hora_Registro' in df_grupo.columns:
                     df_grupo = df_grupo.sort_values(by='Hora_Registro', ascending=False).reset_index(drop=True)
                 display_dataframe_with_formatting(df_grupo)
