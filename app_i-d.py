@@ -222,138 +222,103 @@ def display_attachments(adjuntos_str, s3_client_instance):
 
 # --- Lógica principal de la aplicación ---
 
-# Filtrar por vendedor, estado y rango de fechas
-st.sidebar.header("Filtros")
-
-# Cargar todos los datos al inicio para obtener listas de opciones
+# Cargar todos los datos
 df_all_data = load_data_from_gsheets(GOOGLE_SHEET_ID, GOOGLE_SHEET_WORKSHEET_NAME)
 
-# Convertir 'Hora_Registro' a datetime para filtrar por fecha
+# Convertir 'Hora_Registro' y 'Fecha_Entrega' a datetime
 if 'Hora_Registro' in df_all_data.columns:
     df_all_data['Hora_Registro'] = pd.to_datetime(df_all_data['Hora_Registro'], errors='coerce')
-
-# Convertir 'Fecha_Entrega' a datetime
 if 'Fecha_Entrega' in df_all_data.columns:
     df_all_data['Fecha_Entrega'] = pd.to_datetime(df_all_data['Fecha_Entrega'], errors='coerce')
 
-# Opciones de filtro para Vendedor (incluir todos)
-all_vendedores = ['Todos'] + sorted(df_all_data['Vendedor_Registro'].dropna().unique().tolist())
-selected_vendedor = st.sidebar.selectbox("Filtrar por Vendedor:", all_vendedores)
-
-# Opciones de filtro para Estado (incluir todos)
-all_estados = ['Todos'] + sorted(df_all_data['Estado'].dropna().unique().tolist())
-selected_estado = st.sidebar.selectbox("Filtrar por Estado:", all_estados, index=all_estados.index('Activo') if 'Activo' in all_estados else 0)
-
-# Filtro por tipo de envío
-all_tipos_envio = ['Todos'] + sorted(df_all_data['Tipo_Envio'].dropna().unique().tolist())
-selected_tipo_envio = st.sidebar.selectbox("Filtrar por Tipo de Envío:", all_tipos_envio)
-
-# Filtro de fecha de registro
-today = date.today()
-default_start_date = today - timedelta(days=7) # Últimos 7 días por defecto
-date_range = st.sidebar.date_input(
-    "Rango de Fechas de Registro:",
-    value=(default_start_date, today),
-    max_value=today,
-    format="DD/MM/YYYY"
-)
-
-start_date = date_range[0]
-end_date = date_range[1] if len(date_range) > 1 else date_range[0]
-
-# --- Lógica de filtrado ---
-df_filtered = df_all_data.copy()
-
-if selected_vendedor != 'Todos':
-    df_filtered = df_filtered[df_filtered['Vendedor_Registro'] == selected_vendedor]
-
-if selected_estado != 'Todos':
-    df_filtered = df_filtered[df_filtered['Estado'] == selected_estado]
-
-if selected_tipo_envio != 'Todos':
-    df_filtered = df_filtered[df_filtered['Tipo_Envio'] == selected_tipo_envio]
-
-# Filtrar por rango de fechas de registro
-if 'Hora_Registro' in df_filtered.columns:
-    df_filtered = df_filtered[
-        (df_filtered['Hora_Registro'].dt.date >= start_date) &
-        (df_filtered['Hora_Registro'].dt.date <= end_date)
-    ]
-
-# Ordenar los datos: Activos primero, luego por Hora_Registro más reciente
-df_activos = df_filtered[df_filtered['Estado'] == 'Activo'].sort_values(by='Hora_Registro', ascending=False)
-df_completados = df_filtered[df_filtered['Estado'] == 'Completado'].sort_values(by='Hora_Registro', ascending=False)
-
-# Unir ambos DataFrames
-df_display = pd.concat([df_activos, df_completados])
 
 # --- Visualización de Datos ---
-st.header("Pedidos Filtrados")
+st.header("Todos los Pedidos por Tipo de Envío")
 
-if not df_display.empty:
-    st.info(f"Se encontraron {len(df_display)} pedidos con los filtros aplicados.")
+if not df_all_data.empty:
+    st.info(f"Mostrando todos los {len(df_all_data)} pedidos.")
 
-    if 'ID_Pedido' in df_display.columns:
-        df_display['ID_Pedido'] = df_display['ID_Pedido'].astype(str)
+    # Convertir 'ID_Pedido' a string
+    if 'ID_Pedido' in df_all_data.columns:
+        df_all_data['ID_Pedido'] = df_all_data['ID_Pedido'].astype(str)
 
-    if 'Adjuntos' in df_display.columns:
-        df_display['Adjuntos_Enlaces'] = df_display['Adjuntos'].apply(
+    # Procesar adjuntos para crear enlaces
+    if 'Adjuntos' in df_all_data.columns:
+        df_all_data['Adjuntos_Enlaces'] = df_all_data['Adjuntos'].apply(
             lambda x: display_attachments(x, s3_client)
         )
 
-    # Convertir a datetime antes de formatear
-    if 'Hora_Registro' in df_display.columns:
-        df_display['Hora_Registro'] = pd.to_datetime(df_display['Hora_Registro'], errors='coerce')
-    if 'Fecha_Completado' in df_display.columns:
-        df_display['Fecha_Completado'] = pd.to_datetime(df_display['Fecha_Completado'], errors='coerce')
+    # Convertir a datetime antes de formatear para todas las columnas de tiempo
+    if 'Hora_Registro' in df_all_data.columns:
+        df_all_data['Hora_Registro'] = pd.to_datetime(df_all_data['Hora_Registro'], errors='coerce')
+    if 'Fecha_Completado' in df_all_data.columns:
+        df_all_data['Fecha_Completado'] = pd.to_datetime(df_all_data['Fecha_Completado'], errors='coerce')
 
-    # Columnas a mostrar y sus nuevos nombres
-    display_cols_mapping = {
-        'ID_Pedido': 'ID_Pedido',
-        'Cliente': 'Cliente',
-        'Estado': 'Estado',
-        'Vendedor_Registro': 'Vendedor',
-        'Tipo_Envio': 'Envío',
-        'Fecha_Entrega': 'Entrega',
-        'Hora_Registro': 'Registro',
-        'Notas': 'Notas',
-        'Adjuntos_Enlaces': 'Adjuntos'
-    }
+    # Obtener tipos de envío únicos y ordenarlos para una visualización consistente
+    unique_tipos_envio = sorted(df_all_data['Tipo_Envio'].dropna().unique().tolist())
 
-    # Añadir 'Fecha_Completado' si existe en el DataFrame
-    if 'Fecha_Completado' in df_display.columns:
-        display_cols_mapping['Fecha_Completado'] = 'Completado'
+    if not unique_tipos_envio:
+        st.warning("No se encontraron tipos de envío definidos en los pedidos.")
+    else:
+        for tipo_envio in unique_tipos_envio:
+            st.subheader(f"🚚 Pedidos: {tipo_envio}")
 
-    # Filtrar las columnas que no existen en el DataFrame actual
-    cols_to_use = {original: new for original, new in display_cols_mapping.items() if original in df_display.columns}
-    df_display_renamed = df_display[list(cols_to_use.keys())].rename(columns=cols_to_use)
+            df_current_tipo = df_all_data[df_all_data['Tipo_Envio'] == tipo_envio].copy()
 
-    # Formatear la columna de registro a solo hora si es del día actual, sino fecha y hora
-    if 'Registro' in df_display_renamed.columns:
-        df_display_renamed['Registro'] = df_display_renamed['Registro'].apply(
-            lambda x: x.strftime("%H:%M") if pd.notna(x) and x.date() == date.today() else x.strftime("%d/%m %H:%M") if pd.notna(x) else ""
-        )
-    # Formatear la columna de completado a solo fecha
-    if 'Completado' in df_display_renamed.columns:
-        df_display_renamed['Completado'] = df_display_renamed['Completado'].apply(
-            lambda x: x.strftime("%d/%m/%Y") if pd.notna(x) else ""
-        )
+            if not df_current_tipo.empty:
+                # Ordenar por Hora_Registro más reciente
+                if 'Hora_Registro' in df_current_tipo.columns:
+                    df_current_tipo = df_current_tipo.sort_values(by='Hora_Registro', ascending=False).reset_index(drop=True)
 
-    st.dataframe(
-        df_display_renamed.reset_index(drop=True),
-        use_container_width=True,
-        column_config={
-            "Adjuntos": st.column_config.Column(
-                "Adjuntos",
-                help="Enlaces a los archivos adjuntos en S3",
-                width="large"
-            ),
-            **{col: st.column_config.Column(width="small") for col in df_display_renamed.columns if col != "Adjuntos"}
-        },
-        hide_index=True
-    )
+                # Columnas a mostrar y sus nuevos nombres
+                display_cols_mapping = {
+                    'ID_Pedido': 'ID_Pedido',
+                    'Cliente': 'Cliente',
+                    'Estado': 'Estado',
+                    'Vendedor_Registro': 'Vendedor',
+                    'Tipo_Envio': 'Envío',
+                    'Fecha_Entrega': 'Entrega',
+                    'Hora_Registro': 'Registro',
+                    'Notas': 'Notas',
+                    'Adjuntos_Enlaces': 'Adjuntos'
+                }
+
+                # Añadir 'Fecha_Completado' si existe en el DataFrame específico del tipo de envío
+                if 'Fecha_Completado' in df_current_tipo.columns:
+                    display_cols_mapping['Fecha_Completado'] = 'Completado'
+
+                # Filtrar las columnas que no existen en el DataFrame actual antes de renombrar
+                cols_to_use = {original: new for original, new in display_cols_mapping.items() if original in df_current_tipo.columns}
+                df_display_final = df_current_tipo[list(cols_to_use.keys())].rename(columns=cols_to_use)
+
+                # Formatear la columna de registro a solo hora si es del día actual, sino fecha y hora
+                if 'Registro' in df_display_final.columns:
+                    df_display_final['Registro'] = df_display_final['Registro'].apply(
+                        lambda x: x.strftime("%H:%M") if pd.notna(x) and x.date() == date.today() else x.strftime("%d/%m %H:%M") if pd.notna(x) else ""
+                    )
+                # Formatear la columna de completado a solo fecha
+                if 'Completado' in df_display_final.columns:
+                    df_display_final['Completado'] = df_display_final['Completado'].apply(
+                        lambda x: x.strftime("%d/%m/%Y") if pd.notna(x) else ""
+                    )
+
+                st.dataframe(
+                    df_display_final,
+                    use_container_width=True,
+                    column_config={
+                        "Adjuntos": st.column_config.Column(
+                            "Adjuntos",
+                            help="Enlaces a los archivos adjuntos en S3",
+                            width="large"
+                        ),
+                        **{col: st.column_config.Column(width="small") for col in df_display_final.columns if col != "Adjuntos"}
+                    },
+                    hide_index=True
+                )
+            else:
+                st.info(f"No hay pedidos para el tipo de envío '{tipo_envio}'.")
 else:
-    st.info("No hay pedidos para mostrar según los criterios de filtro.")
+    st.info("No hay pedidos para mostrar en la hoja de cálculo.")
 
 if __name__ == '__main__':
     # No hay código adicional aquí, la aplicación de Streamlit se ejecuta directamente.
