@@ -104,6 +104,12 @@ def load_data_from_gsheets(sheet_id, worksheet_name):
         df['Estado'] = df['Estado'].astype(str).str.strip()
 
         return df, worksheet
+    except gspread.exceptions.SpreadsheetNotFound:
+        st.error(f"❌ Error: La hoja de cálculo con ID '{sheet_id}' no se encontró. Verifica el ID.")
+        st.stop()
+    except gspread.exceptions.WorksheetNotFound:
+        st.error(f"❌ Error: La pestaña '{worksheet_name}' no se encontró en la hoja de cálculo.")
+        st.stop()
     except Exception as e:
         st.error(f"❌ Error al cargar los datos desde Google Sheets: {e}")
         st.stop()
