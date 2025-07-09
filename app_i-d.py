@@ -24,6 +24,9 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
+# Añadir línea separadora
+st.markdown("---")
+
 # Inyectar CSS para el word-wrap en las celdas del dataframe
 st.markdown(
     """
@@ -263,7 +266,7 @@ if 'Adjuntos' in df_all_data.columns:
     )
 
 # --- Visualización de Datos por columna 'Turno' ---
-st.header("Pedidos por Turno") # Simplified header as requested
+# Removed: st.header("Pedidos por Turno") # Simplified header as requested
 
 if not df_all_data.empty:
     # Removed: st.info(f"Mostrando todos los {len(df_all_data)} pedidos.")
