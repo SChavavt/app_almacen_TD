@@ -155,6 +155,7 @@ def load_data_from_gsheets(sheet_id, worksheet_name):
         
         # Asegurarse de que la columna 'Turno' se maneje correctamente como string y nulos
         if 'Turno' in df.columns:
+            # Reemplazar 'nan' string por string vacío, luego NaN por string vacío
             df['Turno'] = df['Turno'].astype(str).replace({'nan': '', '': None}).fillna('')
         else:
             df['Turno'] = '' # Si no existe, crearla vacía
@@ -298,32 +299,42 @@ if not df_all_data.empty:
     for turno_val in sorted_unique_turns:
         df_grupo = df_all_data[df_all_data['Turno'] == turno_val].copy()
         if not df_grupo.empty:
-            # Asignar emoji según el valor del turno
-            emoji = ""
-            if "Local Mañana" in turno_val:
-                emoji = "☀️"
-            elif "Local Tarde" in turno_val:
-                emoji = "🌙"
-            elif "Pasa a Bodega" in turno_val:
-                emoji = "📦"
-            elif "Saltillo" in turno_val:
-                emoji = "🌵"
-            else:
-                emoji = "❓" # Para cualquier otro valor de Turno
-            
-            grupos_a_mostrar.append((f"{emoji} {turno_val} ({len(df_grupo)})", df_grupo))
+            # Determinar el título final. Si el turno ya tiene un emoji, lo usamos directo.
+            # Si no, añadimos uno para distinguirlo.
+            titulo_grupo = turno_val
+            if not any(char in titulo_grupo for char in ['☀️', '🌙', '📦', '🌵', '🌍']): # Check if emoji is already present
+                if "Local Mañana" in turno_val: # Aunque ya deberían venir con emoji del sheet
+                    titulo_grupo = f"☀️ {turno_val}"
+                elif "Local Tarde" in turno_val:
+                    titulo_grupo = f"🌙 {turno_val}"
+                elif "Pasa a Bodega" in turno_val:
+                    titulo_grupo = f"📦 {turno_val}"
+                elif "Saltillo" in turno_val:
+                    titulo_grupo = f"🌵 {turno_val}"
+                else:
+                    titulo_grupo = f"❓ {turno_val}" # Para cualquier otro valor de Turno sin emoji
+
+            grupos_a_mostrar.append((f"{titulo_grupo} ({len(df_grupo)})", df_grupo))
 
 
     if grupos_a_mostrar:
-        # Mostrar columnas dinámicamente, una al lado de la otra
-        cols = st.columns(len(grupos_a_mostrar))
-        for i, (titulo, df_grupo) in enumerate(grupos_a_mostrar):
-            with cols[i]:
-                st.markdown(f"#### {titulo}")
-                # Ordenar por Hora_Registro en orden descendente
-                if 'Hora_Registro' in df_grupo.columns:
-                    df_grupo = df_grupo.sort_values(by='Hora_Registro', ascending=False).reset_index(drop=True)
-                display_dataframe_with_formatting(df_grupo)
+        # Dividir los grupos en dos filas de 3 columnas
+        num_cols_per_row = 3
+        
+        for row_index in range(0, len(grupos_a_mostrar), num_cols_per_row):
+            # Obtener los grupos para la fila actual
+            current_row_groups = grupos_a_mostrar[row_index : row_index + num_cols_per_row]
+            
+            # Crear las columnas para esta fila
+            cols = st.columns(len(current_row_groups))
+            
+            for i, (titulo, df_grupo) in enumerate(current_row_groups):
+                with cols[i]:
+                    st.markdown(f"#### {titulo}")
+                    # Ordenar por Hora_Registro en orden descendente
+                    if 'Hora_Registro' in df_grupo.columns:
+                        df_grupo = df_grupo.sort_values(by='Hora_Registro', ascending=False).reset_index(drop=True)
+                    display_dataframe_with_formatting(df_grupo)
     else:
         st.info("No hay pedidos para mostrar según los criterios.")
 else:
