@@ -6,6 +6,7 @@ from oauth2client.service_account import ServiceAccountCredentials
 import boto3
 import re
 import gspread.utils
+import json # Import json for parsing credentials
 
 st.set_page_config(page_title="Recepción de Pedidos TD", layout="wide")
 
@@ -103,8 +104,6 @@ try:
         st.error("❌ Las credenciales de Google Sheets no se encontraron en Streamlit secrets. Asegúrate de que tu archivo .streamlit/secrets.toml esté configurado correctamente con la sección [gsheets].")
         st.info("Falta la clave: 'st.secrets has no key \"gsheets\". Did you forget to add it to secrets.toml, mount it to secret directory, or the app settings on Streamlit Cloud? More info: https://docs.streamlit.io/deploy/streamlit-community-cloud/deploy-your-app/secrets-management'")
         st.stop()
-
-    import json
 
     GSHEETS_CREDENTIALS = json.loads(st.secrets["gsheets"]["google_credentials"])
     GSHEETS_CREDENTIALS["private_key"] = GSHEETS_CREDENTIALS["private_key"].replace("\\n", "\n")
@@ -237,15 +236,19 @@ def batch_update_gsheet_cells(worksheet, updates_list):
 # --- AWS S3 Helper Functions (Copied from app_admin.py directly) ---
 
 def find_pedido_subfolder_prefix(s3_client_param, parent_prefix, folder_name):
+    """
+    Finds the correct S3 prefix for a given order folder.
+    Searches for various possible prefix formats.
+    """
     if not s3_client_param:
         return None
 
     possible_prefixes = [
         f"{parent_prefix}{folder_name}/",
         f"{parent_prefix}{folder_name}",
-        f"adjuntos_pedidos/{folder_name}/",
+        f"adjuntos_pedidos/{folder_name}/", # Fallback if parent_prefix is not correctly set
         f"adjuntos_pedidos/{folder_name}",
-        f"{folder_name}/",
+        f"{folder_name}/", # Even more general fallback
         folder_name
     ]
 
@@ -261,12 +264,14 @@ def find_pedido_subfolder_prefix(s3_client_param, parent_prefix, folder_name):
                 return pedido_prefix
 
         except Exception:
+            # Continue to the next prefix if there's an error with the current one
             continue
 
+    # If direct prefix search fails, try a broader search
     try:
         response = s3_client_param.list_objects_v2(
             Bucket=S3_BUCKET_NAME,
-            MaxKeys=100 # Revisar si esto es suficiente o si se necesita paginación
+            MaxKeys=100 # Adjust MaxKeys or implement pagination if many objects are expected
         )
 
         if 'Contents' in response:
@@ -277,11 +282,14 @@ def find_pedido_subfolder_prefix(s3_client_param, parent_prefix, folder_name):
                         return '/'.join(prefix_parts) + '/'
 
     except Exception:
-        pass
+        pass # Silently fail if broader search also has issues
 
     return None
 
 def get_files_in_s3_prefix(s3_client_param, prefix):
+    """
+    Retrieves a list of files within a given S3 prefix.
+    """
     if not s3_client_param or not prefix:
         return []
 
@@ -289,13 +297,13 @@ def get_files_in_s3_prefix(s3_client_param, prefix):
         response = s3_client_param.list_objects_v2(
             Bucket=S3_BUCKET_NAME,
             Prefix=prefix,
-            MaxKeys=100
+            MaxKeys=100 # Adjust MaxKeys or implement pagination if many files are expected
         )
 
         files = []
         if 'Contents' in response:
             for item in response['Contents']:
-                if not item['Key'].endswith('/'):
+                if not item['Key'].endswith('/'): # Exclude folders
                     file_name = item['Key'].split('/')[-1]
                     if file_name:
                         files.append({
@@ -311,6 +319,9 @@ def get_files_in_s3_prefix(s3_client_param, prefix):
         return []
 
 def get_s3_file_download_url(s3_client_param, object_key):
+    """
+    Generates a pre-signed URL for downloading an S3 object.
+    """
     if not s3_client_param or not object_key:
         return "#"
 
@@ -318,14 +329,14 @@ def get_s3_file_download_url(s3_client_param, object_key):
         url = s3_client_param.generate_presigned_url(
             'get_object',
             Params={'Bucket': S3_BUCKET_NAME, 'Key': object_key},
-            ExpiresIn=7200
+            ExpiresIn=7200 # URL valid for 2 hours
         )
         return url
     except Exception as e:
         st.error(f"❌ Error al generar URL pre-firmada para '{object_key}': {e}")
         return "#"
 
-# --- Helper Functions (existentes en app.py) ---
+# --- Helper Functions (existing in app.py) ---
 
 def ordenar_pedidos_custom(df_pedidos_filtrados):
     """
@@ -375,12 +386,12 @@ def check_and_update_demorados(df_to_check, worksheet, headers):
 
     try:
         estado_col_index = headers.index('Estado') + 1
-        headers.index('Hora_Proceso') + 1 # Obtener índice de columna Hora_Proceso
+        headers.index('Hora_Proceso') + 1 # Get Hora_Proceso column index
     except ValueError:
         st.error("❌ Error interno: Columna 'Estado' o 'Hora_Proceso' no encontrada en los encabezados de Google Sheets.")
         return df_to_check, False
 
-    changes_made = False # Flag para indicar si hubo cambios en los estados
+    changes_made = False # Flag to indicate if there were status changes
 
     for idx, row in df_to_check.iterrows():
         if row['Estado'] == "🔵 En Proceso" and pd.notna(row['Hora_Proceso']):
@@ -390,12 +401,12 @@ def check_and_update_demorados(df_to_check, worksheet, headers):
                 gsheet_row_index = row.get('_gsheet_row_index')
 
                 if gsheet_row_index is not None:
-                    # Preparar actualización a "🔴 Demorado"
+                    # Prepare update to "🔴 Demorado"
                     updates_to_perform.append({
                         'range': f"{gspread.utils.rowcol_to_a1(gsheet_row_index, estado_col_index)}",
                         'values': [["🔴 Demorado"]]
                     })
-                    # Actualizar DataFrame en memoria
+                    # Update DataFrame in memory
                     df_to_check.loc[idx, "Estado"] = "🔴 Demorado"
                     changes_made = True
                 else:
@@ -404,15 +415,19 @@ def check_and_update_demorados(df_to_check, worksheet, headers):
     if updates_to_perform:
         if batch_update_gsheet_cells(worksheet, updates_to_perform):
             st.toast(f"✅ Se actualizaron {len(updates_to_perform)} pedidos a 'Demorado'.", icon="✅")
-            # st.cache_data.clear() # Limpiar la caché de datos para que se recargue si es necesario
+            # st.cache_data.clear() # Clear cache to force reload if necessary
             return df_to_check, changes_made
         else:
             st.error("Falló la actualización por lotes de estados 'Demorado'.")
             return df_to_check, False
     
-    return df_to_check, False # No hubo actualizaciones
+    return df_to_check, False # No updates were made
 
 def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, worksheet, headers, s3_client_param):
+    """
+    Displays a single order with its details, actions, and attachments.
+    Includes logic for updating status, surtidor, notes, and handling attachments.
+    """
     gsheet_row_index = row.get('_gsheet_row_index')
     if gsheet_row_index is None:
         st.error(f"❌ Error interno: No se pudo obtener el índice de fila de Google Sheets para el pedido '{row['ID_Pedido']}'.")
@@ -425,6 +440,7 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
             st.warning(f"⚠ ¡MODIFICACIÓN DE SURTIDO DETECTADA! Pedido #{orden}")
 
         # --- Cambiar Fecha y Turno ---
+        # This block allows changing the delivery date and shift for local and foreign orders
         if row['Estado'] != "🟢 Completado" and row.get("Tipo_Envio") in ["📍 Pedido Local", "🚚 Pedido Foráneo"]:
             st.markdown("##### 📅 Cambiar Fecha y Turno")
             col_current_info_date, col_current_info_turno, col_inputs = st.columns([1, 1, 2])
@@ -462,7 +478,7 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
             )
 
             if row.get("Tipo_Envio") == "📍 Pedido Local" and origen_tab in ["Mañana", "Tarde"]:
-                # MODIFIED: Only these two options for local turns
+                # Only these two options for local turns
                 turno_options = ["", "☀️ Local Mañana", "🌙 Local Tarde"]
                 if st.session_state[turno_key] not in turno_options:
                     st.session_state[turno_key] = turno_options[0]
@@ -474,7 +490,6 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
                 )
 
             if st.button("✅ Aplicar Cambios de Fecha/Turno", key=f"btn_apply_{row['ID_Pedido']}"):
-                # Removed all debug prints from here
                 cambios = []
                 nueva_fecha_str = st.session_state[fecha_key].strftime('%Y-%m-%d')
 
@@ -505,7 +520,8 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
         
         st.markdown("---")
 
-        # --- Layout Principal del Pedido ---
+        # --- Main Order Layout ---
+        # This section displays the core information of the order
         disabled_if_completed = (row['Estado'] == "🟢 Completado")
 
         col_order_num, col_client, col_time, col_status, col_surtidor, col_print_btn, col_complete_btn = st.columns([0.5, 2, 1.5, 1, 1.2, 1, 1])
@@ -532,7 +548,7 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
                     st.error("Falló la actualización del surtidor.")
 
         surtidor_key = f"surtidor_{row['ID_Pedido']}_{origen_tab}"
-        col_surtidor.text_input(
+        st.text_input(
             "Surtidor",
             value=surtidor_current,
             label_visibility="collapsed",
@@ -544,11 +560,32 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
         )
 
 
-        # Imprimir/Ver Adjuntos and change to "En Proceso"
-        
+        # ✅ PRINT and UPDATE TO "IN PROCESS"
+        # This button handles printing and updates the order status
         if col_print_btn.button("🖨 Imprimir", key=f"print_{row['ID_Pedido']}_{origen_tab}"):
             st.session_state["expanded_attachments"][row['ID_Pedido']] = not st.session_state["expanded_attachments"].get(row['ID_Pedido'], False)
 
+            # Only update if the current status is "Pending"
+            if row["Estado"] == "🟡 Pendiente":
+                now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                estado_col_idx = headers.index("Estado") + 1
+                hora_proc_col_idx = headers.index("Hora_Proceso") + 1
+
+                updates = [
+                    {'range': gspread.utils.rowcol_to_a1(gsheet_row_index, estado_col_idx), 'values': [["🔵 En Proceso"]]},
+                    {'range': gspread.utils.rowcol_to_a1(gsheet_row_index, hora_proc_col_idx), 'values': [[now_str]]}
+                ]
+                if batch_update_gsheet_cells(worksheet, updates):
+                    df.loc[idx, "Estado"] = "🔵 En Proceso"
+                    df.loc[idx, "Hora_Proceso"] = now_str
+                    st.toast("📄 Estado actualizado a 'En Proceso'", icon="📌")
+                    st.cache_data.clear()
+                    st.rerun()
+                else:
+                    st.error("❌ Falló la actualización del estado a 'En Proceso'.")
+
+
+        # This block displays attachments if they are expanded
         if st.session_state["expanded_attachments"].get(row["ID_Pedido"], False):
             st.markdown(f"##### Adjuntos para ID: {row['ID_Pedido']}")
             pedido_folder_prefix = find_pedido_subfolder_prefix(s3_client_param, S3_ATTACHMENT_PREFIX, row['ID_Pedido'])
@@ -575,7 +612,8 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
                 st.error(f"❌ No se encontró la carpeta (prefijo S3) del pedido '{row['ID_Pedido']}'.")
 
 
-        # Botón Completar
+        # Complete Button
+        # This button allows marking an order as 'Completed'
         if col_complete_btn.button("🟢 Completar", key=f"complete_button_{row['ID_Pedido']}_{origen_tab}", disabled=disabled_if_completed):
             surtidor_val = st.session_state.get(surtidor_key, "").strip()
             if not surtidor_val:
@@ -606,7 +644,8 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
                 except Exception as e:
                     st.error(f"Error al completar el pedido: {e}")
 
-        # --- Campo de Notas editable y Comentario ---
+        # --- Editable Notes Field and Comment ---
+        # This section provides fields for notes and comments related to the order
         st.markdown("---")
         info_text_comment = row.get("Comentario")
         if pd.notna(info_text_comment) and str(info_text_comment).strip() != '':
@@ -643,7 +682,7 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
                     mod_surtido_archivos_mencionados_raw.extend([f.strip() for f in match.group(1).split(',')])
 
             surtido_files_in_s3 = []
-            if pedido_folder_prefix is None: # Asegurarse de que el prefijo se haya encontrado
+            if pedido_folder_prefix is None: # Ensure the prefix has been found
                 pedido_folder_prefix = find_pedido_subfolder_prefix(s3_client_param, S3_ATTACHMENT_PREFIX, row['ID_Pedido'])
 
             if pedido_folder_prefix:
@@ -655,15 +694,15 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
 
             all_surtido_related_files = []
             for f_name in mod_surtido_archivos_mencionados_raw:
-                # Asegurarse de que el archivo no sea una URL completa en el texto, solo el nombre
-                cleaned_f_name = f_name.split('/')[-1] # Tomar solo el nombre del archivo
+                # Ensure the file is not a complete URL in the text, just the name
+                cleaned_f_name = f_name.split('/')[-1] # Take only the file name
                 all_surtido_related_files.append({
                     'title': cleaned_f_name,
-                    'key': f"{pedido_folder_prefix}{cleaned_f_name}" # Construir la clave S3 completa
+                    'key': f"{pedido_folder_prefix}{cleaned_f_name}" # Build the complete S3 key
                 })
 
             for s_file in surtido_files_in_s3:
-                # Evitar duplicados si ya se añadió por mención en el texto
+                # Avoid duplicates if already added by mention in the text
                 if not any(s_file['title'] == existing_f['title'] for existing_f in all_surtido_related_files):
                     all_surtido_related_files.append(s_file)
 
@@ -680,11 +719,11 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
                         continue
 
                     try:
-                        # Si la clave S3 no se construyó correctamente antes, intentar reconstruirla aquí
+                        # If the S3 key was not built correctly before, try to rebuild it here
                         if not object_key_to_download.startswith(S3_ATTACHMENT_PREFIX) and pedido_folder_prefix:
                             object_key_to_download = f"{pedido_folder_prefix}{file_name_to_display}"
                         
-                        # Fallback si no se encontró prefix o la key no parece válida
+                        # Fallback if prefix not found or key doesn't seem valid
                         if not pedido_folder_prefix and not object_key_to_download.startswith(S3_BUCKET_NAME):
                              st.warning(f"⚠️ No se pudo determinar la ruta S3 para: {file_name_to_display}")
                              continue
@@ -714,8 +753,8 @@ df_main, headers_main = process_sheet_data(raw_data)
 if not df_main.empty:
     df_main, changes_made_by_demorado_check = check_and_update_demorados(df_main, worksheet_main, headers_main)
     if changes_made_by_demorado_check:
-        st.cache_data.clear() # Limpiar caché para forzar recarga si hay cambios de estado
-        st.rerun() # Se mantiene para asegurar que los pedidos demorados se muevan de inmediato
+        st.cache_data.clear() # Clear cache to force reload if there are status changes
+        st.rerun() # Rerun to ensure delayed orders move immediately
 
     df_pendientes_proceso_demorado = df_main[df_main["Estado"].isin(["🟡 Pendiente", "🔵 En Proceso", "🔴 Demorado"])].copy()
     df_completados_historial = df_main[df_main["Estado"] == "🟢 Completado"].copy()
@@ -773,9 +812,9 @@ if not df_main.empty:
                             pedidos_fecha = pedidos_m_display[pedidos_m_display["Fecha_Entrega_dt"] == current_selected_date_dt].copy()
                             pedidos_fecha = ordenar_pedidos_custom(pedidos_fecha)
                             st.markdown(f"#### 🌅 Pedidos Locales - Mañana - {date_label}")
-                else: # Añadido: Mensaje si no hay pedidos para el turno mañana
+                else: # Added: Message if no orders for morning shift
                     st.info("No hay pedidos para el turno mañana.")
-            else: # Añadido: Mensaje si no hay pedidos para el turno mañana
+            else: # Added: Message if no orders for morning shift
                 st.info("No hay pedidos para el turno mañana.")
                                 
         with subtabs_local[1]:  # 🌇 Tarde
@@ -882,7 +921,7 @@ if not df_main.empty:
                     'ID_Pedido', 'Folio_Factura', 'Cliente', 'Estado', 'Vendedor_Registro',
                     'Tipo_Envio', 'Fecha_Entrega', 'Fecha_Completado', 'Notas', 'Modificacion_Surtido',
                     'Adjuntos', 'Adjuntos_Surtido', 'Turno'
-                ]].head(50), # Mostrar los 50 más recientes
+                ]].head(50), # Show the 50 most recent
                 use_container_width=True, hide_index=True
             )
             st.info("Mostrando los 50 pedidos completados más recientes.")
