@@ -14,31 +14,15 @@ st.set_page_config(page_title="Panel de Almacén Integrado", layout="wide")
 # 🔄 Refrescar cada 5 segundos automáticamente
 st_autorefresh(interval=5 * 1000, key="datarefresh_integrated")
 
-# --- Título con emoji y botón a la derecha ---
-col_title, col_button = st.columns([0.7, 0.3]) # Adjust column ratios as needed
-
-with col_title:
-    st.markdown(
-        """
-        <h1 style="color: white; font-size: 2.5rem; margin-bottom: 0rem;">
-            <span style="font-size: 3rem;">🏷️</span> Flujo de Pedidos en Tiempo Real
-        </h1>
-        """,
-        unsafe_allow_html=True,
-    )
-
-with col_button:
-    # Ajustar el padding top para alinear con el título si es necesario
-    st.markdown("<div style='padding-top: 25px;'>", unsafe_allow_html=True) # Adjust this value as needed for vertical alignment
-    # Inicializar estado de sesión si no existe (False significa que por defecto se muestran TODOS los completados)
-    if 'hide_all_completed' not in st.session_state:
-        st.session_state['hide_all_completed'] = False
-
-    button_label = "👁️ Ocultar Completados" if not st.session_state['hide_all_completed'] else "👁️ Mostrar Completados"
-    if st.button(button_label):
-        st.session_state['hide_all_completed'] = not st.session_state['hide_all_completed']
-        st.rerun() # Fuerza una recarga para aplicar el filtro
-    st.markdown("</div>", unsafe_allow_html=True)
+# Título con emoji colorido
+st.markdown(
+    """
+    <h1 style="color: white; font-size: 2.5rem; margin-bottom: 2rem;">
+        <span style="font-size: 3rem;">🏷️</span> Flujo de Pedidos en Tiempo Real
+    </h1>
+    """,
+    unsafe_allow_html=True,
+)
 
 # Añadir línea separadora
 st.markdown("---")
@@ -67,7 +51,7 @@ def get_gspread_client(_credentials_json_dict):
     y retorna un cliente de gspread.
     """
     try:
-        scope = ['https://sheets.googleapis.com/auth/spreadsheets', 'https://www.googleapis.com/auth/drive']
+        scope = ['https://spreadsheets.google.com/feeds', 'https://www.googleapis.com/auth/drive']
         creds_dict = dict(_credentials_json_dict)
 
         if "private_key" in creds_dict and isinstance(creds_dict["private_key"], str):
@@ -280,6 +264,19 @@ if 'Adjuntos' in df_all_data.columns:
     df_all_data['Adjuntos_Enlaces'] = df_all_data['Adjuntos'].apply(
         lambda x: display_attachments(x, s3_client)
     )
+
+# --- Botón Único para Filtrar/Mostrar Completados ---
+# Inicializar estado de sesión si no existe (False significa que por defecto se muestran TODOS los completados)
+if 'hide_all_completed' not in st.session_state:
+    st.session_state['hide_all_completed'] = False
+
+col1, col2, col3 = st.columns(3) # Para centrar el botón
+
+with col2:
+    button_label = "Ocultar Completados" if not st.session_state['hide_all_completed'] else "Mostrar Completados"
+    if st.button(button_label):
+        st.session_state['hide_all_completed'] = not st.session_state['hide_all_completed']
+        st.rerun() # Fuerza una recarga para aplicar el filtro
 
 # --- Visualización de Datos por columna 'Turno' ---
 if not df_all_data.empty:
