@@ -580,8 +580,7 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
                     df.loc[idx, "Estado"] = "🔵 En Proceso"
                     df.loc[idx, "Hora_Proceso"] = now_str
                     st.toast("📄 Estado actualizado a 'En Proceso'", icon="📌")
-                    st.cache_data.clear()
-                    st.rerun()
+                    # Removed st.cache_data.clear() and st.rerun() to prevent tab switching
                 else:
                     st.error("❌ Falló la actualización del estado a 'En Proceso'.")
 
