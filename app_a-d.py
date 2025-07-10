@@ -423,12 +423,18 @@ with tab2:
                 na_position='last'
             )
 
-            # Selector de pedido
+            st.write("🧪 EJEMPLOS DE DISPLAY_LABEL:")
+            st.write(filtered_orders['display_label'].head(10).tolist())
+
+            st.write("🧪 EJEMPLOS DE CAMPOS CRÍTICOS:")
+            st.dataframe(filtered_orders[['ID_Pedido', 'Folio_Factura', 'Cliente', 'Estado', 'Tipo_Envio']].head(10))
+
             selected_order_display = st.selectbox(
                 "📝 Seleccionar Pedido para Modificar",
                 filtered_orders['display_label'].tolist(),
                 key="select_order_to_modify"
             )
+
 
 
             # Generar display_label robusto y legible
