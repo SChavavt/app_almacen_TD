@@ -1,6 +1,6 @@
 import streamlit as st
 import pandas as pd
-from datetime import datetime, date, timedelta
+from datetime import date
 import json
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
@@ -76,7 +76,7 @@ try:
     AWS_ACCESS_KEY_ID = AWS_CREDENTIALS["aws_access_key_id"]
     AWS_SECRET_ACCESS_KEY = AWS_CREDENTIALS["aws_secret_access_key"]
     AWS_REGION = AWS_CREDENTIALS["aws_region"]
-    S3_BUCKET_NAME = AWS_CREDENTIALS["s3_bucket_name"] # Corrected back to 's3_bucket_name'
+    S3_BUCKET_NAME = AWS_CREDENTIALS["s3_bucket_name"]
 
 except Exception as e:
     st.error(f"❌ Error al cargar las credenciales de AWS S3: {e}")
@@ -265,103 +265,70 @@ if 'Adjuntos' in df_all_data.columns:
         lambda x: display_attachments(x, s3_client)
     )
 
-# --- Botones de acción ---
-button_cols = st.columns(3)
+# --- Botón de acción ---
+# Inicializar estado de sesión si no existe
+if 'hide_completed_orders' not in st.session_state:
+    st.session_state['hide_completed_orders'] = True # Default to hiding completed orders
 
-with button_cols[0]:
-    if st.button("Mostrar Completados (Últimas 24h)"):
-        st.session_state['show_last_24h_completed'] = True
-        st.session_state['show_all_orders'] = False # Ensure only one view is active
-        st.session_state['hide_completed_orders'] = False # If showing 24h, don't hide all completed
+col1, col2, col3 = st.columns(3) # Use columns for layout even if only one button is active
 
-with button_cols[1]:
-    if st.button("Mostrar Todos los Pedidos"):
-        st.session_state['show_last_24h_completed'] = False
-        st.session_state['show_all_orders'] = True # Default state, show all
-        st.session_state['hide_completed_orders'] = False # Show all, so don't hide completed
-
-with button_cols[2]:
-    if st.button("Ocultar Pedidos Completados"): # Renamed button
-        st.session_state['hide_completed_orders'] = True
-        st.session_state['show_last_24h_completed'] = False # If hiding, don't show 24h view
-        st.session_state['show_all_orders'] = True # Continue showing other orders
-
-# Inicializar estados de sesión si no existen
-if 'show_last_24h_completed' not in st.session_state:
-    st.session_state['show_last_24h_completed'] = False
-if 'show_all_orders' not in st.session_state:
-    st.session_state['show_all_orders'] = True # Default to showing all
-if 'hide_completed_orders' not in st.session_state: # New state for hiding
-    st.session_state['hide_completed_orders'] = False
-
+with col2: # Center the single button or place it as desired
+    if st.button("Alternar Visibilidad de Pedidos Completados"):
+        st.session_state['hide_completed_orders'] = not st.session_state['hide_completed_orders']
 
 # --- Visualización de Datos por columna 'Turno' ---
 if not df_all_data.empty:
     df_display_data = df_all_data.copy()
 
+    # Aplicar el filtro según el estado de la sesión
     if st.session_state['hide_completed_orders']:
         df_display_data = df_display_data[df_display_data['Estado'] != '🟢 Completado'].copy()
-        st.info("Pedidos completados ocultos. Haz clic en 'Mostrar Todos los Pedidos' para verlos de nuevo.")
+        st.info("Pedidos completados ocultos. Haz clic en 'Alternar Visibilidad de Pedidos Completados' para verlos.")
+    else:
+        st.info("Mostrando todos los pedidos, incluyendo los completados. Haz clic para ocultarlos.")
 
-    if st.session_state['show_last_24h_completed']:
-        st.subheader("Pedidos Completados (Últimas 24 horas)")
-        
-        # Filtra los pedidos completados en las últimas 24 horas
-        time_threshold = datetime.now() - timedelta(hours=24)
-        df_completed_24h = df_all_data[ # Use df_all_data here to always get fresh data
-            (df_all_data['Estado'] == '🟢 Completado') & 
-            (df_all_data['Fecha_Completado'].notna()) &
-            (df_all_data['Fecha_Completado'] >= time_threshold)
-        ].copy()
+    grupos_a_mostrar = []
+    # 1. Pedidos Foráneos: Si 'Turno' está vacío (None o string vacío después de limpieza)
+    df_foraneos = df_display_data[df_display_data['Turno'] == ''].copy() 
+    if not df_foraneos.empty:
+        grupos_a_mostrar.append((f"🌍 Pedidos Foráneos ({len(df_foraneos)})", df_foraneos))
+    
+    # 2. Otros grupos basados en valores únicos de la columna 'Turno' (excluyendo vacíos)
+    unique_turns = [t for t in df_display_data['Turno'].unique() if t != ''] 
+    
+    preferred_order = [
+        '☀️ Local Mañana',
+        '🌙 Local Tarde',
+        '📦 Pasa a Bodega',
+        '🌵 Saltillo'
+    ]
 
-        if not df_completed_24h.empty:
-            df_completed_24h = df_completed_24h.sort_values(by='Fecha_Completado', ascending=False).reset_index(drop=True)
-            display_dataframe_with_formatting(df_completed_24h)
-        else:
-            st.info("No hay pedidos completados en las últimas 24 horas.")
-    elif st.session_state['show_all_orders']: # This will handle the default view and "Mostrar Todos los Pedidos" button
-        grupos_a_mostrar = []
-        # 1. Pedidos Foráneos: Si 'Turno' está vacío (None o string vacío después de limpieza)
-        df_foraneos = df_display_data[df_display_data['Turno'] == ''].copy() # Use df_display_data here
-        if not df_foraneos.empty:
-            grupos_a_mostrar.append((f"🌍 Pedidos Foráneos ({len(df_foraneos)})", df_foraneos))
-        
-        # 2. Otros grupos basados en valores únicos de la columna 'Turno' (excluyendo vacíos)
-        unique_turns = [t for t in df_display_data['Turno'].unique() if t != ''] # Use df_display_data here
-        
-        preferred_order = [
-            '☀️ Local Mañana',
-            '🌙 Local Tarde',
-            '📦 Pasa a Bodega',
-            '🌵 Saltillo'
-        ]
+    sorted_unique_turns = []
+    for p_t in preferred_order:
+        if p_t in unique_turns:
+            sorted_unique_turns.append(p_t)
+            unique_turns.remove(p_t)
+    sorted_unique_turns.extend(sorted(unique_turns)) 
 
-        sorted_unique_turns = []
-        for p_t in preferred_order:
-            if p_t in unique_turns:
-                sorted_unique_turns.append(p_t)
-                unique_turns.remove(p_t)
-        sorted_unique_turns.extend(sorted(unique_turns)) 
+    for turno_val in sorted_unique_turns:
+        df_grupo = df_display_data[df_display_data['Turno'] == turno_val].copy() 
+        if not df_grupo.empty:
+            titulo_grupo = turno_val
+            grupos_a_mostrar.append((f"{titulo_grupo} ({len(df_grupo)})", df_grupo))
 
-        for turno_val in sorted_unique_turns:
-            df_grupo = df_display_data[df_display_data['Turno'] == turno_val].copy() # Use df_display_data here
-            if not df_grupo.empty:
-                titulo_grupo = turno_val
-                grupos_a_mostrar.append((f"{titulo_grupo} ({len(df_grupo)})", df_grupo))
-
-        if grupos_a_mostrar:
-            num_cols_per_row = 3
-            for row_index_start in range(0, len(grupos_a_mostrar), num_cols_per_row):
-                current_row_groups = grupos_a_mostrar[row_index_start : row_index_start + num_cols_per_row]
-                cols = st.columns(len(current_row_groups))
-                for i, (titulo, df_grupo) in enumerate(current_row_groups):
-                    with cols[i]:
-                        st.markdown(f"#### {titulo}")
-                        if 'Hora_Registro' in df_grupo.columns:
-                            df_grupo = df_grupo.sort_values(by='Hora_Registro', ascending=False).reset_index(drop=True)
-                        display_dataframe_with_formatting(df_grupo)
-        else:
-            st.info("No hay pedidos para mostrar según los criterios.")
+    if grupos_a_mostrar:
+        num_cols_per_row = 3
+        for row_index_start in range(0, len(grupos_a_mostrar), num_cols_per_row):
+            current_row_groups = grupos_a_mostrar[row_index_start : row_index_start + num_cols_per_row]
+            cols = st.columns(len(current_row_groups))
+            for i, (titulo, df_grupo) in enumerate(current_row_groups):
+                with cols[i]:
+                    st.markdown(f"#### {titulo}")
+                    if 'Hora_Registro' in df_grupo.columns:
+                        df_grupo = df_grupo.sort_values(by='Hora_Registro', ascending=False).reset_index(drop=True)
+                    display_dataframe_with_formatting(df_grupo)
+    else:
+        st.info("No hay pedidos para mostrar según los criterios.")
 else:
     st.info("No hay pedidos para mostrar en la hoja de cálculo.")
 
