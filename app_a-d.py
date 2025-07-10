@@ -397,12 +397,39 @@ with tab2:
 
 
         if filtered_orders.empty:
-            message_placeholder_tab2.warning("No hay pedidos que coincidan con los filtros seleccionados.")
-
+            st.warning("❌ No hay pedidos que coincidan con los filtros seleccionados.")
+            st.stop()
         else:
-            # Limpiar columnas usadas para evitar mostrar 'nan' o valores vacíos
+            # Depuración opcional: ver los primeros 10 pedidos filtrados
+            st.write("🔍 Total de pedidos filtrados:", filtered_orders.shape[0])
+            st.dataframe(filtered_orders[['ID_Pedido', 'Folio_Factura', 'Cliente', 'Estado', 'Tipo_Envio']].head(10))
+
+            # Limpiar columnas para evitar 'nan' o 'None' como texto
             for col in ['Folio_Factura', 'Cliente', 'Estado', 'Tipo_Envio', 'ID_Pedido']:
                 filtered_orders[col] = filtered_orders[col].astype(str).fillna('').replace(['nan', 'None'], '')
+
+            # Generar display_label robusto
+            filtered_orders['display_label'] = filtered_orders.apply(lambda row:
+                f"📄 {row['Folio_Factura'] if row['Folio_Factura'] else row['ID_Pedido']} - "
+                f"{row['Cliente'] if row['Cliente'] else 'Cliente no definido'} - "
+                f"{row['Estado'] if row['Estado'] else 'Sin estado'} - "
+                f"{row['Tipo_Envio'] if row['Tipo_Envio'] else 'Sin tipo'}", axis=1
+            )
+
+            # Ordenar alfabéticamente por folio y ID
+            filtered_orders = filtered_orders.sort_values(
+                by=['Folio_Factura', 'ID_Pedido'],
+                key=lambda x: x.astype(str).str.lower(),
+                na_position='last'
+            )
+
+            # Selector de pedido
+            selected_order_display = st.selectbox(
+                "📝 Seleccionar Pedido para Modificar",
+                filtered_orders['display_label'].tolist(),
+                key="select_order_to_modify"
+            )
+
 
             # Generar display_label robusto y legible
             filtered_orders['display_label'] = filtered_orders.apply(lambda row:
