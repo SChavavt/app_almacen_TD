@@ -1,6 +1,6 @@
 import streamlit as st
 import pandas as pd
-from datetime import date
+from datetime import datetime, date, timedelta
 import json
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
@@ -205,7 +205,7 @@ def display_attachments(adjuntos_str, s3_client_instance):
         return f"Error al procesar adjuntos: {e}"
 
 # Helper function to encapsulate dataframe display logic
-def display_dataframe_with_formatting(df_to_display):
+def display_dataframe_with_formatting(df_to_display, title_suffix=""):
     # Columnas a mostrar: Cliente, Hora_Registro (como Fecha), Estado, Vendedor_Registro (como Surtidor)
     columnas_base = ["Cliente", "Hora_Registro", "Estado"]
     
@@ -218,7 +218,7 @@ def display_dataframe_with_formatting(df_to_display):
     existing_columns = [col for col in columnas_base if col in df_to_display.columns]
 
     if not existing_columns:
-        st.info("No hay columnas relevantes para mostrar en este subgrupo.")
+        st.info(f"No hay columnas relevantes para mostrar en este subgrupo{title_suffix}.")
         return
 
     df_display_final = df_to_display[existing_columns].copy()
@@ -267,70 +267,90 @@ if 'Adjuntos' in df_all_data.columns:
 
 # --- Botón de acción ---
 # Inicializar estado de sesión si no existe
-if 'hide_completed_orders' not in st.session_state:
-    st.session_state['hide_completed_orders'] = True # Default to hiding completed orders
+if 'display_24h_completed' not in st.session_state:
+    st.session_state['display_24h_completed'] = False
 
-col1, col2, col3 = st.columns(3) # Use columns for layout even if only one button is active
+col1, col2, col3 = st.columns(3) # Using columns for layout
 
-with col2: # Center the single button or place it as desired
-    if st.button("Alternar Visibilidad de Pedidos Completados"):
-        st.session_state['hide_completed_orders'] = not st.session_state['hide_completed_orders']
+with col2: # Placing the single button in the middle column
+    if st.button("Mostrar Completados (Últimas 24h)"):
+        st.session_state['display_24h_completed'] = True
 
-# --- Visualización de Datos por columna 'Turno' ---
+
+# --- Visualización Principal (Pedidos no completados) ---
 if not df_all_data.empty:
-    df_display_data = df_all_data.copy()
+    df_active_orders = df_all_data[df_all_data['Estado'] != '🟢 Completado'].copy()
 
-    # Aplicar el filtro según el estado de la sesión
-    if st.session_state['hide_completed_orders']:
-        df_display_data = df_display_data[df_display_data['Estado'] != '🟢 Completado'].copy()
-        st.info("Pedidos completados ocultos. Haz clic en 'Alternar Visibilidad de Pedidos Completados' para verlos.")
+    if not df_active_orders.empty:
+        grupos_a_mostrar = []
+        # 1. Pedidos Foráneos: Si 'Turno' está vacío (None o string vacío después de limpieza)
+        df_foraneos = df_active_orders[df_active_orders['Turno'] == ''].copy() 
+        if not df_foraneos.empty:
+            grupos_a_mostrar.append((f"🌍 Pedidos Foráneos ({len(df_foraneos)})", df_foraneos))
+        
+        # 2. Otros grupos basados en valores únicos de la columna 'Turno' (excluyendo vacíos)
+        unique_turns = [t for t in df_active_orders['Turno'].unique() if t != ''] 
+        
+        preferred_order = [
+            '☀️ Local Mañana',
+            '🌙 Local Tarde',
+            '📦 Pasa a Bodega',
+            '🌵 Saltillo'
+        ]
+
+        sorted_unique_turns = []
+        for p_t in preferred_order:
+            if p_t in unique_turns:
+                sorted_unique_turns.append(p_t)
+                unique_turns.remove(p_t)
+        sorted_unique_turns.extend(sorted(unique_turns)) 
+
+        for turno_val in sorted_unique_turns:
+            df_grupo = df_active_orders[df_active_orders['Turno'] == turno_val].copy() 
+            if not df_grupo.empty:
+                titulo_grupo = turno_val
+                grupos_a_mostrar.append((f"{titulo_grupo} ({len(df_grupo)})", df_grupo))
+
+        if grupos_a_mostrar:
+            num_cols_per_row = 3
+            for row_index_start in range(0, len(grupos_a_mostrar), num_cols_per_row):
+                current_row_groups = grupos_a_mostrar[row_index_start : row_index_start + num_cols_per_row]
+                cols = st.columns(len(current_row_groups))
+                for i, (titulo, df_grupo) in enumerate(current_row_groups):
+                    with cols[i]:
+                        st.markdown(f"#### {titulo}")
+                        if 'Hora_Registro' in df_grupo.columns:
+                            df_grupo = df_grupo.sort_values(by='Hora_Registro', ascending=False).reset_index(drop=True)
+                        display_dataframe_with_formatting(df_grupo)
+        else:
+            st.info("No hay pedidos pendientes, demorados o en proceso para mostrar.")
     else:
-        st.info("Mostrando todos los pedidos, incluyendo los completados. Haz clic para ocultarlos.")
-
-    grupos_a_mostrar = []
-    # 1. Pedidos Foráneos: Si 'Turno' está vacío (None o string vacío después de limpieza)
-    df_foraneos = df_display_data[df_display_data['Turno'] == ''].copy() 
-    if not df_foraneos.empty:
-        grupos_a_mostrar.append((f"🌍 Pedidos Foráneos ({len(df_foraneos)})", df_foraneos))
-    
-    # 2. Otros grupos basados en valores únicos de la columna 'Turno' (excluyendo vacíos)
-    unique_turns = [t for t in df_display_data['Turno'].unique() if t != ''] 
-    
-    preferred_order = [
-        '☀️ Local Mañana',
-        '🌙 Local Tarde',
-        '📦 Pasa a Bodega',
-        '🌵 Saltillo'
-    ]
-
-    sorted_unique_turns = []
-    for p_t in preferred_order:
-        if p_t in unique_turns:
-            sorted_unique_turns.append(p_t)
-            unique_turns.remove(p_t)
-    sorted_unique_turns.extend(sorted(unique_turns)) 
-
-    for turno_val in sorted_unique_turns:
-        df_grupo = df_display_data[df_display_data['Turno'] == turno_val].copy() 
-        if not df_grupo.empty:
-            titulo_grupo = turno_val
-            grupos_a_mostrar.append((f"{titulo_grupo} ({len(df_grupo)})", df_grupo))
-
-    if grupos_a_mostrar:
-        num_cols_per_row = 3
-        for row_index_start in range(0, len(grupos_a_mostrar), num_cols_per_row):
-            current_row_groups = grupos_a_mostrar[row_index_start : row_index_start + num_cols_per_row]
-            cols = st.columns(len(current_row_groups))
-            for i, (titulo, df_grupo) in enumerate(current_row_groups):
-                with cols[i]:
-                    st.markdown(f"#### {titulo}")
-                    if 'Hora_Registro' in df_grupo.columns:
-                        df_grupo = df_grupo.sort_values(by='Hora_Registro', ascending=False).reset_index(drop=True)
-                    display_dataframe_with_formatting(df_grupo)
-    else:
-        st.info("No hay pedidos para mostrar según los criterios.")
+        st.info("No hay pedidos pendientes, demorados o en proceso en la hoja de cálculo.")
 else:
-    st.info("No hay pedidos para mostrar en la hoja de cálculo.")
+    st.info("No hay pedidos en la hoja de cálculo.")
+
+# --- Visualización Condicional de Pedidos Completados (Últimas 24h) ---
+if st.session_state['display_24h_completed']:
+    st.markdown("---") # Separador visual
+    st.subheader("Pedidos Completados (Últimas 24 horas)")
+    
+    time_threshold = datetime.now() - timedelta(hours=24)
+    df_completed_24h = df_all_data[
+        (df_all_data['Estado'] == '🟢 Completado') & 
+        (df_all_data['Fecha_Completado'].notna()) &
+        (df_all_data['Fecha_Completado'] >= time_threshold)
+    ].copy()
+
+    if not df_completed_24h.empty:
+        df_completed_24h = df_completed_24h.sort_values(by='Fecha_Completado', ascending=False).reset_index(drop=True)
+        display_dataframe_with_formatting(df_completed_24h, title_suffix=" (Últimas 24h)")
+    else:
+        st.info("No hay pedidos completados en las últimas 24 horas.")
+    
+    # Botón para cerrar esta sección
+    if st.button("Cerrar Historial Completados (24h)"):
+        st.session_state['display_24h_completed'] = False
+        st.rerun() # Rerun to hide the section
 
 if __name__ == '__main__':
     pass
