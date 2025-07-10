@@ -271,68 +271,44 @@ button_cols = st.columns(3)
 with button_cols[0]:
     if st.button("Mostrar Completados (Últimas 24h)"):
         st.session_state['show_last_24h_completed'] = True
-        st.session_state['show_all_completed_groups'] = False # Ensure only one view is active
-        st.session_state['show_all_orders'] = False
+        st.session_state['show_all_orders'] = False # Ensure only one view is active
+        st.session_state['hide_completed_orders'] = False # If showing 24h, don't hide all completed
 
 with button_cols[1]:
     if st.button("Mostrar Todos los Pedidos"):
         st.session_state['show_last_24h_completed'] = False
-        st.session_state['show_all_completed_groups'] = False
         st.session_state['show_all_orders'] = True # Default state, show all
+        st.session_state['hide_completed_orders'] = False # Show all, so don't hide completed
 
 with button_cols[2]:
-    if st.button("Eliminar Pedidos Completados"):
-        st.session_state['confirm_delete_completed'] = True
+    if st.button("Ocultar Pedidos Completados"): # Renamed button
+        st.session_state['hide_completed_orders'] = True
+        st.session_state['show_last_24h_completed'] = False # If hiding, don't show 24h view
+        st.session_state['show_all_orders'] = True # Continue showing other orders
 
 # Inicializar estados de sesión si no existen
 if 'show_last_24h_completed' not in st.session_state:
     st.session_state['show_last_24h_completed'] = False
-if 'show_all_completed_groups' not in st.session_state: # New state for showing all groups
-    st.session_state['show_all_completed_groups'] = False
 if 'show_all_orders' not in st.session_state:
     st.session_state['show_all_orders'] = True # Default to showing all
-
-if 'confirm_delete_completed' not in st.session_state:
-    st.session_state['confirm_delete_completed'] = False
-
-# --- Lógica de eliminación ---
-if st.session_state['confirm_delete_completed']:
-    st.warning("⚠️ ¿Estás seguro de que quieres eliminar TODOS los pedidos con estado '🟢 Completado'? Esta acción es irreversible.")
-    col_confirm_delete = st.columns(2)
-    with col_confirm_delete[0]:
-        if st.button("Sí, Eliminar Permanentemente"):
-            df_completed_to_delete = df_all_data[df_all_data['Estado'] == '🟢 Completado'].copy()
-            if not df_completed_to_delete.empty:
-                # Obtener los índices de fila de Google Sheet en orden descendente para evitar problemas de reindexación
-                rows_to_delete = sorted(df_completed_to_delete['gsheet_row_index'].tolist(), reverse=True)
-                
-                try:
-                    worksheet = g_spread_client.open_by_key(GOOGLE_SHEET_ID).worksheet(GOOGLE_SHEET_WORKSHEET_NAME)
-                    for row_index in rows_to_delete:
-                        worksheet.delete_rows(row_index)
-                    st.success(f"✅ Se han eliminado {len(rows_to_delete)} pedidos completados.")
-                    st.session_state['confirm_delete_completed'] = False # Reset confirmation
-                    st.session_state['refresh_data'] = True # Trigger a data refresh
-                    st.rerun() # Rerun to reload data
-                except Exception as e:
-                    st.error(f"❌ Error al eliminar pedidos: {e}")
-            else:
-                st.info("No hay pedidos con estado '🟢 Completado' para eliminar.")
-            st.session_state['confirm_delete_completed'] = False # Reset confirmation if no items to delete or error
-    with col_confirm_delete[1]:
-        if st.button("Cancelar Eliminación"):
-            st.session_state['confirm_delete_completed'] = False
-            st.info("Eliminación cancelada.")
+if 'hide_completed_orders' not in st.session_state: # New state for hiding
+    st.session_state['hide_completed_orders'] = False
 
 
 # --- Visualización de Datos por columna 'Turno' ---
 if not df_all_data.empty:
+    df_display_data = df_all_data.copy()
+
+    if st.session_state['hide_completed_orders']:
+        df_display_data = df_display_data[df_display_data['Estado'] != '🟢 Completado'].copy()
+        st.info("Pedidos completados ocultos. Haz clic en 'Mostrar Todos los Pedidos' para verlos de nuevo.")
+
     if st.session_state['show_last_24h_completed']:
         st.subheader("Pedidos Completados (Últimas 24 horas)")
         
         # Filtra los pedidos completados en las últimas 24 horas
         time_threshold = datetime.now() - timedelta(hours=24)
-        df_completed_24h = df_all_data[
+        df_completed_24h = df_all_data[ # Use df_all_data here to always get fresh data
             (df_all_data['Estado'] == '🟢 Completado') & 
             (df_all_data['Fecha_Completado'].notna()) &
             (df_all_data['Fecha_Completado'] >= time_threshold)
@@ -346,12 +322,12 @@ if not df_all_data.empty:
     elif st.session_state['show_all_orders']: # This will handle the default view and "Mostrar Todos los Pedidos" button
         grupos_a_mostrar = []
         # 1. Pedidos Foráneos: Si 'Turno' está vacío (None o string vacío después de limpieza)
-        df_foraneos = df_all_data[df_all_data['Turno'] == ''].copy()
+        df_foraneos = df_display_data[df_display_data['Turno'] == ''].copy() # Use df_display_data here
         if not df_foraneos.empty:
             grupos_a_mostrar.append((f"🌍 Pedidos Foráneos ({len(df_foraneos)})", df_foraneos))
         
         # 2. Otros grupos basados en valores únicos de la columna 'Turno' (excluyendo vacíos)
-        unique_turns = [t for t in df_all_data['Turno'].unique() if t != '']
+        unique_turns = [t for t in df_display_data['Turno'].unique() if t != ''] # Use df_display_data here
         
         preferred_order = [
             '☀️ Local Mañana',
@@ -368,7 +344,7 @@ if not df_all_data.empty:
         sorted_unique_turns.extend(sorted(unique_turns)) 
 
         for turno_val in sorted_unique_turns:
-            df_grupo = df_all_data[df_all_data['Turno'] == turno_val].copy()
+            df_grupo = df_display_data[df_display_data['Turno'] == turno_val].copy() # Use df_display_data here
             if not df_grupo.empty:
                 titulo_grupo = turno_val
                 grupos_a_mostrar.append((f"{titulo_grupo} ({len(df_grupo)})", df_grupo))
