@@ -337,6 +337,10 @@ with tab2:
                 df_pedidos['Vendedor_Registro'] = df_pedidos['Vendedor_Registro'].apply(
                     lambda x: x if x in VENDEDORES_LIST else 'Otro/Desconocido' if pd.notna(x) and str(x).strip() != '' else 'N/A'
                 ).astype(str)
+            # Asegura que las columnas necesarias para display_label sean string y maneja NaNs
+            for col in ['ID_Pedido', 'Cliente', 'Estado', 'Tipo_Envio']:
+                if col in df_pedidos.columns:
+                    df_pedidos[col] = df_pedidos[col].astype(str).replace('nan', '')
         else:
             message_placeholder_tab2.warning("No se pudieron cargar los encabezados del Google Sheet. Asegúrate de que la primera fila no esté vacía.")
 
@@ -397,62 +401,19 @@ with tab2:
 
 
         if filtered_orders.empty:
-            st.warning("❌ No hay pedidos que coincidan con los filtros seleccionados.")
-            st.stop()
+            message_placeholder_tab2.warning("No hay pedidos que coincidan con los filtros seleccionados.")
         else:
-            # Depuración opcional: ver los primeros 10 pedidos filtrados
-            st.write("🔍 Total de pedidos filtrados:", filtered_orders.shape[0])
-            st.dataframe(filtered_orders[['ID_Pedido', 'Folio_Factura', 'Cliente', 'Estado', 'Tipo_Envio']].head(10))
-
-            # Limpiar columnas para evitar 'nan' o 'None' como texto
-            for col in ['Folio_Factura', 'Cliente', 'Estado', 'Tipo_Envio', 'ID_Pedido']:
-                filtered_orders[col] = filtered_orders[col].astype(str).fillna('').replace(['nan', 'None'], '')
-
-            # Generar display_label robusto
             filtered_orders['display_label'] = filtered_orders.apply(lambda row:
-                f"📄 {row['Folio_Factura'] if row['Folio_Factura'] else row['ID_Pedido']} - "
-                f"{row['Cliente'] if row['Cliente'] else 'Cliente no definido'} - "
-                f"{row['Estado'] if row['Estado'] else 'Sin estado'} - "
-                f"{row['Tipo_Envio'] if row['Tipo_Envio'] else 'Sin tipo'}", axis=1
+                f"📄 {row.get('Folio_Factura', 'N/A') if row.get('Folio_Factura', 'N/A') != '' else row.get('ID_Pedido', 'N/A')} - "
+                f"{row.get('Cliente', 'N/A')} - {row.get('Estado', 'N/A')} - {row.get('Tipo_Envio', 'N/A')}", axis=1
             )
-
-            # Ordenar alfabéticamente por folio y ID
             filtered_orders = filtered_orders.sort_values(
                 by=['Folio_Factura', 'ID_Pedido'],
                 key=lambda x: x.astype(str).str.lower(),
                 na_position='last'
             )
 
-            st.write("🧪 EJEMPLOS DE DISPLAY_LABEL:")
-            st.write(filtered_orders['display_label'].head(10).tolist())
 
-            st.write("🧪 EJEMPLOS DE CAMPOS CRÍTICOS:")
-            st.dataframe(filtered_orders[['ID_Pedido', 'Folio_Factura', 'Cliente', 'Estado', 'Tipo_Envio']].head(10))
-
-            selected_order_display = st.selectbox(
-                "📝 Seleccionar Pedido para Modificar",
-                filtered_orders['display_label'].tolist(),
-                key="select_order_to_modify"
-            )
-
-
-
-            # Generar display_label robusto y legible
-            filtered_orders['display_label'] = filtered_orders.apply(lambda row:
-                f"📄 {row['Folio_Factura'] if row['Folio_Factura'] else row['ID_Pedido']} - "
-                f"{row['Cliente'] if row['Cliente'] else 'Cliente no definido'} - "
-                f"{row['Estado'] if row['Estado'] else 'Sin estado'} - "
-                f"{row['Tipo_Envio'] if row['Tipo_Envio'] else 'Sin tipo'}", axis=1
-            )
-
-            # Ordenar por folio y ID_Pedido como antes
-            filtered_orders = filtered_orders.sort_values(
-                by=['Folio_Factura', 'ID_Pedido'],
-                key=lambda x: x.astype(str).str.lower(),
-                na_position='last'
-            )
-
-            # Mostrar el selector
             selected_order_display = st.selectbox(
                 "📝 Seleccionar Pedido para Modificar",
                 filtered_orders['display_label'].tolist(),
