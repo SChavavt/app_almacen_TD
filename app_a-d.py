@@ -548,7 +548,8 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
                     st.error("Falló la actualización del surtidor.")
 
         surtidor_key = f"surtidor_{row['ID_Pedido']}_{origen_tab}"
-        st.text_input(
+        # This is the Surtidor input field
+        col_surtidor.text_input(
             "Surtidor",
             value=surtidor_current,
             label_visibility="collapsed",
