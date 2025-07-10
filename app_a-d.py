@@ -331,25 +331,12 @@ with tab2:
         headers = worksheet.row_values(1)
         if headers:
             df_pedidos = pd.DataFrame(worksheet.get_all_records())
-
-            # --- ROBUST CLEANING FOR ALL RELEVANT DISPLAY COLUMNS ---
-            columns_to_clean = ['Folio_Factura', 'ID_Pedido', 'Cliente', 'Estado', 'Tipo_Envio', 'Vendedor_Registro', 'Turno']
-            for col in columns_to_clean:
-                if col in df_pedidos.columns:
-                    # Convert to string first to handle various types including numbers, then replace 'nan'
-                    df_pedidos[col] = df_pedidos[col].astype(str).replace('nan', '').fillna('')
-                else:
-                    # If a crucial column is missing, add it with empty strings to prevent errors later
-                    df_pedidos[col] = ''
-                    st.warning(f"La columna '{col}' no se encontró en el Google Sheet. Asegúrate de que esté en la primera fila de tu hoja.")
-
-            # Specific handling for Vendedor_Registro to map to VENDEDORES_LIST
+            if 'Folio_Factura' in df_pedidos.columns:
+                df_pedidos['Folio_Factura'] = df_pedidos['Folio_Factura'].astype(str).replace('nan', '')
             if 'Vendedor_Registro' in df_pedidos.columns:
                 df_pedidos['Vendedor_Registro'] = df_pedidos['Vendedor_Registro'].apply(
                     lambda x: x if x in VENDEDORES_LIST else 'Otro/Desconocido' if pd.notna(x) and str(x).strip() != '' else 'N/A'
-                ).astype(str) # Ensure it remains string after mapping
-            # --- END ROBUST CLEANING ---
-
+                ).astype(str)
         else:
             message_placeholder_tab2.warning("No se pudieron cargar los encabezados del Google Sheet. Asegúrate de que la primera fila no esté vacía.")
 
@@ -412,15 +399,10 @@ with tab2:
         if filtered_orders.empty:
             message_placeholder_tab2.warning("No hay pedidos que coincidan con los filtros seleccionados.")
         else:
-            # Ensure these columns are handled *before* display_label creation
-            # This robust cleaning block was moved up after df_pedidos is created.
-            # filtered_orders['Folio_Factura'] = filtered_orders['Folio_Factura'].astype(str).replace('nan', '')
-            # filtered_orders['ID_Pedido'] = filtered_orders['ID_Pedido'].astype(str).replace('nan', '')
-            # filtered_orders['Cliente'] = filtered_orders['Cliente'].astype(str).replace('nan', '')
-            # filtered_orders['Estado'] = filtered_orders['Estado'].astype(str).replace('nan', '')
-            # filtered_orders['Tipo_Envio'] = filtered_orders['Tipo_Envio'].astype(str).replace('nan', '')
-
-
+            # 🔧 Corrección clave: limpieza previa de columnas antes del display_label
+            for col in ['Folio_Factura', 'ID_Pedido', 'Cliente', 'Estado', 'Tipo_Envio']:
+                if col in filtered_orders.columns:
+                    filtered_orders[col] = filtered_orders[col].astype(str).replace('nan', '').fillna('').str.strip()
             filtered_orders['display_label'] = filtered_orders.apply(lambda row:
                 f"📄 {row.get('Folio_Factura', 'N/A') if row.get('Folio_Factura', 'N/A') != '' else row.get('ID_Pedido', 'N/A')} - "
                 f"{row.get('Cliente', 'N/A')} - {row.get('Estado', 'N/A')} - {row.get('Tipo_Envio', 'N/A')}", axis=1
@@ -601,22 +583,12 @@ with tab3:
         headers = worksheet.row_values(1)
         if headers:
             df_pedidos_comprobante = pd.DataFrame(worksheet.get_all_records())
-            # --- ROBUST CLEANING FOR ALL RELEVANT DISPLAY COLUMNS (TAB 3) ---
-            columns_to_clean_tab3 = ['Folio_Factura', 'ID_Pedido', 'Cliente', 'Estado', 'Tipo_Envio', 'Vendedor_Registro', 'Turno', 'Adjuntos']
-            for col in columns_to_clean_tab3:
-                if col in df_pedidos_comprobante.columns:
-                    df_pedidos_comprobante[col] = df_pedidos_comprobante[col].astype(str).replace('nan', '').fillna('')
-                else:
-                    df_pedidos_comprobante[col] = ''
-                    st.warning(f"La columna '{col}' no se encontró en el Google Sheet (Tab 3). Asegúrate de que esté en la primera fila de tu hoja.")
-
-            # Specific handling for Vendedor_Registro to map to VENDEDORES_LIST
+            if 'Folio_Factura' in df_pedidos_comprobante.columns:
+                df_pedidos_comprobante['Folio_Factura'] = df_pedidos_comprobante['Folio_Factura'].astype(str).replace('nan', '')
             if 'Vendedor_Registro' in df_pedidos_comprobante.columns:
                 df_pedidos_comprobante['Vendedor_Registro'] = df_pedidos_comprobante['Vendedor_Registro'].apply(
                     lambda x: x if x in VENDEDORES_LIST else 'Otro/Desconocido' if pd.notna(x) and str(x).strip() != '' else 'N/A'
-                ).astype(str) # Ensure it remains string after mapping
-            # --- END ROBUST CLEANING (TAB 3) ---
-
+                ).astype(str)
         else:
             st.warning("No se pudieron cargar los encabezados del Google Sheet. Asegúrate de que la primera fila no esté vacía.")
 
@@ -773,22 +745,17 @@ with tab4:
             if 'Fecha_Entrega' in df_all_pedidos.columns:
                 df_all_pedidos['Fecha_Entrega'] = pd.to_datetime(df_all_pedidos['Fecha_Entrega'], errors='coerce')
 
-            # --- ROBUST CLEANING FOR ALL RELEVANT DISPLAY COLUMNS (TAB 4) ---
-            columns_to_clean_tab4 = ['Folio_Factura', 'ID_Pedido', 'Cliente', 'Estado', 'Tipo_Envio', 'Vendedor_Registro', 'Turno', 'Adjuntos', 'Adjuntos_Surtido', 'Comentario', 'Notas', 'Modificacion_Surtido', 'Estado_Pago', 'Surtidor', 'Hora_Registro', 'Fecha_Completado', 'Hora_Proceso', 'Fecha_Completado_dt']
-            for col in columns_to_clean_tab4:
-                if col in df_all_pedidos.columns:
-                    df_all_pedidos[col] = df_all_pedidos[col].astype(str).replace('nan', '').fillna('')
-                else:
-                    df_all_pedidos[col] = ''
-                    # st.warning(f"La columna '{col}' no se encontró en el Google Sheet (Tab 4). Se añadió vacía.") # Removed to reduce noise
-
-            # Specific handling for Vendedor_Registro to map to VENDEDORES_LIST
             if 'Vendedor_Registro' in df_all_pedidos.columns:
                 df_all_pedidos['Vendedor_Registro'] = df_all_pedidos['Vendedor_Registro'].apply(
                     lambda x: x if x in VENDEDORES_LIST else 'Otro/Desconocido' if pd.notna(x) and str(x).strip() != '' else 'N/A'
-                ).astype(str) # Ensure it remains string after mapping
-            # --- END ROBUST CLEANING (TAB 4) ---
+                ).astype(str)
+            else:
+                st.warning("La columna 'Vendedor_Registro' no se encontró en el Google Sheet para el filtrado. Asegúrate de que exista y esté correctamente nombrada.")
 
+            if 'Folio_Factura' in df_all_pedidos.columns:
+                df_all_pedidos['Folio_Factura'] = df_all_pedidos['Folio_Factura'].astype(str).replace('nan', '')
+            else:
+                 st.warning("La columna 'Folio_Factura' no se encontró en el Google Sheet. No se podrá mostrar en la vista previa.")
 
         else:
             st.warning("No se pudieron cargar los encabezados del Google Sheet. Asegúrate de que la primera fila no esté vacía.")
