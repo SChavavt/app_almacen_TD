@@ -1,6 +1,6 @@
 import streamlit as st
 import pandas as pd
-from datetime import date
+from datetime import datetime, date, timedelta
 import json
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
@@ -29,14 +29,17 @@ with col_title:
 
 with col_button:
     # Ajustar el padding top para alinear con el título si es necesario
-    st.markdown("<div style='padding-top: 25px;'>", unsafe_allow_html=True) # Ajusta este valor según sea necesario para la alineación vertical
-    # Inicializar estado de sesión si no existe (False significa que por defecto se muestran TODOS los completados)
-    if 'hide_all_completed' not in st.session_state:
-        st.session_state['hide_all_completed'] = False
+    st.markdown("<div style='padding-top: 25px;'>", unsafe_allow_html=True) 
+    
+    # Inicializar estado de sesión: False = solo activos (por defecto, ocultar completados de 24h)
+    # True = mostrar activos + completados de 24h
+    if 'show_recent_completed' not in st.session_state:
+        st.session_state['show_recent_completed'] = False
 
-    button_label = "👁️ Ocultar Completados" if not st.session_state['hide_all_completed'] else "👁️ Mostrar Completados"
+    # Etiqueta del botón basada en el estado
+    button_label = "👁️ Mostrar Completados (24h)" if not st.session_state['show_recent_completed'] else "👁️ Ocultar Completados"
     if st.button(button_label):
-        st.session_state['hide_all_completed'] = not st.session_state['hide_all_completed']
+        st.session_state['show_recent_completed'] = not st.session_state['show_recent_completed']
         st.rerun() # Fuerza una recarga para aplicar el filtro
     st.markdown("</div>", unsafe_allow_html=True)
 
@@ -67,7 +70,7 @@ def get_gspread_client(_credentials_json_dict):
     y retorna un cliente de gspread.
     """
     try:
-        # REVERTED SCOPE: Usando el scope más compatible para gspread
+        # Usando el scope más compatible para gspread
         scope = ['https://spreadsheets.google.com/feeds', 'https://www.googleapis.com/auth/drive']
         creds_dict = dict(_credentials_json_dict)
 
@@ -285,14 +288,22 @@ if 'Adjuntos' in df_all_data.columns:
 # --- Visualización de Datos por columna 'Turno' ---
 if not df_all_data.empty:
     df_display_data = df_all_data.copy()
+    time_threshold = datetime.now() - timedelta(hours=24)
 
-    # Aplicar filtro si el botón "Ocultar Completados" ha sido pulsado (hide_all_completed es True)
-    if st.session_state['hide_all_completed']:
+    # Lógica de filtrado basada en el estado del botón
+    if not st.session_state['show_recent_completed']:
+        # Estado: False -> Botón dice "Mostrar Completados (24h)"
+        # Acción: Mostrar solo pedidos NO completados (ocultar TODOS los completados).
         df_display_data = df_display_data[df_display_data['Estado'] != '🟢 Completado'].copy()
-        st.info("Solo se muestran pedidos activos (pendientes, demorados, en proceso).")
     else:
-        st.info("Mostrando todos los pedidos, incluyendo los completados.")
-
+        # Estado: True -> Botón dice "Ocultar Completados"
+        # Acción: Mostrar pedidos NO completados Y completados de las últimas 24h.
+        df_display_data = df_display_data[
+            (df_display_data['Estado'] != '🟢 Completado') |
+            ((df_display_data['Estado'] == '🟢 Completado') & 
+             (df_display_data['Fecha_Completado'].notna()) &
+             (df_display_data['Fecha_Completado'] >= time_threshold))
+        ].copy()
 
     grupos_a_mostrar = []
     # 1. Pedidos Foráneos: Si 'Turno' está vacío (None o string vacío después de limpieza)
