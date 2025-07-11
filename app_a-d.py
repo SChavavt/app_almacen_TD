@@ -501,15 +501,19 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
                 if cambios:
                     if batch_update_gsheet_cells(worksheet, cambios):
                         st.success(f"✅ Pedido {row['ID_Pedido']} actualizado.")
+
+                        # 🔁 Mantener pestaña y pedido al recargar
                         st.session_state["pedido_editado"] = row['ID_Pedido']
                         st.session_state["fecha_seleccionada"] = nueva_fecha_str
                         st.session_state["subtab_local"] = origen_tab
+
                         st.cache_data.clear()
                         st.rerun()
                     else:
                         st.error("❌ Falló la actualización en Google Sheets.")
                 else:
                     st.info("No hubo cambios para aplicar.")
+
         
         st.markdown("---")
 
@@ -531,14 +535,24 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
         col_status.write(f"{row['Estado']}")
 
         surtidor_current = row.get("Surtidor", "")
-        def update_surtidor_callback(current_idx, current_gsheet_row_index, current_surtidor_key, df_param):
+        def update_surtidor_callback(current_idx, current_gsheet_row_index, current_surtidor_key, df_param, row, origen_tab):
             new_surtidor_val = st.session_state[current_surtidor_key]
-            if new_surtidor_val != surtidor_current:
+            surtidor_actual = row.get("Surtidor", "")
+            if new_surtidor_val != surtidor_actual:
                 if update_gsheet_cell(worksheet, headers, current_gsheet_row_index, "Surtidor", new_surtidor_val):
                     df_param.loc[current_idx, "Surtidor"] = new_surtidor_val
-                    st.toast("Surtidor actualizado", icon="✅")
+                    st.toast("✅ Surtidor actualizado", icon="✅")
+
+                    # 🔁 Mantener visibilidad del pedido y pestaña al recargar
+                    st.session_state["pedido_editado"] = row['ID_Pedido']
+                    st.session_state["fecha_seleccionada"] = row.get("Fecha_Entrega", "")
+                    st.session_state["subtab_local"] = origen_tab
+
+                    st.cache_data.clear()
+                    st.rerun()
                 else:
-                    st.error("Falló la actualización del surtidor.")
+                    st.error("❌ Falló la actualización del surtidor.")
+
 
         surtidor_key = f"surtidor_{row['ID_Pedido']}_{origen_tab}"
         # This is the Surtidor input field
@@ -550,16 +564,14 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
             key=surtidor_key,
             disabled=disabled_if_completed,
             on_change=update_surtidor_callback,
-            args=(idx, gsheet_row_index, surtidor_key, df)
+            args=(idx, gsheet_row_index, surtidor_key, df, row, origen_tab)
         )
 
-
         # ✅ PRINT and UPDATE TO "IN PROCESS"
-        # This button handles printing and updates the order status
         if col_print_btn.button("🖨 Imprimir", key=f"print_{row['ID_Pedido']}_{origen_tab}"):
             st.session_state["expanded_attachments"][row['ID_Pedido']] = not st.session_state["expanded_attachments"].get(row['ID_Pedido'], False)
 
-            # Only update if the current status is "Pending"
+            # Only update if the current status is "Pendiente"
             if row["Estado"] == "🟡 Pendiente":
                 now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                 estado_col_idx = headers.index("Estado") + 1
@@ -573,9 +585,17 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
                     df.loc[idx, "Estado"] = "🔵 En Proceso"
                     df.loc[idx, "Hora_Proceso"] = now_str
                     st.toast("📄 Estado actualizado a 'En Proceso'", icon="📌")
-                    # Removed st.cache_data.clear() and st.rerun() to prevent tab switching
+                    
+                    # 🔄 Forzar recarga visual del cambio
+                    st.session_state["pedido_editado"] = row['ID_Pedido']
+                    st.session_state["fecha_seleccionada"] = row.get("Fecha_Entrega", "")
+                    st.session_state["subtab_local"] = origen_tab
+                    st.cache_data.clear()
+                    st.rerun()
+
                 else:
                     st.error("❌ Falló la actualización del estado a 'En Proceso'.")
+
 
 
         # This block displays attachments if they are expanded
@@ -606,7 +626,6 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
 
 
         # Complete Button
-        # This button allows marking an order as 'Completed'
         if col_complete_btn.button("🟢 Completar", key=f"complete_button_{row['ID_Pedido']}_{origen_tab}", disabled=disabled_if_completed):
             surtidor_val = st.session_state.get(surtidor_key, "").strip()
             if not surtidor_val:
@@ -630,12 +649,19 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
                         df.loc[idx, "Estado"] = "🟢 Completado"
                         df.loc[idx, "Fecha_Completado"] = datetime.now()
                         st.success(f"✅ Pedido {row['ID_Pedido']} completado exitosamente.")
+
+                        # 🔁 Mantener pestaña activa
+                        st.session_state["pedido_editado"] = row['ID_Pedido']
+                        st.session_state["fecha_seleccionada"] = row.get("Fecha_Entrega", "")
+                        st.session_state["subtab_local"] = origen_tab
+
                         st.cache_data.clear()
                         st.rerun()
                     else:
                         st.error("❌ No se pudo completar el pedido.")
                 except Exception as e:
                     st.error(f"Error al completar el pedido: {e}")
+
 
         # --- Editable Notes Field and Comment ---
         # This section provides fields for notes and comments related to the order
@@ -645,14 +671,24 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
             st.info(f"💬 Comentario: {info_text_comment}")
 
         current_notas = row.get("Notas", "")
-        def update_notas_callback(current_idx, current_gsheet_row_index, current_notas_key, df_param):
+        def update_notas_callback(current_idx, current_gsheet_row_index, current_notas_key, df_param, row, origen_tab):
             new_notas_val = st.session_state[current_notas_key]
-            if new_notas_val != current_notas:
+            notas_actual = row.get("Notas", "")
+            if new_notas_val != notas_actual:
                 if update_gsheet_cell(worksheet, headers, current_gsheet_row_index, "Notas", new_notas_val):
                     df_param.loc[current_idx, "Notas"] = new_notas_val
-                    st.toast("Notas actualizadas", icon="✅")
+                    st.toast("✅ Notas actualizadas", icon="📝")
+
+                    # 🔁 Mantener pedido y pestaña activa al recargar
+                    st.session_state["pedido_editado"] = row['ID_Pedido']
+                    st.session_state["fecha_seleccionada"] = row.get("Fecha_Entrega", "")
+                    st.session_state["subtab_local"] = origen_tab
+
+                    st.cache_data.clear()
+                    st.rerun()
                 else:
-                    st.error("Falló la actualización de las notas.")
+                    st.error("❌ Falló la actualización de las notas.")
+
 
         notas_key = f"notas_edit_{row['ID_Pedido']}_{origen_tab}"
         st.text_area(
@@ -662,7 +698,7 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
             height=70,
             disabled=disabled_if_completed,
             on_change=update_notas_callback,
-            args=(idx, gsheet_row_index, notas_key, df)
+            args=(idx, gsheet_row_index, notas_key, df, row, origen_tab)
         )
 
         if tiene_modificacion:
@@ -797,14 +833,7 @@ if not df_main.empty:
                             st.markdown(f"#### 🌅 Pedidos Locales - Mañana - {date_label}")
                             for orden, (idx, row) in enumerate(pedidos_fecha.iterrows(), start=1):
                                 mostrar_pedido(df_main, idx, row, orden, "Mañana", "📍 Pedidos Locales", worksheet_main, headers_main, s3_client)
-
-                            current_selected_date_dt_str = date_label.replace("📅 ", "")
-
-                            current_selected_date_dt = pd.to_datetime(current_selected_date_dt_str, format='%d/%m/%Y')
-                            
-                            pedidos_fecha = pedidos_m_display[pedidos_m_display["Fecha_Entrega_dt"] == current_selected_date_dt].copy()
-                            pedidos_fecha = ordenar_pedidos_custom(pedidos_fecha)
-                            st.markdown(f"#### 🌅 Pedidos Locales - Mañana - {date_label}")
+                                
                 else: # Added: Message if no orders for morning shift
                     st.info("No hay pedidos para el turno mañana.")
             else: # Added: Message if no orders for morning shift
