@@ -57,29 +57,22 @@ if "expanded_attachments" not in st.session_state:
 
 @st.cache_resource
 def get_gspread_client(_credentials_json_dict):
-    """
-    Autentica con Google Sheets usando las credenciales de la cuenta de servicio
-    y retorna un cliente de gspread.
-    """
+    scope = ['https://spreadsheets.google.com/feeds', 'https://www.googleapis.com/auth/drive']
+    creds_dict = dict(_credentials_json_dict)
+
+    if "private_key" in creds_dict and isinstance(creds_dict["private_key"], str):
+        creds_dict["private_key"] = creds_dict["private_key"].replace("\n", "\n").strip()
+
     try:
-        scope = ['https://spreadsheets.google.com/feeds', 'https://www.googleapis.com/auth/drive']
-
-        creds_dict = dict(_credentials_json_dict)
-
-        # Ensure private_key has actual newlines and no surrounding whitespace.
-        # This is CRITICAL for 'Incorrect padding' error.
-        if "private_key" in creds_dict and isinstance(creds_dict["private_key"], str):
-            creds_dict["private_key"] = creds_dict["private_key"].replace("\\n", "\n").strip()
-
         creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
         client = gspread.authorize(creds)
+        _ = client.open_by_key("1aWkSelodaz0nWfQx7FZAysGnIYGQFJxAN7RO3YgCiZY")
         return client
     except Exception as e:
-        st.error(f"❌ Error al autenticar con Google Sheets: {e}")
-        st.info("ℹ️ Verifica que las APIs de Google Sheets y Drive estén habilitadas para tu proyecto de Google Cloud y que tus credenciales de servicio en `secrets.toml` sean válidas.")
-        st.stop()
+        st.cache_resource.clear()
+        st.warning("🔁 Token expirado o inválido. Reintentando autenticación...")
+        raise e
 
-@st.cache_resource
 def get_s3_client():
     """
     Inicializa y retorna un cliente de S3, usando credenciales globales.
