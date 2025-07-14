@@ -548,14 +548,18 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
 
         surtidor_current = row.get("Surtidor", "")
         def update_surtidor_callback(current_idx, current_gsheet_row_index, current_surtidor_key, df_param, row, origen_tab):
-            new_surtidor_val = st.session_state[current_surtidor_key]
+            if current_surtidor_key not in st.session_state:
+                st.warning(f"⚠️ La clave {current_surtidor_key} no está en session_state. Puede que se haya limpiado la caché. Refresca o reescribe el valor.")
+                return
+
+            new_surtidor_val = st.session_state.get(current_surtidor_key, "").strip()
             surtidor_actual = row.get("Surtidor", "")
+            
             if new_surtidor_val != surtidor_actual:
                 if update_gsheet_cell(worksheet, headers, current_gsheet_row_index, "Surtidor", new_surtidor_val):
                     df_param.loc[current_idx, "Surtidor"] = new_surtidor_val
                     st.toast("✅ Surtidor actualizado", icon="✅")
 
-                    # 🔁 Mantener visibilidad del pedido y pestaña al recargar
                     st.session_state["pedido_editado"] = row['ID_Pedido']
                     st.session_state["fecha_seleccionada"] = row.get("Fecha_Entrega", "")
                     st.session_state["subtab_local"] = origen_tab
