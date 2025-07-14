@@ -10,12 +10,16 @@ import json # Import json for parsing credentials
 
 st.set_page_config(page_title="Recepción de Pedidos TD", layout="wide")
 
-# 👇 Diagnóstico: muestra todo lo que hay en session_state
-for k, v in st.session_state.items():
-    st.write(f"{k} → {v}")
-
 st.title("📬 Bandeja de Pedidos TD")
 
+# ⛔ Oculta visualmente cualquier métrica suelta sin etiqueta que tenga el número 16
+st.markdown("""
+    <style>
+        .element-container:has(span:contains("16")):not(:has(div[data-testid="stMetricLabel"])) {
+            display: none !important;
+        }
+    </style>
+""", unsafe_allow_html=True)
 
 # 🔄 Limpieza de salida visual "fantasma"
 st.empty()
@@ -24,7 +28,6 @@ st.empty()
 if st.button("🔄 Recargar Pedidos", help="Haz clic para recargar todos los pedidos desde Google Sheets."):
     st.cache_data.clear()
     st.rerun()
-
 
 # --- Google Sheets Constants (pueden venir de st.secrets si se prefiere) ---
 GOOGLE_SHEET_ID = '1aWkSelodaz0nWfQx7FZAysGnIYGQFJxAN7RO3YgCiZY'
