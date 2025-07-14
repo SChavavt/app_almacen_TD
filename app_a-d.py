@@ -736,6 +736,7 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
 
         if tiene_modificacion:
             st.warning(f"🟡 Modificación de Surtido:\n{row['Modificacion_Surtido']}")
+            surtido_files_in_s3 = []
 
             mod_surtido_archivos_mencionados_raw = []
             for linea in str(row['Modificacion_Surtido']).split('\n'):
