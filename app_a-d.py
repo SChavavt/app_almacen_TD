@@ -12,6 +12,14 @@ st.set_page_config(page_title="Recepción de Pedidos TD", layout="wide")
 
 st.title("📬 Bandeja de Pedidos TD")
 
+# 🔄 Limpieza de salida visual "fantasma"
+st.empty()
+
+# Botón de refrescar pedidos
+if st.button("🔄 Recargar Pedidos", help="Haz clic para recargar todos los pedidos desde Google Sheets."):
+    st.cache_data.clear()
+    st.rerun()
+
 # ⛔ Oculta visualmente cualquier métrica suelta sin etiqueta que tenga el número 16
 st.markdown("""
     <style>
@@ -20,14 +28,6 @@ st.markdown("""
         }
     </style>
 """, unsafe_allow_html=True)
-
-# 🔄 Limpieza de salida visual "fantasma"
-st.empty()
-
-# Botón de refrescar pedidos
-if st.button("🔄 Recargar Pedidos", help="Haz clic para recargar todos los pedidos desde Google Sheets."):
-    st.cache_data.clear()
-    st.rerun()
 
 # --- Google Sheets Constants (pueden venir de st.secrets si se prefiere) ---
 GOOGLE_SHEET_ID = '1aWkSelodaz0nWfQx7FZAysGnIYGQFJxAN7RO3YgCiZY'
