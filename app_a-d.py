@@ -794,13 +794,16 @@ df_main, headers_main = process_sheet_data(raw_data)
 if not df_main.empty:
     df_main, changes_made_by_demorado_check = check_and_update_demorados(df_main, worksheet_main, headers_main)
     if changes_made_by_demorado_check:
-        st.cache_data.clear() # Clear cache to force reload if there are status changes
-        st.rerun() # Rerun to ensure delayed orders move immediately
+        st.cache_data.clear()  # Clear cache to force reload if there are status changes
+        st.rerun()  # Rerun to ensure delayed orders move immediately
 
     df_pendientes_proceso_demorado = df_main[df_main["Estado"].isin(["🟡 Pendiente", "🔵 En Proceso", "🔴 Demorado"])].copy()
     df_completados_historial = df_main[df_main["Estado"] == "🟢 Completado"].copy()
 
-        # ⛔ Oculta visualmente cualquier métrica suelta sin etiqueta que tenga el número 16
+    # 🧼 Prevenir salida accidental de "16"
+    _ = ""
+
+    # ⛔ Oculta visualmente cualquier métrica suelta sin etiqueta que tenga el número 16
     st.markdown("""
         <style>
             .element-container:has(span:contains("16")):not(:has(div[data-testid="stMetricLabel"])) {
@@ -820,6 +823,7 @@ if not df_main.empty:
     col2.metric("🔵 En Proceso", estado_counts.get('🔵 En Proceso', 0))
     col3.metric("🔴 Demorados", estado_counts.get('🔴 Demorado', 0))
     col4.metric("🟢 Completados", estado_counts.get('🟢 Completado', 0))
+
 
     # --- Implementación de Pestañas con st.tabs ---
     tab_options = ["📍 Pedidos Locales", "🚚 Pedidos Foráneos", "🛠 Garantías", "🔁 Devoluciones", "📬 Solicitud de Guía", "✅ Historial Completados"]
