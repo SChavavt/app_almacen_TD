@@ -9,14 +9,17 @@ import gspread.utils
 import json # Import json for parsing credentials
 
 st.set_page_config(page_title="Recepción de Pedidos TD", layout="wide")
-st.empty()  # limpia cualquier salida pendiente
 
 st.title("📬 Bandeja de Pedidos TD")
 
-# Botón de refrescar
+# 🔄 Limpieza de salida visual "fantasma"
+st.empty()
+
+# Botón de refrescar pedidos
 if st.button("🔄 Recargar Pedidos", help="Haz clic para recargar todos los pedidos desde Google Sheets."):
-    st.cache_data.clear()  # Limpia la caché de datos para forzar la recarga
-    st.rerun()  # Vuelve a ejecutar la aplicación para recargar los datos
+    st.cache_data.clear()
+    st.rerun()
+
 
 # --- Google Sheets Constants (pueden venir de st.secrets si se prefiere) ---
 GOOGLE_SHEET_ID = '1aWkSelodaz0nWfQx7FZAysGnIYGQFJxAN7RO3YgCiZY'
