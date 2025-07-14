@@ -20,15 +20,6 @@ if st.button("🔄 Recargar Pedidos", help="Haz clic para recargar todos los ped
     st.cache_data.clear()
     st.rerun()
 
-# ⛔ Oculta visualmente cualquier métrica suelta sin etiqueta que tenga el número 16
-st.markdown("""
-    <style>
-        .element-container:has(span:contains("16")):not(:has(div[data-testid="stMetricLabel"])) {
-            display: none !important;
-        }
-    </style>
-""", unsafe_allow_html=True)
-
 # --- Google Sheets Constants (pueden venir de st.secrets si se prefiere) ---
 GOOGLE_SHEET_ID = '1aWkSelodaz0nWfQx7FZAysGnIYGQFJxAN7RO3YgCiZY'
 GOOGLE_SHEET_WORKSHEET_NAME = 'datos_pedidos'
@@ -808,6 +799,15 @@ if not df_main.empty:
 
     df_pendientes_proceso_demorado = df_main[df_main["Estado"].isin(["🟡 Pendiente", "🔵 En Proceso", "🔴 Demorado"])].copy()
     df_completados_historial = df_main[df_main["Estado"] == "🟢 Completado"].copy()
+
+        # ⛔ Oculta visualmente cualquier métrica suelta sin etiqueta que tenga el número 16
+    st.markdown("""
+        <style>
+            .element-container:has(span:contains("16")):not(:has(div[data-testid="stMetricLabel"])) {
+                display: none !important;
+            }
+        </style>
+    """, unsafe_allow_html=True)
 
     st.markdown("### 📊 Resumen de Estados")
 
