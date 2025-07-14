@@ -508,7 +508,14 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
                         st.session_state["subtab_local"] = origen_tab
 
                         st.cache_data.clear()
+
+                        st.session_state["active_main_tab_index"] = st.session_state.get("active_main_tab_index", 0)
+                        st.session_state["active_subtab_local_index"] = st.session_state.get("active_subtab_local_index", 0)
+                        st.session_state["active_date_tab_m_index"] = st.session_state.get("active_date_tab_m_index", 0)
+                        st.session_state["active_date_tab_t_index"] = st.session_state.get("active_date_tab_t_index", 0)
+
                         st.rerun()
+
                     else:
                         st.error("❌ Falló la actualización en Google Sheets.")
                 else:
@@ -549,7 +556,13 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
                     st.session_state["subtab_local"] = origen_tab
 
                     st.cache_data.clear()
+
+                    st.session_state["active_main_tab_index"] = st.session_state.get("active_main_tab_index", 0)
+                    st.session_state["active_subtab_local_index"] = st.session_state.get("active_subtab_local_index", 0)
+                    st.session_state["active_date_tab_m_index"] = st.session_state.get("active_date_tab_m_index", 0)
+                    st.session_state["active_date_tab_t_index"] = st.session_state.get("active_date_tab_t_index", 0)
                     st.rerun()
+
                 else:
                     st.error("❌ Falló la actualización del surtidor.")
 
@@ -590,8 +603,15 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
                     st.session_state["pedido_editado"] = row['ID_Pedido']
                     st.session_state["fecha_seleccionada"] = row.get("Fecha_Entrega", "")
                     st.session_state["subtab_local"] = origen_tab
+
                     st.cache_data.clear()
+
+                    st.session_state["active_main_tab_index"] = st.session_state.get("active_main_tab_index", 0)
+                    st.session_state["active_subtab_local_index"] = st.session_state.get("active_subtab_local_index", 0)
+                    st.session_state["active_date_tab_m_index"] = st.session_state.get("active_date_tab_m_index", 0)
+                    st.session_state["active_date_tab_t_index"] = st.session_state.get("active_date_tab_t_index", 0)
                     st.rerun()
+
 
                 else:
                     st.error("❌ Falló la actualización del estado a 'En Proceso'.")
@@ -656,7 +676,13 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
                         st.session_state["subtab_local"] = origen_tab
 
                         st.cache_data.clear()
+
+                        st.session_state["active_main_tab_index"] = st.session_state.get("active_main_tab_index", 0)
+                        st.session_state["active_subtab_local_index"] = st.session_state.get("active_subtab_local_index", 0)
+                        st.session_state["active_date_tab_m_index"] = st.session_state.get("active_date_tab_m_index", 0)
+                        st.session_state["active_date_tab_t_index"] = st.session_state.get("active_date_tab_t_index", 0)
                         st.rerun()
+
                     else:
                         st.error("❌ No se pudo completar el pedido.")
                 except Exception as e:
@@ -685,7 +711,14 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
                     st.session_state["subtab_local"] = origen_tab
 
                     st.cache_data.clear()
+
+                    st.session_state["active_main_tab_index"] = st.session_state.get("active_main_tab_index", 0)
+                    st.session_state["active_subtab_local_index"] = st.session_state.get("active_subtab_local_index", 0)
+                    st.session_state["active_date_tab_m_index"] = st.session_state.get("active_date_tab_m_index", 0)
+                    st.session_state["active_date_tab_t_index"] = st.session_state.get("active_date_tab_t_index", 0)
+
                     st.rerun()
+
                 else:
                     st.error("❌ Falló la actualización de las notas.")
 
@@ -782,8 +815,15 @@ df_main, headers_main = process_sheet_data(raw_data)
 if not df_main.empty:
     df_main, changes_made_by_demorado_check = check_and_update_demorados(df_main, worksheet_main, headers_main)
     if changes_made_by_demorado_check:
-        st.cache_data.clear() # Clear cache to force reload if there are status changes
-        st.rerun() # Rerun to ensure delayed orders move immediately
+        st.cache_data.clear()
+
+        st.session_state["active_main_tab_index"] = st.session_state.get("active_main_tab_index", 0)
+        st.session_state["active_subtab_local_index"] = st.session_state.get("active_subtab_local_index", 0)
+        st.session_state["active_date_tab_m_index"] = st.session_state.get("active_date_tab_m_index", 0)
+        st.session_state["active_date_tab_t_index"] = st.session_state.get("active_date_tab_t_index", 0)
+
+        st.rerun()
+
 
     df_pendientes_proceso_demorado = df_main[df_main["Estado"].isin(["🟡 Pendiente", "🔵 En Proceso", "🔴 Demorado"])].copy()
     df_completados_historial = df_main[df_main["Estado"] == "🟢 Completado"].copy()
