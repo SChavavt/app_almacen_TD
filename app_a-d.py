@@ -9,13 +9,6 @@ import gspread.utils
 import json # Import json for parsing credentials
 
 st.set_page_config(page_title="Recepción de Pedidos TD", layout="wide")
-st.markdown("""
-    <style>
-        .block-container > div:nth-child(4) {
-            display: none !important;
-        }
-    </style>
-""", unsafe_allow_html=True)
 
 st.title("📬 Bandeja de Pedidos TD")
 
@@ -794,7 +787,6 @@ if not df_main.empty:
 
     df_pendientes_proceso_demorado = df_main[df_main["Estado"].isin(["🟡 Pendiente", "🔵 En Proceso", "🔴 Demorado"])].copy()
     df_completados_historial = df_main[df_main["Estado"] == "🟢 Completado"].copy()
-    _ = ""  # Previene salida automática
 
     st.markdown("### 📊 Resumen de Estados")
 
