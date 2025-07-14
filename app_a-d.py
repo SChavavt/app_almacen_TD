@@ -9,6 +9,13 @@ import gspread.utils
 import json # Import json for parsing credentials
 
 st.set_page_config(page_title="Recepción de Pedidos TD", layout="wide")
+st.markdown("""
+    <style>
+        .block-container > div:nth-child(4) {
+            display: none !important;
+        }
+    </style>
+""", unsafe_allow_html=True)
 
 st.title("📬 Bandeja de Pedidos TD")
 
