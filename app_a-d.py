@@ -1,3 +1,4 @@
+import time
 import streamlit as st
 import pandas as pd
 from datetime import datetime, timedelta
@@ -125,18 +126,25 @@ except Exception as e:
 # --- Data Loading from Google Sheets (Cached) ---
 @st.cache_data(ttl=60)
 def get_raw_sheet_data(sheet_id: str, worksheet_name: str, credentials: dict) -> list[list[str]]:
-    """
-    Lee todos los valores desde una hoja de Google Sheets.
-    Se cachea porque solo recibe tipos hasheables (str, dict).
-    """
     scope = ['https://spreadsheets.google.com/feeds', 'https://www.googleapis.com/auth/drive']
     credentials["private_key"] = credentials["private_key"].replace("\\n", "\n")
     creds = ServiceAccountCredentials.from_json_keyfile_dict(credentials, scope)
     client = gspread.authorize(creds)
 
-    sheet = client.open_by_key(sheet_id)
-    worksheet = sheet.worksheet(worksheet_name)
-    return worksheet.get_all_values()
+    try:
+        sheet = client.open_by_key(sheet_id)
+        worksheet = sheet.worksheet(worksheet_name)
+        return worksheet.get_all_values()
+    except gspread.exceptions.APIError:
+        st.cache_data.clear()  # 🔁 Limpiar la caché en caso de error de token/API
+        st.warning("🔁 Token expirado o error de conexión. Reintentando...")
+        time.sleep(1)  # Pequeña pausa antes de reintentar  # noqa: F821
+        # Reautenticamos
+        client = gspread.authorize(creds)
+        sheet = client.open_by_key(sheet_id)
+        worksheet = sheet.worksheet(worksheet_name)
+        return worksheet.get_all_values()
+
 
 def process_sheet_data(all_data: list[list[str]]) -> tuple[pd.DataFrame, list[str]]:
     """
