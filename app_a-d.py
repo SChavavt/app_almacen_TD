@@ -421,6 +421,9 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
     Displays a single order with its details, actions, and attachments.
     Includes logic for updating status, surtidor, notes, and handling attachments.
     """
+
+    surtido_files_in_s3 = []  # ✅ Garantiza que la variable exista siempre
+
     gsheet_row_index = row.get('_gsheet_row_index')
     if gsheet_row_index is None:
         st.error(f"❌ Error interno: No se pudo obtener el índice de fila de Google Sheets para el pedido '{row['ID_Pedido']}'.")
@@ -431,6 +434,7 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
         tiene_modificacion = row.get("Modificacion_Surtido") and pd.notna(row["Modificacion_Surtido"]) and str(row["Modificacion_Surtido"]).strip() != ''
         if tiene_modificacion:
             st.warning(f"⚠ ¡MODIFICACIÓN DE SURTIDO DETECTADA! Pedido #{orden}")
+
 
         # --- Cambiar Fecha y Turno ---
         # This block allows changing the delivery date and shift for local and foreign orders
@@ -746,7 +750,6 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
                 if match:
                     mod_surtido_archivos_mencionados_raw.extend([f.strip() for f in match.group(1).split(',')])
 
-            surtido_files_in_s3 = []
             if pedido_folder_prefix is None: # Ensure the prefix has been found
                 pedido_folder_prefix = find_pedido_subfolder_prefix(s3_client_param, S3_ATTACHMENT_PREFIX, row['ID_Pedido'])
 
