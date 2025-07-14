@@ -9,8 +9,7 @@ import gspread.utils
 from streamlit_autorefresh import st_autorefresh
 
 st.set_page_config(page_title="Panel de Almacén Integrado", layout="wide")
-st_autorefresh(interval=5 * 1000, key="datarefresh_integrated")
-
+st_autorefresh(interval=30 * 1000, key="datarefresh_integrated")  # cada 30 segundos
 col_title, col_button = st.columns([0.7, 0.3])
 with col_title:
     st.markdown("""
