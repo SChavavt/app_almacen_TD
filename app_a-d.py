@@ -10,7 +10,12 @@ import json # Import json for parsing credentials
 
 st.set_page_config(page_title="Recepción de Pedidos TD", layout="wide")
 
+# 👇 Diagnóstico: muestra todo lo que hay en session_state
+for k, v in st.session_state.items():
+    st.write(f"{k} → {v}")
+
 st.title("📬 Bandeja de Pedidos TD")
+
 
 # 🔄 Limpieza de salida visual "fantasma"
 st.empty()
