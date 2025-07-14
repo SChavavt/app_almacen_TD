@@ -688,14 +688,18 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
 
         current_notas = row.get("Notas", "")
         def update_notas_callback(current_idx, current_gsheet_row_index, current_notas_key, df_param, row, origen_tab):
-            new_notas_val = st.session_state[current_notas_key]
+            if current_notas_key not in st.session_state:
+                st.warning(f"⚠️ La clave {current_notas_key} no está en session_state. Puede que se haya limpiado la caché. Refresca o reescribe las notas.")
+                return
+
+            new_notas_val = st.session_state.get(current_notas_key, "")
             notas_actual = row.get("Notas", "")
+            
             if new_notas_val != notas_actual:
                 if update_gsheet_cell(worksheet, headers, current_gsheet_row_index, "Notas", new_notas_val):
                     df_param.loc[current_idx, "Notas"] = new_notas_val
                     st.toast("✅ Notas actualizadas", icon="📝")
 
-                    # 🔁 Mantener pedido y pestaña activa al recargar
                     st.session_state["pedido_editado"] = row['ID_Pedido']
                     st.session_state["fecha_seleccionada"] = row.get("Fecha_Entrega", "")
                     st.session_state["subtab_local"] = origen_tab
@@ -704,6 +708,7 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
                     st.rerun()
                 else:
                     st.error("❌ Falló la actualización de las notas.")
+
 
 
         notas_key = f"notas_edit_{row['ID_Pedido']}_{origen_tab}"
