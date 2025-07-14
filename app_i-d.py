@@ -44,25 +44,27 @@ st.markdown("""
 GOOGLE_SHEET_ID = '1aWkSelodaz0nWfQx7FZAysGnIYGQFJxAN7RO3YgCiZY'
 GOOGLE_SHEET_WORKSHEET_NAME = 'datos_pedidos'
 
-@st.cache_resource
-def get_gspread_client(_credentials_json_dict):
+def construir_gspread_client(creds_dict):
     scope = ['https://spreadsheets.google.com/feeds', 'https://www.googleapis.com/auth/drive']
-    creds_dict = dict(_credentials_json_dict)
-
     if "private_key" in creds_dict and isinstance(creds_dict["private_key"], str):
         creds_dict["private_key"] = creds_dict["private_key"].replace("\\n", "\n").strip()
 
-    try:
-        creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
-        client = gspread.authorize(creds)
+    creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
+    return gspread.authorize(creds)
 
-        # Verificamos que la hoja existe, si falla por token inválido lanzará error
+@st.cache_resource
+def get_gspread_client(_credentials_json_dict):
+    client = construir_gspread_client(_credentials_json_dict)
+    try:
+        # Intenta validar el token
         _ = client.open_by_key("1aWkSelodaz0nWfQx7FZAysGnIYGQFJxAN7RO3YgCiZY")
         return client
-    except Exception as e:
+    except gspread.exceptions.APIError:
         st.cache_resource.clear()
         st.warning("🔁 Token expirado detectado. Intentando refrescar sesión...")
-        raise e
+        client = construir_gspread_client(_credentials_json_dict)
+        _ = client.open_by_key("1aWkSelodaz0nWfQx7FZAysGnIYGQFJxAN7RO3YgCiZY")
+        return client
 
 
 try:
