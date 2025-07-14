@@ -11,14 +11,11 @@ import json # Import json for parsing credentials
 st.set_page_config(page_title="Recepción de Pedidos TD", layout="wide")
 
 st.title("📬 Bandeja de Pedidos TD")
-# 🧼 Prevenir salida accidental de "16"
-_ = ""
 
-
-# Botón de refrescar pedidos
+# Botón de refrescar
 if st.button("🔄 Recargar Pedidos", help="Haz clic para recargar todos los pedidos desde Google Sheets."):
-    st.cache_data.clear()
-    st.rerun()
+    st.cache_data.clear()  # Limpia la caché de datos para forzar la recarga
+    st.rerun()  # Vuelve a ejecutar la aplicación para recargar los datos
 
 # --- Google Sheets Constants (pueden venir de st.secrets si se prefiere) ---
 GOOGLE_SHEET_ID = '1aWkSelodaz0nWfQx7FZAysGnIYGQFJxAN7RO3YgCiZY'
@@ -539,18 +536,14 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
 
         surtidor_current = row.get("Surtidor", "")
         def update_surtidor_callback(current_idx, current_gsheet_row_index, current_surtidor_key, df_param, row, origen_tab):
-            if current_surtidor_key not in st.session_state:
-                st.warning(f"⚠️ La clave {current_surtidor_key} no está en session_state. Puede que se haya limpiado la caché. Refresca o reescribe el valor.")
-                return
-
-            new_surtidor_val = st.session_state.get(current_surtidor_key, "").strip()
+            new_surtidor_val = st.session_state[current_surtidor_key]
             surtidor_actual = row.get("Surtidor", "")
-            
             if new_surtidor_val != surtidor_actual:
                 if update_gsheet_cell(worksheet, headers, current_gsheet_row_index, "Surtidor", new_surtidor_val):
                     df_param.loc[current_idx, "Surtidor"] = new_surtidor_val
                     st.toast("✅ Surtidor actualizado", icon="✅")
 
+                    # 🔁 Mantener visibilidad del pedido y pestaña al recargar
                     st.session_state["pedido_editado"] = row['ID_Pedido']
                     st.session_state["fecha_seleccionada"] = row.get("Fecha_Entrega", "")
                     st.session_state["subtab_local"] = origen_tab
@@ -679,18 +672,14 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
 
         current_notas = row.get("Notas", "")
         def update_notas_callback(current_idx, current_gsheet_row_index, current_notas_key, df_param, row, origen_tab):
-            if current_notas_key not in st.session_state:
-                st.warning(f"⚠️ La clave {current_notas_key} no está en session_state. Puede que se haya limpiado la caché. Refresca o reescribe las notas.")
-                return
-
-            new_notas_val = st.session_state.get(current_notas_key, "")
+            new_notas_val = st.session_state[current_notas_key]
             notas_actual = row.get("Notas", "")
-            
             if new_notas_val != notas_actual:
                 if update_gsheet_cell(worksheet, headers, current_gsheet_row_index, "Notas", new_notas_val):
                     df_param.loc[current_idx, "Notas"] = new_notas_val
                     st.toast("✅ Notas actualizadas", icon="📝")
 
+                    # 🔁 Mantener pedido y pestaña activa al recargar
                     st.session_state["pedido_editado"] = row['ID_Pedido']
                     st.session_state["fecha_seleccionada"] = row.get("Fecha_Entrega", "")
                     st.session_state["subtab_local"] = origen_tab
@@ -699,7 +688,6 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
                     st.rerun()
                 else:
                     st.error("❌ Falló la actualización de las notas.")
-
 
 
         notas_key = f"notas_edit_{row['ID_Pedido']}_{origen_tab}"
@@ -794,14 +782,12 @@ df_main, headers_main = process_sheet_data(raw_data)
 if not df_main.empty:
     df_main, changes_made_by_demorado_check = check_and_update_demorados(df_main, worksheet_main, headers_main)
     if changes_made_by_demorado_check:
-        st.cache_data.clear()  # Clear cache to force reload if there are status changes
-        st.rerun()  # Rerun to ensure delayed orders move immediately
+        st.cache_data.clear() # Clear cache to force reload if there are status changes
+        st.rerun() # Rerun to ensure delayed orders move immediately
 
     df_pendientes_proceso_demorado = df_main[df_main["Estado"].isin(["🟡 Pendiente", "🔵 En Proceso", "🔴 Demorado"])].copy()
     df_completados_historial = df_main[df_main["Estado"] == "🟢 Completado"].copy()
-
-    # 🧼 Prevenir salida accidental de "16"
-    _ = ""
+    _ = ""  # Previene salida automática
 
     st.markdown("### 📊 Resumen de Estados")
 
@@ -814,7 +800,6 @@ if not df_main.empty:
     col2.metric("🔵 En Proceso", estado_counts.get('🔵 En Proceso', 0))
     col3.metric("🔴 Demorados", estado_counts.get('🔴 Demorado', 0))
     col4.metric("🟢 Completados", estado_counts.get('🟢 Completado', 0))
-
 
     # --- Implementación de Pestañas con st.tabs ---
     tab_options = ["📍 Pedidos Locales", "🚚 Pedidos Foráneos", "🛠 Garantías", "🔁 Devoluciones", "📬 Solicitud de Guía", "✅ Historial Completados"]
