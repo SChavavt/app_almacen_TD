@@ -6,10 +6,12 @@ import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 import boto3
 import gspread.utils
-from streamlit_autorefresh import st_autorefresh
 
 st.set_page_config(page_title="Panel de Almacén Integrado", layout="wide")
-st_autorefresh(interval=30 * 1000, key="datarefresh_integrated")  # cada 30 segundos
+if st.button("🔄 Recargar pedidos ahora"):
+    st.cache_data.clear()
+    st.rerun()
+
 col_title, col_button = st.columns([0.7, 0.3])
 with col_title:
     st.markdown("""
@@ -53,17 +55,19 @@ def construir_gspread_client(creds_dict):
 
 @st.cache_resource
 def get_gspread_client(_credentials_json_dict):
-    client = construir_gspread_client(_credentials_json_dict)
+    scope = ['https://spreadsheets.google.com/feeds', 'https://www.googleapis.com/auth/drive']
+    _credentials_json_dict["private_key"] = _credentials_json_dict["private_key"].replace("\\n", "\n").strip()
+    creds = ServiceAccountCredentials.from_json_keyfile_dict(_credentials_json_dict, scope)
+    client = gspread.authorize(creds)
     try:
-        # Intenta validar el token
-        _ = client.open_by_key("1aWkSelodaz0nWfQx7FZAysGnIYGQFJxAN7RO3YgCiZY")
-        return client
+        _ = client.open_by_key(GOOGLE_SHEET_ID)
     except gspread.exceptions.APIError:
         st.cache_resource.clear()
-        st.warning("🔁 Token expirado detectado. Intentando refrescar sesión...")
-        client = construir_gspread_client(_credentials_json_dict)
-        _ = client.open_by_key("1aWkSelodaz0nWfQx7FZAysGnIYGQFJxAN7RO3YgCiZY")
-        return client
+        st.warning("🔁 Token expirado o inválido. Reintentando autenticación...")
+        creds = ServiceAccountCredentials.from_json_keyfile_dict(_credentials_json_dict, scope)
+        client = gspread.authorize(creds)
+    return client
+
 
 
 try:
@@ -113,10 +117,8 @@ except Exception as e:
     st.stop()
 
 @st.cache_data(ttl=30)
-def load_data_from_gsheets(sheet_id, worksheet_name):
+def load_data_from_gsheets(worksheet):
     try:
-        spreadsheet = g_spread_client.open_by_key(sheet_id)
-        worksheet = spreadsheet.worksheet(worksheet_name)
         data = worksheet.get_all_values()
         if not data:
             return pd.DataFrame()
@@ -144,6 +146,7 @@ def load_data_from_gsheets(sheet_id, worksheet_name):
     except Exception as e:
         st.error(f"❌ Error al cargar datos de Google Sheets: {e}")
         st.stop()
+
 
 def get_s3_file_url(s3_object_key):
     if not s3_object_key:
@@ -208,7 +211,7 @@ def display_dataframe_with_formatting(df_to_display):
 
 # --- Lógica principal ---
 
-df_all_data = load_data_from_gsheets(GOOGLE_SHEET_ID, GOOGLE_SHEET_WORKSHEET_NAME)
+df_all_data = load_data_from_gsheets(worksheet_main)
 
 if 'ID_Pedido' in df_all_data.columns:
     df_all_data['ID_Pedido'] = df_all_data['ID_Pedido'].astype(str)
