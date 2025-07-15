@@ -115,8 +115,6 @@ try:
 except Exception as e:
     st.error(f"❌ Error al autenticar clientes: {e}")
     st.stop()
-
-@st.cache_data(ttl=30)
 def load_data_from_gsheets(worksheet):
     try:
         data = worksheet.get_all_values()
