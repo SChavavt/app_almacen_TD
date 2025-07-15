@@ -60,19 +60,24 @@ if "expanded_attachments" not in st.session_state:
 def get_gspread_client(_credentials_json_dict):
     scope = ['https://spreadsheets.google.com/feeds', 'https://www.googleapis.com/auth/drive']
     creds_dict = dict(_credentials_json_dict)
+    creds_dict["private_key"] = creds_dict["private_key"].replace("\\n", "\n").strip()
 
-    if "private_key" in creds_dict and isinstance(creds_dict["private_key"], str):
-        creds_dict["private_key"] = creds_dict["private_key"].replace("\n", "\n").strip()
+    creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
+    client = gspread.authorize(creds)
 
     try:
+        _ = client.open_by_key(GOOGLE_SHEET_ID)
+    except gspread.exceptions.APIError:
+        # Token expirado o inválido → limpiar y regenerar
+        st.cache_resource.clear()
+        st.warning("🔁 Token expirado. Reintentando autenticación...")
+
         creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
         client = gspread.authorize(creds)
-        _ = client.open_by_key("1aWkSelodaz0nWfQx7FZAysGnIYGQFJxAN7RO3YgCiZY")
-        return client
-    except Exception as e:
-        st.cache_resource.clear()
-        st.warning("🔁 Token expirado o inválido. Reintentando autenticación...")
-        raise e
+        _ = client.open_by_key(GOOGLE_SHEET_ID)
+
+    return client
+
 
 def get_s3_client():
     """
