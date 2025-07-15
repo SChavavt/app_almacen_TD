@@ -10,6 +10,7 @@ import gspread.utils
 st.set_page_config(page_title="Panel de Almacén Integrado", layout="wide")
 if st.button("🔄 Recargar pedidos ahora"):
     st.cache_data.clear()
+    st.cache_resource.clear()  # 💥 Limpia también el cliente de Google (y S3 si hiciera falta)
     st.rerun()
 
 col_title, col_button = st.columns([0.7, 0.3])
