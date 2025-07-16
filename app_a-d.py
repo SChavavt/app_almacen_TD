@@ -1,4 +1,3 @@
-
 import time
 import streamlit as st
 import pandas as pd
@@ -9,6 +8,8 @@ import boto3
 import re
 import gspread.utils
 import json # Import json for parsing credentials
+import os
+import uuid
 
 st.set_page_config(page_title="Recepción de Pedidos TD", layout="wide")
 
@@ -94,7 +95,7 @@ def get_s3_client():
         return s3
     except Exception as e:
         st.error(f"❌ Error al inicializar el cliente S3: {e}")
-        st.info("ℹ️ Revisa tus credenciales de AWS en `st.secrets['aws']` y la configuración de la región.")
+        st.info("ℹ️ Revisa tus credenciales de AWS en st.secrets['aws'] y la configuración de la región.")
         st.stop()
 
 # Initialize clients globally
@@ -125,7 +126,7 @@ try:
 
 except Exception as e:
     st.error(f"❌ Error general al autenticarse o inicializar clientes: {e}")
-    st.info("ℹ️ Asegúrate de que las APIs de Google Sheets y Drive estén habilitadas para tu proyecto de Google Cloud. También, revisa tus credenciales de AWS S3 y Google Sheets en `.streamlit/secrets.toml` o en la interfaz de Streamlit Cloud.")
+    st.info("ℹ️ Asegúrate de que las APIs de Google Sheets y Drive estén habilitadas para tu proyecto de Google Cloud. También, revisa tus credenciales de AWS S3 y Google Sheets en .streamlit/secrets.toml o en la interfaz de Streamlit Cloud.")
     st.stop()
 
 
@@ -167,9 +168,10 @@ def process_sheet_data(all_data: list[list[str]]) -> tuple[pd.DataFrame, list[st
     expected_columns = [
         'ID_Pedido', 'Folio_Factura', 'Hora_Registro', 'Vendedor_Registro', 'Cliente',
         'Tipo_Envio', 'Fecha_Entrega', 'Comentario', 'Notas', 'Modificacion_Surtido',
-        'Adjuntos', 'Adjuntos_Surtido', 'Estado', 'Estado_Pago', 'Fecha_Completado',
-        'Hora_Proceso', 'Turno', 'Surtidor'
+        'Adjuntos', 'Adjuntos_Surtido', 'Adjuntos_Guia',  # 👈 nuevo
+        'Estado', 'Estado_Pago', 'Fecha_Completado', 'Hora_Proceso', 'Turno', 'Surtidor'
     ]
+
 
     for col in expected_columns:
         if col not in df.columns:
@@ -194,9 +196,9 @@ def process_sheet_data(all_data: list[list[str]]) -> tuple[pd.DataFrame, list[st
 def update_gsheet_cell(worksheet, headers, row_index, col_name, value):
     """
     Actualiza una celda específica en Google Sheets.
-    `row_index` es el índice de fila de gspread (base 1).
-    `col_name` es el nombre de la columna.
-    `headers` es la lista de encabezados obtenida previamente.
+    row_index es el índice de fila de gspread (base 1).
+    col_name es el nombre de la columna.
+    headers es la lista de encabezados obtenida previamente.
     """
     try:
         if col_name not in headers:
@@ -239,7 +241,28 @@ def batch_update_gsheet_cells(worksheet, updates_list):
     except Exception as e:
         st.error(f"❌ Error al realizar la actualización por lotes en Google Sheets: {e}")
         return False
+# --- AWS S3 Helper Functions (Copied from app_admin.py directly) ---
 
+def upload_file_to_s3(s3_client_param, bucket_name, file_obj, s3_key):
+    """
+    Uploads a file-like object to S3 and returns (success, url).
+    """
+    try:
+        s3_client_param.upload_fileobj(
+            file_obj,
+            bucket_name,
+            s3_key,
+            ExtraArgs={'ACL': 'private'}
+        )
+        url = s3_client_param.generate_presigned_url(
+            'get_object',
+            Params={'Bucket': bucket_name, 'Key': s3_key},
+            ExpiresIn=7200
+        )
+        return True, url
+    except Exception as e:
+        st.error(f"❌ Error al subir archivo a S3: {e}")
+        return False, None
 # --- AWS S3 Helper Functions (Copied from app_admin.py directly) ---
 
 def find_pedido_subfolder_prefix(s3_client_param, parent_prefix, folder_name):
@@ -751,6 +774,38 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
             on_change=update_notas_callback,
             args=(idx, gsheet_row_index, notas_key, df, row, origen_tab)
         )
+
+        # --- Adjuntar archivos de guía ---
+        if row['Estado'] != "🟢 Completado":
+            with st.expander("📦 Subir Archivos de Guía"):
+                activar_guia = st.checkbox("Habilitar subida de guía", key=f"activar_guia_{row['ID_Pedido']}")
+                if activar_guia:
+                    archivos_guia = st.file_uploader(
+                        "📎 Subir guía(s) del pedido",
+                        type=["pdf", "jpg", "jpeg", "png"],
+                        accept_multiple_files=True,
+                        key=f"file_guia_{row['ID_Pedido']}"
+                    )
+                    if archivos_guia:
+                        uploaded_urls = []
+                        for archivo in archivos_guia:
+                            ext = os.path.splitext(archivo.name)[1]
+                            s3_key = f"{row['ID_Pedido']}/guia_{uuid.uuid4().hex[:6]}{ext}"
+                            success, url = upload_file_to_s3(s3_client_param, S3_BUCKET_NAME, archivo, s3_key)
+                            if success:
+                                uploaded_urls.append(url)
+
+                        if uploaded_urls:
+                            nueva_lista = row.get("Adjuntos_Guia", "")
+                            nueva_lista_actualizada = nueva_lista + ", " + ", ".join(uploaded_urls) if nueva_lista else ", ".join(uploaded_urls)
+                            success = update_gsheet_cell(worksheet, headers, gsheet_row_index, "Adjuntos_Guia", nueva_lista_actualizada)
+                            if success:
+                                st.success(f"✅ {len(uploaded_urls)} archivo(s) de guía subido(s) y registrado(s).")
+                                st.cache_data.clear()
+                                st.rerun()
+                            else:
+                                st.error("❌ No se pudo actualizar el Google Sheet con los archivos de guía.")
+
 
         surtido_files_in_s3 = []  # ✅ aseguramos su existencia
 
