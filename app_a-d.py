@@ -452,6 +452,14 @@ def check_and_update_demorados(df_to_check, worksheet, headers):
             return df_to_check, False
     
     return df_to_check, False # No updates were made
+def fijar_estado_pestanas_guia(row, origen_tab):
+    st.session_state["pedido_editado"] = row['ID_Pedido']
+    st.session_state["fecha_seleccionada"] = row.get("Fecha_Entrega", "")
+    st.session_state["subtab_local"] = origen_tab
+    st.session_state["active_main_tab_index"] = st.session_state.get("active_main_tab_index", 0)
+    st.session_state["active_subtab_local_index"] = st.session_state.get("active_subtab_local_index", 0)
+    st.session_state["active_date_tab_m_index"] = st.session_state.get("active_date_tab_m_index", 0)
+    st.session_state["active_date_tab_t_index"] = st.session_state.get("active_date_tab_t_index", 0)
 
 def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, worksheet, headers, s3_client_param):
     """
@@ -778,15 +786,22 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
         # --- Adjuntar archivos de guía ---
         if row['Estado'] != "🟢 Completado":
             with st.expander("📦 Subir Archivos de Guía"):
+                upload_key = f"file_guia_{row['ID_Pedido']}"
+
                 archivos_guia = st.file_uploader(
                     "📎 Subir guía(s) del pedido",
                     type=["pdf", "jpg", "jpeg", "png"],
                     accept_multiple_files=True,
-                    key=f"file_guia_{row['ID_Pedido']}"
-                )
+                    key=upload_key,
+                    on_change=fijar_estado_pestanas_guia,
+                    kwargs={"row": row, "origen_tab": origen_tab}
+)
+
 
                 if archivos_guia:
                     if st.button("📤 Subir Guía", key=f"btn_subir_guia_{row['ID_Pedido']}"):
+                        fijar_estado_pestanas_guia(row, origen_tab)
+
                         uploaded_urls = []
                         for archivo in archivos_guia:
                             ext = os.path.splitext(archivo.name)[1]
@@ -917,7 +932,7 @@ if not df_main.empty:
     col4.metric("🟢 Completados", estado_counts.get('🟢 Completado', 0))
 
     # --- Implementación de Pestañas con st.tabs ---
-    tab_options = ["📍 Pedidos Locales", "🚚 Pedidos Foráneos", "🛠 Garantías", "🔁 Devoluciones", "📬 Solicitud de Guía", "✅ Historial Completados"]
+    tab_options = ["📍 Pedidos Locales", "🚚 Pedidos Foráneos", "🔁 Devoluciones", "📬 Solicitud de Guía", "✅ Historial Completados"]
 
     main_tabs = st.tabs(tab_options)
 
@@ -1020,16 +1035,7 @@ if not df_main.empty:
         else:
             st.info("No hay pedidos foráneos.")
 
-    with main_tabs[2]: # 🛠 Garantías
-        garantias_display = df_pendientes_proceso_demorado[(df_pendientes_proceso_demorado["Tipo_Envio"] == "🛠 Garantía")].copy()
-        if not garantias_display.empty:
-            garantias_display = ordenar_pedidos_custom(garantias_display)
-            for orden, (idx, row) in enumerate(garantias_display.iterrows(), start=1):
-                mostrar_pedido(df_main, idx, row, orden, "Garantía", "🛠 Garantías", worksheet_main, headers_main, s3_client)
-        else:
-            st.info("No hay garantías.")
-
-    with main_tabs[3]: # 🔁 Devoluciones
+    with main_tabs[2]: # 🔁 Devoluciones
         devoluciones_display = df_pendientes_proceso_demorado[(df_pendientes_proceso_demorado["Tipo_Envio"] == "🔁 Devolución")].copy()
         if not devoluciones_display.empty:
             devoluciones_display = ordenar_pedidos_custom(devoluciones_display)
@@ -1038,7 +1044,7 @@ if not df_main.empty:
         else:
             st.info("No hay devoluciones.")
 
-    with main_tabs[4]: # 📬 Solicitud de Guía
+    with main_tabs[3]: # 📬 Solicitud de Guía
         solicitudes_display = df_pendientes_proceso_demorado[(df_pendientes_proceso_demorado["Tipo_Envio"] == "📬 Solicitud de guía")].copy()
         if not solicitudes_display.empty:
             solicitudes_display = ordenar_pedidos_custom(solicitudes_display)
@@ -1047,7 +1053,7 @@ if not df_main.empty:
         else:
             st.info("No hay solicitudes de guía.")
 
-    with main_tabs[5]: # ✅ Historial Completados
+    with main_tabs[4]: # ✅ Historial Completados
         st.markdown("### Historial de Pedidos Completados")
         if not df_completados_historial.empty:
             # Ordenar por Fecha_Completado en orden descendente para mostrar los más recientes
