@@ -178,7 +178,7 @@ def display_attachments(adjuntos_str, s3_client_instance):
         return f"Error adjuntos: {e}"
 
 def display_dataframe_with_formatting(df_to_display):
-    columnas_base = ["Cliente", "Hora_Registro", "Estado"]
+    columnas_base = ["Cliente", "Fecha_Entrega", "Estado"]
     if 'Surtidor' in df_to_display.columns:
         columnas_base.append("Surtidor")
     elif 'Vendedor_Registro' in df_to_display.columns:
@@ -192,7 +192,7 @@ def display_dataframe_with_formatting(df_to_display):
     df_display_final = df_to_display[existing_columns].copy()
     rename_map = {}
     if "Hora_Registro" in df_display_final.columns:
-        rename_map["Hora_Registro"] = "Fecha"
+        rename_map["Hora_Registro"] = "Fecha Entrega"
     if "Vendedor_Registro" in df_display_final.columns and "Surtidor" not in df_display_final.columns:
         rename_map["Vendedor_Registro"] = "Surtidor"
 
