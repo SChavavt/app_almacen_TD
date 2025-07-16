@@ -1045,7 +1045,7 @@ if not df_main.empty:
         else:
             st.info("No hay devoluciones.")
 
-    with main_tabs[3]: # 🛠 Garantías
+    with main_tabs[3]: #🛠 Garantías
         garantias_display = df_pendientes_proceso_demorado[(df_pendientes_proceso_demorado["Tipo_Envio"] == "🛠 Garantía")].copy()
         if not garantias_display.empty:
             garantias_display = ordenar_pedidos_custom(garantias_display)
