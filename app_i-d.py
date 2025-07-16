@@ -1,6 +1,6 @@
 import streamlit as st
 import pandas as pd
-from datetime import datetime, date, timedelta
+from datetime import datetime, timedelta
 import json
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
@@ -191,15 +191,16 @@ def display_dataframe_with_formatting(df_to_display):
 
     df_display_final = df_to_display[existing_columns].copy()
     rename_map = {}
-    if "Hora_Registro" in df_display_final.columns:
-        rename_map["Hora_Registro"] = "Fecha Entrega"
+    if "Fecha_Entrega" in df_display_final.columns:
+        rename_map["Fecha_Entrega"] = "Fecha Entrega"
+
     if "Vendedor_Registro" in df_display_final.columns and "Surtidor" not in df_display_final.columns:
         rename_map["Vendedor_Registro"] = "Surtidor"
 
     df_display_final = df_display_final.rename(columns=rename_map)
-    if 'Fecha' in df_display_final.columns:
-        df_display_final['Fecha'] = df_display_final['Fecha'].apply(
-            lambda x: x.strftime("%H:%M") if pd.notna(x) and x.date() == date.today() else x.strftime("%d/%m %H:%M") if pd.notna(x) else ""
+    if 'Fecha Entrega' in df_display_final.columns:
+        df_display_final['Fecha Entrega'] = df_display_final['Fecha Entrega'].apply(
+            lambda x: x.strftime("%d/%m") if pd.notna(x) else ""
         )
     st.dataframe(
         df_display_final,
@@ -256,8 +257,9 @@ if not df_all_data.empty:
             for j, (titulo, df_grupo) in enumerate(row):
                 with cols[j]:
                     st.markdown(f"#### {titulo}")
-                    if 'Hora_Registro' in df_grupo.columns:
-                        df_grupo = df_grupo.sort_values(by='Hora_Registro', ascending=False).reset_index(drop=True)
+                    if 'Fecha_Entrega' in df_grupo.columns:
+                        df_grupo = df_grupo.sort_values(by='Fecha_Entrega', ascending=False).reset_index(drop=True)
+
                     display_dataframe_with_formatting(df_grupo)
     else:
         st.info("No hay pedidos para mostrar.")
