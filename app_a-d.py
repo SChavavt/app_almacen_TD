@@ -933,7 +933,7 @@ if not df_main.empty:
     col4.metric("🟢 Completados", estado_counts.get('🟢 Completado', 0))
 
     # --- Implementación de Pestañas con st.tabs ---
-    tab_options = ["📍 Pedidos Locales", "🚚 Pedidos Foráneos", "🔁 Devoluciones", "📬 Solicitud de Guía", "✅ Historial Completados"]
+    tab_options = ["📍 Pedidos Locales", "🚚 Pedidos Foráneos", "🔁 Devoluciones", "🛠 Garantías", "✅ Historial Completados"]
 
     main_tabs = st.tabs(tab_options)
 
@@ -1045,14 +1045,14 @@ if not df_main.empty:
         else:
             st.info("No hay devoluciones.")
 
-    with main_tabs[3]: # 📬 Solicitud de Guía
-        solicitudes_display = df_pendientes_proceso_demorado[(df_pendientes_proceso_demorado["Tipo_Envio"] == "📬 Solicitud de guía")].copy()
-        if not solicitudes_display.empty:
-            solicitudes_display = ordenar_pedidos_custom(solicitudes_display)
-            for orden, (idx, row) in enumerate(solicitudes_display.iterrows(), start=1):
-                mostrar_pedido(df_main, idx, row, orden, "Solicitud de Guía", "📬 Solicitud de Guía", worksheet_main, headers_main, s3_client)
+    with main_tabs[3]: # 🛠 Garantías
+        garantias_display = df_pendientes_proceso_demorado[(df_pendientes_proceso_demorado["Tipo_Envio"] == "🛠 Garantía")].copy()
+        if not garantias_display.empty:
+            garantias_display = ordenar_pedidos_custom(garantias_display)
+            for orden, (idx, row) in enumerate(garantias_display.iterrows(), start=1):
+                mostrar_pedido(df_main, idx, row, orden, "Garantía", "🛠 Garantías", worksheet_main, headers_main, s3_client)
         else:
-            st.info("No hay solicitudes de guía.")
+            st.info("No hay garantías.")
 
     with main_tabs[4]: # ✅ Historial Completados
         st.markdown("### Historial de Pedidos Completados")
