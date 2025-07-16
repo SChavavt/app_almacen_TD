@@ -468,6 +468,7 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
     """
 
     surtido_files_in_s3 = []  # ✅ Garantiza que la variable exista siempre
+    pedido_folder_prefix = None  # ✅ Garantiza que esté definido aunque no se haya expandido adjuntos
 
     gsheet_row_index = row.get('_gsheet_row_index')
     if gsheet_row_index is None:
