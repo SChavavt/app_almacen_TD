@@ -778,15 +778,15 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
         # --- Adjuntar archivos de guía ---
         if row['Estado'] != "🟢 Completado":
             with st.expander("📦 Subir Archivos de Guía"):
-                activar_guia = st.checkbox("Habilitar subida de guía", key=f"activar_guia_{row['ID_Pedido']}")
-                if activar_guia:
-                    archivos_guia = st.file_uploader(
-                        "📎 Subir guía(s) del pedido",
-                        type=["pdf", "jpg", "jpeg", "png"],
-                        accept_multiple_files=True,
-                        key=f"file_guia_{row['ID_Pedido']}"
-                    )
-                    if archivos_guia:
+                archivos_guia = st.file_uploader(
+                    "📎 Subir guía(s) del pedido",
+                    type=["pdf", "jpg", "jpeg", "png"],
+                    accept_multiple_files=True,
+                    key=f"file_guia_{row['ID_Pedido']}"
+                )
+
+                if archivos_guia:
+                    if st.button("📤 Subir Guía", key=f"btn_subir_guia_{row['ID_Pedido']}"):
                         uploaded_urls = []
                         for archivo in archivos_guia:
                             ext = os.path.splitext(archivo.name)[1]
@@ -800,11 +800,12 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
                             nueva_lista_actualizada = nueva_lista + ", " + ", ".join(uploaded_urls) if nueva_lista else ", ".join(uploaded_urls)
                             success = update_gsheet_cell(worksheet, headers, gsheet_row_index, "Adjuntos_Guia", nueva_lista_actualizada)
                             if success:
-                                st.success(f"✅ {len(uploaded_urls)} archivo(s) de guía subido(s) y registrado(s).")
+                                st.success(f"✅ {len(uploaded_urls)} archivo(s) subido(s) y registrado(s).")
+                                st.toast("🎉 ¡Guías subidas!", icon="📦")
                                 st.cache_data.clear()
-                                st.rerun()
                             else:
                                 st.error("❌ No se pudo actualizar el Google Sheet con los archivos de guía.")
+
 
 
         surtido_files_in_s3 = []  # ✅ aseguramos su existencia
