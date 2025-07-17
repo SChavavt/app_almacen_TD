@@ -578,7 +578,7 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
         # This section displays the core information of the order
         disabled_if_completed = (row['Estado'] == "🟢 Completado")
 
-        col_order_num, col_client, col_time, col_status, col_surtidor, col_print_btn, col_complete_btn = st.columns([0.5, 2, 1.5, 1, 1.2, 1, 1])
+        col_order_num, col_client, col_time, col_status, col_vendedor, col_print_btn, col_complete_btn = st.columns([0.5, 2, 1.5, 1, 1.2, 1, 1])
 
         col_order_num.write(f"**{orden}**")
         col_client.write(f"**{row['Cliente']}**")
@@ -591,44 +591,9 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
 
         col_status.write(f"{row['Estado']}")
 
-        surtidor_current = row.get("Surtidor", "")
-        def update_surtidor_callback(current_idx, current_gsheet_row_index, current_surtidor_key, df_param, row, origen_tab):
-            new_surtidor_val = st.session_state[current_surtidor_key]
-            surtidor_actual = row.get("Surtidor", "")
-            if new_surtidor_val != surtidor_actual:
-                if update_gsheet_cell(worksheet, headers, current_gsheet_row_index, "Surtidor", new_surtidor_val):
-                    df_param.loc[current_idx, "Surtidor"] = new_surtidor_val
-                    st.toast("✅ Surtidor actualizado", icon="✅")
+        vendedor_registro = row.get("Vendedor_Registro", "")
+        col_vendedor.write(f"👤 {vendedor_registro}")
 
-                    # 🔁 Mantener visibilidad del pedido y pestaña al recargar
-                    st.session_state["pedido_editado"] = row['ID_Pedido']
-                    st.session_state["fecha_seleccionada"] = row.get("Fecha_Entrega", "")
-                    st.session_state["subtab_local"] = origen_tab
-
-                    st.cache_data.clear()
-
-                    st.session_state["active_main_tab_index"] = st.session_state.get("active_main_tab_index", 0)
-                    st.session_state["active_subtab_local_index"] = st.session_state.get("active_subtab_local_index", 0)
-                    st.session_state["active_date_tab_m_index"] = st.session_state.get("active_date_tab_m_index", 0)
-                    st.session_state["active_date_tab_t_index"] = st.session_state.get("active_date_tab_t_index", 0)
-                    st.rerun()
-
-                else:
-                    st.error("❌ Falló la actualización del surtidor.")
-
-
-        surtidor_key = f"surtidor_{row['ID_Pedido']}_{origen_tab}"
-        # This is the Surtidor input field
-        col_surtidor.text_input(
-            "Surtidor",
-            value=surtidor_current,
-            label_visibility="collapsed",
-            placeholder="Surtidor",
-            key=surtidor_key,
-            disabled=disabled_if_completed,
-            on_change=update_surtidor_callback,
-            args=(idx, gsheet_row_index, surtidor_key, df, row, origen_tab)
-        )
 
         # ✅ PRINT and UPDATE TO "IN PROCESS"
         if col_print_btn.button("🖨 Imprimir", key=f"print_{row['ID_Pedido']}_{origen_tab}"):
@@ -697,46 +662,43 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
 
         # Complete Button
         if col_complete_btn.button("🟢 Completar", key=f"complete_button_{row['ID_Pedido']}_{origen_tab}", disabled=disabled_if_completed):
-            surtidor_val = st.session_state.get(surtidor_key, "").strip()
-            if not surtidor_val:
-                st.warning("⚠️ Debes ingresar el nombre del surtidor antes de completar el pedido.")
-            else:
-                try:
-                    updates = []
-                    estado_col_idx = headers.index('Estado') + 1
-                    fecha_completado_col_idx = headers.index('Fecha_Completado') + 1
+            try:
+                updates = []
+                estado_col_idx = headers.index('Estado') + 1
+                fecha_completado_col_idx = headers.index('Fecha_Completado') + 1
 
-                    updates.append({
-                        'range': gspread.utils.rowcol_to_a1(gsheet_row_index, estado_col_idx),
-                        'values': [["🟢 Completado"]]
-                    })
-                    updates.append({
-                        'range': gspread.utils.rowcol_to_a1(gsheet_row_index, fecha_completado_col_idx),
-                        'values': [[datetime.now().strftime("%Y-%m-%d %H:%M:%S")]]
-                    })
+                now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-                    if batch_update_gsheet_cells(worksheet, updates):
-                        df.loc[idx, "Estado"] = "🟢 Completado"
-                        df.loc[idx, "Fecha_Completado"] = datetime.now()
-                        st.success(f"✅ Pedido {row['ID_Pedido']} completado exitosamente.")
+                updates.append({
+                    'range': gspread.utils.rowcol_to_a1(gsheet_row_index, estado_col_idx),
+                    'values': [["🟢 Completado"]]
+                })
+                updates.append({
+                    'range': gspread.utils.rowcol_to_a1(gsheet_row_index, fecha_completado_col_idx),
+                    'values': [[now_str]]
+                })
 
-                        # 🔁 Mantener pestaña activa
-                        st.session_state["pedido_editado"] = row['ID_Pedido']
-                        st.session_state["fecha_seleccionada"] = row.get("Fecha_Entrega", "")
-                        st.session_state["subtab_local"] = origen_tab
+                if batch_update_gsheet_cells(worksheet, updates):
+                    df.loc[idx, "Estado"] = "🟢 Completado"
+                    df.loc[idx, "Fecha_Completado"] = datetime.now()
+                    st.success(f"✅ Pedido {row['ID_Pedido']} completado exitosamente.")
 
-                        st.cache_data.clear()
+                    # 🔁 Mantener pestaña activa
+                    st.session_state["pedido_editado"] = row['ID_Pedido']
+                    st.session_state["fecha_seleccionada"] = row.get("Fecha_Entrega", "")
+                    st.session_state["subtab_local"] = origen_tab
 
-                        st.session_state["active_main_tab_index"] = st.session_state.get("active_main_tab_index", 0)
-                        st.session_state["active_subtab_local_index"] = st.session_state.get("active_subtab_local_index", 0)
-                        st.session_state["active_date_tab_m_index"] = st.session_state.get("active_date_tab_m_index", 0)
-                        st.session_state["active_date_tab_t_index"] = st.session_state.get("active_date_tab_t_index", 0)
-                        st.rerun()
+                    st.cache_data.clear()
 
-                    else:
-                        st.error("❌ No se pudo completar el pedido.")
-                except Exception as e:
-                    st.error(f"Error al completar el pedido: {e}")
+                    st.session_state["active_main_tab_index"] = st.session_state.get("active_main_tab_index", 0)
+                    st.session_state["active_subtab_local_index"] = st.session_state.get("active_subtab_local_index", 0)
+                    st.session_state["active_date_tab_m_index"] = st.session_state.get("active_date_tab_m_index", 0)
+                    st.session_state["active_date_tab_t_index"] = st.session_state.get("active_date_tab_t_index", 0)
+                    st.rerun()
+                else:
+                    st.error("❌ No se pudo completar el pedido.")
+            except Exception as e:
+                st.error(f"Error al completar el pedido: {e}")
 
 
         # --- Editable Notes Field and Comment ---
