@@ -167,36 +167,32 @@ def display_attachments(adjuntos_str, s3_client_instance):
         return f"Error adjuntos: {e}"
 
 def display_dataframe_with_formatting(df_to_display):
-    columnas_base = ["Cliente", "Fecha_Entrega", "Estado"]
-    if 'Surtidor' in df_to_display.columns:
-        columnas_base.append("Surtidor")
-    elif 'Vendedor_Registro' in df_to_display.columns:
-        columnas_base.append("Vendedor_Registro")
+    columnas_deseadas = ["Fecha_Entrega", "Cliente", "Vendedor_Registro", "Estado"]
 
-    existing_columns = [col for col in columnas_base if col in df_to_display.columns]
-    if not existing_columns:
-        st.info("No hay columnas relevantes.")
+    columnas_existentes = [col for col in columnas_deseadas if col in df_to_display.columns]
+    if not columnas_existentes:
+        st.info("No hay columnas relevantes para mostrar.")
         return
 
-    df_display_final = df_to_display[existing_columns].copy()
-    rename_map = {}
-    if "Fecha_Entrega" in df_display_final.columns:
-        rename_map["Fecha_Entrega"] = "Fecha Entrega"
+    df_vista = df_to_display[columnas_existentes].copy()
 
-    if "Vendedor_Registro" in df_display_final.columns and "Surtidor" not in df_display_final.columns:
-        rename_map["Vendedor_Registro"] = "Surtidor"
+    df_vista = df_vista.rename(columns={
+        "Fecha_Entrega": "Fecha Entrega",
+        "Vendedor_Registro": "Vendedor"
+    })
 
-    df_display_final = df_display_final.rename(columns=rename_map)
-    if 'Fecha Entrega' in df_display_final.columns:
-        df_display_final['Fecha Entrega'] = df_display_final['Fecha Entrega'].apply(
+    if "Fecha Entrega" in df_vista.columns:
+        df_vista["Fecha Entrega"] = df_vista["Fecha Entrega"].apply(
             lambda x: x.strftime("%d/%m") if pd.notna(x) else ""
         )
+
     st.dataframe(
-        df_display_final,
+        df_vista,
         use_container_width=True,
-        column_config={col: st.column_config.Column(width="small") for col in df_display_final.columns},
+        column_config={col: st.column_config.Column(width="small") for col in df_vista.columns},
         hide_index=True
     )
+
 
 # --- Lógica principal ---
 
