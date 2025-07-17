@@ -1078,6 +1078,8 @@ if not df_main.empty:
                         })
                 if updates and batch_update_gsheet_cells(worksheet_main, updates):
                     st.success(f"✅ {len(updates)} pedidos marcados como limpiados.")
+                    st.cache_data.clear()
+                    st.session_state["active_main_tab_index"] = 4
                     st.rerun()
 
         if not df_completados_historial.empty:
