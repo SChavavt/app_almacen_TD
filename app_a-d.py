@@ -10,6 +10,8 @@ import gspread.utils
 import json # Import json for parsing credentials
 import os
 import uuid
+from pytz import timezone
+
 
 st.set_page_config(page_title="Recepción de Pedidos TD", layout="wide")
 
@@ -601,7 +603,9 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
 
             # Only update if the current status is "Pendiente"
             if row["Estado"] == "🟡 Pendiente":
-                now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                zona_mexico = timezone("America/Mexico_City")
+                now = datetime.now(zona_mexico)
+                now_str = now.strftime("%Y-%m-%d %H:%M:%S")
                 estado_col_idx = headers.index("Estado") + 1
                 hora_proc_col_idx = headers.index("Hora_Proceso") + 1
 
@@ -663,11 +667,13 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
         # Complete Button
         if col_complete_btn.button("🟢 Completar", key=f"complete_button_{row['ID_Pedido']}_{origen_tab}", disabled=disabled_if_completed):
             try:
+                zona_mexico = timezone("America/Mexico_City")
+                now = datetime.now(zona_mexico)
+                now_str = now.strftime("%Y-%m-%d %H:%M:%S")
+
                 updates = []
                 estado_col_idx = headers.index('Estado') + 1
                 fecha_completado_col_idx = headers.index('Fecha_Completado') + 1
-
-                now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
                 updates.append({
                     'range': gspread.utils.rowcol_to_a1(gsheet_row_index, estado_col_idx),
@@ -680,7 +686,7 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
 
                 if batch_update_gsheet_cells(worksheet, updates):
                     df.loc[idx, "Estado"] = "🟢 Completado"
-                    df.loc[idx, "Fecha_Completado"] = datetime.now()
+                    df.loc[idx, "Fecha_Completado"] = now
                     st.success(f"✅ Pedido {row['ID_Pedido']} completado exitosamente.")
 
                     # 🔁 Mantener pestaña activa
@@ -699,6 +705,7 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
                     st.error("❌ No se pudo completar el pedido.")
             except Exception as e:
                 st.error(f"Error al completar el pedido: {e}")
+
 
 
         # --- Editable Notes Field and Comment ---
