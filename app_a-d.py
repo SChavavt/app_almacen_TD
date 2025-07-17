@@ -1055,37 +1055,18 @@ if not df_main.empty:
             st.info("No hay garantías.")
 
     with main_tabs[4]:  # ✅ Historial Completados
-        st.markdown("### Historial de Pedidos Completados")
-
-        # Asegurar que la columna 'Completados_Limpiado' exista
-        if 'Completados_Limpiado' not in df_main.columns:
-            df_main['Completados_Limpiado'] = ''
-            if 'Completados_Limpiado' not in headers_main:
-                headers_main.append('Completados_Limpiado')
-                worksheet_main.update_cell(1, len(headers_main), 'Completados_Limpiado')
-
-        # Filtrar solo completados que NO han sido limpiados
         df_completados_historial = df_main[
-            (df_main['Estado'] == '🟢 Completado') &
-            (df_main['Completados_Limpiado'].astype(str).str.lower() != 'sí')
+            (df_main["Estado"] == "🟢 Completado") &
+            (df_main.get("Completados_Limpiado", "").astype(str).str.lower() != "sí")
         ].copy()
 
-        if not df_completados_historial.empty:
-            df_completados_historial['Fecha_Completado_dt'] = pd.to_datetime(df_completados_historial['Fecha_Completado'], errors='coerce')
-            df_completados_historial = df_completados_historial.sort_values(by="Fecha_Completado_dt", ascending=False).reset_index(drop=True)
+        df_completados_historial['_gsheet_row_index'] = df_completados_historial['_gsheet_row_index'].astype(int)
 
-            st.dataframe(
-                df_completados_historial[[
-                    'ID_Pedido', 'Folio_Factura', 'Cliente', 'Estado', 'Vendedor_Registro',
-                    'Tipo_Envio', 'Fecha_Entrega', 'Fecha_Completado', 'Notas', 'Modificacion_Surtido',
-                    'Adjuntos', 'Adjuntos_Surtido', 'Turno'
-                ]].head(50),
-                use_container_width=True, hide_index=True
-            )
-
-            st.info("Mostrando los 50 pedidos completados más recientes (sin limpiar).")
-
-            if st.button("🧹 Limpiar Completados", use_container_width=True):
+        col_titulo, col_btn = st.columns([0.75, 0.25])
+        with col_titulo:
+            st.markdown("### Historial de Pedidos Completados")
+        with col_btn:
+            if not df_completados_historial.empty and st.button("🧹 Limpiar Completados"):
                 updates = []
                 col_idx = headers_main.index("Completados_Limpiado") + 1
                 for _, row in df_completados_historial.iterrows():
@@ -1098,5 +1079,10 @@ if not df_main.empty:
                 if updates and batch_update_gsheet_cells(worksheet_main, updates):
                     st.success(f"✅ {len(updates)} pedidos marcados como limpiados.")
                     st.rerun()
+
+        if not df_completados_historial.empty:
+            df_completados_historial = df_completados_historial.sort_values(by="Fecha_Completado", ascending=False)
+            for orden, (idx, row) in enumerate(df_completados_historial.iterrows(), start=1):
+                mostrar_pedido(df_main, idx, row, orden, "Historial", "✅ Historial Completados", worksheet_main, headers_main, s3_client)
         else:
             st.info("No hay pedidos completados recientes o ya fueron limpiados.")
