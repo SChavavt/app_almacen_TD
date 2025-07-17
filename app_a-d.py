@@ -414,7 +414,6 @@ def check_and_update_demorados(df_to_check, worksheet, headers):
     """
     updates_to_perform = []
     current_time = datetime.now()
-    one_hour_ago = current_time - timedelta(hours=1)
 
     try:
         estado_col_index = headers.index('Estado') + 1
@@ -429,7 +428,7 @@ def check_and_update_demorados(df_to_check, worksheet, headers):
         if row['Estado'] == "🔵 En Proceso" and pd.notna(row['Hora_Proceso']):
             hora_proceso_dt = pd.to_datetime(row['Hora_Proceso'], errors='coerce')
 
-            if pd.notna(hora_proceso_dt) and hora_proceso_dt < one_hour_ago:
+            if pd.notna(hora_proceso_dt) and (current_time - hora_proceso_dt).total_seconds() > 3600:
                 gsheet_row_index = row.get('_gsheet_row_index')
 
                 if gsheet_row_index is not None:
