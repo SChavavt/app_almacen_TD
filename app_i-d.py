@@ -21,17 +21,6 @@ with col_title:
         </h1>
     """, unsafe_allow_html=True)
 
-with col_button:
-    st.markdown("<div style='padding-top: 25px;'>", unsafe_allow_html=True)
-    if 'show_recent_completed' not in st.session_state:
-        st.session_state['show_recent_completed'] = False
-
-    button_label = "👁️ Mostrar Completados (24h)" if not st.session_state['show_recent_completed'] else "👁️ Ocultar Completados"
-    if st.button(button_label):
-        st.session_state['show_recent_completed'] = not st.session_state['show_recent_completed']
-        st.rerun()
-    st.markdown("</div>", unsafe_allow_html=True)
-
 st.markdown("---")
 
 st.markdown("""
@@ -225,15 +214,15 @@ if not df_all_data.empty:
     df_display_data = df_all_data.copy()
     time_threshold = datetime.now() - timedelta(hours=24)
 
-    if not st.session_state['show_recent_completed']:
-        df_display_data = df_display_data[df_display_data['Estado'] != '🟢 Completado'].copy()
-    else:
-        df_display_data = df_display_data[
-            (df_display_data['Estado'] != '🟢 Completado') |
-            ((df_display_data['Estado'] == '🟢 Completado') & 
-             (df_display_data['Fecha_Completado'].notna()) &
-             (df_display_data['Fecha_Completado'] >= time_threshold))
-        ].copy()
+    # Mostrar solo completados que NO estén marcados como limpiados
+    if 'Completados_Limpiado' not in df_display_data.columns:
+        df_display_data['Completados_Limpiado'] = ''
+
+    df_display_data = df_display_data[
+        (df_display_data['Estado'] != '🟢 Completado') |
+        ((df_display_data['Estado'] == '🟢 Completado') &
+        (df_display_data['Completados_Limpiado'].astype(str).str.lower() != "sí"))
+    ].copy()
 
     grupos_a_mostrar = []
     df_foraneos = df_display_data[df_display_data['Turno'] == ''].copy() 
