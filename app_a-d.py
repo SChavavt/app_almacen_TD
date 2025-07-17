@@ -667,13 +667,11 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
         # Complete Button
         if col_complete_btn.button("🟢 Completar", key=f"complete_button_{row['ID_Pedido']}_{origen_tab}", disabled=disabled_if_completed):
             try:
-                zona_mexico = timezone("America/Mexico_City")
-                now = datetime.now(zona_mexico)
-                now_str = now.strftime("%Y-%m-%d %H:%M:%S")
-
                 updates = []
                 estado_col_idx = headers.index('Estado') + 1
                 fecha_completado_col_idx = headers.index('Fecha_Completado') + 1
+
+                now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
                 updates.append({
                     'range': gspread.utils.rowcol_to_a1(gsheet_row_index, estado_col_idx),
@@ -705,7 +703,6 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
                     st.error("❌ No se pudo completar el pedido.")
             except Exception as e:
                 st.error(f"Error al completar el pedido: {e}")
-
 
 
         # --- Editable Notes Field and Comment ---
