@@ -110,10 +110,9 @@ except Exception as e:
     st.error(f"❌ Error al autenticar clientes: {e}")
     st.stop()
 @st.cache_data(ttl=60)
-def load_data_from_gsheets(worksheet):
-
+def load_data_from_gsheets():
     try:
-        data = worksheet.get_all_values()
+        data = worksheet_main.get_all_values()
         if not data:
             return pd.DataFrame()
 
@@ -202,7 +201,7 @@ def display_dataframe_with_formatting(df_to_display):
 
 # --- Lógica principal ---
 
-df_all_data = load_data_from_gsheets(worksheet_main)
+df_all_data = load_data_from_gsheets()
 
 if 'ID_Pedido' in df_all_data.columns:
     df_all_data['ID_Pedido'] = df_all_data['ID_Pedido'].astype(str)
