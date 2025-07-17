@@ -1054,10 +1054,23 @@ if not df_main.empty:
         else:
             st.info("No hay garantías.")
 
-    with main_tabs[4]: # ✅ Historial Completados
+    with main_tabs[4]:  # ✅ Historial Completados
         st.markdown("### Historial de Pedidos Completados")
+
+        # Asegurar que la columna 'Completados_Limpiado' exista
+        if 'Completados_Limpiado' not in df_main.columns:
+            df_main['Completados_Limpiado'] = ''
+            if 'Completados_Limpiado' not in headers_main:
+                headers_main.append('Completados_Limpiado')
+                worksheet_main.update_cell(1, len(headers_main), 'Completados_Limpiado')
+
+        # Filtrar solo completados que NO han sido limpiados
+        df_completados_historial = df_main[
+            (df_main['Estado'] == '🟢 Completado') &
+            (df_main['Completados_Limpiado'].astype(str).str.lower() != 'sí')
+        ].copy()
+
         if not df_completados_historial.empty:
-            # Ordenar por Fecha_Completado en orden descendente para mostrar los más recientes
             df_completados_historial['Fecha_Completado_dt'] = pd.to_datetime(df_completados_historial['Fecha_Completado'], errors='coerce')
             df_completados_historial = df_completados_historial.sort_values(by="Fecha_Completado_dt", ascending=False).reset_index(drop=True)
 
@@ -1066,12 +1079,24 @@ if not df_main.empty:
                     'ID_Pedido', 'Folio_Factura', 'Cliente', 'Estado', 'Vendedor_Registro',
                     'Tipo_Envio', 'Fecha_Entrega', 'Fecha_Completado', 'Notas', 'Modificacion_Surtido',
                     'Adjuntos', 'Adjuntos_Surtido', 'Turno'
-                ]].head(50), # Show the 50 most recent
+                ]].head(50),
                 use_container_width=True, hide_index=True
             )
-            st.info("Mostrando los 50 pedidos completados más recientes.")
-        else:
-            st.info("No hay pedidos completados en el historial.")
 
-else:
-    st.info("No se encontraron datos de pedidos en la hoja de Google Sheets. Asegúrate de que los datos se están subiendo correctamente desde la aplicación de Vendedores.")
+            st.info("Mostrando los 50 pedidos completados más recientes (sin limpiar).")
+
+            if st.button("🧹 Limpiar Completados", use_container_width=True):
+                updates = []
+                col_idx = headers_main.index("Completados_Limpiado") + 1
+                for _, row in df_completados_historial.iterrows():
+                    g_row = row.get("_gsheet_row_index")
+                    if g_row:
+                        updates.append({
+                            'range': gspread.utils.rowcol_to_a1(g_row, col_idx),
+                            'values': [["sí"]]
+                        })
+                if updates and batch_update_gsheet_cells(worksheet_main, updates):
+                    st.success(f"✅ {len(updates)} pedidos marcados como limpiados.")
+                    st.rerun()
+        else:
+            st.info("No hay pedidos completados recientes o ya fueron limpiados.")
