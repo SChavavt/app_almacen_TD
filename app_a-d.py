@@ -71,10 +71,14 @@ def get_gspread_client(_credentials_json_dict):
 
     try:
         _ = client.open_by_key(GOOGLE_SHEET_ID)
-    except gspread.exceptions.APIError:
-        # Token expirado o inválido → limpiar y regenerar
-        st.cache_resource.clear()
-        st.warning("🔁 Token expirado. Reintentando autenticación...")
+    except gspread.exceptions.APIError as e:
+        if "expired" in str(e).lower() or "RESOURCE_EXHAUSTED" in str(e):
+            st.cache_resource.clear()
+            st.warning("🔁 Token expirado o cuota alcanzada. Reintentando autenticación...")
+            creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
+            client = gspread.authorize(creds)
+            _ = client.open_by_key(GOOGLE_SHEET_ID)
+
 
         creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
         client = gspread.authorize(creds)
