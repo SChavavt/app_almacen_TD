@@ -51,9 +51,13 @@ def get_gspread_client(_credentials_json_dict):
     client = gspread.authorize(creds)
     try:
         _ = client.open_by_key(GOOGLE_SHEET_ID)
-    except gspread.exceptions.APIError:
-        st.cache_resource.clear()
-        st.warning("🔁 Token expirado o inválido. Reintentando autenticación...")
+    except gspread.exceptions.APIError as e:
+        if "expired" in str(e).lower() or "RESOURCE_EXHAUSTED" in str(e):
+            st.cache_resource.clear()
+            st.warning("🔁 Token expirado o cuota alcanzada. Reintentando autenticación...")
+            creds = ServiceAccountCredentials.from_json_keyfile_dict(_credentials_json_dict, scope)
+            client = gspread.authorize(creds)
+
         creds = ServiceAccountCredentials.from_json_keyfile_dict(_credentials_json_dict, scope)
         client = gspread.authorize(creds)
     return client
@@ -105,7 +109,9 @@ try:
 except Exception as e:
     st.error(f"❌ Error al autenticar clientes: {e}")
     st.stop()
+@st.cache_data(ttl=60)
 def load_data_from_gsheets(worksheet):
+
     try:
         data = worksheet.get_all_values()
         if not data:
