@@ -430,6 +430,9 @@ def check_and_update_demorados(df_to_check, worksheet, headers):
         if row['Estado'] == "🔵 En Proceso" and pd.notna(row['Hora_Proceso']):
             hora_proceso_dt = pd.to_datetime(row['Hora_Proceso'], errors='coerce')
 
+            if pd.notna(hora_proceso_dt):
+                hora_proceso_dt = hora_proceso_dt.tz_localize("America/Mexico_City") if hora_proceso_dt.tzinfo is None else hora_proceso_dt
+
             if pd.notna(hora_proceso_dt) and (current_time - hora_proceso_dt).total_seconds() > 3600:
                 gsheet_row_index = row.get('_gsheet_row_index')
 
