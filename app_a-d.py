@@ -413,7 +413,9 @@ def check_and_update_demorados(df_to_check, worksheet, headers):
     Utiliza actualización por lotes para mayor eficiencia.
     """
     updates_to_perform = []
-    current_time = datetime.now()
+    zona_mexico = timezone("America/Mexico_City")
+    current_time = datetime.now(zona_mexico)
+
 
     try:
         estado_col_index = headers.index('Estado') + 1
