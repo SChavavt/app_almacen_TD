@@ -587,7 +587,9 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
         col_order_num, col_client, col_time, col_status, col_vendedor, col_print_btn, col_complete_btn = st.columns([0.5, 2, 1.5, 1, 1.2, 1, 1])
 
         col_order_num.write(f"**{orden}**")
-        col_client.write(f"**{row['Cliente']}**")
+        folio_factura = row.get("Folio_Factura", "").strip()
+        cliente = row.get("Cliente", "").strip()
+        col_client.markdown(f"📄 **{folio_factura}**  \n🤝 **{cliente}**")
 
         hora_registro_dt = pd.to_datetime(row['Hora_Registro'], errors='coerce')
         if pd.notna(hora_registro_dt):
@@ -598,8 +600,8 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
         col_status.write(f"{row['Estado']}")
 
         vendedor_registro = row.get("Vendedor_Registro", "")
-        folio_factura = row.get("Folio_Factura", "").strip()
-        col_vendedor.write(f"📄 {folio_factura}\n👤 {vendedor_registro}")
+        col_vendedor.write(f"👤 {vendedor_registro}")
+
 
 
         # ✅ PRINT and UPDATE TO "IN PROCESS"
