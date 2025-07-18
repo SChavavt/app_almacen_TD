@@ -678,7 +678,10 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
                 estado_col_idx = headers.index('Estado') + 1
                 fecha_completado_col_idx = headers.index('Fecha_Completado') + 1
 
-                now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                zona_mexico = timezone("America/Mexico_City")
+                now = datetime.now(zona_mexico)
+                now_str = now.strftime("%Y-%m-%d %H:%M:%S")
+
 
                 updates.append({
                     'range': gspread.utils.rowcol_to_a1(gsheet_row_index, estado_col_idx),
