@@ -182,8 +182,9 @@ def display_dataframe_with_formatting(df_to_display):
     df_vista = df_to_display[columnas_existentes].copy()
     if "Folio_Factura" in df_to_display.columns and "Cliente" in df_to_display.columns:
         df_vista["Cliente"] = df_to_display.apply(
-            lambda row: f"📄 {row['Folio_Factura']}\n🤝 {row['Cliente']}", axis=1
+            lambda row: f"📄 <b>{row['Folio_Factura']}</b><br>🤝 {row['Cliente']}", axis=1
         )
+
 
 
 
@@ -197,12 +198,7 @@ def display_dataframe_with_formatting(df_to_display):
             lambda x: x.strftime("%d/%m") if pd.notna(x) else ""
         )
 
-    st.dataframe(
-        df_vista,
-        use_container_width=True,
-        column_config={col: st.column_config.Column(width="small") for col in df_vista.columns},
-        hide_index=True
-    )
+    st.markdown(df_vista.to_html(escape=False, index=False), unsafe_allow_html=True)
 
 
 # --- Lógica principal ---
