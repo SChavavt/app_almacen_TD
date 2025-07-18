@@ -6,6 +6,7 @@ import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 import boto3
 import gspread.utils
+import time
 
 st.set_page_config(page_title="Panel de Almacén Integrado", layout="wide")
 if st.button("🔄 Recargar pedidos ahora"):
@@ -100,11 +101,24 @@ try:
     GSHEETS_CREDENTIALS = json.loads(st.secrets["gsheets"]["google_credentials"])
     GSHEETS_CREDENTIALS["private_key"] = GSHEETS_CREDENTIALS["private_key"].replace("\\n", "\n")
 
-    g_spread_client = get_gspread_client(_credentials_json_dict=GSHEETS_CREDENTIALS)
-    s3_client = get_s3_client()
+    try:
+        g_spread_client = get_gspread_client(_credentials_json_dict=GSHEETS_CREDENTIALS)
+        s3_client = get_s3_client()
+        spreadsheet = g_spread_client.open_by_key(GOOGLE_SHEET_ID)
+        worksheet_main = spreadsheet.worksheet(GOOGLE_SHEET_WORKSHEET_NAME)
 
-    spreadsheet = g_spread_client.open_by_key(GOOGLE_SHEET_ID)
-    worksheet_main = spreadsheet.worksheet(GOOGLE_SHEET_WORKSHEET_NAME)
+    except gspread.exceptions.APIError as e:
+        if "ACCESS_TOKEN_EXPIRED" in str(e) or "UNAUTHENTICATED" in str(e):
+            st.cache_resource.clear()
+            st.warning("🔄 La sesión con Google Sheets expiró. Reconectando...")
+            time.sleep(1)
+            g_spread_client = get_gspread_client(_credentials_json_dict=GSHEETS_CREDENTIALS)
+            s3_client = get_s3_client()
+            spreadsheet = g_spread_client.open_by_key(GOOGLE_SHEET_ID)
+            worksheet_main = spreadsheet.worksheet(GOOGLE_SHEET_WORKSHEET_NAME)
+        else:
+            st.error(f"❌ Error al autenticar clientes: {e}")
+            st.stop()
 
 except Exception as e:
     st.error(f"❌ Error al autenticar clientes: {e}")
