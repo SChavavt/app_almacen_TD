@@ -180,6 +180,11 @@ def display_dataframe_with_formatting(df_to_display):
         return
 
     df_vista = df_to_display[columnas_existentes].copy()
+    if "Folio_Factura" in df_to_display.columns and "Cliente" in df_to_display.columns:
+        df_vista["Cliente"] = df_to_display.apply(
+            lambda row: f"📄 {row['Folio_Factura']}\n🤝 {row['Cliente']}", axis=1
+        )
+
 
     df_vista = df_vista.rename(columns={
         "Fecha_Entrega": "Fecha Entrega",
@@ -225,20 +230,20 @@ if not df_all_data.empty:
         (df_display_data['Completados_Limpiado'].astype(str).str.lower() != "sí"))
     ].copy()
 
+    # 🔄 NUEVA agrupación por tipo de envío (turno o foráneo) y fecha de entrega
+    df_display_data['Fecha_Entrega_Str'] = df_display_data['Fecha_Entrega'].dt.strftime("%d/%m")
+    df_display_data['Grupo_Clave'] = df_display_data.apply(
+        lambda row: f"{row['Turno'] if row['Turno'] else '🌍 Foráneo'} – {row['Fecha_Entrega_Str']}", axis=1
+    )
+
     grupos_a_mostrar = []
-    df_foraneos = df_display_data[df_display_data['Turno'] == ''].copy() 
-    if not df_foraneos.empty:
-        grupos_a_mostrar.append((f"🌍 Pedidos Foráneos ({len(df_foraneos)})", df_foraneos))
-    
-    unique_turns = [t for t in df_display_data['Turno'].unique() if t != '']
-    preferred_order = ['☀️ Local Mañana', '🌙 Local Tarde', '📦 Pasa a Bodega', '🌵 Saltillo']
-    sorted_unique_turns = [t for t in preferred_order if t in unique_turns] + sorted(set(unique_turns) - set(preferred_order))
+    grouped = df_display_data.groupby(['Grupo_Clave', 'Fecha_Entrega'])
 
-    for turno_val in sorted_unique_turns:
-        df_grupo = df_display_data[df_display_data['Turno'] == turno_val].copy()
+    for (clave, _), df_grupo in sorted(grouped, key=lambda x: x[0][1]):
         if not df_grupo.empty:
-            grupos_a_mostrar.append((f"{turno_val} ({len(df_grupo)})", df_grupo))
+            grupos_a_mostrar.append((f"{clave} ({len(df_grupo)})", df_grupo))
 
+    # 🔽 Mostrar los grupos
     if grupos_a_mostrar:
         num_cols_per_row = 3
         for i in range(0, len(grupos_a_mostrar), num_cols_per_row):
@@ -253,5 +258,3 @@ if not df_all_data.empty:
                     display_dataframe_with_formatting(df_grupo)
     else:
         st.info("No hay pedidos para mostrar.")
-else:
-    st.info("No hay pedidos cargados desde Google Sheets.")
