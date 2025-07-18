@@ -112,8 +112,20 @@ try:
     GSHEETS_CREDENTIALS["private_key"] = GSHEETS_CREDENTIALS["private_key"].replace("\\n", "\n")
 
 
-    g_spread_client = get_gspread_client(_credentials_json_dict=GSHEETS_CREDENTIALS)
-    s3_client = get_s3_client()
+    try:
+        g_spread_client = get_gspread_client(_credentials_json_dict=GSHEETS_CREDENTIALS)
+        s3_client = get_s3_client()
+    except gspread.exceptions.APIError as e:
+        if "ACCESS_TOKEN_EXPIRED" in str(e) or "UNAUTHENTICATED" in str(e):
+            st.cache_resource.clear()
+            st.warning("🔄 La sesión con Google Sheets expiró. Reconectando...")
+            time.sleep(1)
+            g_spread_client = get_gspread_client(_credentials_json_dict=GSHEETS_CREDENTIALS)
+            s3_client = get_s3_client()
+        else:
+            st.error(f"❌ Error al autenticar clientes: {e}")
+            st.stop()
+
 
     # Abrir la hoja de cálculo por ID y nombre de pestaña
     try:
