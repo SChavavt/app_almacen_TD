@@ -186,6 +186,7 @@ def display_dataframe_with_formatting(df_to_display):
         )
 
 
+
     df_vista = df_vista.rename(columns={
         "Fecha_Entrega": "Fecha Entrega",
         "Vendedor_Registro": "Vendedor"
