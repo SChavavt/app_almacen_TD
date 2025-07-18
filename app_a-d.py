@@ -598,7 +598,8 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
         col_status.write(f"{row['Estado']}")
 
         vendedor_registro = row.get("Vendedor_Registro", "")
-        col_vendedor.write(f"👤 {vendedor_registro}")
+        folio_factura = row.get("Folio_Factura", "").strip()
+        col_vendedor.write(f"📄 {folio_factura}\n👤 {vendedor_registro}")
 
 
         # ✅ PRINT and UPDATE TO "IN PROCESS"
