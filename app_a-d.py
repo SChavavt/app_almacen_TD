@@ -494,7 +494,8 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
         st.error(f"❌ Error interno: No se pudo obtener el índice de fila de Google Sheets para el pedido '{row['ID_Pedido']}'.")
         return
 
-    with st.expander(f"{row['Estado']} - {row['ID_Pedido']} - {row['Cliente']}", expanded=st.session_state["expanded_pedidos"].get(row['ID_Pedido'], False)):
+    folio = row.get("Folio_Factura", "").strip() or row['ID_Pedido']
+    with st.expander(f"{row['Estado']} - {folio} - {row['Cliente']}", expanded=st.session_state["expanded_pedidos"].get(row['ID_Pedido'], False)):  
         st.markdown("---")
         tiene_modificacion = row.get("Modificacion_Surtido") and pd.notna(row["Modificacion_Surtido"]) and str(row["Modificacion_Surtido"]).strip() != ''
         if tiene_modificacion:
