@@ -918,9 +918,18 @@ if not df_main.empty:
 
     st.markdown("### 📊 Resumen de Estados")
 
-    estado_counts = df_main['Estado'].astype(str).value_counts().reindex([
-        '🟡 Pendiente', '🔵 En Proceso', '🔴 Demorado', '🟢 Completado'
-    ], fill_value=0)
+    # Contador corregido que excluye completados ya limpiados
+    completados_visibles = df_main[
+        (df_main['Estado'] == '🟢 Completado') &
+        (df_main.get('Completados_Limpiado', '').astype(str).str.lower() != 'sí')
+    ]
+
+    estado_counts = {
+        '🟡 Pendiente': (df_main['Estado'] == '🟡 Pendiente').sum(),
+        '🔵 En Proceso': (df_main['Estado'] == '🔵 En Proceso').sum(),
+        '🔴 Demorado': (df_main['Estado'] == '🔴 Demorado').sum(),
+        '🟢 Completado': len(completados_visibles)
+    }
 
     col1, col2, col3, col4 = st.columns(4)
     col1.metric("🟡 Pendientes", estado_counts.get('🟡 Pendiente', 0))
