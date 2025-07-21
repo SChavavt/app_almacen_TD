@@ -539,6 +539,8 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
                 format="DD/MM/YYYY",
                 key=fecha_key,
             )
+            st.session_state["expanded_pedidos"][row['ID_Pedido']] = True
+
 
             if row.get("Tipo_Envio") == "📍 Pedido Local" and origen_tab in ["Mañana", "Tarde"]:
                 # Only these two options for local turns
@@ -551,6 +553,8 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
                     options=turno_options,
                     key=turno_key,
                 )
+                st.session_state["expanded_pedidos"][row['ID_Pedido']] = True
+
 
             if st.button("✅ Aplicar Cambios de Fecha/Turno", key=f"btn_apply_{row['ID_Pedido']}"):
                 cambios = []
@@ -635,6 +639,7 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
                     {'range': gspread.utils.rowcol_to_a1(gsheet_row_index, hora_proc_col_idx), 'values': [[now_str]]}
                 ]
                 if batch_update_gsheet_cells(worksheet, updates):
+                    st.session_state["expanded_pedidos"][row['ID_Pedido']] = True
                     df.loc[idx, "Estado"] = "🔵 En Proceso"
                     df.loc[idx, "Hora_Proceso"] = now_str
                     st.toast("📄 Estado actualizado a 'En Proceso'", icon="📌")
@@ -786,10 +791,11 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
                     key=upload_key,
                     on_change=fijar_estado_pestanas_guia,
                     kwargs={"row": row, "origen_tab": origen_tab}
-)
-
+                )
 
                 if archivos_guia:
+                    st.session_state["expanded_pedidos"][row['ID_Pedido']] = True  # 👈 ahora correctamente indentado
+
                     if st.button("📤 Subir Guía", key=f"btn_subir_guia_{row['ID_Pedido']}"):
                         fijar_estado_pestanas_guia(row, origen_tab)
 
