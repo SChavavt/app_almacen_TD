@@ -54,7 +54,8 @@ if "active_date_tab_m_index" not in st.session_state:
     st.session_state["active_date_tab_m_index"] = 0
 if "active_date_tab_t_index" not in st.session_state:
     st.session_state["active_date_tab_t_index"] = 0
-if "expanded_attachments" not in st.session_state:
+if "expanded_pedidos" not in st.session_state:
+    st.session_state["expanded_pedidos"] = {}
     st.session_state["expanded_attachments"] = {}
 
 
@@ -439,7 +440,7 @@ def check_and_update_demorados(df_to_check, worksheet, headers):
     changes_made = False # Flag to indicate if there were status changes
 
     for idx, row in df_to_check.iterrows():
-        if row['Estado'] == "🔵 En Proceso" and pd.notna(row['Hora_Proceso']):
+        if row['Estado'] == "🟡 Pendiente" and pd.notna(row['Hora_Proceso']):
             hora_proceso_dt = pd.to_datetime(row['Hora_Proceso'], errors='coerce')
 
             if pd.notna(hora_proceso_dt):
@@ -493,7 +494,7 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
         st.error(f"❌ Error interno: No se pudo obtener el índice de fila de Google Sheets para el pedido '{row['ID_Pedido']}'.")
         return
 
-    with st.container():
+    with st.expander(f"{row['Estado']} - {row['ID_Pedido']} - {row['Cliente']}", expanded=st.session_state["expanded_pedidos"].get(row['ID_Pedido'], False)):
         st.markdown("---")
         tiene_modificacion = row.get("Modificacion_Surtido") and pd.notna(row["Modificacion_Surtido"]) and str(row["Modificacion_Surtido"]).strip() != ''
         if tiene_modificacion:
