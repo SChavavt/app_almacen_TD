@@ -240,6 +240,19 @@ if not df_all_data.empty:
         ((df_display_data['Estado'] == '🟢 Completado') &
         (df_display_data['Completados_Limpiado'].astype(str).str.lower() != "sí"))
     ].copy()
+    # --- Contador de estados (corrigiendo Completados limpiados) ---
+    completados_visibles = df_all_data[
+        (df_all_data['Estado'] == '🟢 Completado') &
+        (df_all_data.get('Completados_Limpiado', '').astype(str).str.lower() != 'sí')
+    ]
+
+    estado_counts = {
+        '🟡 Pendiente': (df_all_data['Estado'] == '🟡 Pendiente').sum(),
+        '🔵 En Proceso': (df_all_data['Estado'] == '🔵 En Proceso').sum(),
+        '🔴 Demorado': (df_all_data['Estado'] == '🔴 Demorado').sum(),
+        '🟢 Completado': len(completados_visibles)
+    }
+
 
     # 🔄 NUEVA agrupación por tipo de envío (turno o foráneo) y fecha de entrega
     df_display_data['Fecha_Entrega_Str'] = df_display_data['Fecha_Entrega'].dt.strftime("%d/%m")
@@ -253,6 +266,16 @@ if not df_all_data.empty:
     for (clave, _), df_grupo in sorted(grouped, key=lambda x: x[0][1]):
         if not df_grupo.empty:
             grupos_a_mostrar.append((f"{clave} ({len(df_grupo)})", df_grupo))
+
+    # --- Mostrar resumen de estados ---
+    st.markdown("### 📊 Resumen General de Pedidos")
+
+    col1, col2, col3, col4 = st.columns(4)
+    col1.metric("🟡 Pendientes", estado_counts.get('🟡 Pendiente', 0))
+    col2.metric("🔵 En Proceso", estado_counts.get('🔵 En Proceso', 0))
+    col3.metric("🔴 Demorados", estado_counts.get('🔴 Demorado', 0))
+    col4.metric("🟢 Completados", estado_counts.get('🟢 Completado', 0))
+
 
     # 🔽 Mostrar los grupos
     if grupos_a_mostrar:
