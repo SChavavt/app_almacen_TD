@@ -183,8 +183,8 @@ def process_sheet_data(all_data: list[list[str]]) -> tuple[pd.DataFrame, list[st
     expected_columns = [
         'ID_Pedido', 'Folio_Factura', 'Hora_Registro', 'Vendedor_Registro', 'Cliente',
         'Tipo_Envio', 'Fecha_Entrega', 'Comentario', 'Notas', 'Modificacion_Surtido',
-        'Adjuntos', 'Adjuntos_Surtido', 'Adjuntos_Guia',  # 👈 nuevo
-        'Estado', 'Estado_Pago', 'Fecha_Completado', 'Hora_Proceso', 'Turno', 'Surtidor'
+        'Adjuntos', 'Adjuntos_Surtido', 'Adjuntos_Guia',
+        'Estado', 'Estado_Pago', 'Fecha_Completado', 'Hora_Proceso', 'Turno'
     ]
 
 
@@ -1051,37 +1051,78 @@ if not df_main.empty:
         else:
             st.info("No hay garantías.")
 
-    with main_tabs[4]:  # ✅ Historial Completados
-        df_completados_historial = df_main[
-            (df_main["Estado"] == "🟢 Completado") &
-            (df_main.get("Completados_Limpiado", "").astype(str).str.lower() != "sí")
-        ].copy()
+with main_tabs[4]:  # ✅ Historial Completados
+    df_completados_historial = df_main[
+        (df_main["Estado"] == "🟢 Completado") & 
+        (df_main.get("Completados_Limpiado", "").astype(str).str.lower() != "sí")
+    ].copy()
 
-        df_completados_historial['_gsheet_row_index'] = df_completados_historial['_gsheet_row_index'].astype(int)
+    df_completados_historial['_gsheet_row_index'] = df_completados_historial['_gsheet_row_index'].astype(int)
 
-        col_titulo, col_btn = st.columns([0.75, 0.25])
-        with col_titulo:
-            st.markdown("### Historial de Pedidos Completados")
-        with col_btn:
-            if not df_completados_historial.empty and st.button("🧹 Limpiar Completados"):
-                updates = []
-                col_idx = headers_main.index("Completados_Limpiado") + 1
-                for _, row in df_completados_historial.iterrows():
-                    g_row = row.get("_gsheet_row_index")
-                    if g_row:
-                        updates.append({
-                            'range': gspread.utils.rowcol_to_a1(g_row, col_idx),
+    col_titulo, col_btn = st.columns([0.75, 0.25])
+    with col_titulo:
+        st.markdown("### Historial de Pedidos Completados")
+    with col_btn:
+        if not df_completados_historial.empty and st.button("🧹 Limpiar Todos los Completados"):
+            updates = []
+            col_idx = headers_main.index("Completados_Limpiado") + 1
+            for _, row in df_completados_historial.iterrows():
+                g_row = row.get("_gsheet_row_index")
+                if g_row:
+                    updates.append({
+                        'range': gspread.utils.rowcol_to_a1(g_row, col_idx),
+                        'values': [["sí"]]
+                    })
+            if updates and batch_update_gsheet_cells(worksheet_main, updates):
+                st.success(f"✅ {len(updates)} pedidos marcados como limpiados.")
+                st.cache_data.clear()
+                st.session_state["active_main_tab_index"] = 4
+                st.rerun()
+
+    # 🧹 Limpieza específica por grupo de completados locales
+    df_completados_historial["Fecha_dt"] = pd.to_datetime(df_completados_historial["Fecha_Entrega"], errors='coerce')
+    df_completados_historial["Grupo_Clave"] = df_completados_historial.apply(
+        lambda row: f"{row['Turno']} – {row['Fecha_dt'].strftime('%d/%m')}" if row["Tipo_Envio"] == "📍 Pedido Local" else None,
+        axis=1
+    )
+
+    grupos_locales = df_completados_historial[df_completados_historial["Grupo_Clave"].notna()]["Grupo_Clave"].unique().tolist()
+
+    if grupos_locales:
+        st.markdown("### 🧹 Limpieza Específica de Completados Locales")
+        for grupo in grupos_locales:
+            turno, fecha_str = grupo.split(" – ")
+            fecha_dt = pd.to_datetime(fecha_str, format="%d/%m", errors='coerce').replace(year=datetime.now().year)
+
+            # Verificar si hay incompletos en ese grupo
+            hay_incompletos = df_main[
+                (df_main["Turno"] == turno) &
+                (pd.to_datetime(df_main["Fecha_Entrega"], errors='coerce').dt.date == fecha_dt.date()) &
+                (df_main["Estado"].isin(["🟡 Pendiente", "🔵 En Proceso", "🔴 Demorado"]))
+            ]
+
+            if hay_incompletos.empty:
+                label_btn = f"🧹 Limpiar {turno.strip()} - {fecha_str}"
+                if st.button(label_btn):
+                    pedidos_a_limpiar = df_completados_historial[df_completados_historial["Grupo_Clave"] == grupo]
+                    col_idx = headers_main.index("Completados_Limpiado") + 1
+                    updates = [
+                        {
+                            'range': gspread.utils.rowcol_to_a1(int(row["_gsheet_row_index"]), col_idx),
                             'values': [["sí"]]
-                        })
-                if updates and batch_update_gsheet_cells(worksheet_main, updates):
-                    st.success(f"✅ {len(updates)} pedidos marcados como limpiados.")
-                    st.cache_data.clear()
-                    st.session_state["active_main_tab_index"] = 4
-                    st.rerun()
+                        }
+                        for _, row in pedidos_a_limpiar.iterrows()
+                    ]
+                    if updates and batch_update_gsheet_cells(worksheet_main, updates):
+                        st.success(f"✅ {len(updates)} pedidos completados en {grupo} marcados como limpiados.")
+                        st.cache_data.clear()
+                        st.session_state["active_main_tab_index"] = 4
+                        st.rerun()
 
-        if not df_completados_historial.empty:
-            df_completados_historial = df_completados_historial.sort_values(by="Fecha_Completado", ascending=False)
-            for orden, (idx, row) in enumerate(df_completados_historial.iterrows(), start=1):
-                mostrar_pedido(df_main, idx, row, orden, "Historial", "✅ Historial Completados", worksheet_main, headers_main, s3_client)
-        else:
-            st.info("No hay pedidos completados recientes o ya fueron limpiados.")
+    # Mostrar pedidos completados individuales
+    if not df_completados_historial.empty:
+        df_completados_historial = df_completados_historial.sort_values(by="Fecha_Completado", ascending=False)
+        for orden, (idx, row) in enumerate(df_completados_historial.iterrows(), start=1):
+            mostrar_pedido(df_main, idx, row, orden, "Historial", "✅ Historial Completados", worksheet_main, headers_main, s3_client)
+    else:
+        st.info("No hay pedidos completados recientes o ya fueron limpiados.")
