@@ -1121,6 +1121,28 @@ with main_tabs[4]:  # ✅ Historial Completados
 
     # Mostrar pedidos completados individuales
     if not df_completados_historial.empty:
+            # 🧹 Botón de limpieza específico para foráneos
+        completados_foraneos = df_completados_historial[
+            df_completados_historial["Tipo_Envio"] == "🚚 Pedido Foráneo"
+        ]
+
+        if not completados_foraneos.empty:
+            st.markdown("### 🧹 Limpieza de Completados Foráneos")
+            if st.button("🧹 Limpiar Foráneos Completados"):
+                col_idx = headers_main.index("Completados_Limpiado") + 1
+                updates = [
+                    {
+                        'range': gspread.utils.rowcol_to_a1(int(row["_gsheet_row_index"]), col_idx),
+                        'values': [["sí"]]
+                    }
+                    for _, row in completados_foraneos.iterrows()
+                ]
+                if updates and batch_update_gsheet_cells(worksheet_main, updates):
+                    st.success(f"✅ {len(updates)} pedidos foráneos completados fueron marcados como limpiados.")
+                    st.cache_data.clear()
+                    st.session_state["active_main_tab_index"] = 4
+                    st.rerun()
+
         df_completados_historial = df_completados_historial.sort_values(by="Fecha_Completado", ascending=False)
         for orden, (idx, row) in enumerate(df_completados_historial.iterrows(), start=1):
             mostrar_pedido(df_main, idx, row, orden, "Historial", "✅ Historial Completados", worksheet_main, headers_main, s3_client)
