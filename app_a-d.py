@@ -385,39 +385,33 @@ def get_s3_file_download_url(s3_client_param, object_key):
 
 def ordenar_pedidos_custom(df_pedidos_filtrados):
     """
-    Ordena el DataFrame filtrado con 'Demorado' al principio,
-    luego el orden original para 'Pendiente'/'En proceso', y 'Completado' al final.
+    Ordena el DataFrame con:
+    1. Modificación de Surtido (sin importar hora)
+    2. Demorados
+    3. Pendientes / En Proceso (los más viejos arriba)
     """
     if df_pedidos_filtrados.empty:
         return df_pedidos_filtrados
 
-    # Asegurarse de que 'Hora_Registro' sea datetime para el ordenamiento
+    # Asegurar datetime para ordenar por antigüedad
     df_pedidos_filtrados['Hora_Registro_dt'] = pd.to_datetime(df_pedidos_filtrados['Hora_Registro'], errors='coerce')
 
     def get_sort_key(row):
-        if row["Estado"] == "🔴 Demorado":
-            return 0, row['Hora_Registro_dt'] # Mayor prioridad, luego por hora
-        elif row["Estado"] in ["🟡 Pendiente", "🔵 En Proceso"]:
-            return 1, row['Hora_Registro_dt'] # Prioridad media, mantiene el orden de llegada
-        elif row["Estado"] == "🟢 Completado":
-            # Para completados, ordenar por Fecha_Completado descendente
-            # Si no hay Fecha_Completado, usar Hora_Registro_dt
-            fecha_orden = row['Fecha_Completado'] if pd.notna(row['Fecha_Completado']) else row['Hora_Registro_dt']
-            return 2, fecha_orden # Menor prioridad, al final, ordenado por fecha de completado
+        tiene_modificacion = pd.notna(row.get("Modificacion_Surtido")) and str(row.get("Modificacion_Surtido")).strip() != ''
+        if tiene_modificacion:
+            return (0, pd.Timestamp.min)  # Siempre arriba
 
-        return 3, row['Hora_Registro_dt'] # Para cualquier otro estado desconocido, al final
+        if row["Estado"] == "🔴 Demorado":
+            return (1, pd.Timestamp.min)  # Justo debajo de modificación
+
+        # Pendiente o En Proceso: orden por hora
+        return (2, row['Hora_Registro_dt'] if pd.notna(row['Hora_Registro_dt']) else pd.Timestamp.max)
 
     df_pedidos_filtrados['custom_sort_key'] = df_pedidos_filtrados.apply(get_sort_key, axis=1)
 
-    # Ordenar primero por la clave personalizada (ascendente), luego por el segundo elemento de la tupla (fecha)
-    # Si la clave es 2 (Completado/Cancelado), el segundo elemento se ordena descendente.
-    df_sorted = df_pedidos_filtrados.sort_values(
-        by=['custom_sort_key'],
-        ascending=[True]
-    )
+    df_sorted = df_pedidos_filtrados.sort_values(by='custom_sort_key', ascending=True)
 
-    df_sorted = df_sorted.drop(columns=['custom_sort_key', 'Hora_Registro_dt'])
-    return df_sorted
+    return df_sorted.drop(columns=['custom_sort_key', 'Hora_Registro_dt'])
 
 def check_and_update_demorados(df_to_check, worksheet, headers):
     """
@@ -904,6 +898,37 @@ if not df_main.empty:
 
         st.rerun()
 
+    # --- 🔔 Alerta de Modificación de Surtido ---
+    mod_surtido_df = df_main[df_main['Modificacion_Surtido'].astype(str).str.strip() != '']
+    mod_surtido_count = len(mod_surtido_df)
+
+    if mod_surtido_count > 0:
+        ubicaciones = []
+        for _, row in mod_surtido_df.iterrows():
+            tipo = row.get("Tipo_Envio", "")
+            turno = row.get("Turno", "")
+            if tipo == "📍 Pedido Local":
+                if "Mañana" in turno:
+                    ubicaciones.append("📍 Local / Mañana")
+                elif "Tarde" in turno:
+                    ubicaciones.append("📍 Local / Tarde")
+                elif "Saltillo" in turno:
+                    ubicaciones.append("📍 Local / Saltillo")
+                elif "Bodega" in turno:
+                    ubicaciones.append("📍 Local / Bodega")
+                else:
+                    ubicaciones.append("📍 Local")
+            elif tipo == "🚚 Pedido Foráneo":
+                ubicaciones.append("🚚 Foráneo")
+            elif tipo == "🔁 Devolución":
+                ubicaciones.append("🔁 Devolución")
+            elif tipo == "🛠 Garantía":
+                ubicaciones.append("🛠 Garantía")
+
+        ubicaciones = sorted(set(ubicaciones))
+        ubicaciones_str = ", ".join(ubicaciones)
+
+        st.warning(f"⚠️ Hay {mod_surtido_count} pedido(s) con **Modificación de Surtido** ➤ {ubicaciones_str}")
 
     df_pendientes_proceso_demorado = df_main[df_main["Estado"].isin(["🟡 Pendiente", "🔵 En Proceso", "🔴 Demorado"])].copy()
     df_completados_historial = df_main[df_main["Estado"] == "🟢 Completado"].copy()
