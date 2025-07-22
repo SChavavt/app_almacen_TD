@@ -421,56 +421,48 @@ def ordenar_pedidos_custom(df_pedidos_filtrados):
 
 def check_and_update_demorados(df_to_check, worksheet, headers):
     """
-    Checks for orders in 'En Proceso' status that have exceeded 1 hour and
-    updates their status to 'Demorado' in the DataFrame and Google Sheets.
-    Utiliza actualización por lotes para mayor eficiencia.
+    Revisa pedidos en estado '🟡 Pendiente' que lleven más de 1 hora desde su registro
+    y los actualiza a '🔴 Demorado'.
     """
     updates_to_perform = []
     zona_mexico = timezone("America/Mexico_City")
     current_time = datetime.now(zona_mexico)
 
-
     try:
         estado_col_index = headers.index('Estado') + 1
-        headers.index('Hora_Proceso') + 1 # Get Hora_Proceso column index
     except ValueError:
-        st.error("❌ Error interno: Columna 'Estado' o 'Hora_Proceso' no encontrada en los encabezados de Google Sheets.")
+        st.error("❌ Error interno: Columna 'Estado' no encontrada en los encabezados de Google Sheets.")
         return df_to_check, False
 
-    changes_made = False # Flag to indicate if there were status changes
+    changes_made = False
 
     for idx, row in df_to_check.iterrows():
-        if row['Estado'] == "🟡 Pendiente" and pd.notna(row['Hora_Proceso']):
-            hora_proceso_dt = pd.to_datetime(row['Hora_Proceso'], errors='coerce')
+        if row['Estado'] != "🟡 Pendiente":
+            continue
 
-            if pd.notna(hora_proceso_dt):
-                hora_proceso_dt = hora_proceso_dt.tz_localize("America/Mexico_City") if hora_proceso_dt.tzinfo is None else hora_proceso_dt
+        hora_registro = pd.to_datetime(row.get('Hora_Registro'), errors='coerce')
+        gsheet_row_index = row.get('_gsheet_row_index')
 
-            if pd.notna(hora_proceso_dt) and (current_time - hora_proceso_dt).total_seconds() > 3600:
-                gsheet_row_index = row.get('_gsheet_row_index')
-
-                if gsheet_row_index is not None:
-                    # Prepare update to "🔴 Demorado"
-                    updates_to_perform.append({
-                        'range': f"{gspread.utils.rowcol_to_a1(gsheet_row_index, estado_col_index)}",
-                        'values': [["🔴 Demorado"]]
-                    })
-                    # Update DataFrame in memory
-                    df_to_check.loc[idx, "Estado"] = "🔴 Demorado"
-                    changes_made = True
-                else:
-                    st.warning(f"⚠️ ID_Pedido '{row['ID_Pedido']}' no tiene '_gsheet_row_index'. No se pudo actualizar el estado a 'Demorado'.")
+        if pd.notna(hora_registro):
+            hora_registro = hora_registro.tz_localize("America/Mexico_City") if hora_registro.tzinfo is None else hora_registro
+            if (current_time - hora_registro).total_seconds() > 3600 and gsheet_row_index is not None:
+                updates_to_perform.append({
+                    'range': f"{gspread.utils.rowcol_to_a1(gsheet_row_index, estado_col_index)}",
+                    'values': [["🔴 Demorado"]]
+                })
+                df_to_check.loc[idx, "Estado"] = "🔴 Demorado"
+                changes_made = True
 
     if updates_to_perform:
         if batch_update_gsheet_cells(worksheet, updates_to_perform):
             st.toast(f"✅ Se actualizaron {len(updates_to_perform)} pedidos a 'Demorado'.", icon="✅")
-            # st.cache_data.clear() # Clear cache to force reload if necessary
             return df_to_check, changes_made
         else:
-            st.error("Falló la actualización por lotes de estados 'Demorado'.")
+            st.error("❌ Falló la actualización por lotes a 'Demorado'.")
             return df_to_check, False
-    
-    return df_to_check, False # No updates were made
+
+    return df_to_check, False
+
 def fijar_estado_pestanas_guia(row, origen_tab):
     st.session_state["pedido_editado"] = row['ID_Pedido']
     st.session_state["fecha_seleccionada"] = row.get("Fecha_Entrega", "")
