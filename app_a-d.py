@@ -616,7 +616,7 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
 
             # ❌ No cambiar pestaña ni expandir/cerrar pedido
             # ✅ Cambiar estado si corresponde
-            if row["Estado"] == "🟡 Pendiente":
+            if row["Estado"] != "🟢 Completado":
                 zona_mexico = timezone("America/Mexico_City")
                 now = datetime.now(zona_mexico)
                 now_str = now.strftime("%Y-%m-%d %H:%M:%S")
