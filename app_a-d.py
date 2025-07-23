@@ -847,7 +847,10 @@ if not df_main.empty:
         st.rerun()
 
     # --- 🔔 Alerta de Modificación de Surtido ---
-    mod_surtido_df = df_main[df_main['Modificacion_Surtido'].astype(str).str.strip() != '']
+    mod_surtido_df = df_main[
+        (df_main['Modificacion_Surtido'].astype(str).str.strip() != '') &
+        (df_main['Estado'] != '🟢 Completado')
+    ]
     mod_surtido_count = len(mod_surtido_df)
 
     if mod_surtido_count > 0:
