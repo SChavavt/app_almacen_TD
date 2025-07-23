@@ -482,6 +482,7 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
         return
 
     folio = row.get("Folio_Factura", "").strip() or row['ID_Pedido']
+    st.markdown(f'<a name="pedido_{row["ID_Pedido"]}"></a>', unsafe_allow_html=True)
     with st.expander(f"{row['Estado']} - {folio} - {row['Cliente']}", expanded=st.session_state["expanded_pedidos"].get(row['ID_Pedido'], False)):  
         st.markdown("---")
         tiene_modificacion = row.get("Modificacion_Surtido") and pd.notna(row["Modificacion_Surtido"]) and str(row["Modificacion_Surtido"]).strip() != ''
@@ -613,9 +614,14 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
         if col_print_btn.button("🖨 Imprimir", key=f"print_{row['ID_Pedido']}_{origen_tab}"):
             # ✅ Mostrar adjuntos del pedido
             st.session_state["expanded_attachments"][row['ID_Pedido']] = True
+            st.session_state["scroll_to_pedido_id"] = row["ID_Pedido"]
 
-            # ❌ No cambiar pestaña ni expandir/cerrar pedido
-            # ✅ Cambiar estado si corresponde
+            # ✅ Expandir el pedido actual (solo este)
+            st.session_state["expanded_pedidos"][row['ID_Pedido']] = True
+
+            # ✅ No cambiar pestañas, no recargar
+
+            # ✅ Cambiar estado a 'En Proceso' si no está completado
             if row["Estado"] != "🟢 Completado":
                 zona_mexico = timezone("America/Mexico_City")
                 now = datetime.now(zona_mexico)
@@ -631,9 +637,9 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
                     df.loc[idx, "Estado"] = "🔵 En Proceso"
                     df.loc[idx, "Hora_Proceso"] = now_str
                     st.toast("📄 Estado actualizado a 'En Proceso'", icon="📌")
+                    st.cache_data.clear()
                 else:
                     st.error("❌ Falló la actualización del estado a 'En Proceso'.")
-
 
         # This block displays attachments if they are expanded
         if st.session_state["expanded_attachments"].get(row["ID_Pedido"], False):
@@ -823,6 +829,19 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
                     archivos_ya_mostrados_para_mod.add(file_name_to_display)
             else:
                 st.info("No hay adjuntos específicos para esta modificación de surtido mencionados en el texto.")
+    # --- Scroll automático al pedido impreso (si corresponde) ---
+    if st.session_state.get("scroll_to_pedido_id") == row["ID_Pedido"]:
+        import streamlit.components.v1 as components
+        components.html(f"""
+            <script>
+                const el = document.querySelector('a[name="pedido_{row["ID_Pedido"]}"]');
+                if (el) {{
+                    el.scrollIntoView({{ behavior: 'smooth', block: 'start' }});
+                }}
+            </script>
+        """, height=0)
+        st.session_state["scroll_to_pedido_id"] = None
+
 
 # --- Main Application Logic ---
 
