@@ -1,3 +1,4 @@
+
 import time
 import streamlit as st
 import pandas as pd
@@ -260,22 +261,17 @@ def batch_update_gsheet_cells(worksheet, updates_list):
 # --- AWS S3 Helper Functions (Copied from app_admin.py directly) ---
 
 def upload_file_to_s3(s3_client_param, bucket_name, file_obj, s3_key):
-    """
-    Uploads a file-like object to S3 and returns (success, url).
-    """
     try:
         s3_client_param.upload_fileobj(
             file_obj,
             bucket_name,
             s3_key,
-            ExtraArgs={'ACL': 'private'}
+            ExtraArgs={'ACL': 'public-read'}
         )
-        url = s3_client_param.generate_presigned_url(
-            'get_object',
-            Params={'Bucket': bucket_name, 'Key': s3_key},
-            ExpiresIn=7200
-        )
+        # Ya no necesitamos presigned_url, podemos armar la URL pública directa:
+        url = f"https://{bucket_name}.s3.{AWS_REGION}.amazonaws.com/{s3_key}"
         return True, url
+
     except Exception as e:
         st.error(f"❌ Error al subir archivo a S3: {e}")
         return False, None
