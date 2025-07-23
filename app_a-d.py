@@ -714,7 +714,8 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
 
         # --- Editable Notes Field and Comment ---
         # This section provides fields for notes and comments related to the order
-        st.markdown("---")
+        # st.markdown("---")  # Eliminar o comentar esta
+        st.markdown("<div style='margin-top: 4px;'></div>", unsafe_allow_html=True)
         info_text_comment = row.get("Comentario")
         if pd.notna(info_text_comment) and str(info_text_comment).strip() != '':
             st.info(f"💬 Comentario: {info_text_comment}")
