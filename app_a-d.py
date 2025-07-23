@@ -182,10 +182,11 @@ def process_sheet_data(all_data: list[list[str]]) -> tuple[pd.DataFrame, list[st
 
     expected_columns = [
         'ID_Pedido', 'Folio_Factura', 'Hora_Registro', 'Vendedor_Registro', 'Cliente',
-        'Tipo_Envio', 'Fecha_Entrega', 'Comentario', 'Notas', 'Modificacion_Surtido',
+        'Tipo_Envio', 'Fecha_Entrega', 'Comentario', 'Modificacion_Surtido',
         'Adjuntos', 'Adjuntos_Surtido', 'Adjuntos_Guia',
         'Estado', 'Estado_Pago', 'Fecha_Completado', 'Hora_Proceso', 'Turno'
     ]
+
 
 
     for col in expected_columns:
@@ -726,44 +727,6 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
         info_text_comment = row.get("Comentario")
         if pd.notna(info_text_comment) and str(info_text_comment).strip() != '':
             st.info(f"💬 Comentario: {info_text_comment}")
-
-        current_notas = row.get("Notas", "")
-        def update_notas_callback(current_idx, current_gsheet_row_index, current_notas_key, df_param, row, origen_tab):
-            new_notas_val = st.session_state[current_notas_key]
-            notas_actual = row.get("Notas", "")
-            if new_notas_val != notas_actual:
-                if update_gsheet_cell(worksheet, headers, current_gsheet_row_index, "Notas", new_notas_val):
-                    df_param.loc[current_idx, "Notas"] = new_notas_val
-                    st.toast("✅ Notas actualizadas", icon="📝")
-
-                    # 🔁 Mantener pedido y pestaña activa al recargar
-                    st.session_state["pedido_editado"] = row['ID_Pedido']
-                    st.session_state["fecha_seleccionada"] = row.get("Fecha_Entrega", "")
-                    st.session_state["subtab_local"] = origen_tab
-
-                    st.cache_data.clear()
-
-                    st.session_state["active_main_tab_index"] = st.session_state.get("active_main_tab_index", 0)
-                    st.session_state["active_subtab_local_index"] = st.session_state.get("active_subtab_local_index", 0)
-                    st.session_state["active_date_tab_m_index"] = st.session_state.get("active_date_tab_m_index", 0)
-                    st.session_state["active_date_tab_t_index"] = st.session_state.get("active_date_tab_t_index", 0)
-
-                    st.rerun()
-
-                else:
-                    st.error("❌ Falló la actualización de las notas.")
-
-
-        notas_key = f"notas_edit_{row['ID_Pedido']}_{origen_tab}"
-        st.text_area(
-            "📝 Notas (editable)",
-            value=current_notas,
-            key=notas_key,
-            height=70,
-            disabled=disabled_if_completed,
-            on_change=update_notas_callback,
-            args=(idx, gsheet_row_index, notas_key, df, row, origen_tab)
-        )
 
         # --- Adjuntar archivos de guía ---
         if row['Estado'] != "🟢 Completado":
