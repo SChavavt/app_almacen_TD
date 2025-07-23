@@ -611,9 +611,11 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
 
         # ✅ PRINT and UPDATE TO "IN PROCESS"
         if col_print_btn.button("🖨 Imprimir", key=f"print_{row['ID_Pedido']}_{origen_tab}"):
-            st.session_state["expanded_attachments"][row['ID_Pedido']] = not st.session_state["expanded_attachments"].get(row['ID_Pedido'], False)
+            # ✅ Mostrar adjuntos del pedido
+            st.session_state["expanded_attachments"][row['ID_Pedido']] = True
 
-            # Only update if the current status is "Pendiente"
+            # ❌ No cambiar pestaña ni expandir/cerrar pedido
+            # ✅ Cambiar estado si corresponde
             if row["Estado"] == "🟡 Pendiente":
                 zona_mexico = timezone("America/Mexico_City")
                 now = datetime.now(zona_mexico)
@@ -626,28 +628,11 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
                     {'range': gspread.utils.rowcol_to_a1(gsheet_row_index, hora_proc_col_idx), 'values': [[now_str]]}
                 ]
                 if batch_update_gsheet_cells(worksheet, updates):
-                    st.session_state["expanded_pedidos"][row['ID_Pedido']] = True
                     df.loc[idx, "Estado"] = "🔵 En Proceso"
                     df.loc[idx, "Hora_Proceso"] = now_str
                     st.toast("📄 Estado actualizado a 'En Proceso'", icon="📌")
-                    
-                    # 🔄 Forzar recarga visual del cambio
-                    st.session_state["pedido_editado"] = row['ID_Pedido']
-                    st.session_state["fecha_seleccionada"] = row.get("Fecha_Entrega", "")
-                    st.session_state["subtab_local"] = origen_tab
-
-                    st.cache_data.clear()
-
-                    st.session_state["active_main_tab_index"] = st.session_state.get("active_main_tab_index", 0)
-                    st.session_state["active_subtab_local_index"] = st.session_state.get("active_subtab_local_index", 0)
-                    st.session_state["active_date_tab_m_index"] = st.session_state.get("active_date_tab_m_index", 0)
-                    st.session_state["active_date_tab_t_index"] = st.session_state.get("active_date_tab_t_index", 0)
-                    st.rerun()
-
-
                 else:
                     st.error("❌ Falló la actualización del estado a 'En Proceso'.")
-
 
 
         # This block displays attachments if they are expanded
