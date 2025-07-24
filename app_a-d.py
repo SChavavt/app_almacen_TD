@@ -747,8 +747,23 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
         surtido_files_in_s3 = []  # ✅ aseguramos su existencia
 
         if tiene_modificacion:
-            st.warning(f"🟡 Modificación de Surtido:\n{row['Modificacion_Surtido']}")
-
+            if str(row['Modificacion_Surtido']).strip().endswith('[✔CONFIRMADO]'):
+                st.info(f"🟡 Modificación de Surtido:\n{row['Modificacion_Surtido']}")
+            else:
+                st.warning(f"🟡 Modificación de Surtido:\n{row['Modificacion_Surtido']}")
+                # ✅ Botón para confirmar modificación
+                if st.button("✅ Confirmar Cambios de Surtido", key=f"confirm_mod_{row['ID_Pedido']}"):
+                    texto_actual = str(row['Modificacion_Surtido']).strip()
+                    if not texto_actual.endswith('[✔CONFIRMADO]'):
+                        nuevo_texto = texto_actual + " [✔CONFIRMADO]"
+                        success = update_gsheet_cell(worksheet, headers, gsheet_row_index, "Modificacion_Surtido", nuevo_texto)
+                        if success:
+                            st.success("✅ Cambios de surtido confirmados.")
+                            st.cache_data.clear()
+                            st.rerun()
+                        else:
+                            st.error("❌ No se pudo confirmar la modificación.")
+               
 
             mod_surtido_archivos_mencionados_raw = []
             for linea in str(row['Modificacion_Surtido']).split('\n'):
@@ -849,11 +864,13 @@ if not df_main.empty:
 
         st.rerun()
 
-    # --- 🔔 Alerta de Modificación de Surtido ---
+    # --- 🔔 Alerta de Modificación de Surtido ---  
     mod_surtido_df = df_main[
         (df_main['Modificacion_Surtido'].astype(str).str.strip() != '') &
+        (~df_main['Modificacion_Surtido'].astype(str).str.endswith('[✔CONFIRMADO]')) &
         (df_main['Estado'] != '🟢 Completado')
     ]
+
     mod_surtido_count = len(mod_surtido_df)
 
     if mod_surtido_count > 0:
