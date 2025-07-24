@@ -362,21 +362,10 @@ def get_files_in_s3_prefix(s3_client_param, prefix):
 
 def get_s3_file_download_url(s3_client_param, object_key):
     """
-    Generates a pre-signed URL for downloading an S3 object.
+    Retorna una URL pública permanente para archivos subidos con ACL='public-read'.
     """
-    if not s3_client_param or not object_key:
-        return "#"
+    return f"https://{S3_BUCKET_NAME}.s3.{AWS_REGION}.amazonaws.com/{object_key}"
 
-    try:
-        url = s3_client_param.generate_presigned_url(
-            'get_object',
-            Params={'Bucket': S3_BUCKET_NAME, 'Key': object_key},
-            ExpiresIn=7200 # URL valid for 2 hours
-        )
-        return url
-    except Exception as e:
-        st.error(f"❌ Error al generar URL pre-firmada para '{object_key}': {e}")
-        return "#"
 
 # --- Helper Functions (existing in app.py) ---
 
