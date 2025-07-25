@@ -259,15 +259,14 @@ def batch_update_gsheet_cells(worksheet, updates_list):
         st.error(f"❌ Error al realizar la actualización por lotes en Google Sheets: {e}")
         return False
 # --- AWS S3 Helper Functions (Copied from app_admin.py directly) ---
-
 def upload_file_to_s3(s3_client_param, bucket_name, file_obj, s3_key):
     try:
-        s3_client_param.upload_fileobj(
-            file_obj,
-            bucket_name,
-            s3_key,
-            ExtraArgs={'ACL': 'public-read'}
+        s3_client_param.put_object(
+            Bucket=bucket_name,
+            Key=s3_key,
+            Body=file_obj.getvalue()
         )
+
         # Ya no necesitamos presigned_url, podemos armar la URL pública directa:
         url = f"https://{bucket_name}.s3.{AWS_REGION}.amazonaws.com/{s3_key}"
         return True, url
@@ -275,6 +274,7 @@ def upload_file_to_s3(s3_client_param, bucket_name, file_obj, s3_key):
     except Exception as e:
         st.error(f"❌ Error al subir archivo a S3: {e}")
         return False, None
+
 # --- AWS S3 Helper Functions (Copied from app_admin.py directly) ---
 
 def find_pedido_subfolder_prefix(s3_client_param, parent_prefix, folder_name):
