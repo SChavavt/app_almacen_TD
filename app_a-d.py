@@ -712,17 +712,14 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
                     "📎 Subir guía(s) del pedido",
                     type=["pdf", "jpg", "jpeg", "png"],
                     accept_multiple_files=True,
-                    key=upload_key,
-                    on_change=fijar_estado_pestanas_guia,
-                    kwargs={"row": row, "origen_tab": origen_tab}
+                    key=upload_key
                 )
 
                 if archivos_guia:
-                    st.session_state["expanded_pedidos"][row['ID_Pedido']] = True  # 👈 ahora correctamente indentado
+                    fijar_estado_pestanas_guia(row, origen_tab)
+                    st.session_state["expanded_pedidos"][row['ID_Pedido']] = True  # ✅ se mantiene expandido
 
                     if st.button("📤 Subir Guía", key=f"btn_subir_guia_{row['ID_Pedido']}"):
-                        fijar_estado_pestanas_guia(row, origen_tab)
-
                         uploaded_urls = []
                         for archivo in archivos_guia:
                             ext = os.path.splitext(archivo.name)[1]
@@ -741,6 +738,7 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
                                 st.cache_data.clear()
                             else:
                                 st.error("❌ No se pudo actualizar el Google Sheet con los archivos de guía.")
+
 
 
 
