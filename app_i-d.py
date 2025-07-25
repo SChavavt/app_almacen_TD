@@ -286,23 +286,7 @@ if not df_all_data.empty:
             for j, (titulo, df_grupo) in enumerate(row):
                 with cols[j]:
                     st.markdown(f"#### {titulo}")
-
-                    # 🔧 ORDEN PERSONALIZADO DE ESTADOS
-                    prioridad_estado = {
-                        "🔴 Demorado": 0,
-                        "🟡 Pendiente": 1,
-                        "🔵 En Proceso": 2,
-                        "🟢 Completado": 3
-                    }
-                    df_grupo["prioridad_estado"] = df_grupo["Estado"].map(prioridad_estado).fillna(99)
-
-                    # 🔀 Ordenar primero por estado, luego por Fecha_Entrega
-                    df_grupo = df_grupo.sort_values(
-                        by=["prioridad_estado", "Fecha_Entrega"],
-                        ascending=[True, False]
-                    ).reset_index(drop=True)
+                    if 'Hora_Registro' in df_grupo.columns:
+                        df_grupo = df_grupo.sort_values(by='Hora_Registro', ascending=False).reset_index(drop=True)
 
                     display_dataframe_with_formatting(df_grupo)
-
-    else:
-        st.info("No hay pedidos para mostrar.")
