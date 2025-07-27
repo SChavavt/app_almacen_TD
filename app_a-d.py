@@ -1,4 +1,3 @@
-
 import time
 import streamlit as st
 import pandas as pd
@@ -259,14 +258,15 @@ def batch_update_gsheet_cells(worksheet, updates_list):
         st.error(f"❌ Error al realizar la actualización por lotes en Google Sheets: {e}")
         return False
 # --- AWS S3 Helper Functions (Copied from app_admin.py directly) ---
+
 def upload_file_to_s3(s3_client_param, bucket_name, file_obj, s3_key):
     try:
-        s3_client_param.put_object(
-            Bucket=bucket_name,
-            Key=s3_key,
-            Body=file_obj.getvalue()
+        s3_client_param.upload_fileobj(
+            file_obj,
+            bucket_name,
+            s3_key,
+            ExtraArgs={'ACL': 'public-read'}
         )
-
         # Ya no necesitamos presigned_url, podemos armar la URL pública directa:
         url = f"https://{bucket_name}.s3.{AWS_REGION}.amazonaws.com/{s3_key}"
         return True, url
@@ -274,7 +274,6 @@ def upload_file_to_s3(s3_client_param, bucket_name, file_obj, s3_key):
     except Exception as e:
         st.error(f"❌ Error al subir archivo a S3: {e}")
         return False, None
-
 # --- AWS S3 Helper Functions (Copied from app_admin.py directly) ---
 
 def find_pedido_subfolder_prefix(s3_client_param, parent_prefix, folder_name):
@@ -712,14 +711,17 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
                     "📎 Subir guía(s) del pedido",
                     type=["pdf", "jpg", "jpeg", "png"],
                     accept_multiple_files=True,
-                    key=upload_key
+                    key=upload_key,
+                    on_change=fijar_estado_pestanas_guia,
+                    kwargs={"row": row, "origen_tab": origen_tab}
                 )
 
                 if archivos_guia:
-                    fijar_estado_pestanas_guia(row, origen_tab)
-                    st.session_state["expanded_pedidos"][row['ID_Pedido']] = True  # ✅ se mantiene expandido
+                    st.session_state["expanded_pedidos"][row['ID_Pedido']] = True  # 👈 ahora correctamente indentado
 
                     if st.button("📤 Subir Guía", key=f"btn_subir_guia_{row['ID_Pedido']}"):
+                        fijar_estado_pestanas_guia(row, origen_tab)
+
                         uploaded_urls = []
                         for archivo in archivos_guia:
                             ext = os.path.splitext(archivo.name)[1]
@@ -738,7 +740,6 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
                                 st.cache_data.clear()
                             else:
                                 st.error("❌ No se pudo actualizar el Google Sheet con los archivos de guía.")
-
 
 
 
