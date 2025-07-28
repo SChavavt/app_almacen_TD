@@ -603,10 +603,8 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
             # ✅ Expandir el pedido actual (solo este)
             st.session_state["expanded_pedidos"][row['ID_Pedido']] = True
 
-            # ✅ No cambiar pestañas, no recargar
-
-            # ✅ Cambiar estado a 'En Proceso' si no está completado
-            if row["Estado"] != "🟢 Completado":
+            # ✅ Solo cambiar si está en Pendiente o Demorado
+            if row["Estado"] in ["🟡 Pendiente", "🔴 Demorado"]:
                 zona_mexico = timezone("America/Mexico_City")
                 now = datetime.now(zona_mexico)
                 now_str = now.strftime("%Y-%m-%d %H:%M:%S")
@@ -622,14 +620,11 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
                     df.at[idx, "Estado"] = "🔵 En Proceso"
                     df.at[idx, "Hora_Proceso"] = now_str
 
-                    # ✅ Persistir pedido expandido
-                    st.session_state["expanded_pedidos"][row['ID_Pedido']] = True
-                    st.session_state["scroll_to_pedido_id"] = row["ID_Pedido"]
-
                     # 🎯 Refrescar visualmente sin recargar toda la app
                     st.toast("📄 Estado actualizado a 'En Proceso'", icon="📌")
                 else:
                     st.error("❌ Falló la actualización del estado a 'En Proceso'.")
+
 
 
         # This block displays attachments if they are expanded
