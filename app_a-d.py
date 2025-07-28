@@ -618,12 +618,19 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
                     {'range': gspread.utils.rowcol_to_a1(gsheet_row_index, hora_proc_col_idx), 'values': [[now_str]]}
                 ]
                 if batch_update_gsheet_cells(worksheet, updates):
-                    df.loc[idx, "Estado"] = "🔵 En Proceso"
-                    df.loc[idx, "Hora_Proceso"] = now_str
+                    # 🔄 Actualizar en el DataFrame local (inmediato en UI)
+                    df.at[idx, "Estado"] = "🔵 En Proceso"
+                    df.at[idx, "Hora_Proceso"] = now_str
+
+                    # ✅ Persistir pedido expandido
+                    st.session_state["expanded_pedidos"][row['ID_Pedido']] = True
+                    st.session_state["scroll_to_pedido_id"] = row["ID_Pedido"]
+
+                    # 🎯 Refrescar visualmente sin recargar toda la app
                     st.toast("📄 Estado actualizado a 'En Proceso'", icon="📌")
-                    st.cache_data.clear()
                 else:
                     st.error("❌ Falló la actualización del estado a 'En Proceso'.")
+
 
         # This block displays attachments if they are expanded
         if st.session_state["expanded_attachments"].get(row["ID_Pedido"], False):
