@@ -598,7 +598,6 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
         if col_print_btn.button("🖨 Imprimir", key=f"print_{row['ID_Pedido']}_{origen_tab}"):
             # ✅ Mostrar adjuntos del pedido
             st.session_state["expanded_attachments"][row['ID_Pedido']] = True
-            st.session_state["scroll_to_pedido_id"] = row["ID_Pedido"]
 
             # ✅ Expandir el pedido actual (solo este)
             st.session_state["expanded_pedidos"][row['ID_Pedido']] = True
