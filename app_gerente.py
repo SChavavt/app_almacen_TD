@@ -9,7 +9,7 @@ import pandas as pd
 from oauth2client.service_account import ServiceAccountCredentials
 
 st.set_page_config(page_title="Buscador de Archivos PDF", layout="wide")
-st.title("🔍 Buscador de Archivos PDF - Gerente de Almacén")
+st.title("🔍 Buscador de Archivos PDF")
 
 # --- Credenciales AWS
 AWS_ACCESS_KEY_ID = st.secrets["aws"]["aws_access_key_id"]
@@ -71,29 +71,6 @@ def obtener_pedidos_desde_gsheet():
     df = df[df["ID_Pedido"].astype(str).str.strip().ne("")]
     return df
 
-# =========================
-# 🔎 BÚSQUEDA POR PEDIDO
-# =========================
-st.markdown("## 📁 Buscar dentro de un Pedido específico")
-
-pedido_id_input = st.text_input("🔢 ID de Pedido (ej. PED-2024...)", "")
-palabra_local = st.text_input("📝 Palabra clave a buscar dentro del pedido (opcional)", "")
-
-if pedido_id_input.strip():
-    archivos_pdf = listar_pdfs_en_pedido(pedido_id_input.strip())
-    if not archivos_pdf:
-        st.warning("📭 No se encontraron archivos PDF en el pedido.")
-    else:
-        for s3_key in archivos_pdf:
-            with st.expander(f"📄 {s3_key.split('/')[-1]}"):
-                texto = extraer_texto_pdf_s3(s3_key)
-                if palabra_local.strip():
-                    if palabra_local.lower() in texto.lower():
-                        st.success(f"✅ ¡Coincidencia encontrada!")
-                        st.markdown(f"`{palabra_local}` aparece en el documento.")
-                    else:
-                        st.warning("🚫 Palabra clave no encontrada.")
-                st.text_area("Texto extraído del PDF:", texto, height=300)
 
 # =========================
 # 🌎 BÚSQUEDA GLOBAL
