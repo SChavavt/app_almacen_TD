@@ -77,9 +77,12 @@ def obtener_pedidos_desde_gsheet():
 # =========================
 st.markdown("## 🌎 Buscar palabra clave en TODOS los pedidos")
 
-palabra_global = st.text_input("🔤 Palabra a buscar en todos los PDFs del sistema:", "")
+st.markdown("### 🔤 Buscar por número de guía, palabra clave o fragmento")
+palabra_global = st.text_input("📦 Número de guía o texto a buscar:", "")
+buscar_btn = st.button("🔎 Buscar ahora")
 
-if palabra_global.strip():
+if buscar_btn and palabra_global.strip():
+
     df_pedidos = obtener_pedidos_desde_gsheet()
     resultados = []
 
@@ -88,7 +91,12 @@ if palabra_global.strip():
         pdfs = listar_pdfs_en_pedido(pedido_id)
         for s3_key in pdfs:
             texto = extraer_texto_pdf_s3(s3_key)
-            if palabra_global.lower() in texto.lower():
+
+            # 🔧 Normaliza para que ignore espacios y mayúsculas
+            texto_normalizado = texto.replace(" ", "").lower()
+            busqueda_normalizada = palabra_global.replace(" ", "").lower()
+
+            if busqueda_normalizada in texto_normalizado:
                 resultados.append({
                     "ID_Pedido": pedido_id,
                     "Cliente": row.get("Cliente", ""),
@@ -98,7 +106,7 @@ if palabra_global.strip():
                     "Archivo": s3_key.split("/")[-1],
                     "URL": f"https://{S3_BUCKET_NAME}.s3.{AWS_REGION}.amazonaws.com/{s3_key}"
                 })
-                break  # si ya la encontramos en un PDF de ese pedido, pasamos al siguiente
+                break
 
     if resultados:
         st.success(f"✅ Se encontró la palabra en {len(resultados)} pedido(s).")
