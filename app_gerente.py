@@ -125,6 +125,16 @@ if buscar_btn and keyword.strip():
             if coincide:
                 archivos_coincidentes.append((key, generar_url_s3(key)))
 
+        
+
+        # Agrupar todos los archivos del pedido, aunque no tengan coincidencia
+        comprobantes = [f for f in archivos_validos if "comprobante" in f["Key"].lower()]
+        facturas = [f for f in archivos_validos if "factura" in f["Key"].lower()]
+        otros = [f for f in archivos_validos if f not in comprobantes and f not in facturas and f["Key"] not in [ac[0] for ac in archivos_coincidentes]]
+
+        comprobantes_links = [(f["Key"], generar_url_s3(f["Key"])) for f in comprobantes]
+        facturas_links = [(f["Key"], generar_url_s3(f["Key"])) for f in facturas]
+        otros_links = [(f["Key"], generar_url_s3(f["Key"])) for f in otros]
 
         if archivos_coincidentes:
             resultados.append({
@@ -133,19 +143,44 @@ if buscar_btn and keyword.strip():
                 "Estado": row.get("Estado", ""),
                 "Vendedor": row.get("Vendedor_Registro", ""),
                 "Folio": row.get("Folio_Factura", ""),
-                "Archivos": archivos_coincidentes
+                "Coincidentes": archivos_coincidentes,
+                "Comprobantes": comprobantes_links,
+                "Facturas": facturas_links,
+                "Otros": otros_links
             })
+
 
     st.markdown("---")
     if resultados:
         st.success(f"✅ Se encontraron coincidencias en {len(resultados)} pedido(s).")
+
         for res in resultados:
             st.markdown(f"### 📦 Pedido **{res['ID_Pedido']}** – 🤝 {res['Cliente']}")
             st.markdown(f"📄 **Folio:** `{res['Folio']}`  |  🔍 **Estado:** `{res['Estado']}`  |  🧑‍💼 **Vendedor:** `{res['Vendedor']}`")
-            for key, url in res["Archivos"]:
-                nombre = key.split("/")[-1]
-                st.markdown(f"- [📎 {nombre}]({url})")
+
+            with st.expander("📁 Archivos del Pedido", expanded=True):
+                if res["Coincidentes"]:
+                    st.markdown("#### 🔍 Coincidencias encontradas:")
+                    for key, url in res["Coincidentes"]:
+                        nombre = key.split("/")[-1]
+                        st.markdown(f"- [🔍 {nombre}]({url})")
+
+                if res["Comprobantes"]:
+                    st.markdown("#### 🧾 Comprobantes:")
+                    for key, url in res["Comprobantes"]:
+                        nombre = key.split("/")[-1]
+                        st.markdown(f"- [📄 {nombre}]({url})")
+
+                if res["Facturas"]:
+                    st.markdown("#### 📑 Facturas:")
+                    for key, url in res["Facturas"]:
+                        nombre = key.split("/")[-1]
+                        st.markdown(f"- [📄 {nombre}]({url})")
+
+                if res["Otros"]:
+                    st.markdown("#### 📂 Otros Archivos:")
+                    for key, url in res["Otros"]:
+                        nombre = key.split("/")[-1]
+                        st.markdown(f"- [📎 {nombre}]({url})")
     else:
         st.warning("⚠️ No se encontraron coincidencias en ningún archivo PDF.")
-elif buscar_btn:
-    st.warning("⚠️ Ingresa una palabra clave antes de buscar.")
