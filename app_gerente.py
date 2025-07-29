@@ -113,6 +113,9 @@ if buscar_btn and palabra_global.strip():
     for _, row in df_pedidos.iterrows():
         pedido_id = row["ID_Pedido"]
         pdfs = listar_todos_pdfs_en_pedido(pedido_id, row)
+        st.info(f"🔎 Revisando {len(pdfs)} PDF(s) en pedido {pedido_id}:")
+        for archivo in pdfs:
+            st.markdown(f"- `{archivo}`")
         for s3_key in pdfs:
             texto = extraer_texto_pdf_s3(s3_key)
 
