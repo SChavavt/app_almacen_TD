@@ -47,19 +47,25 @@ def get_clients():
 def contiene_palabra(pdf_bytes, keyword):
     try:
         keyword_clean = re.sub(r"[\s\-]+", "", keyword.lower())
-
         with pdfplumber.open(BytesIO(pdf_bytes)) as pdf:
-            for page in pdf.pages:
+            for i, page in enumerate(pdf.pages):
                 texto = page.extract_text() or ""
                 texto_limpio = re.sub(r"[\s\n\r\-]+", "", texto.lower())
 
+                # 👇 DEBUG TEMPORAL
+                st.write(f"🧪 Página {i+1}")
+                st.code(texto[:1000])  # Muestra los primeros 1000 caracteres extraídos
+
                 if keyword_clean in texto_limpio:
+                    st.success("🎯 Coincidencia con texto limpio")
                     return True
                 if keyword.lower().strip() in texto.lower():
+                    st.success("🎯 Coincidencia con texto exacto")
                     return True
-    except Exception:
-        pass
+    except Exception as e:
+        st.error(f"❌ Error en contiene_palabra: {e}")
     return False
+
 
 # --- BÚSQUEDA EN PDF DE S3 ---
 def buscar_pdf_en_s3(s3, bucket, key, keyword):
