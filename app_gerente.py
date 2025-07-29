@@ -15,6 +15,7 @@ st.markdown("Busca palabras clave, números de guía o cualquier texto en los PD
 
 # --- INPUT ---
 palabra_clave = st.text_input("📦 Ingresa una palabra clave, número de guía, fragmento o código a buscar:")
+palabra_clave = palabra_clave.strip()  # ✅ quita espacios iniciales y finales
 buscar_btn = st.button("🔎 Buscar en todos los pedidos")
 
 # --- CREDENCIALES DESDE SECRETS ---
@@ -46,7 +47,7 @@ def get_clients():
 # --- EXTRACCIÓN DE TEXTO DE PDF ---
 def contiene_palabra(pdf_bytes, keyword):
     try:
-        keyword_clean = re.sub(r"[\s\-]+", "", keyword.lower())
+        keyword_clean = re.sub(r"[\s\n\r\-\_]+", "", keyword.lower())
         with pdfplumber.open(BytesIO(pdf_bytes)) as pdf:
             for i, page in enumerate(pdf.pages):
                 texto = page.extract_text() or ""
@@ -59,7 +60,8 @@ def contiene_palabra(pdf_bytes, keyword):
                 if keyword_clean in texto_limpio:
                     st.success("🎯 Coincidencia con texto limpio")
                     return True
-                if keyword.lower().strip() in texto.lower():
+                keyword_raw = keyword.lower().strip()
+                if keyword_raw in texto.lower():
                     st.success("🎯 Coincidencia con texto exacto")
                     return True
     except Exception as e:
