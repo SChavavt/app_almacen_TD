@@ -147,20 +147,20 @@ if buscar_btn and palabra_clave.strip():
                 "Archivos": archivos_encontrados
             })
 
-if resultados:
-    st.success(f"✅ Se encontró la palabra en {len(resultados)} pedido(s):")
+    if resultados:
+        st.success(f"✅ Se encontró la palabra en {len(resultados)} pedido(s):")
 
-    for r in resultados:
-        st.markdown("---")
-        st.markdown(f"### 📦 Pedido: `{r.get('ID', '—')}`")
-        st.markdown(f"👤 Cliente: `{r.get('Cliente', '—')}`")
-        st.markdown(f"📄 Folio: `{r.get('Folio', '—')}`")
-        st.markdown(f"📦 Estado: `{r.get('Estado', '—')}` | Vendedor: `{r.get('Vendedor', '—')}`")
+        for r in resultados:
+            st.markdown("---")
+            st.markdown(f"### 📦 Pedido: `{r.get('ID', '—')}`")
+            st.markdown(f"👤 Cliente: `{r.get('Cliente', '—')}`")
+            st.markdown(f"📄 Folio: `{r.get('Folio', '—')}`")
+            st.markdown(f"📦 Estado: `{r.get('Estado', '—')}` | Vendedor: `{r.get('Vendedor', '—')}`")
 
-        for archivo in r.get("Archivos", []):
-            archivo_nombre = archivo.get("archivo", "Archivo")
-            archivo_url = archivo.get("url", "")
-            st.markdown(f"- 📄 [{archivo_nombre}]({archivo_url})")
-else:
-    st.warning("🔍 No se encontró la palabra en ningún PDF.")
+            for archivo in r.get("Archivos", []):
+                archivo_nombre = archivo.get("archivo", "Archivo")
+                archivo_url = archivo.get("url", "")
+                st.markdown(f"- 📄 [{archivo_nombre}]({archivo_url})")
+    else:
+        st.warning("🔍 No se encontró la palabra en ningún PDF.")
 
