@@ -87,6 +87,23 @@ if buscar_btn and palabra_global.strip():
     resultados = []
 
     for _, row in df_pedidos.iterrows():
+        if row["ID_Pedido"] == "PED-20250724164354-482F":
+            st.warning("📂 Revisando manualmente el pedido PED-20250724164354-482F...")
+
+            pdfs_test = listar_pdfs_en_pedido("PED-20250724164354-482F")
+            st.write(f"Archivos PDF encontrados en S3: {pdfs_test}")
+
+            for s3_key in pdfs_test:
+                texto = extraer_texto_pdf_s3(s3_key)
+                texto_normalizado = texto.replace(" ", "").lower()
+                st.info(f"🧪 Vista previa de texto en {s3_key}:")
+                st.text(texto[:1000])
+
+                if "4110109592" in texto_normalizado:
+                    st.success("✅ ¡Texto detectado correctamente en el PDF!")
+                else:
+                    st.error("🚫 El número no está presente (incluso sin espacios).")
+
         pedido_id = row["ID_Pedido"]
         pdfs = listar_pdfs_en_pedido(pedido_id)
         for s3_key in pdfs:
