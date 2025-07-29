@@ -30,17 +30,39 @@ def get_s3_client():
 
 s3_client = get_s3_client()
 
-# --- Función: Obtener archivos PDF en S3 por pedido
-def listar_pdfs_en_pedido(pedido_id):
-    prefix = f"{S3_ATTACHMENT_PREFIX}{pedido_id}/"
-    try:
-        response = s3_client.list_objects_v2(Bucket=S3_BUCKET_NAME, Prefix=prefix)
-        if "Contents" not in response:
-            return []
-        return [obj["Key"] for obj in response["Contents"] if obj["Key"].lower().endswith(".pdf")]
-    except Exception as e:
-        st.error(f"Error al listar archivos en S3: {e}")
-        return []
+# --- Función: Buscar TODOS los PDFs en todas las carpetas relevantes + Adjuntos_Surtido
+def listar_todos_pdfs_en_pedido(pedido_id, row):
+    carpetas = [
+        f"adjuntos_pedidos/{pedido_id}/",
+        f"adjuntos_guias/{pedido_id}/",
+        f"adjuntos_facturas/{pedido_id}/"
+    ]
+    archivos_encontrados = []
+
+    # 📁 Buscar en carpetas estándar
+    for prefix in carpetas:
+        try:
+            response = s3_client.list_objects_v2(Bucket=S3_BUCKET_NAME, Prefix=prefix)
+            if "Contents" in response:
+                archivos_encontrados += [
+                    obj["Key"] for obj in response["Contents"] if obj["Key"].lower().endswith(".pdf")
+                ]
+        except Exception as e:
+            st.error(f"❌ Error al listar en {prefix}: {e}")
+
+    # 📁 Buscar en Adjuntos_Surtido (columna del Excel)
+    adjuntos_surtido = row.get("Adjuntos_Surtido", "")
+    if isinstance(adjuntos_surtido, str) and "https://" in adjuntos_surtido:
+        urls = [u.strip() for u in adjuntos_surtido.split(",") if u.strip().endswith(".pdf")]
+        for url in urls:
+            try:
+                key = url.split(f"{S3_BUCKET_NAME}.s3.{AWS_REGION}.amazonaws.com/")[-1]
+                if key.endswith(".pdf"):
+                    archivos_encontrados.append(key)
+            except Exception as e:
+                st.error(f"⚠️ Error al procesar URL de Adjuntos_Surtido: {e}")
+
+    return archivos_encontrados
 
 # --- Función: Extraer texto de un PDF desde S3
 def extraer_texto_pdf_s3(s3_key):
@@ -71,10 +93,10 @@ def obtener_pedidos_desde_gsheet():
     df = df[df["ID_Pedido"].astype(str).str.strip().ne("")]
     return df
 
-
 # =========================
 # 🌎 BÚSQUEDA GLOBAL
 # =========================
+
 st.markdown("## 🌎 Buscar palabra clave en TODOS los pedidos")
 
 st.markdown("### 🔤 Buscar por número de guía, palabra clave o fragmento")
@@ -90,7 +112,7 @@ if buscar_btn and palabra_global.strip():
         if row["ID_Pedido"] == "PED-20250724164354-482F":
             st.warning("📂 Revisando manualmente el pedido PED-20250724164354-482F...")
 
-            pdfs_test = listar_pdfs_en_pedido("PED-20250724164354-482F")
+            pdfs_test = listar_todos_pdfs_en_pedido("PED-20250724164354-482F", row)
             st.write(f"Archivos PDF encontrados en S3: {pdfs_test}")
 
             for s3_key in pdfs_test:
@@ -105,7 +127,7 @@ if buscar_btn and palabra_global.strip():
                     st.error("🚫 El número no está presente (incluso sin espacios).")
 
         pedido_id = row["ID_Pedido"]
-        pdfs = listar_pdfs_en_pedido(pedido_id)
+        pdfs = listar_todos_pdfs_en_pedido(pedido_id, row)
         for s3_key in pdfs:
             texto = extraer_texto_pdf_s3(s3_key)
 
