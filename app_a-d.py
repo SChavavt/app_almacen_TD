@@ -582,6 +582,12 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
         disabled_if_completed = (row['Estado'] == "🟢 Completado")
 
         col_order_num, col_client, col_time, col_status, col_vendedor, col_print_btn, col_complete_btn = st.columns([0.5, 2, 1.5, 1, 1.2, 1, 1])
+        # --- Mostrar Comentario (si existe)
+        comentario = str(row.get("Comentario", "")).strip()
+        if comentario:
+            st.markdown("##### 📝 Comentario del Pedido")
+            st.info(comentario)
+
 
         col_order_num.write(f"**{orden}**")
         folio_factura = row.get("Folio_Factura", "").strip()
@@ -1152,4 +1158,4 @@ with main_tabs[4]:  # ✅ Historial Completados
         for orden, (idx, row) in enumerate(df_completados_historial.iterrows(), start=1):
             mostrar_pedido(df_main, idx, row, orden, "Historial", "✅ Historial Completados", worksheet_main, headers_main, s3_client)
     else:
-        st.info("No hay pedidos completados recientes o ya fueron limpiados.")
+        st.info("No hay pedidos completados recientes o ya fueron limpiados.") 
