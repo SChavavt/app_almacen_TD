@@ -102,14 +102,11 @@ if buscar_btn and keyword.strip():
         archivos_validos = obtener_archivos_pdf_validos(prefix)
         archivos_coincidentes = []
 
+        match_encontrado = False  # bandera para cortar búsqueda si ya hay coincidencia
+
         for archivo in archivos_validos:
             key = archivo["Key"]
             texto = extraer_texto_pdf(key)
-            waybill_match = re.search(r"WAYBILL[\s:]*([0-9 ]{8,})", texto, re.IGNORECASE)
-            if waybill_match:
-                st.code(f"📦 WAYBILL detectado: {waybill_match.group(1)}")
-
-            import re
 
             clave = keyword.strip()
             clave_sin_espacios = clave.replace(" ", "")
@@ -123,7 +120,15 @@ if buscar_btn and keyword.strip():
             )
 
             if coincide:
+                # ✅ Solo mostrar el WAYBILL del archivo coincidente
+                waybill_match = re.search(r"WAYBILL[\s:]*([0-9 ]{8,})", texto, re.IGNORECASE)
+                if waybill_match:
+                    st.code(f"📦 WAYBILL detectado: {waybill_match.group(1)}")
+
                 archivos_coincidentes.append((key, generar_url_s3(key)))
+                match_encontrado = True
+                break  # ✅ dejamos de revisar más archivos una vez encontrada la coincidencia
+
 
         
 
