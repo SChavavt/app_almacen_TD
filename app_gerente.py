@@ -50,19 +50,20 @@ def listar_todos_pdfs_en_pedido(pedido_id, row):
         except Exception as e:
             st.error(f"❌ Error al listar en {prefix}: {e}")
 
-    # 📁 Buscar en Adjuntos_Surtido (columna del Excel)
-    adjuntos_surtido = row.get("Adjuntos_Surtido", "")
-    if isinstance(adjuntos_surtido, str) and "https://" in adjuntos_surtido:
-        urls = [u.strip() for u in adjuntos_surtido.split(",") if u.strip().endswith(".pdf")]
-        for url in urls:
-            try:
-                from urllib.parse import urlparse
-                parsed = urlparse(url)
-                key = parsed.path.lstrip("/")
-                if key.endswith(".pdf"):
-                    archivos_encontrados.append(key)
-            except Exception as e:
-                st.error(f"⚠️ Error al procesar URL de Adjuntos_Surtido: {e}")
+    # 📁 Buscar en Adjuntos_Surtido y Adjuntos_Guia (ambas columnas con URLs públicas)
+    for col in ["Adjuntos_Surtido", "Adjuntos_Guia"]:
+        urls = row.get(col, "")
+        if isinstance(urls, str) and "https://" in urls:
+            for url in urls.split(","):
+                url = url.strip()
+                if url.lower().endswith(".pdf"):
+                    try:
+                        from urllib.parse import urlparse
+                        parsed = urlparse(url)
+                        key = parsed.path.lstrip("/")
+                        archivos_encontrados.append(key)
+                    except Exception as e:
+                        st.error(f"⚠️ Error al procesar URL de {col}: {e}")
 
     return archivos_encontrados
 
