@@ -56,7 +56,9 @@ def listar_todos_pdfs_en_pedido(pedido_id, row):
         urls = [u.strip() for u in adjuntos_surtido.split(",") if u.strip().endswith(".pdf")]
         for url in urls:
             try:
-                key = url.split(f"{S3_BUCKET_NAME}.s3.{AWS_REGION}.amazonaws.com/")[-1]
+                from urllib.parse import urlparse
+                parsed = urlparse(url)
+                key = parsed.path.lstrip("/")
                 if key.endswith(".pdf"):
                     archivos_encontrados.append(key)
             except Exception as e:
@@ -114,6 +116,9 @@ if buscar_btn and palabra_global.strip():
 
             pdfs_test = listar_todos_pdfs_en_pedido("PED-20250724164354-482F", row)
             st.write(f"Archivos PDF encontrados en S3: {pdfs_test}")
+            urls_surtido = [u.strip() for u in row.get("Adjuntos_Surtido", "").split(",") if u.strip().endswith(".pdf")]
+            st.info(f"🔗 Archivos referenciados en Adjuntos_Surtido: {urls_surtido}")
+
 
             for s3_key in pdfs_test:
                 texto = extraer_texto_pdf_s3(s3_key)
