@@ -101,8 +101,6 @@ if buscar_btn and keyword.strip():
 
         archivos_validos = obtener_archivos_pdf_validos(prefix)
         archivos_coincidentes = []
-        archivos_todos = []  # Inicializa vacío por fuera del bloque
-
 
         for archivo in archivos_validos:
             key = archivo["Key"]
@@ -125,29 +123,18 @@ if buscar_btn and keyword.strip():
             )
 
             if coincide:
-                url_coincidente = generar_url_s3(key)
-                archivos_coincidentes.append((key, url_coincidente))
-
-                # ✅ Cargar TODOS los archivos del pedido
-                try:
-                    respuesta_todos = s3_client.list_objects_v2(Bucket=S3_BUCKET, Prefix=prefix)
-                    todos_los_archivos = respuesta_todos.get("Contents", [])
-                    archivos_todos = [(f["Key"], generar_url_s3(f["Key"])) for f in todos_los_archivos if f["Key"].lower().endswith((".pdf", ".jpg", ".jpeg", ".png"))]
-                except Exception as e:
-                    archivos_todos = []
-                    st.warning(f"⚠️ No se pudieron listar todos los archivos de {pedido_id}: {e}")
+                archivos_coincidentes.append((key, generar_url_s3(key)))
 
 
-        resultados.append({
-            "ID_Pedido": pedido_id,
-            "Cliente": row.get("Cliente", ""),
-            "Estado": row.get("Estado", ""),
-            "Vendedor": row.get("Vendedor_Registro", ""),
-            "Folio": row.get("Folio_Factura", ""),
-            "ArchivosCoincidentes": archivos_coincidentes,
-            "TodosLosArchivos": archivos_todos
-        })
-
+        if archivos_coincidentes:
+            resultados.append({
+                "ID_Pedido": pedido_id,
+                "Cliente": row.get("Cliente", ""),
+                "Estado": row.get("Estado", ""),
+                "Vendedor": row.get("Vendedor_Registro", ""),
+                "Folio": row.get("Folio_Factura", ""),
+                "Archivos": archivos_coincidentes
+            })
 
     st.markdown("---")
     if resultados:
@@ -155,16 +142,9 @@ if buscar_btn and keyword.strip():
         for res in resultados:
             st.markdown(f"### 📦 Pedido **{res['ID_Pedido']}** – 🤝 {res['Cliente']}")
             st.markdown(f"📄 **Folio:** `{res['Folio']}`  |  🔍 **Estado:** `{res['Estado']}`  |  🧑‍💼 **Vendedor:** `{res['Vendedor']}`")
-            st.markdown("#### ✅ Coincidencia encontrada en:")
-            for key, url in res["ArchivosCoincidentes"]:
+            for key, url in res["Archivos"]:
                 nombre = key.split("/")[-1]
-                st.markdown(f"- 🔍 [**{nombre}**]({url})")
-
-            st.markdown("#### 📂 Todos los archivos del pedido:")
-            for key, url in res["TodosLosArchivos"]:
-                nombre = key.split("/")[-1]
-                st.markdown(f"- [📄 {nombre}]({url})")
-
+                st.markdown(f"- [📎 {nombre}]({url})")
     else:
         st.warning("⚠️ No se encontraron coincidencias en ningún archivo PDF.")
 elif buscar_btn:
