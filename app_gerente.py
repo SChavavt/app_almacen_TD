@@ -1,150 +1,151 @@
 import streamlit as st
 import pandas as pd
-import pdfplumber
 import boto3
 import gspread
+import pdfplumber
 import json
 import re
 from io import BytesIO
 from oauth2client.service_account import ServiceAccountCredentials
 
-# --- CONFIGURACIÓN ---
-st.set_page_config(page_title="🔍 Buscador de Palabras Clave en PDFs", layout="wide")
+# --- CONFIGURACIÓN DE STREAMLIT ---
+st.set_page_config(page_title="🔍 Buscador de Guías y Descargas", layout="wide")
 st.title("🔍 Buscador de Archivos PDF en Pedidos S3")
-st.markdown("Busca palabras clave, números de guía o cualquier texto en los PDFs adjuntos de todos los pedidos que contengan 'guía' o 'descarga' en el nombre del archivo.")
-
-# --- INPUT ---
-palabra_clave = st.text_input("📦 Ingresa una palabra clave, número de guía, fragmento o código a buscar:").strip()
-buscar_btn = st.button("🔎 Buscar en todos los pedidos")
 
 # --- CREDENCIALES DESDE SECRETS ---
-AWS_ACCESS_KEY_ID = st.secrets["aws"]["aws_access_key_id"]
-AWS_SECRET_ACCESS_KEY = st.secrets["aws"]["aws_secret_access_key"]
-AWS_REGION = st.secrets["aws"]["aws_region"]
-S3_BUCKET_NAME = st.secrets["aws"]["s3_bucket_name"]
-
-GSHEETS_CREDENTIALS = json.loads(st.secrets["gsheets"]["google_credentials"])
-GSHEETS_CREDENTIALS["private_key"] = GSHEETS_CREDENTIALS["private_key"].replace("\\n", "\n")
-GOOGLE_SHEET_ID = "1aWkSelodaz0nWfQx7FZAysGnIYGQFJxAN7RO3YgCiZY"
-SHEET_NAME = "datos_pedidos"
-
-# --- FUNCIONES DE AUTENTICACIÓN ---
-@st.cache_resource
-def get_clients():
+try:
+    credentials_dict = json.loads(st.secrets["gsheets"]["google_credentials"])
+    credentials_dict["private_key"] = credentials_dict["private_key"].replace("\\n", "\n")
     scope = ['https://spreadsheets.google.com/feeds', 'https://www.googleapis.com/auth/drive']
-    creds = ServiceAccountCredentials.from_json_keyfile_dict(GSHEETS_CREDENTIALS, scope)
+    creds = ServiceAccountCredentials.from_json_keyfile_dict(credentials_dict, scope)
     gspread_client = gspread.authorize(creds)
+except Exception as e:
+    st.error(f"❌ Error al autenticar con Google Sheets: {e}")
+    st.stop()
+
+try:
     s3_client = boto3.client(
         "s3",
-        aws_access_key_id=AWS_ACCESS_KEY_ID,
-        aws_secret_access_key=AWS_SECRET_ACCESS_KEY,
-        region_name=AWS_REGION
+        aws_access_key_id=st.secrets["aws"]["aws_access_key_id"],
+        aws_secret_access_key=st.secrets["aws"]["aws_secret_access_key"],
+        region_name=st.secrets["aws"]["aws_region"]
     )
-    return gspread_client, s3_client
+    S3_BUCKET = st.secrets["aws"]["s3_bucket_name"]
+except Exception as e:
+    st.error(f"❌ Error al autenticar con AWS S3: {e}")
+    st.stop()
 
-# --- EXTRACCIÓN DE TEXTO DE PDF ---
-def contiene_palabra(pdf_bytes, keyword):
+# --- FUNCIONES ---
+@st.cache_data(ttl=300)
+def cargar_pedidos():
+    sheet = gspread_client.open_by_key("1aWkSelodaz0nWfQx7FZAysGnIYGQFJxAN7RO3YgCiZY").worksheet("datos_pedidos")
+    data = sheet.get_all_records()
+    return pd.DataFrame(data)
+
+def obtener_prefijo_s3(pedido_id):
+    posibles_prefijos = [
+        f"{pedido_id}/", f"adjuntos_pedidos/{pedido_id}/",
+        f"adjuntos_pedidos/{pedido_id}", f"{pedido_id}"
+    ]
+    for prefix in posibles_prefijos:
+        try:
+            respuesta = s3_client.list_objects_v2(Bucket=S3_BUCKET, Prefix=prefix, MaxKeys=1)
+            if "Contents" in respuesta:
+                return prefix if prefix.endswith("/") else prefix + "/"
+        except:
+            continue
+    return None
+
+def obtener_archivos_pdf_validos(prefix):
     try:
-        keyword_clean = re.sub(r"[\s\n\r\-\_]+", "", keyword.lower())
-        with pdfplumber.open(BytesIO(pdf_bytes)) as pdf:
-            for i, page in enumerate(pdf.pages):
-                texto = page.extract_text() or ""
-                texto_limpio = re.sub(r"[\s\n\r\-]+", "", texto.lower())
-                if keyword_clean in texto_limpio:
-                    return True
-                if keyword.lower().strip() in texto.lower():
-                    return True
+        respuesta = s3_client.list_objects_v2(Bucket=S3_BUCKET, Prefix=prefix)
+        archivos = respuesta.get("Contents", [])
+        return [f for f in archivos if f["Key"].lower().endswith(".pdf") and any(x in f["Key"].lower() for x in ["guia", "guía", "descarga"])]
     except Exception as e:
-        st.error(f"❌ Error en contiene_palabra: {e}")
-    return False
+        st.error(f"❌ Error al listar archivos en S3 para prefijo {prefix}: {e}")
+        return []
 
-# --- BÚSQUEDA EN PDF DE S3 ---
-def buscar_pdf_en_s3(s3, bucket, key, keyword):
+def extraer_texto_pdf(s3_key):
     try:
-        if not key.lower().endswith(".pdf"):
-            return False
-        nombre_archivo = key.split("/")[-1].lower()
-        if not re.search(r"(gu[ií]a|descarga)", nombre_archivo):
-            return False
-        obj = s3.get_object(Bucket=bucket, Key=key)
-        pdf_bytes = obj["Body"].read()
-        return contiene_palabra(pdf_bytes, keyword)
-    except Exception:
-        return False
+        response = s3_client.get_object(Bucket=S3_BUCKET, Key=s3_key)
+        with pdfplumber.open(BytesIO(response["Body"].read())) as pdf:
+            return "\n".join(page.extract_text() or "" for page in pdf.pages)
+    except Exception as e:
+        return f"[ERROR AL LEER PDF]: {e}"
 
-# --- PROCESO PRINCIPAL ---
-if buscar_btn and palabra_clave:
-    gspread_client, s3 = get_clients()
+def generar_url_s3(s3_key):
+    return s3_client.generate_presigned_url(
+        'get_object',
+        Params={'Bucket': S3_BUCKET, 'Key': s3_key},
+        ExpiresIn=3600
+    )
+
+# --- INTERFAZ ---
+keyword = st.text_input("📦 Ingresa una palabra clave, número de guía, fragmento o código a buscar:")
+buscar_btn = st.button("🔎 Buscar")
+
+if buscar_btn and keyword.strip():
     st.info("🔄 Buscando, por favor espera... puede tardar unos segundos...")
-
-    hoja = gspread_client.open_by_key(GOOGLE_SHEET_ID).worksheet(SHEET_NAME)
-    data = hoja.get_all_records()
-    df = pd.DataFrame(data)
-    df["ID_Pedido"] = df["ID_Pedido"].astype(str)
+    df_pedidos = cargar_pedidos()
 
     resultados = []
 
-    for _, row in df.iterrows():
-        id_pedido = row["ID_Pedido"]
-        cliente = row.get("Cliente", "")
-        estado = row.get("Estado", "")
-        vendedor = row.get("Vendedor_Registro", "")
-        folio = row.get("Folio_Factura", "")
-        archivos_encontrados = []
+    for _, row in df_pedidos.iterrows():
+        pedido_id = str(row.get("ID_Pedido", "")).strip()
+        if not pedido_id:
+            continue
 
-        # 1. Buscar en carpetas conocidas de S3
-        for carpeta in ["adjuntos_pedidos", "adjuntos_guias", "adjuntos_facturas"]:
-            prefix = f"{carpeta}/{id_pedido}/"
-            try:
-                response = s3.list_objects_v2(Bucket=S3_BUCKET_NAME, Prefix=prefix)
-                for obj in response.get("Contents", []):
-                    key = obj["Key"]
-                    if buscar_pdf_en_s3(s3, S3_BUCKET_NAME, key, palabra_clave):
-                        archivos_encontrados.append({
-                            "archivo": key.split("/")[-1],
-                            "url": f"https://{S3_BUCKET_NAME}.s3.{AWS_REGION}.amazonaws.com/{key}"
-                        })
-            except Exception:
-                continue
+        prefix = obtener_prefijo_s3(pedido_id)
+        if not prefix:
+            continue
 
-        # 2. Buscar en URLs sueltas (solo si contienen "guía" o "descarga")
-        for col in ["Adjuntos_Surtido", "Adjuntos_Guia"]:
-            urls_str = row.get(col, "")
-            urls = [x.strip() for x in urls_str.split(",") if x.strip()]
-            for url in urls:
-                try:
-                    if S3_BUCKET_NAME in url:
-                        key = url.split(f"{S3_BUCKET_NAME}.s3.{AWS_REGION}.amazonaws.com/")[-1]
-                        nombre_archivo = key.split("/")[-1].lower()
-                        if re.search(r"(gu[ií]a|descarga)", nombre_archivo) and buscar_pdf_en_s3(s3, S3_BUCKET_NAME, key, palabra_clave):
-                            archivos_encontrados.append({
-                                "archivo": nombre_archivo,
-                                "url": url
-                            })
-                except Exception:
-                    continue
+        archivos_validos = obtener_archivos_pdf_validos(prefix)
+        archivos_coincidentes = []
 
-        if archivos_encontrados:
+        for archivo in archivos_validos:
+            key = archivo["Key"]
+            texto = extraer_texto_pdf(key)
+            waybill_match = re.search(r"WAYBILL[\s:]*([0-9 ]{8,})", texto, re.IGNORECASE)
+            if waybill_match:
+                st.code(f"📦 WAYBILL detectado: {waybill_match.group(1)}")
+
+            import re
+
+            clave = keyword.strip()
+            clave_sin_espacios = clave.replace(" ", "")
+            texto_limpio = texto.replace(" ", "").replace("\n", "")
+
+            coincide = (
+                clave in texto
+                or clave_sin_espacios in texto_limpio
+                or re.search(re.escape(clave), texto_limpio)
+                or re.search(re.escape(clave_sin_espacios), texto_limpio)
+            )
+
+            if coincide:
+                archivos_coincidentes.append((key, generar_url_s3(key)))
+
+
+        if archivos_coincidentes:
             resultados.append({
-                "ID": id_pedido,
-                "Cliente": cliente,
-                "Estado": estado,
-                "Vendedor": vendedor,
-                "Folio": folio,
-                "Archivos": archivos_encontrados
+                "ID_Pedido": pedido_id,
+                "Cliente": row.get("Cliente", ""),
+                "Estado": row.get("Estado", ""),
+                "Vendedor": row.get("Vendedor_Registro", ""),
+                "Folio": row.get("Folio_Factura", ""),
+                "Archivos": archivos_coincidentes
             })
 
+    st.markdown("---")
     if resultados:
-        st.success(f"✅ Se encontró la palabra en {len(resultados)} pedido(s):")
-        for r in resultados:
-            st.markdown("---")
-            st.markdown(f"### 📦 Pedido: `{r.get('ID', '—')}`")
-            st.markdown(f"👤 Cliente: `{r.get('Cliente', '—')}`")
-            st.markdown(f"📄 Folio: `{r.get('Folio', '—')}`")
-            st.markdown(f"📦 Estado: `{r.get('Estado', '—')}` | Vendedor: `{r.get('Vendedor', '—')}`")
-            for archivo in r.get("Archivos", []):
-                archivo_nombre = archivo.get("archivo", "Archivo")
-                archivo_url = archivo.get("url", "")
-                st.markdown(f"- 📄 [{archivo_nombre}]({archivo_url})")
+        st.success(f"✅ Se encontraron coincidencias en {len(resultados)} pedido(s).")
+        for res in resultados:
+            st.markdown(f"### 📦 Pedido **{res['ID_Pedido']}** – 🤝 {res['Cliente']}")
+            st.markdown(f"📄 **Folio:** `{res['Folio']}`  |  🔍 **Estado:** `{res['Estado']}`  |  🧑‍💼 **Vendedor:** `{res['Vendedor']}`")
+            for key, url in res["Archivos"]:
+                nombre = key.split("/")[-1]
+                st.markdown(f"- [📎 {nombre}]({url})")
     else:
-        st.warning("🔍 No se encontró la palabra en ningún PDF.")
+        st.warning("⚠️ No se encontraron coincidencias en ningún archivo PDF.")
+elif buscar_btn:
+    st.warning("⚠️ Ingresa una palabra clave antes de buscar.")
