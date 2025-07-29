@@ -72,11 +72,20 @@ def contiene_palabra(pdf_bytes, keyword):
 # --- BÚSQUEDA EN PDF DE S3 ---
 def buscar_pdf_en_s3(s3, bucket, key, keyword):
     try:
+        if not key.lower().endswith(".pdf"):
+            return False  # ⚠️ No procesar si no es PDF
+
         obj = s3.get_object(Bucket=bucket, Key=key)
         pdf_bytes = obj["Body"].read()
-        return contiene_palabra(pdf_bytes, keyword)
-    except Exception:
+        resultado = contiene_palabra(pdf_bytes, keyword)
+
+        if resultado:
+            st.info(f"🧾 Coincidencia encontrada en: {key}")
+        return resultado
+    except Exception as e:
+        st.error(f"❌ Error al procesar PDF '{key}': {e}")
         return False
+
 
 # --- PROCESO PRINCIPAL ---
 if buscar_btn and palabra_clave.strip():
@@ -123,6 +132,7 @@ if buscar_btn and palabra_clave.strip():
                         key = url.split(f"{S3_BUCKET_NAME}.s3.{AWS_REGION}.amazonaws.com/")[-1]
                         if key.lower().endswith(".pdf") and buscar_pdf_en_s3(s3, S3_BUCKET_NAME, key, palabra_clave):
                             archivos_encontrados.append({"archivo": key.split("/")[-1], "url": url})
+                            st.success(f"📎 Agregado a resultados: {key}")
                 except Exception:
                     continue
 
