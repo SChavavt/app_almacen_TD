@@ -15,12 +15,26 @@ from pytz import timezone
 
 st.set_page_config(page_title="Recepción de Pedidos TD", layout="wide")
 
+# --- Recarga segura sin reiniciar pestañas (soft reload)
+if st.session_state.get("reload_pedidos_soft"):
+    st.session_state["reload_pedidos_soft"] = False
+    st.rerun()
+
 st.title("📬 Bandeja de Pedidos TD")
 
-if st.button("🔄 Recargar Pedidos", help="Haz clic para recargar todos los pedidos desde Google Sheets."):
-    st.cache_data.clear()
-    st.cache_resource.clear()  # ✅ Limpia también el cliente de Google (evita error 401)
-    st.rerun()
+# Define columns for reload and retry buttons
+col_recarga, col_reintento = st.columns([1, 1])
+
+with col_recarga:
+    if st.button("🔄 Recargar Pedidos (seguro)", help="Actualiza datos sin reiniciar pestañas ni scroll"):
+        st.cache_data.clear()
+        st.session_state["reload_pedidos_soft"] = True
+
+with col_reintento:
+    if st.button("❌ Reparar Conexión", help="Borra todos los caches y recarga la app"):
+        st.cache_data.clear()
+        st.cache_resource.clear()
+        st.rerun()
 
 # --- Google Sheets Constants (pueden venir de st.secrets si se prefiere) ---
 GOOGLE_SHEET_ID = '1aWkSelodaz0nWfQx7FZAysGnIYGQFJxAN7RO3YgCiZY'
@@ -57,6 +71,11 @@ if "active_date_tab_t_index" not in st.session_state:
 if "expanded_pedidos" not in st.session_state:
     st.session_state["expanded_pedidos"] = {}
     st.session_state["expanded_attachments"] = {}
+
+# --- Soft reload si el usuario presionó "Recargar Pedidos (seguro)"
+if st.session_state.get("reload_pedidos_soft"):
+    st.session_state["reload_pedidos_soft"] = False
+    st.rerun()  # 🔁 Solo recarga los datos sin perder el estado de pestañas
 
 
 # --- Cached Clients for Google Sheets and AWS S3 ---
@@ -382,15 +401,17 @@ def ordenar_pedidos_custom(df_pedidos_filtrados):
     df_pedidos_filtrados['Hora_Registro_dt'] = pd.to_datetime(df_pedidos_filtrados['Hora_Registro'], errors='coerce')
 
     def get_sort_key(row):
-        tiene_modificacion = pd.notna(row.get("Modificacion_Surtido")) and str(row.get("Modificacion_Surtido")).strip() != ''
-        if tiene_modificacion:
-            return (0, pd.Timestamp.min)  # Siempre arriba
+        mod_texto = str(row.get("Modificacion_Surtido", "")).strip()
+        tiene_modificacion_sin_confirmar = mod_texto and not mod_texto.endswith("[✔CONFIRMADO]")
+
+        if tiene_modificacion_sin_confirmar:
+            return (0, pd.Timestamp.min)  # Arriba del todo si no está confirmada
 
         if row["Estado"] == "🔴 Demorado":
-            return (1, pd.Timestamp.min)  # Justo debajo de modificación
+            return (1, pd.Timestamp.min)  # Justo debajo
 
-        # Pendiente o En Proceso: orden por hora
         return (2, row['Hora_Registro_dt'] if pd.notna(row['Hora_Registro_dt']) else pd.Timestamp.max)
+
 
     df_pedidos_filtrados['custom_sort_key'] = df_pedidos_filtrados.apply(get_sort_key, axis=1)
 
@@ -469,14 +490,16 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
     st.markdown(f'<a name="pedido_{row["ID_Pedido"]}"></a>', unsafe_allow_html=True)
     with st.expander(f"{row['Estado']} - {folio} - {row['Cliente']}", expanded=st.session_state["expanded_pedidos"].get(row['ID_Pedido'], False)):  
         st.markdown("---")
-        tiene_modificacion = row.get("Modificacion_Surtido") and pd.notna(row["Modificacion_Surtido"]) and str(row["Modificacion_Surtido"]).strip() != ''
+        mod_texto = str(row.get("Modificacion_Surtido", "")).strip()
+        tiene_modificacion = mod_texto != "" and not mod_texto.endswith("[✔CONFIRMADO]")
         if tiene_modificacion:
             st.warning(f"⚠ ¡MODIFICACIÓN DE SURTIDO DETECTADA! Pedido #{orden}")
 
 
+
         # --- Cambiar Fecha y Turno ---
-        # This block allows changing the delivery date and shift for local and foreign orders
         if row['Estado'] != "🟢 Completado" and row.get("Tipo_Envio") in ["📍 Pedido Local", "🚚 Pedido Foráneo"]:
+            st.session_state["expanded_pedidos"][row['ID_Pedido']] = True
             st.markdown("##### 📅 Cambiar Fecha y Turno")
             col_current_info_date, col_current_info_turno, col_inputs = st.columns([1, 1, 2])
 
@@ -490,7 +513,6 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
                 col_current_info_turno.info(f"**Turno actual:** {current_turno}")
             else:
                 col_current_info_turno.empty()
-
 
             today = datetime.now().date()
             default_fecha = fecha_actual_dt.date() if pd.notna(fecha_actual_dt) and fecha_actual_dt.date() >= today else today
@@ -511,11 +533,8 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
                 format="DD/MM/YYYY",
                 key=fecha_key,
             )
-            st.session_state["expanded_pedidos"][row['ID_Pedido']] = True
-
 
             if row.get("Tipo_Envio") == "📍 Pedido Local" and origen_tab in ["Mañana", "Tarde"]:
-                # Only these two options for local turns
                 turno_options = ["", "☀️ Local Mañana", "🌙 Local Tarde"]
                 if st.session_state[turno_key] not in turno_options:
                     st.session_state[turno_key] = turno_options[0]
@@ -525,18 +544,16 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
                     options=turno_options,
                     key=turno_key,
                 )
-                st.session_state["expanded_pedidos"][row['ID_Pedido']] = True
-
 
             if st.button("✅ Aplicar Cambios de Fecha/Turno", key=f"btn_apply_{row['ID_Pedido']}"):
-                st.session_state["expanded_pedidos"][row['ID_Pedido']] = True  # ✅ mantener expandido
+                st.session_state["expanded_pedidos"][row['ID_Pedido']] = True
                 cambios = []
                 nueva_fecha_str = st.session_state[fecha_key].strftime('%Y-%m-%d')
 
                 if nueva_fecha_str != fecha_actual_str:
                     col_idx = headers.index("Fecha_Entrega") + 1
                     cambios.append({'range': gspread.utils.rowcol_to_a1(gsheet_row_index, col_idx), 'values': [[nueva_fecha_str]]})
-                    
+
                 if row.get("Tipo_Envio") == "📍 Pedido Local" and origen_tab in ["Mañana", "Tarde"]:
                     nuevo_turno = st.session_state[turno_key]
                     if nuevo_turno != current_turno:
@@ -545,27 +562,17 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
 
                 if cambios:
                     if batch_update_gsheet_cells(worksheet, cambios):
-                        # 🔄 Reflejar los cambios en el DataFrame local
-                        for cambio in cambios:
-                            col_letter = cambio['range'][0]
-                            value = cambio['values'][0][0]
-                            if col_letter.startswith("A") or col_letter.startswith("B"):  # Por si acaso
-                                continue
-                            if "Fecha_Entrega" in headers:
-                                df.at[idx, "Fecha_Entrega"] = nueva_fecha_str
-                            if "Turno" in headers and row.get("Tipo_Envio") == "📍 Pedido Local":
-                                df.at[idx, "Turno"] = st.session_state[turno_key]
+                        if "Fecha_Entrega" in headers:
+                            df.at[idx, "Fecha_Entrega"] = nueva_fecha_str
+                        if "Turno" in headers and row.get("Tipo_Envio") == "📍 Pedido Local":
+                            df.at[idx, "Turno"] = st.session_state[turno_key]
 
-                        # ✅ mantener expandido
-                        st.session_state["expanded_pedidos"][row['ID_Pedido']] = True
-
-                        # 🎉 mostrar éxito inmediato
                         st.toast(f"📅 Pedido {row['ID_Pedido']} actualizado.", icon="✅")
                     else:
                         st.error("❌ Falló la actualización en Google Sheets.")
-
                 else:
                     st.info("No hubo cambios para aplicar.")
+
 
         
         st.markdown("---")
@@ -598,12 +605,13 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
         if col_print_btn.button("🖨 Imprimir", key=f"print_{row['ID_Pedido']}_{origen_tab}"):
             # ✅ Mostrar adjuntos del pedido
             st.session_state["expanded_attachments"][row['ID_Pedido']] = True
-
-            # ✅ Expandir el pedido actual (solo este)
             st.session_state["expanded_pedidos"][row['ID_Pedido']] = True
 
-            # ✅ Solo cambiar si está en Pendiente o Demorado
-            if row["Estado"] in ["🟡 Pendiente", "🔴 Demorado"]:
+            # ✅ Recordar pedido actual para mantener scroll
+            st.session_state["scroll_to_pedido_id"] = row["ID_Pedido"]
+
+            # ✅ Solo cambiar si está en Pendiente o Demorado (y no ya en Proceso)
+            if row["Estado"] in ["🟡 Pendiente", "🔴 Demorado"] and row["Estado"] != "🔵 En Proceso":
                 zona_mexico = timezone("America/Mexico_City")
                 now = datetime.now(zona_mexico)
                 now_str = now.strftime("%Y-%m-%d %H:%M:%S")
@@ -615,15 +623,11 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
                     {'range': gspread.utils.rowcol_to_a1(gsheet_row_index, hora_proc_col_idx), 'values': [[now_str]]}
                 ]
                 if batch_update_gsheet_cells(worksheet, updates):
-                    # 🔄 Actualizar en el DataFrame local (inmediato en UI)
                     df.at[idx, "Estado"] = "🔵 En Proceso"
                     df.at[idx, "Hora_Proceso"] = now_str
-
-                    # 🎯 Refrescar visualmente sin recargar toda la app
                     st.toast("📄 Estado actualizado a 'En Proceso'", icon="📌")
                 else:
                     st.error("❌ Falló la actualización del estado a 'En Proceso'.")
-
 
 
         # This block displays attachments if they are expanded
@@ -714,6 +718,9 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
                     st.session_state["expanded_pedidos"][row['ID_Pedido']] = True  # ✅ se mantiene expandido
 
                     if st.button("📤 Subir Guía", key=f"btn_subir_guia_{row['ID_Pedido']}"):
+                        st.session_state["expanded_pedidos"][row['ID_Pedido']] = True
+                        st.session_state["scroll_to_pedido_id"] = row["ID_Pedido"]  # ✅ Scroll al regresar
+
                         uploaded_urls = []
                         for archivo in archivos_guia:
                             ext = os.path.splitext(archivo.name)[1]
@@ -728,15 +735,16 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
 
                             success = update_gsheet_cell(worksheet, headers, gsheet_row_index, "Adjuntos_Guia", nueva_lista)
                             if success:
-                                # 🔄 Reflejar cambio en el df local
                                 df.at[idx, "Adjuntos_Guia"] = nueva_lista
                                 st.session_state["expanded_pedidos"][row['ID_Pedido']] = True
+
                                 st.toast(f"📤 {len(uploaded_urls)} guía(s) subida(s) con éxito.", icon="📦")
+                                st.success(f"📦 Se subieron correctamente {len(uploaded_urls)} archivo(s) de guía.")  # ✅ AGREGADO
+                                st.rerun()  # ✅ Aplicar scroll y evitar reinicios manuales
                             else:
                                 st.error("❌ No se pudo actualizar el Google Sheet con los archivos de guía.")
                         else:
                             st.warning("⚠️ No se subió ningún archivo válido.")
-
 
 
         surtido_files_in_s3 = []  # ✅ aseguramos su existencia
@@ -748,6 +756,9 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
                 st.warning(f"🟡 Modificación de Surtido:\n{row['Modificacion_Surtido']}")
                 # ✅ Botón para confirmar modificación
                 if st.button("✅ Confirmar Cambios de Surtido", key=f"confirm_mod_{row['ID_Pedido']}"):
+                    st.session_state["expanded_pedidos"][row['ID_Pedido']] = True
+                    st.session_state["scroll_to_pedido_id"] = row["ID_Pedido"]  # ✅ Recordar para scroll
+
                     texto_actual = str(row['Modificacion_Surtido']).strip()
                     if not texto_actual.endswith('[✔CONFIRMADO]'):
                         nuevo_texto = texto_actual + " [✔CONFIRMADO]"
@@ -755,9 +766,10 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
                         if success:
                             st.success("✅ Cambios de surtido confirmados.")
                             st.cache_data.clear()
-                            st.rerun()
+                            st.rerun()  # ✅ Aplicar scroll automático al volver
                         else:
                             st.error("❌ No se pudo confirmar la modificación.")
+
                
 
             mod_surtido_archivos_mencionados_raw = []
@@ -823,6 +835,7 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
                     archivos_ya_mostrados_para_mod.add(file_name_to_display)
             else:
                 st.info("No hay adjuntos específicos para esta modificación de surtido mencionados en el texto.")
+
     # --- Scroll automático al pedido impreso (si corresponde) ---
     if st.session_state.get("scroll_to_pedido_id") == row["ID_Pedido"]:
         import streamlit.components.v1 as components
@@ -835,6 +848,7 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
             </script>
         """, height=0)
         st.session_state["scroll_to_pedido_id"] = None
+
 
 
 # --- Main Application Logic ---
