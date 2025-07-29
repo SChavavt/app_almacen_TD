@@ -11,7 +11,7 @@ from oauth2client.service_account import ServiceAccountCredentials
 # --- CONFIGURACIÓN ---
 st.set_page_config(page_title="🔍 Buscador de Palabras Clave en PDFs", layout="wide")
 st.title("🔍 Buscador de Archivos PDF en Pedidos S3")
-st.markdown("Busca palabras clave, números de guía o cualquier texto en los PDFs adjuntos de todos los pedidos.")
+st.markdown("Busca palabras clave, números de guía o cualquier texto en los PDFs adjuntos de todos los pedidos que contengan 'guía' o 'descarga' en el nombre del archivo.")
 
 # --- INPUT ---
 palabra_clave = st.text_input("📦 Ingresa una palabra clave, número de guía, fragmento o código a buscar:").strip()
@@ -50,27 +50,21 @@ def contiene_palabra(pdf_bytes, keyword):
             for i, page in enumerate(pdf.pages):
                 texto = page.extract_text() or ""
                 texto_limpio = re.sub(r"[\s\n\r\-]+", "", texto.lower())
-
-                # 👇 Mostrar el texto completo extraído por página
-                st.markdown(f"#### 🧪 Página {i+1}:")
-                st.code(texto if texto else "[Sin texto extraído]")
-
                 if keyword_clean in texto_limpio:
-                    st.success("🎯 Coincidencia con texto limpio")
                     return True
-                keyword_raw = keyword.lower().strip()
-                if keyword_raw in texto.lower():
-                    st.success("🎯 Coincidencia con texto exacto")
+                if keyword.lower().strip() in texto.lower():
                     return True
     except Exception as e:
         st.error(f"❌ Error en contiene_palabra: {e}")
     return False
 
-
 # --- BÚSQUEDA EN PDF DE S3 ---
 def buscar_pdf_en_s3(s3, bucket, key, keyword):
     try:
         if not key.lower().endswith(".pdf"):
+            return False
+        nombre_archivo = key.split("/")[-1].lower()
+        if not re.search(r"(gu[ií]a|descarga)", nombre_archivo):
             return False
         obj = s3.get_object(Bucket=bucket, Key=key)
         pdf_bytes = obj["Body"].read()
@@ -81,7 +75,7 @@ def buscar_pdf_en_s3(s3, bucket, key, keyword):
 # --- PROCESO PRINCIPAL ---
 if buscar_btn and palabra_clave:
     gspread_client, s3 = get_clients()
-    st.info("🔄 Buscando, por favor espera... puede tardar unos segundos.")
+    st.info("🔄 Buscando, por favor espera... puede tardar unos segundos...")
 
     hoja = gspread_client.open_by_key(GOOGLE_SHEET_ID).worksheet(SHEET_NAME)
     data = hoja.get_all_records()
@@ -98,6 +92,7 @@ if buscar_btn and palabra_clave:
         folio = row.get("Folio_Factura", "")
         archivos_encontrados = []
 
+        # 1. Buscar en carpetas conocidas de S3
         for carpeta in ["adjuntos_pedidos", "adjuntos_guias", "adjuntos_facturas"]:
             prefix = f"{carpeta}/{id_pedido}/"
             try:
@@ -112,6 +107,7 @@ if buscar_btn and palabra_clave:
             except Exception:
                 continue
 
+        # 2. Buscar en URLs sueltas (solo si contienen "guía" o "descarga")
         for col in ["Adjuntos_Surtido", "Adjuntos_Guia"]:
             urls_str = row.get(col, "")
             urls = [x.strip() for x in urls_str.split(",") if x.strip()]
@@ -119,9 +115,10 @@ if buscar_btn and palabra_clave:
                 try:
                     if S3_BUCKET_NAME in url:
                         key = url.split(f"{S3_BUCKET_NAME}.s3.{AWS_REGION}.amazonaws.com/")[-1]
-                        if buscar_pdf_en_s3(s3, S3_BUCKET_NAME, key, palabra_clave):
+                        nombre_archivo = key.split("/")[-1].lower()
+                        if re.search(r"(gu[ií]a|descarga)", nombre_archivo) and buscar_pdf_en_s3(s3, S3_BUCKET_NAME, key, palabra_clave):
                             archivos_encontrados.append({
-                                "archivo": key.split("/")[-1],
+                                "archivo": nombre_archivo,
                                 "url": url
                             })
                 except Exception:
