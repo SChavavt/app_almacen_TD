@@ -47,16 +47,25 @@ def contiene_palabra(pdf_bytes, keyword):
     try:
         keyword_clean = re.sub(r"[\s\n\r\-\_]+", "", keyword.lower())
         with pdfplumber.open(BytesIO(pdf_bytes)) as pdf:
-            for page in pdf.pages:
+            for i, page in enumerate(pdf.pages):
                 texto = page.extract_text() or ""
                 texto_limpio = re.sub(r"[\s\n\r\-]+", "", texto.lower())
+
+                # 👇 Mostrar el texto completo extraído por página
+                st.markdown(f"#### 🧪 Página {i+1}:")
+                st.code(texto if texto else "[Sin texto extraído]")
+
                 if keyword_clean in texto_limpio:
+                    st.success("🎯 Coincidencia con texto limpio")
                     return True
-                if keyword.lower().strip() in texto.lower():
+                keyword_raw = keyword.lower().strip()
+                if keyword_raw in texto.lower():
+                    st.success("🎯 Coincidencia con texto exacto")
                     return True
-    except:
-        pass
+    except Exception as e:
+        st.error(f"❌ Error en contiene_palabra: {e}")
     return False
+
 
 # --- BÚSQUEDA EN PDF DE S3 ---
 def buscar_pdf_en_s3(s3, bucket, key, keyword):
@@ -66,7 +75,7 @@ def buscar_pdf_en_s3(s3, bucket, key, keyword):
         obj = s3.get_object(Bucket=bucket, Key=key)
         pdf_bytes = obj["Body"].read()
         return contiene_palabra(pdf_bytes, keyword)
-    except:
+    except Exception:
         return False
 
 # --- PROCESO PRINCIPAL ---
@@ -100,7 +109,7 @@ if buscar_btn and palabra_clave:
                             "archivo": key.split("/")[-1],
                             "url": f"https://{S3_BUCKET_NAME}.s3.{AWS_REGION}.amazonaws.com/{key}"
                         })
-            except:
+            except Exception:
                 continue
 
         for col in ["Adjuntos_Surtido", "Adjuntos_Guia"]:
@@ -115,7 +124,7 @@ if buscar_btn and palabra_clave:
                                 "archivo": key.split("/")[-1],
                                 "url": url
                             })
-                except:
+                except Exception:
                     continue
 
         if archivos_encontrados:
