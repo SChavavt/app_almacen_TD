@@ -529,41 +529,41 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
 
 
             if st.button("✅ Aplicar Cambios de Fecha/Turno", key=f"btn_apply_{row['ID_Pedido']}"):
+                st.session_state["expanded_pedidos"][row['ID_Pedido']] = True  # ✅ mantener expandido
                 cambios = []
                 nueva_fecha_str = st.session_state[fecha_key].strftime('%Y-%m-%d')
 
                 if nueva_fecha_str != fecha_actual_str:
                     col_idx = headers.index("Fecha_Entrega") + 1
                     cambios.append({'range': gspread.utils.rowcol_to_a1(gsheet_row_index, col_idx), 'values': [[nueva_fecha_str]]})
-                    df.loc[idx, "Fecha_Entrega"] = nueva_fecha_str
-
+                    
                 if row.get("Tipo_Envio") == "📍 Pedido Local" and origen_tab in ["Mañana", "Tarde"]:
                     nuevo_turno = st.session_state[turno_key]
                     if nuevo_turno != current_turno:
                         col_idx = headers.index("Turno") + 1
                         cambios.append({'range': gspread.utils.rowcol_to_a1(gsheet_row_index, col_idx), 'values': [[nuevo_turno]]})
-                        df.loc[idx, "Turno"] = nuevo_turno
 
                 if cambios:
                     if batch_update_gsheet_cells(worksheet, cambios):
-                        st.success(f"✅ Pedido {row['ID_Pedido']} actualizado.")
+                        # 🔄 Reflejar los cambios en el DataFrame local
+                        for cambio in cambios:
+                            col_letter = cambio['range'][0]
+                            value = cambio['values'][0][0]
+                            if col_letter.startswith("A") or col_letter.startswith("B"):  # Por si acaso
+                                continue
+                            if "Fecha_Entrega" in headers:
+                                df.at[idx, "Fecha_Entrega"] = nueva_fecha_str
+                            if "Turno" in headers and row.get("Tipo_Envio") == "📍 Pedido Local":
+                                df.at[idx, "Turno"] = st.session_state[turno_key]
 
-                        # 🔁 Mantener pestaña y pedido al recargar
-                        st.session_state["pedido_editado"] = row['ID_Pedido']
-                        st.session_state["fecha_seleccionada"] = nueva_fecha_str
-                        st.session_state["subtab_local"] = origen_tab
+                        # ✅ mantener expandido
+                        st.session_state["expanded_pedidos"][row['ID_Pedido']] = True
 
-                        st.cache_data.clear()
-
-                        st.session_state["active_main_tab_index"] = st.session_state.get("active_main_tab_index", 0)
-                        st.session_state["active_subtab_local_index"] = st.session_state.get("active_subtab_local_index", 0)
-                        st.session_state["active_date_tab_m_index"] = st.session_state.get("active_date_tab_m_index", 0)
-                        st.session_state["active_date_tab_t_index"] = st.session_state.get("active_date_tab_t_index", 0)
-
-                        st.rerun()
-
+                        # 🎉 mostrar éxito inmediato
+                        st.toast(f"📅 Pedido {row['ID_Pedido']} actualizado.", icon="✅")
                     else:
                         st.error("❌ Falló la actualización en Google Sheets.")
+
                 else:
                     st.info("No hubo cambios para aplicar.")
 
@@ -697,12 +697,6 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
                 st.error(f"Error al completar el pedido: {e}")
 
 
-        # --- Editable Notes Field and Comment ---
-        # This section provides fields for notes and comments related to the order
-        info_text_comment = row.get("Comentario")
-        if pd.notna(info_text_comment) and str(info_text_comment).strip() != '':
-            st.info(f"💬 Comentario: {info_text_comment}")
-
         # --- Adjuntar archivos de guía ---
         if row['Estado'] != "🟢 Completado":
             with st.expander("📦 Subir Archivos de Guía"):
@@ -729,16 +723,19 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
                                 uploaded_urls.append(url)
 
                         if uploaded_urls:
-                            nueva_lista = row.get("Adjuntos_Guia", "")
-                            nueva_lista_actualizada = nueva_lista + ", " + ", ".join(uploaded_urls) if nueva_lista else ", ".join(uploaded_urls)
-                            success = update_gsheet_cell(worksheet, headers, gsheet_row_index, "Adjuntos_Guia", nueva_lista_actualizada)
+                            anterior = str(row.get("Adjuntos_Guia", "")).strip()
+                            nueva_lista = anterior + ", " + ", ".join(uploaded_urls) if anterior else ", ".join(uploaded_urls)
+
+                            success = update_gsheet_cell(worksheet, headers, gsheet_row_index, "Adjuntos_Guia", nueva_lista)
                             if success:
-                                st.success(f"✅ {len(uploaded_urls)} archivo(s) subido(s) y registrado(s).")
-                                st.toast("🎉 ¡Guías subidas!", icon="📦")
-                                st.cache_data.clear()
+                                # 🔄 Reflejar cambio en el df local
+                                df.at[idx, "Adjuntos_Guia"] = nueva_lista
+                                st.session_state["expanded_pedidos"][row['ID_Pedido']] = True
+                                st.toast(f"📤 {len(uploaded_urls)} guía(s) subida(s) con éxito.", icon="📦")
                             else:
                                 st.error("❌ No se pudo actualizar el Google Sheet con los archivos de guía.")
-
+                        else:
+                            st.warning("⚠️ No se subió ningún archivo válido.")
 
 
 
