@@ -14,8 +14,7 @@ st.title("🔍 Buscador de Archivos PDF en Pedidos S3")
 st.markdown("Busca palabras clave, números de guía o cualquier texto en los PDFs adjuntos de todos los pedidos.")
 
 # --- INPUT ---
-palabra_clave = st.text_input("📦 Ingresa una palabra clave, número de guía, fragmento o código a buscar:")
-palabra_clave = palabra_clave.strip()  # ✅ quita espacios iniciales y finales
+palabra_clave = st.text_input("📦 Ingresa una palabra clave, número de guía, fragmento o código a buscar:").strip()
 buscar_btn = st.button("🔎 Buscar en todos los pedidos")
 
 # --- CREDENCIALES DESDE SECRETS ---
@@ -35,7 +34,6 @@ def get_clients():
     scope = ['https://spreadsheets.google.com/feeds', 'https://www.googleapis.com/auth/drive']
     creds = ServiceAccountCredentials.from_json_keyfile_dict(GSHEETS_CREDENTIALS, scope)
     gspread_client = gspread.authorize(creds)
-
     s3_client = boto3.client(
         "s3",
         aws_access_key_id=AWS_ACCESS_KEY_ID,
@@ -49,46 +47,30 @@ def contiene_palabra(pdf_bytes, keyword):
     try:
         keyword_clean = re.sub(r"[\s\n\r\-\_]+", "", keyword.lower())
         with pdfplumber.open(BytesIO(pdf_bytes)) as pdf:
-            for i, page in enumerate(pdf.pages):
+            for page in pdf.pages:
                 texto = page.extract_text() or ""
                 texto_limpio = re.sub(r"[\s\n\r\-]+", "", texto.lower())
-
-                # 👇 DEBUG TEMPORAL
-                st.write(f"🧪 Página {i+1}")
-                st.code(texto[:1000])  # Muestra los primeros 1000 caracteres extraídos
-
                 if keyword_clean in texto_limpio:
-                    st.success("🎯 Coincidencia con texto limpio")
                     return True
-                keyword_raw = keyword.lower().strip()
-                if keyword_raw in texto.lower():
-                    st.success("🎯 Coincidencia con texto exacto")
+                if keyword.lower().strip() in texto.lower():
                     return True
-    except Exception as e:
-        st.error(f"❌ Error en contiene_palabra: {e}")
+    except:
+        pass
     return False
-
 
 # --- BÚSQUEDA EN PDF DE S3 ---
 def buscar_pdf_en_s3(s3, bucket, key, keyword):
     try:
         if not key.lower().endswith(".pdf"):
-            return False  # ⚠️ No procesar si no es PDF
-
+            return False
         obj = s3.get_object(Bucket=bucket, Key=key)
         pdf_bytes = obj["Body"].read()
-        resultado = contiene_palabra(pdf_bytes, keyword)
-
-        if resultado:
-            st.info(f"🧾 Coincidencia encontrada en: {key}")
-        return resultado
-    except Exception as e:
-        st.error(f"❌ Error al procesar PDF '{key}': {e}")
+        return contiene_palabra(pdf_bytes, keyword)
+    except:
         return False
 
-
 # --- PROCESO PRINCIPAL ---
-if buscar_btn and palabra_clave.strip():
+if buscar_btn and palabra_clave:
     gspread_client, s3 = get_clients()
     st.info("🔄 Buscando, por favor espera... puede tardar unos segundos.")
 
@@ -107,22 +89,20 @@ if buscar_btn and palabra_clave.strip():
         folio = row.get("Folio_Factura", "")
         archivos_encontrados = []
 
-        # 1. Buscar en S3 por prefijos conocidos
         for carpeta in ["adjuntos_pedidos", "adjuntos_guias", "adjuntos_facturas"]:
             prefix = f"{carpeta}/{id_pedido}/"
             try:
                 response = s3.list_objects_v2(Bucket=S3_BUCKET_NAME, Prefix=prefix)
                 for obj in response.get("Contents", []):
                     key = obj["Key"]
-                    if key.lower().endswith(".pdf") and buscar_pdf_en_s3(s3, S3_BUCKET_NAME, key, palabra_clave):
+                    if buscar_pdf_en_s3(s3, S3_BUCKET_NAME, key, palabra_clave):
                         archivos_encontrados.append({
                             "archivo": key.split("/")[-1],
                             "url": f"https://{S3_BUCKET_NAME}.s3.{AWS_REGION}.amazonaws.com/{key}"
                         })
-            except Exception:
+            except:
                 continue
 
-        # 2. Buscar también en campos de URLs externas (Adjuntos_Surtido / Adjuntos_Guia)
         for col in ["Adjuntos_Surtido", "Adjuntos_Guia"]:
             urls_str = row.get(col, "")
             urls = [x.strip() for x in urls_str.split(",") if x.strip()]
@@ -130,13 +110,14 @@ if buscar_btn and palabra_clave.strip():
                 try:
                     if S3_BUCKET_NAME in url:
                         key = url.split(f"{S3_BUCKET_NAME}.s3.{AWS_REGION}.amazonaws.com/")[-1]
-                        if key.lower().endswith(".pdf") and buscar_pdf_en_s3(s3, S3_BUCKET_NAME, key, palabra_clave):
-                            archivos_encontrados.append({"archivo": key.split("/")[-1], "url": url})
-                            st.success(f"📎 Agregado a resultados: {key}")
-                except Exception:
+                        if buscar_pdf_en_s3(s3, S3_BUCKET_NAME, key, palabra_clave):
+                            archivos_encontrados.append({
+                                "archivo": key.split("/")[-1],
+                                "url": url
+                            })
+                except:
                     continue
 
-        # Si se encontraron coincidencias
         if archivos_encontrados:
             resultados.append({
                 "ID": id_pedido,
@@ -149,18 +130,15 @@ if buscar_btn and palabra_clave.strip():
 
     if resultados:
         st.success(f"✅ Se encontró la palabra en {len(resultados)} pedido(s):")
-
         for r in resultados:
             st.markdown("---")
             st.markdown(f"### 📦 Pedido: `{r.get('ID', '—')}`")
             st.markdown(f"👤 Cliente: `{r.get('Cliente', '—')}`")
             st.markdown(f"📄 Folio: `{r.get('Folio', '—')}`")
             st.markdown(f"📦 Estado: `{r.get('Estado', '—')}` | Vendedor: `{r.get('Vendedor', '—')}`")
-
             for archivo in r.get("Archivos", []):
                 archivo_nombre = archivo.get("archivo", "Archivo")
                 archivo_url = archivo.get("url", "")
                 st.markdown(f"- 📄 [{archivo_nombre}]({archivo_url})")
     else:
         st.warning("🔍 No se encontró la palabra en ningún PDF.")
-
