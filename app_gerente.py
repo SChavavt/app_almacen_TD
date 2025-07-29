@@ -47,13 +47,16 @@ def get_clients():
 def contiene_palabra(pdf_bytes, keyword):
     try:
         keyword_clean = re.sub(r"[\s\-]+", "", keyword.lower())
+
         with pdfplumber.open(BytesIO(pdf_bytes)) as pdf:
             for page in pdf.pages:
-                texto = page.extract_text()
-                if texto:
-                    texto_limpio = re.sub(r"[\s\n\r\-]+", "", texto.lower())
-                    if keyword_clean in texto_limpio:
-                        return True
+                texto = page.extract_text() or ""
+                texto_limpio = re.sub(r"[\s\n\r\-]+", "", texto.lower())
+
+                if keyword_clean in texto_limpio:
+                    return True
+                if keyword.lower().strip() in texto.lower():
+                    return True
     except Exception:
         pass
     return False
