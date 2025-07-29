@@ -65,6 +65,13 @@ def obtener_archivos_pdf_validos(prefix):
         st.error(f"❌ Error al listar archivos en S3 para prefijo {prefix}: {e}")
         return []
 
+def obtener_todos_los_archivos(prefix):
+    try:
+        respuesta = s3_client.list_objects_v2(Bucket=S3_BUCKET, Prefix=prefix)
+        return respuesta.get("Contents", [])
+    except Exception as e:
+        return []
+
 def extraer_texto_pdf(s3_key):
     try:
         response = s3_client.get_object(Bucket=S3_BUCKET, Key=s3_key)
@@ -87,7 +94,6 @@ buscar_btn = st.button("🔎 Buscar")
 if buscar_btn and keyword.strip():
     st.info("🔄 Buscando, por favor espera... puede tardar unos segundos...")
     df_pedidos = cargar_pedidos()
-
     resultados = []
 
     for _, row in df_pedidos.iterrows():
@@ -101,8 +107,6 @@ if buscar_btn and keyword.strip():
 
         archivos_validos = obtener_archivos_pdf_validos(prefix)
         archivos_coincidentes = []
-
-        match_encontrado = False  # bandera para cortar búsqueda si ya hay coincidencia
 
         for archivo in archivos_validos:
             key = archivo["Key"]
@@ -120,40 +124,35 @@ if buscar_btn and keyword.strip():
             )
 
             if coincide:
-                # ✅ Solo mostrar el WAYBILL del archivo coincidente
                 waybill_match = re.search(r"WAYBILL[\s:]*([0-9 ]{8,})", texto, re.IGNORECASE)
                 if waybill_match:
                     st.code(f"📦 WAYBILL detectado: {waybill_match.group(1)}")
 
                 archivos_coincidentes.append((key, generar_url_s3(key)))
-                match_encontrado = True
-                break  # ✅ dejamos de revisar más archivos una vez encontrada la coincidencia
 
+                # ✅ Una vez que hay coincidencia, cargar todos los archivos del pedido
+                todos_los_archivos = obtener_todos_los_archivos(prefix)
 
-        
+                comprobantes = [f for f in todos_los_archivos if "comprobante" in f["Key"].lower()]
+                facturas = [f for f in todos_los_archivos if "factura" in f["Key"].lower()]
+                otros = [f for f in todos_los_archivos if f not in comprobantes and f not in facturas and f["Key"] != key]
 
-        # Agrupar todos los archivos del pedido, aunque no tengan coincidencia
-        comprobantes = [f for f in archivos_validos if "comprobante" in f["Key"].lower()]
-        facturas = [f for f in archivos_validos if "factura" in f["Key"].lower()]
-        otros = [f for f in archivos_validos if f not in comprobantes and f not in facturas and f["Key"] not in [ac[0] for ac in archivos_coincidentes]]
+                comprobantes_links = [(f["Key"], generar_url_s3(f["Key"])) for f in comprobantes]
+                facturas_links = [(f["Key"], generar_url_s3(f["Key"])) for f in facturas]
+                otros_links = [(f["Key"], generar_url_s3(f["Key"])) for f in otros]
 
-        comprobantes_links = [(f["Key"], generar_url_s3(f["Key"])) for f in comprobantes]
-        facturas_links = [(f["Key"], generar_url_s3(f["Key"])) for f in facturas]
-        otros_links = [(f["Key"], generar_url_s3(f["Key"])) for f in otros]
-
-        if archivos_coincidentes:
-            resultados.append({
-                "ID_Pedido": pedido_id,
-                "Cliente": row.get("Cliente", ""),
-                "Estado": row.get("Estado", ""),
-                "Vendedor": row.get("Vendedor_Registro", ""),
-                "Folio": row.get("Folio_Factura", ""),
-                "Coincidentes": archivos_coincidentes,
-                "Comprobantes": comprobantes_links,
-                "Facturas": facturas_links,
-                "Otros": otros_links
-            })
-
+                resultados.append({
+                    "ID_Pedido": pedido_id,
+                    "Cliente": row.get("Cliente", ""),
+                    "Estado": row.get("Estado", ""),
+                    "Vendedor": row.get("Vendedor_Registro", ""),
+                    "Folio": row.get("Folio_Factura", ""),
+                    "Coincidentes": archivos_coincidentes,
+                    "Comprobantes": comprobantes_links,
+                    "Facturas": facturas_links,
+                    "Otros": otros_links
+                })
+                break  # ✅ ya encontramos una coincidencia, no seguimos buscando
 
     st.markdown("---")
     if resultados:
@@ -177,7 +176,7 @@ if buscar_btn and keyword.strip():
                         st.markdown(f"- [📄 {nombre}]({url})")
 
                 if res["Facturas"]:
-                    st.markdown("#### 📑 Facturas:")
+                    st.markdown("#### 📁 Facturas:")
                     for key, url in res["Facturas"]:
                         nombre = key.split("/")[-1]
                         st.markdown(f"- [📄 {nombre}]({url})")
@@ -186,6 +185,6 @@ if buscar_btn and keyword.strip():
                     st.markdown("#### 📂 Otros Archivos:")
                     for key, url in res["Otros"]:
                         nombre = key.split("/")[-1]
-                        st.markdown(f"- [📎 {nombre}]({url})")
+                        st.markdown(f"- [📌 {nombre}]({url})")
     else:
         st.warning("⚠️ No se encontraron coincidencias en ningún archivo PDF.")
