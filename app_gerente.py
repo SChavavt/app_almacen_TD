@@ -90,7 +90,7 @@ def generar_url_s3(s3_key):
 # --- INTERFAZ ---
 tabs = st.tabs(["🔍 Buscar Pedido", "✏️ Modificar Pedido"])
 with tabs[0]:
-    modo_busqueda = st.radio("Selecciona el modo de búsqueda:", ["🔢 Por número de guía", "🧑 Por cliente"])
+    modo_busqueda = st.radio("Selecciona el modo de búsqueda:", ["🔢 Por número de guía", "🧑 Por cliente"], key="modo_busqueda_radio")
     st.title("🔍 Buscador de Pedidos por Guía o Cliente")
 
     if modo_busqueda == "🔢 Por número de guía":
