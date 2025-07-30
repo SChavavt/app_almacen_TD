@@ -95,7 +95,10 @@ if buscar_btn and keyword.strip():
     st.info("🔄 Buscando, por favor espera... puede tardar unos segundos...")
     df_pedidos = cargar_pedidos()
     resultados = []
-
+    # 🆕 Ordenar por Hora_Registro (más reciente primero)
+    if 'Hora_Registro' in df_pedidos.columns:
+        df_pedidos['Hora_Registro'] = pd.to_datetime(df_pedidos['Hora_Registro'], errors='coerce')
+        df_pedidos = df_pedidos.sort_values(by='Hora_Registro', ascending=False).reset_index(drop=True)
     for _, row in df_pedidos.iterrows():
         pedido_id = str(row.get("ID_Pedido", "")).strip()
         if not pedido_id:
