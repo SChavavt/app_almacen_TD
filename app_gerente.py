@@ -123,10 +123,26 @@ if buscar_btn:
         if not pedido_id:
             continue
 
-        if modo_busqueda == "🔢 Por número de guía":
+        if modo_busqueda == "🧑 Por cliente":
+            cliente_row = row.get("Cliente", "").strip()
+            if not cliente_row:
+                continue
+            cliente_row_normalizado = normalizar(cliente_row)
+            if cliente_normalizado not in cliente_row_normalizado:
+                continue
+
             prefix = obtener_prefijo_s3(pedido_id)
             if not prefix:
                 continue
+
+            archivos_coincidentes = []  # no se buscan coincidencias
+            todos_los_archivos = obtener_todos_los_archivos(prefix)
+
+        elif modo_busqueda == "🔢 Por número de guía":
+            prefix = obtener_prefijo_s3(pedido_id)
+            if not prefix:
+                continue
+
             archivos_validos = obtener_archivos_pdf_validos(prefix)
             archivos_coincidentes = []
 
@@ -152,31 +168,21 @@ if buscar_btn:
 
                     archivos_coincidentes.append((key, generar_url_s3(key)))
                     todos_los_archivos = obtener_todos_los_archivos(prefix)
-                    break
+                    break  # detener búsqueda tras encontrar coincidencia
             else:
-                continue  # no hubo match, pasa al siguiente pedido
+                continue  # ningún PDF coincidió
 
-        elif modo_busqueda == "🧑 Por cliente":
-            cliente_row = row.get("Cliente", "").strip()
-            if not cliente_row:
-                continue
-            cliente_row_normalizado = normalizar(cliente_row)
-            if cliente_normalizado not in cliente_row_normalizado:
-                continue
-
-
-            prefix = obtener_prefijo_s3(pedido_id)
-            if not prefix:
-                continue
-            archivos_coincidentes = []
-            todos_los_archivos = obtener_todos_los_archivos(prefix)
-            # No hay que buscar coincidencia, solo mostrar adjuntos
-            break
+        else:
+            continue  # modo no reconocido
 
         # Una vez tenemos los archivos del pedido
         comprobantes = [f for f in todos_los_archivos if "comprobante" in f["Key"].lower()]
         facturas = [f for f in todos_los_archivos if "factura" in f["Key"].lower()]
-        otros = [f for f in todos_los_archivos if f not in comprobantes and f not in facturas and (modo_busqueda == "🧑 Por cliente" or f["Key"] != archivos_coincidentes[0][0])]
+        otros = [
+            f for f in todos_los_archivos
+            if f not in comprobantes and f not in facturas and
+            (modo_busqueda == "🧑 Por cliente" or f["Key"] != archivos_coincidentes[0][0])
+        ]
 
         comprobantes_links = [(f["Key"], generar_url_s3(f["Key"])) for f in comprobantes]
         facturas_links = [(f["Key"], generar_url_s3(f["Key"])) for f in facturas]
@@ -193,9 +199,8 @@ if buscar_btn:
             "Facturas": facturas_links,
             "Otros": otros_links
         })
-        break  # detener búsqueda tras encontrar uno
 
-
+        break  # detener búsqueda tras encontrar un pedido válido
 
     st.markdown("---")
     if resultados:
@@ -230,7 +235,13 @@ if buscar_btn:
                         nombre = key.split("/")[-1]
                         st.markdown(f"- [📌 {nombre}]({url})")
     else:
-        st.warning("⚠️ No se encontraron coincidencias en ningún archivo PDF.")
+        mensaje = (
+            "⚠️ No se encontraron coincidencias en ningún archivo PDF."
+            if modo_busqueda == "🔢 Por número de guía"
+            else "⚠️ No se encontraron pedidos para el cliente ingresado."
+        )
+        st.warning(mensaje)
+
 
 
 # --- PESTAÑA DE MODIFICACIÓN DE PEDIDOS ---
