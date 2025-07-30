@@ -110,7 +110,8 @@ with tabs[0]:
 
 # --- EJECUCIÓN DE LA BÚSQUEDA ---
 if buscar_btn:
-    st.info("🔄 Buscando, por favor espera... puede tardar unos segundos...")
+    if modo_busqueda == "🔢 Por número de guía":
+        st.info("🔄 Buscando, por favor espera... puede tardar unos segundos...")
     df_pedidos = cargar_pedidos()
     resultados = []
 
@@ -243,10 +244,24 @@ if buscar_btn:
         st.warning(mensaje)
 
 
-
-# --- PESTAÑA DE MODIFICACIÓN DE PEDIDOS ---
+CONTRASENA_ADMIN = "Ceci"  # puedes cambiar esta contraseña si lo deseas
+# --- PESTAÑA DE MODIFICACIÓN DE PEDIDOS CON CONTRASEÑA ---
 with tabs[1]:
     st.header("✏️ Modificar Pedido Existente")
+
+    if "acceso_modificacion" not in st.session_state:
+        st.session_state.acceso_modificacion = False
+
+    if not st.session_state.acceso_modificacion:
+        contrasena_ingresada = st.text_input("🔑 Ingresa la contraseña para modificar pedidos:", type="password")
+        if st.button("🔓 Verificar Contraseña"):
+            if contrasena_ingresada == CONTRASENA_ADMIN:
+                st.session_state.acceso_modificacion = True
+                st.success("✅ Acceso concedido.")
+                st.rerun()
+            else:
+                st.error("❌ Contraseña incorrecta.")
+        st.stop()
 
     df = cargar_pedidos()
     df = df[df["ID_Pedido"].notna()]
