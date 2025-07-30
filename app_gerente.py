@@ -5,6 +5,7 @@ import gspread
 import pdfplumber
 import json
 import re
+import unicodedata
 from io import BytesIO
 from oauth2client.service_account import ServiceAccountCredentials
 
@@ -87,27 +88,23 @@ def generar_url_s3(s3_key):
         ExpiresIn=3600
     )
 
+def normalizar(texto):
+    return unicodedata.normalize('NFKD', texto).encode('ASCII', 'ignore').decode('utf-8').lower()
+
 # --- INTERFAZ ---
 tabs = st.tabs(["🔍 Buscar Pedido", "✏️ Modificar Pedido"])
 with tabs[0]:
     modo_busqueda = st.radio("Selecciona el modo de búsqueda:", ["🔢 Por número de guía", "🧑 Por cliente"], key="modo_busqueda_radio")
-    st.title("🔍 Buscador de Pedidos por Guía o Cliente")
 
     if modo_busqueda == "🔢 Por número de guía":
         keyword = st.text_input("📦 Ingresa una palabra clave, número de guía, fragmento o código a buscar:")
         buscar_btn = st.button("🔎 Buscar")
 
     elif modo_busqueda == "🧑 Por cliente":
-        df_pedidos = cargar_pedidos()
-        if 'Hora_Registro' in df_pedidos.columns:
-            df_pedidos['Hora_Registro'] = pd.to_datetime(df_pedidos['Hora_Registro'], errors='coerce')
-            df_pedidos = df_pedidos.sort_values(by='Hora_Registro', ascending=False).reset_index(drop=True)
+        keyword = st.text_input("🧑 Ingresa el nombre del cliente a buscar (sin importar mayúsculas ni acentos):")
+        buscar_btn = st.button("🔍 Buscar Pedido del Cliente")
 
-        clientes_unicos = df_pedidos['Cliente'].dropna().unique().tolist()
-        clientes_unicos.sort()
-        cliente_seleccionado = st.selectbox("🧑 Selecciona el cliente:", clientes_unicos)
-        buscar_btn = st.button("🔎 Buscar Pedido del Cliente")
-        keyword = None  # para no interferir con el otro modo
+        cliente_normalizado = normalizar(keyword.strip()) if keyword else ""
 
 
 
@@ -160,8 +157,14 @@ if buscar_btn:
                 continue  # no hubo match, pasa al siguiente pedido
 
         elif modo_busqueda == "🧑 Por cliente":
-            if row.get("Cliente", "").strip() != cliente_seleccionado.strip():
+            cliente_row = row.get("Cliente", "").strip()
+            if not cliente_row:
                 continue
+            cliente_row_normalizado = normalizar(cliente_row)
+            if cliente_normalizado not in cliente_row_normalizado:
+                continue
+
+
             prefix = obtener_prefijo_s3(pedido_id)
             if not prefix:
                 continue
