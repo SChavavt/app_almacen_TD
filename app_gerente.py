@@ -89,23 +89,28 @@ def generar_url_s3(s3_key):
 
 # --- INTERFAZ ---
 modo_busqueda = st.radio("Selecciona el modo de búsqueda:", ["🔢 Por número de guía", "🧑 Por cliente"])
-st.title("🔍 Buscador de Pedidos por Guía o Cliente" if modo_busqueda else "🔍 Buscador de Pedidos")
+tabs = st.tabs(["🔍 Buscar Pedido", "✏️ Modificar Pedido"])
 
-if modo_busqueda == "🔢 Por número de guía":
-    keyword = st.text_input("📦 Ingresa una palabra clave, número de guía, fragmento o código a buscar:")
-    buscar_btn = st.button("🔎 Buscar")
+with tabs[0]:
+    modo_busqueda = st.radio("Selecciona el modo de búsqueda:", ["🔢 Por número de guía", "🧑 Por cliente"])
+    st.title("🔍 Buscador de Pedidos por Guía o Cliente")
 
-elif modo_busqueda == "🧑 Por cliente":
-    df_pedidos = cargar_pedidos()
-    if 'Hora_Registro' in df_pedidos.columns:
-        df_pedidos['Hora_Registro'] = pd.to_datetime(df_pedidos['Hora_Registro'], errors='coerce')
-        df_pedidos = df_pedidos.sort_values(by='Hora_Registro', ascending=False).reset_index(drop=True)
+    if modo_busqueda == "🔢 Por número de guía":
+        keyword = st.text_input("📦 Ingresa una palabra clave, número de guía, fragmento o código a buscar:")
+        buscar_btn = st.button("🔎 Buscar")
 
-    clientes_unicos = df_pedidos['Cliente'].dropna().unique().tolist()
-    clientes_unicos.sort()
-    cliente_seleccionado = st.selectbox("🧑 Selecciona el cliente:", clientes_unicos)
-    buscar_btn = st.button("🔎 Buscar Pedido del Cliente")
-    keyword = None  # para no interferir con el otro modo
+    elif modo_busqueda == "🧑 Por cliente":
+        df_pedidos = cargar_pedidos()
+        if 'Hora_Registro' in df_pedidos.columns:
+            df_pedidos['Hora_Registro'] = pd.to_datetime(df_pedidos['Hora_Registro'], errors='coerce')
+            df_pedidos = df_pedidos.sort_values(by='Hora_Registro', ascending=False).reset_index(drop=True)
+
+        clientes_unicos = df_pedidos['Cliente'].dropna().unique().tolist()
+        clientes_unicos.sort()
+        cliente_seleccionado = st.selectbox("🧑 Selecciona el cliente:", clientes_unicos)
+        buscar_btn = st.button("🔎 Buscar Pedido del Cliente")
+        keyword = None  # para no interferir con el otro modo
+
 
 
 # --- EJECUCIÓN DE LA BÚSQUEDA ---
@@ -225,3 +230,47 @@ if buscar_btn:
                         st.markdown(f"- [📌 {nombre}]({url})")
     else:
         st.warning("⚠️ No se encontraron coincidencias en ningún archivo PDF.")
+
+
+# --- PESTAÑA DE MODIFICACIÓN DE PEDIDOS ---
+with tabs[1]:
+    st.header("✏️ Modificar Pedido Existente")
+
+    df = cargar_pedidos()
+    df = df[df["ID_Pedido"].notna()]
+    df = df.sort_values(by="Hora_Registro", ascending=False)
+
+    pedidos_opciones = df["ID_Pedido"].astype(str).tolist()
+    pedido_sel = st.selectbox("📦 Selecciona el pedido a modificar:", pedidos_opciones)
+
+    row = df[df["ID_Pedido"] == pedido_sel].iloc[0]
+    gspread_row_idx = df[df["ID_Pedido"] == pedido_sel].index[0] + 2  # índice real en la hoja
+
+    # --- CAMPOS MODIFICABLES ---
+    nuevo_vendedor = st.selectbox("🧑‍💼 Vendedor", [
+        "ANA KAREN ORTEGA MAHUAD", "NORA ALEJANDRA MARTINEZ MORENO", "BRENDA VANESSA VILLALOBOS GONZALEZ",
+        "LUIS MANUEL CORDOVA MARQUEZ", "JOSE ANGEL RANGEL DE LEON", "XIMENA GARZA", "DANIELA CASTILLO"
+    ], index=0 if row["Vendedor_Registro"] == "" else
+       ["ANA KAREN ORTEGA MAHUAD", "NORA ALEJANDRA MARTINEZ MORENO", "BRENDA VANESSA VILLALOBOS GONZALEZ",
+        "LUIS MANUEL CORDOVA MARQUEZ", "JOSE ANGEL RANGEL DE LEON", "XIMENA GARZA", "DANIELA CASTILLO"].index(row["Vendedor_Registro"]))
+
+    tipo_envio_actual = row["Tipo"]
+    tipo_envio = st.selectbox("🚚 Tipo de Envío", ["📍 Pedido Local", "🚚 Pedido Foráneo"], index=0 if "Local" in tipo_envio_actual else 1)
+
+    turno_actual = row.get("Turno", "")
+    if tipo_envio == "📍 Pedido Local":
+        nuevo_turno = st.selectbox("⏰ Turno", ["☀ Local Mañana", "🌙 Local Tarde", "🌵 Saltillo", "📦 Pasa a Bodega"], index=0 if turno_actual not in ["🌙 Local Tarde", "🌵 Saltillo", "📦 Pasa a Bodega"] else
+            ["☀ Local Mañana", "🌙 Local Tarde", "🌵 Saltillo", "📦 Pasa a Bodega"].index(turno_actual))
+    else:
+        nuevo_turno = ""
+
+    completado = row.get("Completados_Limpiado", "")
+    mostrar_en_app_i = st.checkbox("👁 Mostrar en app_i", value=(completado.strip().lower() == "sí"))
+
+    if st.button("✅ Aplicar Cambios"):
+        hoja = gspread_client.open_by_key("1aWkSelodaz0nWfQx7FZAysGnIYGQFJxAN7RO3YgCiZY").worksheet("datos_pedidos")
+        hoja.update_cell(gspread_row_idx, df.columns.get_loc("Vendedor_Registro")+1, nuevo_vendedor)
+        hoja.update_cell(gspread_row_idx, df.columns.get_loc("Tipo")+1, tipo_envio)
+        hoja.update_cell(gspread_row_idx, df.columns.get_loc("Turno")+1, nuevo_turno)
+        hoja.update_cell(gspread_row_idx, df.columns.get_loc("Completados_Limpiado")+1, "sí" if mostrar_en_app_i else "")
+        st.success("✅ Cambios aplicados correctamente.")
