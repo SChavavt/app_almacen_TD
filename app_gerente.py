@@ -52,7 +52,7 @@ def obtener_prefijo_s3(pedido_id):
             respuesta = s3_client.list_objects_v2(Bucket=S3_BUCKET, Prefix=prefix, MaxKeys=1)
             if "Contents" in respuesta:
                 return prefix if prefix.endswith("/") else prefix + "/"
-        except:
+        except Exception:
             continue
     return None
 
@@ -69,7 +69,7 @@ def obtener_todos_los_archivos(prefix):
     try:
         respuesta = s3_client.list_objects_v2(Bucket=S3_BUCKET, Prefix=prefix)
         return respuesta.get("Contents", [])
-    except Exception as e:
+    except Exception:
         return []
 
 def extraer_texto_pdf(s3_key):
@@ -252,7 +252,7 @@ with tabs[1]:
        ["ANA KAREN ORTEGA MAHUAD", "NORA ALEJANDRA MARTINEZ MORENO", "BRENDA VANESSA VILLALOBOS GONZALEZ",
         "LUIS MANUEL CORDOVA MARQUEZ", "JOSE ANGEL RANGEL DE LEON", "XIMENA GARZA", "DANIELA CASTILLO"].index(row["Vendedor_Registro"]))
 
-    tipo_envio_actual = row["Tipo"]
+    tipo_envio_actual = row["Tipo_Envio"]
     tipo_envio = st.selectbox("🚚 Tipo de Envío", ["📍 Pedido Local", "🚚 Pedido Foráneo"], index=0 if "Local" in tipo_envio_actual else 1)
 
     turno_actual = row.get("Turno", "")
@@ -268,7 +268,7 @@ with tabs[1]:
     if st.button("✅ Aplicar Cambios"):
         hoja = gspread_client.open_by_key("1aWkSelodaz0nWfQx7FZAysGnIYGQFJxAN7RO3YgCiZY").worksheet("datos_pedidos")
         hoja.update_cell(gspread_row_idx, df.columns.get_loc("Vendedor_Registro")+1, nuevo_vendedor)
-        hoja.update_cell(gspread_row_idx, df.columns.get_loc("Tipo")+1, tipo_envio)
+        hoja.update_cell(gspread_row_idx, df.columns.get_loc("Tipo_Envio")+1, tipo_envio)
         hoja.update_cell(gspread_row_idx, df.columns.get_loc("Turno")+1, nuevo_turno)
         hoja.update_cell(gspread_row_idx, df.columns.get_loc("Completados_Limpiado")+1, "sí" if mostrar_en_app_i else "")
         st.success("✅ Cambios aplicados correctamente.")
