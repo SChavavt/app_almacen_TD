@@ -109,143 +109,143 @@ with tabs[0]:
 
 
 # --- EJECUCIÓN DE LA BÚSQUEDA ---
-if buscar_btn:
-    if modo_busqueda == "🔢 Por número de guía":
-        st.info("🔄 Buscando, por favor espera... puede tardar unos segundos...")
-    df_pedidos = cargar_pedidos()
-    resultados = []
+    if buscar_btn:
+        if modo_busqueda == "🔢 Por número de guía":
+            st.info("🔄 Buscando, por favor espera... puede tardar unos segundos...")
+        df_pedidos = cargar_pedidos()
+        resultados = []
 
-    if 'Hora_Registro' in df_pedidos.columns:
-        df_pedidos['Hora_Registro'] = pd.to_datetime(df_pedidos['Hora_Registro'], errors='coerce')
-        df_pedidos = df_pedidos.sort_values(by='Hora_Registro', ascending=False).reset_index(drop=True)
+        if 'Hora_Registro' in df_pedidos.columns:
+            df_pedidos['Hora_Registro'] = pd.to_datetime(df_pedidos['Hora_Registro'], errors='coerce')
+            df_pedidos = df_pedidos.sort_values(by='Hora_Registro', ascending=False).reset_index(drop=True)
 
-    for _, row in df_pedidos.iterrows():
-        pedido_id = str(row.get("ID_Pedido", "")).strip()
-        if not pedido_id:
-            continue
-
-        if modo_busqueda == "🧑 Por cliente":
-            cliente_row = row.get("Cliente", "").strip()
-            if not cliente_row:
-                continue
-            cliente_row_normalizado = normalizar(cliente_row)
-            if cliente_normalizado not in cliente_row_normalizado:
+        for _, row in df_pedidos.iterrows():
+            pedido_id = str(row.get("ID_Pedido", "")).strip()
+            if not pedido_id:
                 continue
 
-            prefix = obtener_prefijo_s3(pedido_id)
-            if not prefix:
-                continue
+            if modo_busqueda == "🧑 Por cliente":
+                cliente_row = row.get("Cliente", "").strip()
+                if not cliente_row:
+                    continue
+                cliente_row_normalizado = normalizar(cliente_row)
+                if cliente_normalizado not in cliente_row_normalizado:
+                    continue
 
-            archivos_coincidentes = []  # no se buscan coincidencias
-            todos_los_archivos = obtener_todos_los_archivos(prefix)
+                prefix = obtener_prefijo_s3(pedido_id)
+                if not prefix:
+                    continue
 
-        elif modo_busqueda == "🔢 Por número de guía":
-            prefix = obtener_prefijo_s3(pedido_id)
-            if not prefix:
-                continue
+                archivos_coincidentes = []  # no se buscan coincidencias
+                todos_los_archivos = obtener_todos_los_archivos(prefix)
 
-            archivos_validos = obtener_archivos_pdf_validos(prefix)
-            archivos_coincidentes = []
+            elif modo_busqueda == "🔢 Por número de guía":
+                prefix = obtener_prefijo_s3(pedido_id)
+                if not prefix:
+                    continue
 
-            for archivo in archivos_validos:
-                key = archivo["Key"]
-                texto = extraer_texto_pdf(key)
+                archivos_validos = obtener_archivos_pdf_validos(prefix)
+                archivos_coincidentes = []
 
-                clave = keyword.strip()
-                clave_sin_espacios = clave.replace(" ", "")
-                texto_limpio = texto.replace(" ", "").replace("\n", "")
+                for archivo in archivos_validos:
+                    key = archivo["Key"]
+                    texto = extraer_texto_pdf(key)
 
-                coincide = (
-                    clave in texto
-                    or clave_sin_espacios in texto_limpio
-                    or re.search(re.escape(clave), texto_limpio)
-                    or re.search(re.escape(clave_sin_espacios), texto_limpio)
-                )
+                    clave = keyword.strip()
+                    clave_sin_espacios = clave.replace(" ", "")
+                    texto_limpio = texto.replace(" ", "").replace("\n", "")
 
-                if coincide:
-                    waybill_match = re.search(r"WAYBILL[\s:]*([0-9 ]{8,})", texto, re.IGNORECASE)
-                    if waybill_match:
-                        st.code(f"📦 WAYBILL detectado: {waybill_match.group(1)}")
+                    coincide = (
+                        clave in texto
+                        or clave_sin_espacios in texto_limpio
+                        or re.search(re.escape(clave), texto_limpio)
+                        or re.search(re.escape(clave_sin_espacios), texto_limpio)
+                    )
 
-                    archivos_coincidentes.append((key, generar_url_s3(key)))
-                    todos_los_archivos = obtener_todos_los_archivos(prefix)
-                    break  # detener búsqueda tras encontrar coincidencia
+                    if coincide:
+                        waybill_match = re.search(r"WAYBILL[\s:]*([0-9 ]{8,})", texto, re.IGNORECASE)
+                        if waybill_match:
+                            st.code(f"📦 WAYBILL detectado: {waybill_match.group(1)}")
+
+                        archivos_coincidentes.append((key, generar_url_s3(key)))
+                        todos_los_archivos = obtener_todos_los_archivos(prefix)
+                        break  # detener búsqueda tras encontrar coincidencia
+                else:
+                    continue  # ningún PDF coincidió
+
             else:
-                continue  # ningún PDF coincidió
+                continue  # modo no reconocido
+
+            # Una vez tenemos los archivos del pedido
+            comprobantes = [f for f in todos_los_archivos if "comprobante" in f["Key"].lower()]
+            facturas = [f for f in todos_los_archivos if "factura" in f["Key"].lower()]
+            otros = [
+                f for f in todos_los_archivos
+                if f not in comprobantes and f not in facturas and
+                (modo_busqueda == "🧑 Por cliente" or f["Key"] != archivos_coincidentes[0][0])
+            ]
+
+            comprobantes_links = [(f["Key"], generar_url_s3(f["Key"])) for f in comprobantes]
+            facturas_links = [(f["Key"], generar_url_s3(f["Key"])) for f in facturas]
+            otros_links = [(f["Key"], generar_url_s3(f["Key"])) for f in otros]
+
+            resultados.append({
+                "ID_Pedido": pedido_id,
+                "Cliente": row.get("Cliente", ""),
+                "Estado": row.get("Estado", ""),
+                "Vendedor": row.get("Vendedor_Registro", ""),
+                "Folio": row.get("Folio_Factura", ""),
+                "Hora_Registro": row.get("Hora_Registro", ""),  # 🆕 Agregamos este campo
+                "Coincidentes": archivos_coincidentes,
+                "Comprobantes": comprobantes_links,
+                "Facturas": facturas_links,
+                "Otros": otros_links
+            })
+
+
+            if modo_busqueda == "🔢 Por número de guía":
+                break  # Solo detener si es búsqueda por guía
+
+        st.markdown("---")
+        if resultados:
+            st.success(f"✅ Se encontraron coincidencias en {len(resultados)} pedido(s).")
+
+            for res in resultados:
+                st.markdown(f"### 🤝 {res['Cliente']}")
+                st.markdown(f"📄 **Folio:** `{res['Folio']}`  |  🔍 **Estado:** `{res['Estado']}`  |  🧑‍💼 **Vendedor:** `{res['Vendedor']}`  |  🕒 **Hora:** `{res['Hora_Registro']}`")
+
+                with st.expander("📁 Archivos del Pedido", expanded=True):
+                    if res["Coincidentes"]:
+                        st.markdown("#### 🔍 Guías:")
+                        for key, url in res["Coincidentes"]:
+                            nombre = key.split("/")[-1]
+                            st.markdown(f"- [🔍 {nombre}]({url})")
+
+                    if res["Comprobantes"]:
+                        st.markdown("#### 🧾 Comprobantes:")
+                        for key, url in res["Comprobantes"]:
+                            nombre = key.split("/")[-1]
+                            st.markdown(f"- [📄 {nombre}]({url})")
+
+                    if res["Facturas"]:
+                        st.markdown("#### 📁 Facturas:")
+                        for key, url in res["Facturas"]:
+                            nombre = key.split("/")[-1]
+                            st.markdown(f"- [📄 {nombre}]({url})")
+
+                    if res["Otros"]:
+                        st.markdown("#### 📂 Otros Archivos:")
+                        for key, url in res["Otros"]:
+                            nombre = key.split("/")[-1]
+                            st.markdown(f"- [📌 {nombre}]({url})")
 
         else:
-            continue  # modo no reconocido
-
-        # Una vez tenemos los archivos del pedido
-        comprobantes = [f for f in todos_los_archivos if "comprobante" in f["Key"].lower()]
-        facturas = [f for f in todos_los_archivos if "factura" in f["Key"].lower()]
-        otros = [
-            f for f in todos_los_archivos
-            if f not in comprobantes and f not in facturas and
-            (modo_busqueda == "🧑 Por cliente" or f["Key"] != archivos_coincidentes[0][0])
-        ]
-
-        comprobantes_links = [(f["Key"], generar_url_s3(f["Key"])) for f in comprobantes]
-        facturas_links = [(f["Key"], generar_url_s3(f["Key"])) for f in facturas]
-        otros_links = [(f["Key"], generar_url_s3(f["Key"])) for f in otros]
-
-        resultados.append({
-            "ID_Pedido": pedido_id,
-            "Cliente": row.get("Cliente", ""),
-            "Estado": row.get("Estado", ""),
-            "Vendedor": row.get("Vendedor_Registro", ""),
-            "Folio": row.get("Folio_Factura", ""),
-            "Hora_Registro": row.get("Hora_Registro", ""),  # 🆕 Agregamos este campo
-            "Coincidentes": archivos_coincidentes,
-            "Comprobantes": comprobantes_links,
-            "Facturas": facturas_links,
-            "Otros": otros_links
-        })
-
-
-        if modo_busqueda == "🔢 Por número de guía":
-            break  # Solo detener si es búsqueda por guía
-
-    st.markdown("---")
-    if resultados:
-        st.success(f"✅ Se encontraron coincidencias en {len(resultados)} pedido(s).")
-
-        for res in resultados:
-            st.markdown(f"### 📦 Pedido **{res['ID_Pedido']}** – 🤝 {res['Cliente']}")
-            st.markdown(f"📄 **Folio:** `{res['Folio']}`  |  🔍 **Estado:** `{res['Estado']}`  |  🧑‍💼 **Vendedor:** `{res['Vendedor']}`  |  🕒 **Hora:** `{res['Hora_Registro']}`")
-
-            with st.expander("📁 Archivos del Pedido", expanded=True):
-                if res["Coincidentes"]:
-                    st.markdown("#### 🔍 Guías:")
-                    for key, url in res["Coincidentes"]:
-                        nombre = key.split("/")[-1]
-                        st.markdown(f"- [🔍 {nombre}]({url})")
-
-                if res["Comprobantes"]:
-                    st.markdown("#### 🧾 Comprobantes:")
-                    for key, url in res["Comprobantes"]:
-                        nombre = key.split("/")[-1]
-                        st.markdown(f"- [📄 {nombre}]({url})")
-
-                if res["Facturas"]:
-                    st.markdown("#### 📁 Facturas:")
-                    for key, url in res["Facturas"]:
-                        nombre = key.split("/")[-1]
-                        st.markdown(f"- [📄 {nombre}]({url})")
-
-                if res["Otros"]:
-                    st.markdown("#### 📂 Otros Archivos:")
-                    for key, url in res["Otros"]:
-                        nombre = key.split("/")[-1]
-                        st.markdown(f"- [📌 {nombre}]({url})")
-
-    else:
-        mensaje = (
-            "⚠️ No se encontraron coincidencias en ningún archivo PDF."
-            if modo_busqueda == "🔢 Por número de guía"
-            else "⚠️ No se encontraron pedidos para el cliente ingresado."
-        )
-        st.warning(mensaje)
+            mensaje = (
+                "⚠️ No se encontraron coincidencias en ningún archivo PDF."
+                if modo_busqueda == "🔢 Por número de guía"
+                else "⚠️ No se encontraron pedidos para el cliente ingresado."
+            )
+            st.warning(mensaje)
 
 
 CONTRASENA_ADMIN = "Ceci"  # puedes cambiar esta contraseña si lo deseas
@@ -254,7 +254,7 @@ with tabs[1]:
     st.header("✏️ Modificar Pedido Existente")
 
     if "acceso_modificacion" not in st.session_state:
-        st.session_state.acceso_modificacion = False
+            st.session_state.acceso_modificacion = False
 
     if not st.session_state.acceso_modificacion:
         contrasena_ingresada = st.text_input("🔑 Ingresa la contraseña para modificar pedidos:", type="password")
@@ -282,7 +282,7 @@ with tabs[1]:
         "ANA KAREN ORTEGA MAHUAD", "NORA ALEJANDRA MARTINEZ MORENO", "BRENDA VANESSA VILLALOBOS GONZALEZ",
         "LUIS MANUEL CORDOVA MARQUEZ", "JOSE ANGEL RANGEL DE LEON", "XIMENA GARZA", "DANIELA CASTILLO"
     ], index=0 if row["Vendedor_Registro"] == "" else
-       ["ANA KAREN ORTEGA MAHUAD", "NORA ALEJANDRA MARTINEZ MORENO", "BRENDA VANESSA VILLALOBOS GONZALEZ",
+    ["ANA KAREN ORTEGA MAHUAD", "NORA ALEJANDRA MARTINEZ MORENO", "BRENDA VANESSA VILLALOBOS GONZALEZ",
         "LUIS MANUEL CORDOVA MARQUEZ", "JOSE ANGEL RANGEL DE LEON", "XIMENA GARZA", "DANIELA CASTILLO"].index(row["Vendedor_Registro"]))
 
     tipo_envio_actual = row["Tipo_Envio"]
