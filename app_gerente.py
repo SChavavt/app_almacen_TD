@@ -208,15 +208,7 @@ if buscar_btn:
     if resultados:
         st.success(f"✅ Se encontraron coincidencias en {len(resultados)} pedido(s).")
 
-        if modo_busqueda == "🧑 Por cliente" and len(resultados) > 1:
-            st.markdown(f"### 📦 Pedido más reciente de **{resultados[0]['Cliente']}**")
-            principales = [resultados[0]]
-            adicionales = resultados[1:]
-        else:
-            principales = resultados
-            adicionales = []
-
-        for res in principales:
+        for res in resultados:
             st.markdown(f"### 📦 Pedido **{res['ID_Pedido']}** – 🤝 {res['Cliente']}")
             st.markdown(f"📄 **Folio:** `{res['Folio']}`  |  🔍 **Estado:** `{res['Estado']}`  |  🧑‍💼 **Vendedor:** `{res['Vendedor']}`")
 
@@ -245,37 +237,6 @@ if buscar_btn:
                         nombre = key.split("/")[-1]
                         st.markdown(f"- [📌 {nombre}]({url})")
 
-        if modo_busqueda == "🧑 Por cliente" and adicionales:
-            if st.checkbox(f"👀 Mostrar {len(adicionales)} pedido(s) anterior(es) del cliente"):
-                for res in adicionales:
-                    st.markdown("---")
-                    st.markdown(f"### 📦 Pedido anterior: **{res['ID_Pedido']}** – 🤝 {res['Cliente']}")
-                    st.markdown(f"📄 **Folio:** `{res['Folio']}`  |  🔍 **Estado:** `{res['Estado']}`  |  🧑‍💼 **Vendedor:** `{res['Vendedor']}`")
-
-                    with st.expander("📁 Archivos del Pedido"):
-                        if res["Coincidentes"]:
-                            st.markdown("#### 🔍 Guías:")
-                            for key, url in res["Coincidentes"]:
-                                nombre = key.split("/")[-1]
-                                st.markdown(f"- [🔍 {nombre}]({url})")
-
-                        if res["Comprobantes"]:
-                            st.markdown("#### 🧾 Comprobantes:")
-                            for key, url in res["Comprobantes"]:
-                                nombre = key.split("/")[-1]
-                                st.markdown(f"- [📄 {nombre}]({url})")
-
-                        if res["Facturas"]:
-                            st.markdown("#### 📁 Facturas:")
-                            for key, url in res["Facturas"]:
-                                nombre = key.split("/")[-1]
-                                st.markdown(f"- [📄 {nombre}]({url})")
-
-                        if res["Otros"]:
-                            st.markdown("#### 📂 Otros Archivos:")
-                            for key, url in res["Otros"]:
-                                nombre = key.split("/")[-1]
-                                st.markdown(f"- [📌 {nombre}]({url})")
     else:
         mensaje = (
             "⚠️ No se encontraron coincidencias en ningún archivo PDF."
