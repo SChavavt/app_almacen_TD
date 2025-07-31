@@ -210,7 +210,7 @@ if buscar_btn:
 
         for res in resultados:
             st.markdown(f"### 📦 Pedido **{res['ID_Pedido']}** – 🤝 {res['Cliente']}")
-            st.markdown(f"📄 **Folio:** `{res['Folio']}`  |  🔍 **Estado:** `{res['Estado']}`  |  🧑‍💼 **Vendedor:** `{res['Vendedor']}`")
+            st.markdown(f"📄 **Folio:** `{res['Folio']}`  |  🔍 **Estado:** `{res['Estado']}`  |  🧑‍💼 **Vendedor:** `{res['Vendedor']}`  |  🕒 **Hora:** `{res.get('Hora_Registro', '')}`")
 
             with st.expander("📁 Archivos del Pedido", expanded=True):
                 if res["Coincidentes"]:
