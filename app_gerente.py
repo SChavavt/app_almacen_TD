@@ -195,11 +195,13 @@ if buscar_btn:
             "Estado": row.get("Estado", ""),
             "Vendedor": row.get("Vendedor_Registro", ""),
             "Folio": row.get("Folio_Factura", ""),
+            "Hora_Registro": row.get("Hora_Registro", ""),  # 🆕 Agregamos este campo
             "Coincidentes": archivos_coincidentes,
             "Comprobantes": comprobantes_links,
             "Facturas": facturas_links,
             "Otros": otros_links
         })
+
 
         if modo_busqueda == "🔢 Por número de guía":
             break  # Solo detener si es búsqueda por guía
