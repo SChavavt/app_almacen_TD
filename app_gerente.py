@@ -323,12 +323,23 @@ with tabs[1]:
     st.markdown(f"📦 **Pedido seleccionado:** `{pedido_sel}`")
 
     # --- CAMPOS MODIFICABLES ---
-    nuevo_vendedor = st.selectbox("🧑‍💼 Vendedor", [
-        "ANA KAREN ORTEGA MAHUAD", "NORA ALEJANDRA MARTINEZ MORENO", "BRENDA VANESSA VILLALOBOS GONZALEZ",
-        "LUIS MANUEL CORDOVA MARQUEZ", "JOSE ANGEL RANGEL DE LEON", "XIMENA GARZA", "DANIELA CASTILLO"
-    ], index=0 if row["Vendedor_Registro"] == "" else
-    ["ANA KAREN ORTEGA MAHUAD", "NORA ALEJANDRA MARTINEZ MORENO", "BRENDA VANESSA VILLALOBOS GONZALEZ",
-        "LUIS MANUEL CORDOVA MARQUEZ", "JOSE ANGEL RANGEL DE LEON", "XIMENA GARZA", "DANIELA CASTILLO"].index(row["Vendedor_Registro"]))
+    vendedores = [
+        "ALEJANDRO RODRIGUEZ",
+        "ANA KAREN ORTEGA MAHUAD",
+        "DANIELA LOPEZ RAMIREZ",
+        "EDGAR ORLANDO GOMEZ VILLAGRAN",
+        "GLORIA MICHELLE GARCIA TORRES", 
+        "GRISELDA CAROLINA SANCHEZ GARCIA",
+        "HECTOR DEL ANGEL AREVALO ALCALA",
+        "JOSELIN TRUJILLO PATRACA",
+        "NORA ALEJANDRA MARTINEZ MORENO",
+        "PAULINA TREJO"
+    ]
+    vendedor_actual = row.get("Vendedor_Registro", "")
+    indice_vendedor = vendedores.index(vendedor_actual) if vendedor_actual in vendedores else 0
+
+    nuevo_vendedor = st.selectbox("🧑‍💼 Vendedor", vendedores, index=indice_vendedor)
+
 
     tipo_envio_actual = row["Tipo_Envio"]
     tipo_envio = st.selectbox("🚚 Tipo de Envío", ["📍 Pedido Local", "🚚 Pedido Foráneo"], index=0 if "Local" in tipo_envio_actual else 1)
