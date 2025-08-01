@@ -276,11 +276,13 @@ with tabs[1]:
     # --- Últimos 10 pedidos ---
     ultimos_10 = df.head(10)
     st.markdown("### 🕒 Últimos 10 Pedidos Registrados")
-    pedido_rapido = st.selectbox(
+    ultimos_10["display"] = ultimos_10.apply(lambda row: f"👤 {row['Cliente']} – 🔍 {row['Estado']} – 🧑‍💼 {row['Vendedor_Registro']} – 🕒 {row['Hora_Registro'].strftime('%d/%m %H:%M')}", axis=1)
+    pedido_rapido_label = st.selectbox(
         "⬇️ Selecciona uno de los pedidos recientes:",
-        ultimos_10["ID_Pedido"] + " – " + ultimos_10["Cliente"]
+        ultimos_10["display"].tolist()
     )
-    pedido_rapido_id = pedido_rapido.split(" – ")[0]
+    pedido_rapido_id = ultimos_10[ultimos_10["display"] == pedido_rapido_label]["ID_Pedido"].values[0]
+
 
     # --- Buscar por cliente ---
     st.markdown("### 🔍 Buscar Pedido por Cliente")
@@ -288,10 +290,10 @@ with tabs[1]:
     cliente_filtrado_df = df[df["Cliente"].str.contains(cliente_buscado, case=False, na=False)] if cliente_buscado else df
 
     pedidos_opciones = cliente_filtrado_df["ID_Pedido"].astype(str).tolist()
-    pedido_sel = st.selectbox("📦 Selecciona el pedido a modificar:", pedidos_opciones)
-
+    pedido_sel = cliente_filtrado_df["ID_Pedido"].iloc[0] if cliente_buscado and not cliente_filtrado_df.empty else pedido_rapido_id
     row = df[df["ID_Pedido"] == pedido_sel].iloc[0]
-    gspread_row_idx = df[df["ID_Pedido"] == pedido_sel].index[0] + 2  # índice real en la hoja
+    gspread_row_idx = df[df["ID_Pedido"] == pedido_sel].index[0] + 2
+
 
     # --- CAMPOS MODIFICABLES ---
     nuevo_vendedor = st.selectbox("🧑‍💼 Vendedor", [
