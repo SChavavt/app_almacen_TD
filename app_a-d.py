@@ -609,18 +609,16 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
 
         # ✅ PRINT and UPDATE TO "IN PROCESS"
         if col_print_btn.button("🖨 Imprimir", key=f"print_{row['ID_Pedido']}_{origen_tab}"):
-            # ✅ Mostrar adjuntos del pedido
-            st.session_state["expanded_attachments"][row['ID_Pedido']] = True
+            # ✅ Expandir el pedido y sus adjuntos
             st.session_state["expanded_pedidos"][row['ID_Pedido']] = True
+            st.session_state["expanded_attachments"][row['ID_Pedido']] = True
 
-            # ✅ Recordar pedido actual para mantener scroll
-            st.session_state["scroll_to_pedido_id"] = row["ID_Pedido"]
-
-            # ✅ Solo cambiar si está en Pendiente o Demorado (y no ya en Proceso)
-            if row["Estado"] in ["🟡 Pendiente", "🔴 Demorado"] and row["Estado"] != "🔵 En Proceso":
+            # ✅ Solo actualizar si estaba en Pendiente o Demorado
+            if row["Estado"] in ["🟡 Pendiente", "🔴 Demorado"]:
                 zona_mexico = timezone("America/Mexico_City")
                 now = datetime.now(zona_mexico)
                 now_str = now.strftime("%Y-%m-%d %H:%M:%S")
+
                 estado_col_idx = headers.index("Estado") + 1
                 hora_proc_col_idx = headers.index("Hora_Proceso") + 1
 
@@ -631,9 +629,11 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
                 if batch_update_gsheet_cells(worksheet, updates):
                     df.at[idx, "Estado"] = "🔵 En Proceso"
                     df.at[idx, "Hora_Proceso"] = now_str
+                    row["Estado"] = "🔵 En Proceso"  # ✅ Refleja el cambio en pantalla
                     st.toast("📄 Estado actualizado a 'En Proceso'", icon="📌")
                 else:
                     st.error("❌ Falló la actualización del estado a 'En Proceso'.")
+
 
 
         # This block displays attachments if they are expanded
@@ -725,9 +725,9 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
 
                     if st.button("📤 Subir Guía", key=f"btn_subir_guia_{row['ID_Pedido']}"):
                         st.session_state["expanded_pedidos"][row['ID_Pedido']] = True
-                        st.session_state["scroll_to_pedido_id"] = row["ID_Pedido"]  # ✅ Scroll al regresar
-
+                        st.session_state["expanded_attachments"][row['ID_Pedido']] = True
                         uploaded_urls = []
+
                         for archivo in archivos_guia:
                             ext = os.path.splitext(archivo.name)[1]
                             s3_key = f"{row['ID_Pedido']}/guia_{uuid.uuid4().hex[:6]}{ext}"
@@ -742,11 +742,9 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
                             success = update_gsheet_cell(worksheet, headers, gsheet_row_index, "Adjuntos_Guia", nueva_lista)
                             if success:
                                 df.at[idx, "Adjuntos_Guia"] = nueva_lista
-                                st.session_state["expanded_pedidos"][row['ID_Pedido']] = True
-
+                                row["Adjuntos_Guia"] = nueva_lista  # ✅ refleja el cambio localmente
                                 st.toast(f"📤 {len(uploaded_urls)} guía(s) subida(s) con éxito.", icon="📦")
-                                st.success(f"📦 Se subieron correctamente {len(uploaded_urls)} archivo(s) de guía.")  # ✅ AGREGADO
-                                st.rerun()  # ✅ Aplicar scroll y evitar reinicios manuales
+                                st.success(f"📦 Se subieron correctamente {len(uploaded_urls)} archivo(s) de guía.")
                             else:
                                 st.error("❌ No se pudo actualizar el Google Sheet con los archivos de guía.")
                         else:
