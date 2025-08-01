@@ -272,6 +272,9 @@ with tabs[1]:
     df = df[df["ID_Pedido"].notna()]
     df["Hora_Registro"] = pd.to_datetime(df["Hora_Registro"], errors='coerce')
     df = df.sort_values(by="Hora_Registro", ascending=False)
+    df = df.sort_values(by="Hora_Registro", ascending=False)
+    pedido_sel = None  # ✅ evitar NameError si no se selecciona nada aún
+
 
     usar_busqueda = st.checkbox("🔍 Buscar por nombre de cliente (activar para ocultar los últimos 10 pedidos)")
 
@@ -318,7 +321,7 @@ with tabs[1]:
     # --- Cargar datos del pedido seleccionado ---
     st.markdown("---")
 
-    if not pedido_sel:
+    if pedido_sel is None:
         st.warning("⚠️ No se ha seleccionado ningún pedido válido.")
         st.stop()
 
