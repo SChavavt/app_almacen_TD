@@ -278,14 +278,31 @@ with tabs[1]:
     if usar_busqueda:
         st.markdown("### 🔍 Buscar Pedido por Cliente")
         cliente_buscado = st.text_input("👤 Escribe el nombre del cliente:")
-        cliente_filtrado_df = df[df["Cliente"].str.contains(cliente_buscado, case=False, na=False)] if cliente_buscado else df
-        if not cliente_filtrado_df.empty:
-            pedido_sel = cliente_filtrado_df.iloc[0]["ID_Pedido"]
-        else:
-            st.warning("⚠️ No se encontraron pedidos para ese cliente.")
-            st.stop()
+        cliente_normalizado = normalizar(cliente_buscado)
+        coincidencias = []
+
+        if cliente_buscado:
+            for _, row_ in df.iterrows():
+                cliente_row = row_.get("Cliente", "").strip()
+                if not cliente_row:
+                    continue
+                cliente_row_normalizado = normalizar(cliente_row)
+                if cliente_normalizado in cliente_row_normalizado:
+                    coincidencias.append(row_)
+
+            if not coincidencias:
+                st.warning("⚠️ No se encontraron pedidos para ese cliente.")
+                st.stop()
+            elif len(coincidencias) == 1:
+                pedido_sel = coincidencias[0]["ID_Pedido"]
+            else:
+                opciones = [
+                    f"{r['ID_Pedido']} – {r['Cliente']} – {r['Estado']} – {r['Vendedor_Registro']} – {r['Hora_Registro'].strftime('%d/%m %H:%M')}"
+                    for r in coincidencias
+                ]
+                seleccion = st.selectbox("👥 Se encontraron múltiples pedidos, selecciona uno:", opciones)
+                pedido_sel = seleccion.split(" – ")[0]
     else:
-        # Mostrar últimos 10 pedidos
         ultimos_10 = df.head(10)
         st.markdown("### 🕒 Últimos 10 Pedidos Registrados")
         ultimos_10["display"] = ultimos_10.apply(
