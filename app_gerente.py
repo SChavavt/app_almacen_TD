@@ -249,12 +249,13 @@ with tabs[0]:
 
 
 CONTRASENA_ADMIN = "Ceci"  # puedes cambiar esta contraseña si lo deseas
+
 # --- PESTAÑA DE MODIFICACIÓN DE PEDIDOS CON CONTRASEÑA ---
 with tabs[1]:
     st.header("✏️ Modificar Pedido Existente")
 
     if "acceso_modificacion" not in st.session_state:
-            st.session_state.acceso_modificacion = False
+        st.session_state.acceso_modificacion = False
 
     if not st.session_state.acceso_modificacion:
         contrasena_ingresada = st.text_input("🔑 Ingresa la contraseña para modificar pedidos:", type="password")
@@ -269,9 +270,24 @@ with tabs[1]:
 
     df = cargar_pedidos()
     df = df[df["ID_Pedido"].notna()]
+    df["Hora_Registro"] = pd.to_datetime(df["Hora_Registro"], errors='coerce')
     df = df.sort_values(by="Hora_Registro", ascending=False)
 
-    pedidos_opciones = df["ID_Pedido"].astype(str).tolist()
+    # --- Últimos 10 pedidos ---
+    ultimos_10 = df.head(10)
+    st.markdown("### 🕒 Últimos 10 Pedidos Registrados")
+    pedido_rapido = st.selectbox(
+        "⬇️ Selecciona uno de los pedidos recientes:",
+        ultimos_10["ID_Pedido"] + " – " + ultimos_10["Cliente"]
+    )
+    pedido_rapido_id = pedido_rapido.split(" – ")[0]
+
+    # --- Buscar por cliente ---
+    st.markdown("### 🔍 Buscar Pedido por Cliente")
+    cliente_buscado = st.text_input("👤 Escribe el nombre del cliente:")
+    cliente_filtrado_df = df[df["Cliente"].str.contains(cliente_buscado, case=False, na=False)] if cliente_buscado else df
+
+    pedidos_opciones = cliente_filtrado_df["ID_Pedido"].astype(str).tolist()
     pedido_sel = st.selectbox("📦 Selecciona el pedido a modificar:", pedidos_opciones)
 
     row = df[df["ID_Pedido"] == pedido_sel].iloc[0]
