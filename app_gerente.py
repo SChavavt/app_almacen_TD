@@ -273,27 +273,37 @@ with tabs[1]:
     df["Hora_Registro"] = pd.to_datetime(df["Hora_Registro"], errors='coerce')
     df = df.sort_values(by="Hora_Registro", ascending=False)
 
-    # --- Últimos 10 pedidos ---
-    ultimos_10 = df.head(10)
-    st.markdown("### 🕒 Últimos 10 Pedidos Registrados")
-    ultimos_10["display"] = ultimos_10.apply(lambda row: f"👤 {row['Cliente']} – 🔍 {row['Estado']} – 🧑‍💼 {row['Vendedor_Registro']} – 🕒 {row['Hora_Registro'].strftime('%d/%m %H:%M')}", axis=1)
-    pedido_rapido_label = st.selectbox(
-        "⬇️ Selecciona uno de los pedidos recientes:",
-        ultimos_10["display"].tolist()
-    )
-    pedido_rapido_id = ultimos_10[ultimos_10["display"] == pedido_rapido_label]["ID_Pedido"].values[0]
+    usar_busqueda = st.checkbox("🔍 Buscar por nombre de cliente (activar para ocultar los últimos 10 pedidos)")
 
+    if usar_busqueda:
+        st.markdown("### 🔍 Buscar Pedido por Cliente")
+        cliente_buscado = st.text_input("👤 Escribe el nombre del cliente:")
+        cliente_filtrado_df = df[df["Cliente"].str.contains(cliente_buscado, case=False, na=False)] if cliente_buscado else df
+        if not cliente_filtrado_df.empty:
+            pedido_sel = cliente_filtrado_df.iloc[0]["ID_Pedido"]
+        else:
+            st.warning("⚠️ No se encontraron pedidos para ese cliente.")
+            st.stop()
+    else:
+        # Mostrar últimos 10 pedidos
+        ultimos_10 = df.head(10)
+        st.markdown("### 🕒 Últimos 10 Pedidos Registrados")
+        ultimos_10["display"] = ultimos_10.apply(
+            lambda row: f"👤 {row['Cliente']} – 🔍 {row['Estado']} – 🧑‍💼 {row['Vendedor_Registro']} – 🕒 {row['Hora_Registro'].strftime('%d/%m %H:%M')}",
+            axis=1
+        )
+        pedido_rapido_label = st.selectbox(
+            "⬇️ Selecciona uno de los pedidos recientes:",
+            ultimos_10["display"].tolist()
+        )
+        pedido_sel = ultimos_10[ultimos_10["display"] == pedido_rapido_label]["ID_Pedido"].values[0]
 
-    # --- Buscar por cliente ---
-    st.markdown("### 🔍 Buscar Pedido por Cliente")
-    cliente_buscado = st.text_input("👤 Escribe el nombre del cliente:")
-    cliente_filtrado_df = df[df["Cliente"].str.contains(cliente_buscado, case=False, na=False)] if cliente_buscado else df
-
-    pedidos_opciones = cliente_filtrado_df["ID_Pedido"].astype(str).tolist()
-    pedido_sel = cliente_filtrado_df["ID_Pedido"].iloc[0] if cliente_buscado and not cliente_filtrado_df.empty else pedido_rapido_id
+    # --- Cargar datos del pedido seleccionado ---
     row = df[df["ID_Pedido"] == pedido_sel].iloc[0]
-    gspread_row_idx = df[df["ID_Pedido"] == pedido_sel].index[0] + 2
+    gspread_row_idx = df[df["ID_Pedido"] == pedido_sel].index[0] + 2  # índice real en hoja
 
+    st.markdown("---")
+    st.markdown(f"📦 **Pedido seleccionado:** `{pedido_sel}`")
 
     # --- CAMPOS MODIFICABLES ---
     nuevo_vendedor = st.selectbox("🧑‍💼 Vendedor", [
