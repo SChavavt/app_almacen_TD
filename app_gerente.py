@@ -316,11 +316,17 @@ with tabs[1]:
         pedido_sel = ultimos_10[ultimos_10["display"] == pedido_rapido_label]["ID_Pedido"].values[0]
 
     # --- Cargar datos del pedido seleccionado ---
+    st.markdown("---")
+
+    if not pedido_sel:
+        st.warning("⚠️ No se ha seleccionado ningún pedido válido.")
+        st.stop()
+
+    st.markdown(f"📦 **Pedido seleccionado:** `{pedido_sel}`")
+
     row = df[df["ID_Pedido"] == pedido_sel].iloc[0]
     gspread_row_idx = df[df["ID_Pedido"] == pedido_sel].index[0] + 2  # índice real en hoja
 
-    st.markdown("---")
-    st.markdown(f"📦 **Pedido seleccionado:** `{pedido_sel}`")
 
     # --- CAMPOS MODIFICABLES ---
     vendedores = [
