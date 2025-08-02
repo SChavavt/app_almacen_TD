@@ -491,11 +491,7 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
     with st.expander(f"{row['Estado']} - {folio} - {row['Cliente']}", expanded=st.session_state["expanded_pedidos"].get(row['ID_Pedido'], False)):  
         st.markdown("---")
         mod_texto = str(row.get("Modificacion_Surtido", "")).strip()
-        tiene_modificacion = mod_texto != "" and not mod_texto.endswith("[✔CONFIRMADO]")
-        if tiene_modificacion:
-            st.warning(f"⚠ ¡MODIFICACIÓN DE SURTIDO DETECTADA! Pedido #{orden}")
-
-
+        hay_modificacion = mod_texto != ""
 
         # --- Cambiar Fecha y Turno ---
         if row['Estado'] != "🟢 Completado" and row.get("Tipo_Envio") in ["📍 Pedido Local", "🚚 Pedido Foráneo"]:
@@ -751,9 +747,7 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
                             st.warning("⚠️ No se subió ningún archivo válido.")
 
 
-        surtido_files_in_s3 = []  # ✅ aseguramos su existencia
-
-        if tiene_modificacion:
+        if hay_modificacion:
             if str(row['Modificacion_Surtido']).strip().endswith('[✔CONFIRMADO]'):
                 st.info(f"🟡 Modificación de Surtido:\n{row['Modificacion_Surtido']}")
             else:
