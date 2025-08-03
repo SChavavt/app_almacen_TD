@@ -747,26 +747,30 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
                             st.warning("⚠️ No se subió ningún archivo válido.")
 
 
-        if hay_modificacion:
-            if str(row['Modificacion_Surtido']).strip().endswith('[✔CONFIRMADO]'):
-                st.info(f"🟡 Modificación de Surtido:\n{row['Modificacion_Surtido']}")
+        refact_tipo = str(row.get("Refacturacion_Tipo", "")).strip()
+        refact_subtipo = str(row.get("Refacturacion_Subtipo", "")).strip()
+
+        if hay_modificacion and refact_tipo != "Datos Fiscales":
+            # Mostrar tipo y subtipo si es por Material
+            if refact_tipo == "Material":
+                st.info(f"🔁 Refacturación por Material\n\n📌 Subtipo: **{refact_subtipo}**")
+
+            if mod_texto.endswith('[✔CONFIRMADO]'):
+                st.info(f"🟡 Modificación de Surtido:\n{mod_texto}")
             else:
-                st.warning(f"🟡 Modificación de Surtido:\n{row['Modificacion_Surtido']}")
-                # ✅ Botón para confirmar modificación
+                st.warning(f"🟡 Modificación de Surtido:\n{mod_texto}")
                 if st.button("✅ Confirmar Cambios de Surtido", key=f"confirm_mod_{row['ID_Pedido']}"):
                     st.session_state["expanded_pedidos"][row['ID_Pedido']] = True
-                    st.session_state["scroll_to_pedido_id"] = row["ID_Pedido"]  # ✅ Recordar para scroll
+                    st.session_state["scroll_to_pedido_id"] = row["ID_Pedido"]
+                    nuevo_texto = mod_texto + " [✔CONFIRMADO]"
+                    success = update_gsheet_cell(worksheet, headers, gsheet_row_index, "Modificacion_Surtido", nuevo_texto)
+                    if success:
+                        st.success("✅ Cambios de surtido confirmados.")
+                        st.cache_data.clear()
+                        st.rerun()
+                    else:
+                        st.error("❌ No se pudo confirmar la modificación.")
 
-                    texto_actual = str(row['Modificacion_Surtido']).strip()
-                    if not texto_actual.endswith('[✔CONFIRMADO]'):
-                        nuevo_texto = texto_actual + " [✔CONFIRMADO]"
-                        success = update_gsheet_cell(worksheet, headers, gsheet_row_index, "Modificacion_Surtido", nuevo_texto)
-                        if success:
-                            st.success("✅ Cambios de surtido confirmados.")
-                            st.cache_data.clear()
-                            st.rerun()  # ✅ Aplicar scroll automático al volver
-                        else:
-                            st.error("❌ No se pudo confirmar la modificación.")
 
                
 
