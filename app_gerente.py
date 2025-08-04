@@ -301,6 +301,11 @@ with tabs[1]:
 
             if len(coincidencias) == 1:
                 pedido_sel = coincidencias[0]["ID_Pedido"]
+                row = coincidencias[0]
+                st.markdown(
+                    f"👤 {row['Cliente']} – 🔍 {row['Estado']} – 🧑‍💼 {row['Vendedor_Registro']} – 🕒 {row['Hora_Registro'].strftime('%d/%m %H:%M')}"
+                )
+
             else:
                 opciones = [
                     f"👤 {r['Cliente']} – 🔍 {r['Estado']} – 🧑‍💼 {r['Vendedor_Registro']} – 🕒 {r['Hora_Registro'].strftime('%d/%m %H:%M')}"
