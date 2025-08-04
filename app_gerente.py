@@ -314,6 +314,19 @@ with tabs[1]:
                     if r["Cliente"].strip() == cliente_seleccionado
                 )
 
+    else:
+        ultimos_10 = df.head(10)
+        st.markdown("### 🕒 Últimos 10 Pedidos Registrados")
+        ultimos_10["display"] = ultimos_10.apply(
+            lambda row: f"👤 {row['Cliente']} – 🔍 {row['Estado']} – 🧑‍💼 {row['Vendedor_Registro']} – 🕒 {row['Hora_Registro'].strftime('%d/%m %H:%M')}",
+            axis=1
+        )
+        pedido_rapido_label = st.selectbox(
+            "⬇️ Selecciona uno de los pedidos recientes:",
+            ultimos_10["display"].tolist()
+        )
+        pedido_sel = ultimos_10[ultimos_10["display"] == pedido_rapido_label]["ID_Pedido"].values[0]
+
 
     # --- Cargar datos del pedido seleccionado ---
     st.markdown("---")
