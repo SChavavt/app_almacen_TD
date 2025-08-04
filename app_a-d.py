@@ -91,17 +91,20 @@ def get_gspread_client(_credentials_json_dict):
 
     try:
         _ = client.open_by_key(GOOGLE_SHEET_ID)
-    except gspread.exceptions.APIError:
-        # Token expirado o inválido → limpiar y regenerar
-        st.cache_resource.clear()
-        st.warning("🔁 Token expirado. Reintentando autenticación...")
 
-        creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
-        client = gspread.authorize(creds)
-        _ = client.open_by_key(GOOGLE_SHEET_ID)
+    except gspread.exceptions.APIError as e:
+        if "ACCESS_TOKEN_EXPIRED" in str(e) or "UNAUTHENTICATED" in str(e):
+            st.cache_resource.clear()
+            st.warning("🔁 Token expirado. Reintentando autenticación con Google Sheets...")
+
+            creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
+            client = gspread.authorize(creds)
+            _ = client.open_by_key(GOOGLE_SHEET_ID)
+        else:
+            # No es error de autenticación → no regenerar
+            raise e
 
     return client
-
 
 def get_s3_client():
     """
