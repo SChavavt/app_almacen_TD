@@ -403,6 +403,7 @@ def ordenar_pedidos_custom(df_pedidos_filtrados):
     def get_sort_key(row):
         mod_texto = str(row.get("Modificacion_Surtido", "")).strip()
         tiene_modificacion_sin_confirmar = mod_texto and not mod_texto.endswith("[✔CONFIRMADO]")
+        
 
         if tiene_modificacion_sin_confirmar:
             return (0, pd.Timestamp.min)  # Arriba del todo si no está confirmada
@@ -492,6 +493,9 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
         st.markdown("---")
         mod_texto = str(row.get("Modificacion_Surtido", "")).strip()
         hay_modificacion = mod_texto != ""
+        if hay_modificacion and str(row.get("Refacturacion_Tipo", "")).strip() != "Datos Fiscales":
+            st.warning(f"⚠ ¡MODIFICACIÓN DE SURTIDO DETECTADA! Pedido #{orden}")
+
 
         # --- Cambiar Fecha y Turno ---
         if row['Estado'] != "🟢 Completado" and row.get("Tipo_Envio") in ["📍 Pedido Local", "🚚 Pedido Foráneo"]:
@@ -877,8 +881,10 @@ if not df_main.empty:
     mod_surtido_df = df_main[
         (df_main['Modificacion_Surtido'].astype(str).str.strip() != '') &
         (~df_main['Modificacion_Surtido'].astype(str).str.endswith('[✔CONFIRMADO]')) &
-        (df_main['Estado'] != '🟢 Completado')
+        (df_main['Estado'] != '🟢 Completado') &
+        (df_main['Refacturacion_Tipo'].fillna("").str.strip() != "Datos Fiscales")
     ]
+
 
     mod_surtido_count = len(mod_surtido_df)
 
