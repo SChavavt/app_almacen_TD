@@ -402,12 +402,7 @@ def ordenar_pedidos_custom(df_pedidos_filtrados):
 
     def get_sort_key(row):
         mod_texto = str(row.get("Modificacion_Surtido", "")).strip()
-        refact_tipo = str(row.get("Refacturacion_Tipo", "")).strip()
-        tiene_modificacion_sin_confirmar = (
-            mod_texto and
-            not mod_texto.endswith("[✔CONFIRMADO]") and
-            refact_tipo != "Datos Fiscales"
-)
+        tiene_modificacion_sin_confirmar = mod_texto and not mod_texto.endswith("[✔CONFIRMADO]")
 
         if tiene_modificacion_sin_confirmar:
             return (0, pd.Timestamp.min)  # Arriba del todo si no está confirmada
@@ -497,8 +492,7 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
         st.markdown("---")
         mod_texto = str(row.get("Modificacion_Surtido", "")).strip()
         hay_modificacion = mod_texto != ""
-        if hay_modificacion and str(row.get("Refacturacion_Tipo", "")).strip() != "Datos Fiscales":
-            st.warning(f"⚠ ¡MODIFICACIÓN DE SURTIDO DETECTADA! Pedido #{orden}")
+        es_datos_fiscales = str(row.get("Refacturacion_Tipo", "")).strip() == "Datos Fiscales"
 
 
         # --- Cambiar Fecha y Turno ---
@@ -755,40 +749,51 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
                             st.warning("⚠️ No se subió ningún archivo válido.")
 
 
-        surtido_files_in_s3 = []  # ✅ aseguramos su existencia
+        refact_tipo = str(row.get("Refacturacion_Tipo", "")).strip()
+        refact_subtipo = str(row.get("Refacturacion_Subtipo", "")).strip()
 
-        if hay_modificacion and str(row.get("Refacturacion_Tipo", "")).strip() != "Datos Fiscales":
-            if str(row['Modificacion_Surtido']).strip().endswith('[✔CONFIRMADO]'):
-                st.info(f"🟡 Modificación de Surtido:\n{row['Modificacion_Surtido']}")
-            else:
-                st.warning(f"🟡 Modificación de Surtido:\n{row['Modificacion_Surtido']}")
-                # ✅ Botón para confirmar modificación
-                if st.button("✅ Confirmar Cambios de Surtido", key=f"confirm_mod_{row['ID_Pedido']}"):
-                    st.session_state["expanded_pedidos"][row['ID_Pedido']] = True
-                    st.session_state["scroll_to_pedido_id"] = row["ID_Pedido"]  # ✅ Recordar para scroll
-
-                    texto_actual = str(row['Modificacion_Surtido']).strip()
-                    if not texto_actual.endswith('[✔CONFIRMADO]'):
-                        nuevo_texto = texto_actual + " [✔CONFIRMADO]"
+        if hay_modificacion:
+            # 🟡 Si NO es refacturación por Datos Fiscales
+            if refact_tipo != "Datos Fiscales":
+                if mod_texto.endswith('[✔CONFIRMADO]'):
+                    st.info(f"🟡 Modificación de Surtido:\n{mod_texto}")
+                else:
+                    st.warning(f"🟡 Modificación de Surtido:\n{mod_texto}")
+                    if st.button("✅ Confirmar Cambios de Surtido", key=f"confirm_mod_{row['ID_Pedido']}"):
+                        st.session_state["expanded_pedidos"][row['ID_Pedido']] = True
+                        st.session_state["scroll_to_pedido_id"] = row["ID_Pedido"]
+                        nuevo_texto = mod_texto + " [✔CONFIRMADO]"
                         success = update_gsheet_cell(worksheet, headers, gsheet_row_index, "Modificacion_Surtido", nuevo_texto)
                         if success:
                             st.success("✅ Cambios de surtido confirmados.")
                             st.cache_data.clear()
-                            st.rerun()  # ✅ Aplicar scroll automático al volver
+                            st.rerun()
                         else:
                             st.error("❌ No se pudo confirmar la modificación.")
+                
+                # Mostrar info adicional si es refacturación por material
+                if refact_tipo == "Material":
+                    st.markdown("#### 🔁 Refacturación por Material")
+                    st.info(f"📌 Tipo: **{refact_tipo}**  \n🔧 Subtipo: **{refact_subtipo}**")
 
-               
+            # ℹ️ Si es refacturación por Datos Fiscales
+            elif refact_tipo == "Datos Fiscales":
+                st.info("ℹ️ Esta modificación fue marcada como **Datos Fiscales**. Se muestra como referencia pero no requiere confirmación.")
+                if mod_texto:
+                    st.info(f"✉️ Modificación (Datos Fiscales):\n{mod_texto}")
 
+            # Archivos mencionados en el texto
             mod_surtido_archivos_mencionados_raw = []
-            for linea in str(row['Modificacion_Surtido']).split('\n'):
+            for linea in mod_texto.split('\n'):
                 match = re.search(r'\(Adjunto: (.+?)\)', linea)
                 if match:
                     mod_surtido_archivos_mencionados_raw.extend([f.strip() for f in match.group(1).split(',')])
 
-            if pedido_folder_prefix is None: # Ensure the prefix has been found
+            # Buscar en S3
+            if pedido_folder_prefix is None:
                 pedido_folder_prefix = find_pedido_subfolder_prefix(s3_client_param, S3_ATTACHMENT_PREFIX, row['ID_Pedido'])
 
+            surtido_files_in_s3 = []
             if pedido_folder_prefix:
                 all_files_in_folder = get_files_in_s3_prefix(s3_client_param, pedido_folder_prefix)
                 surtido_files_in_s3 = [
@@ -798,18 +803,15 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
 
             all_surtido_related_files = []
             for f_name in mod_surtido_archivos_mencionados_raw:
-                # Ensure the file is not a complete URL in the text, just the name
-                cleaned_f_name = f_name.split('/')[-1] # Take only the file name
+                cleaned_f_name = f_name.split('/')[-1]
                 all_surtido_related_files.append({
                     'title': cleaned_f_name,
-                    'key': f"{pedido_folder_prefix}{cleaned_f_name}" # Build the complete S3 key
+                    'key': f"{pedido_folder_prefix}{cleaned_f_name}"
                 })
 
             for s_file in surtido_files_in_s3:
-                # Avoid duplicates if already added by mention in the text
                 if not any(s_file['title'] == existing_f['title'] for existing_f in all_surtido_related_files):
                     all_surtido_related_files.append(s_file)
-
 
             if all_surtido_related_files:
                 st.markdown("Adjuntos de Modificación (Surtido/Relacionados):")
@@ -823,14 +825,12 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
                         continue
 
                     try:
-                        # If the S3 key was not built correctly before, try to rebuild it here
                         if not object_key_to_download.startswith(S3_ATTACHMENT_PREFIX) and pedido_folder_prefix:
                             object_key_to_download = f"{pedido_folder_prefix}{file_name_to_display}"
-                        
-                        # Fallback if prefix not found or key doesn't seem valid
+
                         if not pedido_folder_prefix and not object_key_to_download.startswith(S3_BUCKET_NAME):
-                             st.warning(f"⚠️ No se pudo determinar la ruta S3 para: {file_name_to_display}")
-                             continue
+                            st.warning(f"⚠️ No se pudo determinar la ruta S3 para: {file_name_to_display}")
+                            continue
 
                         presigned_url = get_s3_file_download_url(s3_client_param, object_key_to_download)
                         if presigned_url and presigned_url != "#":
@@ -843,6 +843,7 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
                     archivos_ya_mostrados_para_mod.add(file_name_to_display)
             else:
                 st.info("No hay adjuntos específicos para esta modificación de surtido mencionados en el texto.")
+
 
     # --- Scroll automático al pedido impreso (si corresponde) ---
     if st.session_state.get("scroll_to_pedido_id") == row["ID_Pedido"]:
@@ -885,10 +886,8 @@ if not df_main.empty:
     mod_surtido_df = df_main[
         (df_main['Modificacion_Surtido'].astype(str).str.strip() != '') &
         (~df_main['Modificacion_Surtido'].astype(str).str.endswith('[✔CONFIRMADO]')) &
-        (df_main['Estado'] != '🟢 Completado') &
-        (df_main['Refacturacion_Tipo'].fillna("").str.strip() != "Datos Fiscales")
+        (df_main['Estado'] != '🟢 Completado')
     ]
-
 
     mod_surtido_count = len(mod_surtido_df)
 
