@@ -892,8 +892,10 @@ if not df_main.empty:
     mod_surtido_df = df_main[
         (df_main['Modificacion_Surtido'].astype(str).str.strip() != '') &
         (~df_main['Modificacion_Surtido'].astype(str).str.endswith('[✔CONFIRMADO]')) &
-        (df_main['Estado'] != '🟢 Completado')
+        (df_main['Estado'] != '🟢 Completado') &
+        (df_main['Refacturacion_Tipo'].fillna("").str.strip() != "Datos Fiscales")
     ]
+
 
     mod_surtido_count = len(mod_surtido_df)
 
