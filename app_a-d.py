@@ -402,8 +402,12 @@ def ordenar_pedidos_custom(df_pedidos_filtrados):
 
     def get_sort_key(row):
         mod_texto = str(row.get("Modificacion_Surtido", "")).strip()
-        tiene_modificacion_sin_confirmar = mod_texto and not mod_texto.endswith("[✔CONFIRMADO]")
-        
+        refact_tipo = str(row.get("Refacturacion_Tipo", "")).strip()
+        tiene_modificacion_sin_confirmar = (
+            mod_texto and
+            not mod_texto.endswith("[✔CONFIRMADO]") and
+            refact_tipo != "Datos Fiscales"
+)
 
         if tiene_modificacion_sin_confirmar:
             return (0, pd.Timestamp.min)  # Arriba del todo si no está confirmada
