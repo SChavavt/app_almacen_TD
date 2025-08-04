@@ -293,30 +293,27 @@ with tabs[1]:
                 if cliente_normalizado in cliente_row_normalizado:
                     coincidencias.append(row_)
 
-            if not coincidencias:
-                st.warning("⚠️ No se encontraron pedidos para ese cliente.")
-                st.stop()
-            elif len(coincidencias) == 1:
+        if not coincidencias:
+            st.warning("⚠️ No se encontraron pedidos para ese cliente.")
+            st.stop()
+        else:
+            st.success(f"✅ Se encontraron {len(coincidencias)} coincidencia(s) para este cliente.")
+
+            if len(coincidencias) == 1:
                 pedido_sel = coincidencias[0]["ID_Pedido"]
             else:
                 opciones = [
-                    f"{r['ID_Pedido']} – {r['Cliente']} – {r['Estado']} – {r['Vendedor_Registro']} – {r['Hora_Registro'].strftime('%d/%m %H:%M')}"
+                    f"👤 {r['Cliente']} – 🔍 {r['Estado']} – 🧑‍💼 {r['Vendedor_Registro']} – 🕒 {r['Hora_Registro'].strftime('%d/%m %H:%M')}"
                     for r in coincidencias
                 ]
                 seleccion = st.selectbox("👥 Se encontraron múltiples pedidos, selecciona uno:", opciones)
-                pedido_sel = seleccion.split(" – ")[0]
-    else:
-        ultimos_10 = df.head(10)
-        st.markdown("### 🕒 Últimos 10 Pedidos Registrados")
-        ultimos_10["display"] = ultimos_10.apply(
-            lambda row: f"👤 {row['Cliente']} – 🔍 {row['Estado']} – 🧑‍💼 {row['Vendedor_Registro']} – 🕒 {row['Hora_Registro'].strftime('%d/%m %H:%M')}",
-            axis=1
-        )
-        pedido_rapido_label = st.selectbox(
-            "⬇️ Selecciona uno de los pedidos recientes:",
-            ultimos_10["display"].tolist()
-        )
-        pedido_sel = ultimos_10[ultimos_10["display"] == pedido_rapido_label]["ID_Pedido"].values[0]
+                cliente_seleccionado = seleccion.split(" – ")[0].replace("👤 ", "").strip()
+                pedido_sel = next(
+                    r["ID_Pedido"]
+                    for r in coincidencias
+                    if r["Cliente"].strip() == cliente_seleccionado
+                )
+
 
     # --- Cargar datos del pedido seleccionado ---
     st.markdown("---")
