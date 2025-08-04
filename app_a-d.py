@@ -749,7 +749,7 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
 
         surtido_files_in_s3 = []  # ✅ aseguramos su existencia
 
-        if hay_modificacion:
+        if hay_modificacion and str(row.get("Refacturacion_Tipo", "")).strip() != "Datos Fiscales":
             if str(row['Modificacion_Surtido']).strip().endswith('[✔CONFIRMADO]'):
                 st.info(f"🟡 Modificación de Surtido:\n{row['Modificacion_Surtido']}")
             else:
