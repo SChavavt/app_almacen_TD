@@ -187,20 +187,17 @@ def display_attachments(adjuntos_str, s3_client_instance):
 
 def display_dataframe_with_formatting(df_to_display):
     columnas_deseadas = ["Fecha_Entrega", "Cliente", "Vendedor_Registro", "Estado"]
-
     columnas_existentes = [col for col in columnas_deseadas if col in df_to_display.columns]
     if not columnas_existentes:
         st.info("No hay columnas relevantes para mostrar.")
         return
 
     df_vista = df_to_display[columnas_existentes].copy()
+
     if "Folio_Factura" in df_to_display.columns and "Cliente" in df_to_display.columns:
         df_vista["Cliente"] = df_to_display.apply(
             lambda row: f"📄 <b>{row['Folio_Factura']}</b><br>🤝 {row['Cliente']}", axis=1
         )
-
-
-
 
     df_vista = df_vista.rename(columns={
         "Fecha_Entrega": "Fecha Entrega",
@@ -212,7 +209,37 @@ def display_dataframe_with_formatting(df_to_display):
             lambda x: x.strftime("%d/%m") if pd.notna(x) else ""
         )
 
+    # --- Ajuste dinámico de tamaño según número de filas
+    total_filas = len(df_vista)
+    if total_filas <= 4:
+        font_size = "1.2rem"
+        row_height = "2.5rem"
+    elif total_filas <= 10:
+        font_size = "1.0rem"
+        row_height = "2.0rem"
+    else:
+        font_size = "0.85rem"
+        row_height = "1.5rem"
+
+    st.markdown(f"""
+        <style>
+        .dataframe td {{
+            white-space: unset !important;
+            word-break: break-word;
+            font-size: {font_size};
+            padding: 0.2rem 0.5rem;
+            height: {row_height};
+            vertical-align: top;
+        }}
+        .dataframe th {{
+            font-size: {font_size};
+            padding: 0.3rem 0.5rem;
+        }}
+        </style>
+    """, unsafe_allow_html=True)
+
     st.markdown(df_vista.to_html(escape=False, index=False), unsafe_allow_html=True)
+
 
 
 # --- Lógica principal ---
@@ -240,6 +267,8 @@ if not df_all_data.empty:
         ((df_display_data['Estado'] == '🟢 Completado') &
         (df_display_data['Completados_Limpiado'].astype(str).str.lower() != "sí"))
     ].copy()
+    df_display_data = df_display_data[df_display_data['Estado'].isin(["🟡 Pendiente", "🔵 En Proceso", "🔴 Demorado", "🛠 Modificación", "🟢 Completado"])]
+
     # --- Contador de estados (corrigiendo Completados limpiados) ---
     completados_visibles = df_all_data[
         (df_all_data['Estado'] == '🟢 Completado') &
@@ -250,8 +279,10 @@ if not df_all_data.empty:
         '🟡 Pendiente': (df_all_data['Estado'] == '🟡 Pendiente').sum(),
         '🔵 En Proceso': (df_all_data['Estado'] == '🔵 En Proceso').sum(),
         '🔴 Demorado': (df_all_data['Estado'] == '🔴 Demorado').sum(),
+        '🛠 Modificación': (df_all_data['Estado'] == '🛠 Modificación').sum(),
         '🟢 Completado': len(completados_visibles)
     }
+
 
 
     # 🔄 NUEVA agrupación por tipo de envío (turno o foráneo) y fecha de entrega
@@ -270,11 +301,24 @@ if not df_all_data.empty:
     # --- Mostrar resumen de estados ---
     st.markdown("### 📊 Resumen General de Pedidos")
 
-    col1, col2, col3, col4 = st.columns(4)
-    col1.metric("🟡 Pendientes", estado_counts.get('🟡 Pendiente', 0))
-    col2.metric("🔵 En Proceso", estado_counts.get('🔵 En Proceso', 0))
-    col3.metric("🔴 Demorados", estado_counts.get('🔴 Demorado', 0))
-    col4.metric("🟢 Completados", estado_counts.get('🟢 Completado', 0))
+    estados_a_mostrar = []
+
+    # Solo agrega los contadores si hay al menos un pedido en ese estado
+    for estado, icono in [
+        ('🟡 Pendiente', "🟡 Pendientes"),
+        ('🔵 En Proceso', "🔵 En Proceso"),
+        ('🔴 Demorado', "🔴 Demorados"),
+        ('🛠 Modificación', "🛠 Modificación"),
+        ('🟢 Completado', "🟢 Completados")
+    ]:
+        count = estado_counts.get(estado, 0)
+        if count > 0:
+            estados_a_mostrar.append((icono, count))
+
+    # Mostrar solo las columnas necesarias
+    cols = st.columns(len(estados_a_mostrar))
+    for col, (nombre_estado, cantidad) in zip(cols, estados_a_mostrar):
+        col.metric(nombre_estado, cantidad)
 
 
     # 🔽 Mostrar los grupos
