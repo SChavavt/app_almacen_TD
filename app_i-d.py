@@ -185,7 +185,7 @@ def display_attachments(adjuntos_str, s3_client_instance):
     except Exception as e:
         return f"Error adjuntos: {e}"
 
-def display_dataframe_with_formatting(df_to_display):
+def display_dataframe_with_formatting(df_to_display, num_columnas_actuales=1):
     columnas_deseadas = ["Fecha_Entrega", "Cliente", "Vendedor_Registro", "Estado"]
     columnas_existentes = [col for col in columnas_deseadas if col in df_to_display.columns]
     if not columnas_existentes:
@@ -209,9 +209,12 @@ def display_dataframe_with_formatting(df_to_display):
             lambda x: x.strftime("%d/%m") if pd.notna(x) else ""
         )
 
-    # --- Ajuste dinámico de tamaño según número de filas
+    # 🔁 Ajuste inteligente: considera columnas (grupos simultáneos) y filas
     total_filas = len(df_vista)
-    if total_filas <= 4:
+    if num_columnas_actuales > 2:
+        font_size = "0.85rem"
+        row_height = "1.5rem"
+    elif total_filas <= 4:
         font_size = "1.2rem"
         row_height = "2.5rem"
     elif total_filas <= 10:
@@ -239,6 +242,7 @@ def display_dataframe_with_formatting(df_to_display):
     """, unsafe_allow_html=True)
 
     st.markdown(df_vista.to_html(escape=False, index=False), unsafe_allow_html=True)
+
 
 
 
@@ -333,4 +337,4 @@ if not df_all_data.empty:
                     if 'Hora_Registro' in df_grupo.columns:
                         df_grupo = df_grupo.sort_values(by='Hora_Registro', ascending=False).reset_index(drop=True)
 
-                    display_dataframe_with_formatting(df_grupo)
+                    display_dataframe_with_formatting(df_grupo, num_columnas_actuales=len(row))
