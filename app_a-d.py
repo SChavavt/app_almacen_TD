@@ -493,8 +493,6 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
         mod_texto = str(row.get("Modificacion_Surtido", "")).strip()
         hay_modificacion = mod_texto != ""
 
-
-
         # --- Cambiar Fecha y Turno ---
         if row['Estado'] != "🟢 Completado" and row.get("Tipo_Envio") in ["📍 Pedido Local", "🚚 Pedido Foráneo"]:
             st.session_state["expanded_pedidos"][row['ID_Pedido']] = True
@@ -751,7 +749,7 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
 
         surtido_files_in_s3 = []  # ✅ aseguramos su existencia
 
-        if hay_modificacion and str(row.get("Refacturacion_Tipo", "")).strip() != "Datos Fiscales":
+        if hay_modificacion:
             if str(row['Modificacion_Surtido']).strip().endswith('[✔CONFIRMADO]'):
                 st.info(f"🟡 Modificación de Surtido:\n{row['Modificacion_Surtido']}")
             else:
