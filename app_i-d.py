@@ -237,14 +237,14 @@ def display_dataframe_with_formatting(df_to_display, num_columnas_actuales=1):
         .dataframe td {
             white-space: normal !important;
             overflow-wrap: break-word;
-            font-size: 0.7rem;  /* ✅ Aumentado ligeramente */
+            font-size: 0.75rem;  /* ✅ Aumentado ligeramente */
             padding: 0.1rem 0.2rem;
             height: 1rem;
             line-height: 1.2rem;
             vertical-align: top;
         }
         .dataframe th {
-            font-size: 0.7rem;  /* ✅ También aumentamos encabezados */
+            font-size: 0.75rem;  /* ✅ También aumentamos encabezados */
             padding: 0.1rem 0.2rem;
             text-align: left;
         }
