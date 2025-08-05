@@ -17,10 +17,11 @@ if st.button("🔄 Recargar pedidos ahora"):
 col_title, col_button = st.columns([0.7, 0.3])
 with col_title:
     st.markdown("""
-        <h1 style="color: white; font-size: 2.5rem; margin-bottom: 0rem;">
-            <span style="font-size: 3rem;">🏷️</span> Flujo de Pedidos en Tiempo Real
-        </h1>
+        <h2 style="color: white; font-size: 1.8rem; margin-bottom: 0rem;">
+            <span style="font-size: 2.2rem;">🏷️</span> Flujo de Pedidos en Tiempo Real
+        </h2>
     """, unsafe_allow_html=True)
+
 
 st.markdown("---")
 
@@ -297,7 +298,7 @@ if not df_all_data.empty:
             grupos_a_mostrar.append((f"{clave} ({len(df_grupo)})", df_grupo))
 
     # --- Mostrar resumen de estados ---
-    st.markdown("### 📊 Resumen General de Pedidos")
+    st.markdown("#### 📊 Resumen General de Pedidos")
 
     # Calcular total
     total_pedidos_estados = sum(estado_counts.values())
