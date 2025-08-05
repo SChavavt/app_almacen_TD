@@ -219,25 +219,25 @@ def display_dataframe_with_formatting(df_to_display, num_columnas_actuales=1):
         .dataframe {
             table-layout: fixed;
             width: 100%;
-            border-collapse: collapse;
         }
         .dataframe td {
             white-space: normal !important;
             overflow-wrap: break-word;
-            font-size: 0.7rem;           /* ligeramente más grande que antes */
-            padding: 0.15rem 0.3rem;     /* más espacio entre texto y borde */
-            height: 1.2rem;
-            line-height: 1.3rem;
+            font-size: 0.65rem;
+            padding: 0.1rem 0.2rem;
+            height: 1rem;
+            line-height: 1.1rem;
             vertical-align: top;
         }
         .dataframe th {
-            font-size: 0.72rem;          /* títulos más pequeños */
+            font-size: 0.65rem;
             padding: 0.1rem 0.2rem;
             text-align: left;
-            background-color: #111111;  /* opcional para fondo más oscuro */
         }
         </style>
     """, unsafe_allow_html=True)
+
+    st.markdown(df_vista.to_html(escape=False, index=False), unsafe_allow_html=True)
 
 
 # --- Lógica principal ---
