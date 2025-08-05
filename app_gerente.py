@@ -340,10 +340,12 @@ with tabs[1]:
         st.warning("⚠️ No se ha seleccionado ningún pedido válido.")
         st.stop()
 
-    st.markdown(f"📦 **Pedido seleccionado:** `{pedido_sel}`")
-
     row = df[df["ID_Pedido"] == pedido_sel].iloc[0]
     gspread_row_idx = df[df["ID_Pedido"] == pedido_sel].index[0] + 2  # índice real en hoja
+
+    st.markdown(
+        f"📦 **Cliente:** {row['Cliente']} &nbsp;&nbsp;&nbsp;&nbsp; 🧾 **Folio Factura:** {row.get('Folio_Factura', 'N/A')}"
+    )
 
 
     # --- CAMPOS MODIFICABLES ---
@@ -359,21 +361,23 @@ with tabs[1]:
         "NORA ALEJANDRA MARTINEZ MORENO",
         "PAULINA TREJO"
     ]
-    vendedor_actual = row.get("Vendedor_Registro", "")
-    indice_vendedor = vendedores.index(vendedor_actual) if vendedor_actual in vendedores else 0
+    vendedor_actual = row.get("Vendedor_Registro", "").strip()
+    st.markdown(f"🧑‍💼 **Vendedor actual:** {vendedor_actual}")
 
-    nuevo_vendedor = st.selectbox("🧑‍💼 Vendedor", vendedores, index=indice_vendedor)
+    vendedores_opciones = [v for v in vendedores if v != vendedor_actual] or [vendedor_actual]
+    nuevo_vendedor = st.selectbox("➡️ Cambiar a:", vendedores_opciones)
 
+    tipo_envio_actual = row["Tipo_Envio"].strip()
+    st.markdown(f"🚚 **Tipo de envío actual:** {tipo_envio_actual}")
 
-    tipo_envio_actual = row["Tipo_Envio"]
-    tipo_envio = st.selectbox("🚚 Tipo de Envío", ["📍 Pedido Local", "🚚 Pedido Foráneo"], index=0 if "Local" in tipo_envio_actual else 1)
+    opcion_contraria = "📍 Pedido Local" if "Foráneo" in tipo_envio_actual else "🚚 Pedido Foráneo"
+    tipo_envio = st.selectbox("➡️ Cambiar a:", [opcion_contraria])
 
-    turno_actual = row.get("Turno", "")
     if tipo_envio == "📍 Pedido Local":
-        nuevo_turno = st.selectbox("⏰ Turno", ["☀ Local Mañana", "🌙 Local Tarde", "🌵 Saltillo", "📦 Pasa a Bodega"], index=0 if turno_actual not in ["🌙 Local Tarde", "🌵 Saltillo", "📦 Pasa a Bodega"] else
-            ["☀ Local Mañana", "🌙 Local Tarde", "🌵 Saltillo", "📦 Pasa a Bodega"].index(turno_actual))
+        nuevo_turno = st.selectbox("⏰ Turno", ["☀ Local Mañana", "🌙 Local Tarde", "🌵 Saltillo", "📦 Pasa a Bodega"])
     else:
         nuevo_turno = ""
+
 
     completado = row.get("Completados_Limpiado", "")
     mostrar_en_app_i = st.checkbox("👁 Mostrar en app_i", value=(completado.strip().lower() == "sí"))
