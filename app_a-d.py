@@ -502,7 +502,6 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
         st.markdown("---")
         mod_texto = str(row.get("Modificacion_Surtido", "")).strip()
         hay_modificacion = mod_texto != ""
-        es_datos_fiscales = str(row.get("Refacturacion_Tipo", "")).strip() == "Datos Fiscales"
 
 
         # --- Cambiar Fecha y Turno ---
@@ -963,26 +962,33 @@ if not df_main.empty:
         '🟢 Completado': len(completados_visibles)
     }
 
+    # Calcular el total sumando todos los estados
+    total_pedidos_estados = sum(estado_counts.values())
 
-    # Mostrar solo contadores con al menos un pedido
+
+    # Mostrar siempre estas métricas, incluso si son cero
+    estados_fijos = ['🟡 Pendiente', '🔵 En Proceso', '🟢 Completado']
+    estados_condicionales = ['🔴 Demorado', '🛠 Modificación']
+
     estados_a_mostrar = []
-    for estado, etiqueta in [
-        ('🟡 Pendiente', "🟡 Pendientes"),
-        ('🔵 En Proceso', "🔵 En Proceso"),
-        ('🔴 Demorado', "🔴 Demorados"),
-        ('🛠 Modificación', "🛠 Modificación"),
-        ('🟢 Completado', "🟢 Completados")
-    ]:
+
+    for estado in estados_fijos:
+        etiqueta = estado + "s" if estado != "🟢 Completado" else "🟢 Completados"
+        estados_a_mostrar.append((etiqueta, estado_counts[estado]))
+
+    for estado in estados_condicionales:
         cantidad = estado_counts.get(estado, 0)
         if cantidad > 0:
+            etiqueta = estado + "s" if estado != "🛠 Modificación" else estado
             estados_a_mostrar.append((etiqueta, cantidad))
 
-    # Mostrar métricas adaptativas
-    if estados_a_mostrar:
-        cols = st.columns(len(estados_a_mostrar))
-        for col, (nombre_estado, cantidad) in zip(cols, estados_a_mostrar):
-            col.metric(nombre_estado, cantidad)
+    # Agregar métrica total
+    estados_a_mostrar.insert(0, ("📦 Total Pedidos", total_pedidos_estados))
 
+    # Mostrar métricas
+    cols = st.columns(len(estados_a_mostrar))
+    for col, (nombre_estado, cantidad) in zip(cols, estados_a_mostrar):
+        col.metric(nombre_estado, cantidad)
 
 
     # --- Implementación de Pestañas con st.tabs ---
