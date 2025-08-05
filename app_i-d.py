@@ -21,7 +21,20 @@ with col_title:
             <span style="font-size: 2.2rem;">🏷️</span> Flujo de Pedidos en Tiempo Real
         </h2>
     """, unsafe_allow_html=True)
-
+    st.markdown("""
+        <style>
+        /* 🔢 Ajuste compacto para métricas */
+        div[data-testid="metric-container"] {
+            padding: 0.1rem 0.5rem;
+        }
+        div[data-testid="metric-container"] > div {
+            font-size: 1.1rem !important;  /* número (ej: 13) */
+        }
+        div[data-testid="metric-container"] > label {
+            font-size: 0.85rem !important;  /* título (ej: Total Pedidos) */
+        }
+        </style>
+    """, unsafe_allow_html=True)
 
 st.markdown("---")
 
