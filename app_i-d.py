@@ -211,39 +211,29 @@ def display_dataframe_with_formatting(df_to_display, num_columnas_actuales=1):
         )
 
     # 🔁 Ajuste inteligente: considera columnas (grupos simultáneos) y filas
-    total_filas = len(df_vista)
-    if num_columnas_actuales > 2:
-        font_size = "0.85rem"
-        row_height = "1.5rem"
-    elif total_filas <= 4:
-        font_size = "1.2rem"
-        row_height = "2.5rem"
-    elif total_filas <= 10:
-        font_size = "1.0rem"
-        row_height = "2.0rem"
-    else:
-        font_size = "0.85rem"
-        row_height = "1.5rem"
+    # Ajuste inteligente: considera columnas (grupos simultáneos) y filas
+    # (row_height variable removed as it was unused)
 
-    st.markdown(f"""
+    st.markdown("""
         <style>
-        .dataframe {{
+        .dataframe {
             table-layout: fixed;
             width: 100%;
-        }}
-        .dataframe td {{
+        }
+        .dataframe td {
             white-space: normal !important;
-            word-break: break-word;
-            font-size: {font_size};
-            padding: 0.2rem 0.4rem;
-            height: {row_height};
+            overflow-wrap: break-word;
+            font-size: 0.65rem;
+            padding: 0.1rem 0.2rem;
+            height: 1rem;
+            line-height: 1.1rem;
             vertical-align: top;
-        }}
-        .dataframe th {{
-            font-size: {font_size};
-            padding: 0.2rem 0.4rem;
+        }
+        .dataframe th {
+            font-size: 0.65rem;
+            padding: 0.1rem 0.2rem;
             text-align: left;
-        }}
+        }
         </style>
     """, unsafe_allow_html=True)
 
