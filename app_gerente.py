@@ -343,6 +343,9 @@ with tabs[1]:
     row = df[df["ID_Pedido"] == pedido_sel].iloc[0]
     gspread_row_idx = df[df["ID_Pedido"] == pedido_sel].index[0] + 2  # índice real en hoja
 
+    # Definir la hoja de Google Sheets para modificación
+    hoja = gspread_client.open_by_key("1aWkSelodaz0nWfQx7FZAysGnIYGQFJxAN7RO3YgCiZY").worksheet("datos_pedidos")
+
     st.markdown(
         f"📦 **Cliente:** {row['Cliente']} &nbsp;&nbsp;&nbsp;&nbsp; 🧾 **Folio Factura:** {row.get('Folio_Factura', 'N/A')}"
     )
@@ -362,13 +365,21 @@ with tabs[1]:
         "PAULINA TREJO"
     ]
     vendedor_actual = row.get("Vendedor_Registro", "").strip()
-    st.markdown(f"🧑‍💼 **Vendedor actual:** {vendedor_actual}")
+
+    st.markdown("### 🧑‍💼 Cambio de Vendedor")
+    st.markdown(f"**Actual:** {vendedor_actual}")
 
     vendedores_opciones = [v for v in vendedores if v != vendedor_actual] or [vendedor_actual]
     nuevo_vendedor = st.selectbox("➡️ Cambiar a:", vendedores_opciones)
 
+    if st.button("💾 Guardar cambio de vendedor"):
+        hoja.update_cell(gspread_row_idx, df.columns.get_loc("Vendedor_Registro")+1, nuevo_vendedor)
+        st.success("🎈 Vendedor actualizado correctamente.")
+
+
     tipo_envio_actual = row["Tipo_Envio"].strip()
-    st.markdown(f"🚚 **Tipo de envío actual:** {tipo_envio_actual}")
+    st.markdown("### 🚚 Cambio de Tipo de Envío")
+    st.markdown(f"**Actual:** {tipo_envio_actual}")
 
     opcion_contraria = "📍 Pedido Local" if "Foráneo" in tipo_envio_actual else "🚚 Pedido Foráneo"
     tipo_envio = st.selectbox("➡️ Cambiar a:", [opcion_contraria])
@@ -378,24 +389,14 @@ with tabs[1]:
     else:
         nuevo_turno = ""
 
-
-    completado = row.get("Completados_Limpiado", "")
-    mostrar_en_app_i = st.checkbox("👁 Mostrar en app_i", value=(completado.strip().lower() == "sí"))
-
-    hoja = gspread_client.open_by_key("1aWkSelodaz0nWfQx7FZAysGnIYGQFJxAN7RO3YgCiZY").worksheet("datos_pedidos")
-
-    # --- Botón para cambiar vendedor ---
-    if st.button("💾 Guardar cambio de vendedor"):
-        hoja.update_cell(gspread_row_idx, df.columns.get_loc("Vendedor_Registro")+1, nuevo_vendedor)
-        st.success("🎈 Vendedor actualizado correctamente.")
-
-    # --- Botón para cambiar tipo de envío y turno ---
     if st.button("💾 Guardar cambio de tipo de envío"):
         hoja.update_cell(gspread_row_idx, df.columns.get_loc("Tipo_Envio")+1, tipo_envio)
         hoja.update_cell(gspread_row_idx, df.columns.get_loc("Turno")+1, nuevo_turno)
         st.success("📦 Tipo de envío y turno actualizados correctamente.")
 
-    # --- Botón para mostrar o no en app_i ---
+    completado = row.get("Completados_Limpiado", "")
+    st.markdown("### 👁 Visibilidad en Pantalla de Producción")
+    mostrar_en_app_i = st.checkbox("Mostrar en app_i", value=(completado.strip().lower() == "sí"))
     if st.button("💾 Guardar visibilidad en app_i"):
         hoja.update_cell(gspread_row_idx, df.columns.get_loc("Completados_Limpiado")+1, "sí" if mostrar_en_app_i else "")
         st.success("👁 Visibilidad en pantalla de producción actualizada.")
