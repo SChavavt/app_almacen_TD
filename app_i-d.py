@@ -226,24 +226,27 @@ def display_dataframe_with_formatting(df_to_display, num_columnas_actuales=1):
 
     st.markdown(f"""
         <style>
+        .dataframe {{
+            table-layout: fixed;
+            width: 100%;
+        }}
         .dataframe td {{
-            white-space: unset !important;
+            white-space: normal !important;
             word-break: break-word;
             font-size: {font_size};
-            padding: 0.2rem 0.5rem;
+            padding: 0.2rem 0.4rem;
             height: {row_height};
             vertical-align: top;
         }}
         .dataframe th {{
             font-size: {font_size};
-            padding: 0.3rem 0.5rem;
+            padding: 0.2rem 0.4rem;
+            text-align: left;
         }}
         </style>
     """, unsafe_allow_html=True)
 
     st.markdown(df_vista.to_html(escape=False, index=False), unsafe_allow_html=True)
-
-
 
 
 # --- Lógica principal ---
@@ -305,25 +308,32 @@ if not df_all_data.empty:
     # --- Mostrar resumen de estados ---
     st.markdown("### 📊 Resumen General de Pedidos")
 
+    # Calcular total
+    total_pedidos_estados = sum(estado_counts.values())
+
+    # Mostrar siempre estas métricas, incluso si son cero
+    estados_fijos = ['🟡 Pendiente', '🔵 En Proceso', '🟢 Completado']
+    estados_condicionales = ['🔴 Demorado', '🛠 Modificación']
+
     estados_a_mostrar = []
 
-    # Solo agrega los contadores si hay al menos un pedido en ese estado
-    for estado, icono in [
-        ('🟡 Pendiente', "🟡 Pendientes"),
-        ('🔵 En Proceso', "🔵 En Proceso"),
-        ('🔴 Demorado', "🔴 Demorados"),
-        ('🛠 Modificación', "🛠 Modificación"),
-        ('🟢 Completado', "🟢 Completados")
-    ]:
-        count = estado_counts.get(estado, 0)
-        if count > 0:
-            estados_a_mostrar.append((icono, count))
+    for estado in estados_fijos:
+        etiqueta = estado + "s" if estado != "🟢 Completado" else "🟢 Completados"
+        estados_a_mostrar.append((etiqueta, estado_counts[estado]))
 
-    # Mostrar solo las columnas necesarias
+    for estado in estados_condicionales:
+        cantidad = estado_counts.get(estado, 0)
+        if cantidad > 0:
+            etiqueta = estado + "s" if estado != "🛠 Modificación" else estado
+            estados_a_mostrar.append((etiqueta, cantidad))
+
+    # Agregar métrica total al inicio
+    estados_a_mostrar.insert(0, ("📦 Total Pedidos", total_pedidos_estados))
+
+    # Mostrar métricas
     cols = st.columns(len(estados_a_mostrar))
     for col, (nombre_estado, cantidad) in zip(cols, estados_a_mostrar):
         col.metric(nombre_estado, cantidad)
-
 
     # 🔽 Mostrar los grupos
     if grupos_a_mostrar:
