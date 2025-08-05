@@ -14,11 +14,23 @@ from pytz import timezone
 
 
 st.set_page_config(page_title="Recepción de Pedidos TD", layout="wide")
+# 🔁 Restaurar pestañas activas si venimos de una acción que modificó datos
+if "preserve_main_tab" in st.session_state:
+    st.session_state["active_main_tab_index"] = st.session_state.pop("preserve_main_tab", 0)
+    st.session_state["active_subtab_local_index"] = st.session_state.pop("preserve_local_tab", 0)
+    st.session_state["active_date_tab_m_index"] = st.session_state.pop("preserve_date_tab_m", 0)
+    st.session_state["active_date_tab_t_index"] = st.session_state.pop("preserve_date_tab_t", 0)
+
 
 # --- Recarga segura sin reiniciar pestañas (soft reload)
-if st.session_state.get("reload_pedidos_soft"):
-    st.session_state["reload_pedidos_soft"] = False
-    st.rerun()
+col_recarga, col_reintento = st.columns([1, 1])
+
+with col_recarga:
+    if st.button("🔄 Recargar Pedidos (seguro)", help="Actualiza datos sin reiniciar pestañas ni scroll"):
+        st.session_state["reload_pedidos_soft"] = True
+        st.cache_data.clear()
+        st.cache_resource.clear()
+
 
 st.title("📬 Bandeja de Pedidos TD")
 
@@ -612,6 +624,12 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
 
 
         # ✅ PRINT and UPDATE TO "IN PROCESS"
+        # 🧠 Preservar pestañas activas para evitar cambio visual
+        st.session_state["preserve_main_tab"] = st.session_state.get("active_main_tab_index", 0)
+        st.session_state["preserve_local_tab"] = st.session_state.get("active_subtab_local_index", 0)
+        st.session_state["preserve_date_tab_m"] = st.session_state.get("active_date_tab_m_index", 0)
+        st.session_state["preserve_date_tab_t"] = st.session_state.get("active_date_tab_t_index", 0)
+
         if col_print_btn.button("🖨 Imprimir", key=f"print_{row['ID_Pedido']}_{origen_tab}"):
             # ✅ Expandir el pedido y sus adjuntos
             st.session_state["expanded_pedidos"][row['ID_Pedido']] = True
@@ -727,7 +745,14 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
                     fijar_estado_pestanas_guia(row, origen_tab)
                     st.session_state["expanded_pedidos"][row['ID_Pedido']] = True  # ✅ se mantiene expandido
 
+                    # 🧠 Preservar pestañas activas antes de subir guía
+                    st.session_state["preserve_main_tab"] = st.session_state.get("active_main_tab_index", 0)
+                    st.session_state["preserve_local_tab"] = st.session_state.get("active_subtab_local_index", 0)
+                    st.session_state["preserve_date_tab_m"] = st.session_state.get("active_date_tab_m_index", 0)
+                    st.session_state["preserve_date_tab_t"] = st.session_state.get("active_date_tab_t_index", 0)
+
                     if st.button("📤 Subir Guía", key=f"btn_subir_guia_{row['ID_Pedido']}"):
+
                         st.session_state["expanded_pedidos"][row['ID_Pedido']] = True
                         st.session_state["expanded_attachments"][row['ID_Pedido']] = True
                         uploaded_urls = []
