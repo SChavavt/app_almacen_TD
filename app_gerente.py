@@ -382,10 +382,20 @@ with tabs[1]:
     completado = row.get("Completados_Limpiado", "")
     mostrar_en_app_i = st.checkbox("👁 Mostrar en app_i", value=(completado.strip().lower() == "sí"))
 
-    if st.button("✅ Aplicar Cambios"):
-        hoja = gspread_client.open_by_key("1aWkSelodaz0nWfQx7FZAysGnIYGQFJxAN7RO3YgCiZY").worksheet("datos_pedidos")
+    hoja = gspread_client.open_by_key("1aWkSelodaz0nWfQx7FZAysGnIYGQFJxAN7RO3YgCiZY").worksheet("datos_pedidos")
+
+    # --- Botón para cambiar vendedor ---
+    if st.button("💾 Guardar cambio de vendedor"):
         hoja.update_cell(gspread_row_idx, df.columns.get_loc("Vendedor_Registro")+1, nuevo_vendedor)
+        st.success("🎈 Vendedor actualizado correctamente.")
+
+    # --- Botón para cambiar tipo de envío y turno ---
+    if st.button("💾 Guardar cambio de tipo de envío"):
         hoja.update_cell(gspread_row_idx, df.columns.get_loc("Tipo_Envio")+1, tipo_envio)
         hoja.update_cell(gspread_row_idx, df.columns.get_loc("Turno")+1, nuevo_turno)
+        st.success("📦 Tipo de envío y turno actualizados correctamente.")
+
+    # --- Botón para mostrar o no en app_i ---
+    if st.button("💾 Guardar visibilidad en app_i"):
         hoja.update_cell(gspread_row_idx, df.columns.get_loc("Completados_Limpiado")+1, "sí" if mostrar_en_app_i else "")
-        st.success("✅ Cambios aplicados correctamente.")
+        st.success("👁 Visibilidad en pantalla de producción actualizada.")
