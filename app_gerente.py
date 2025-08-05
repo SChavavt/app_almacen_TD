@@ -375,7 +375,7 @@ with tabs[1]:
     if st.button("🧑‍💼 Guardar cambio de vendedor"):
         hoja.update_cell(gspread_row_idx, df.columns.get_loc("Vendedor_Registro")+1, nuevo_vendedor)
         st.success("🎈 Vendedor actualizado correctamente.")
-
+        st.experimental_rerun()  # 🔁 Recarga la app inmediatamente
 
     tipo_envio_actual = row["Tipo_Envio"].strip()
     st.markdown("### 🚚 Cambio de Tipo de Envío")
@@ -393,6 +393,7 @@ with tabs[1]:
         hoja.update_cell(gspread_row_idx, df.columns.get_loc("Tipo_Envio")+1, tipo_envio)
         hoja.update_cell(gspread_row_idx, df.columns.get_loc("Turno")+1, nuevo_turno)
         st.success("📦 Tipo de envío y turno actualizados correctamente.")
+        st.experimental_rerun()  # 🔁 Recarga la app inmediatamente
 
     completado = row.get("Completados_Limpiado", "")
     st.markdown("### 👁 Visibilidad en Pantalla de Producción")
@@ -405,4 +406,5 @@ with tabs[1]:
     if st.button("👁 Guardar visibilidad en Panel"):
         hoja.update_cell(gspread_row_idx, df.columns.get_loc("Completados_Limpiado")+1, nuevo_valor_completado)
         st.success("👁 Visibilidad en pantalla de producción actualizada.")
+        st.experimental_rerun()  # 🔁 Recarga la app inmediatamente
 
