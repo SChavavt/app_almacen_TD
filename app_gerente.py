@@ -381,7 +381,7 @@ with tabs[1]:
         hoja.update_cell(gspread_row_idx, df.columns.get_loc("Vendedor_Registro")+1, nuevo_vendedor)
         st.success("🎈 Vendedor actualizado correctamente.")
         st.session_state["pedido_modificado"] = pedido_sel
-        st.experimental_rerun()  # 🔁 Recarga la app inmediatamente
+        st.rerun()  # ✅ reemplazo seguro
 
     tipo_envio_actual = row["Tipo_Envio"].strip()
     st.markdown("### 🚚 Cambio de Tipo de Envío")
@@ -400,7 +400,7 @@ with tabs[1]:
         hoja.update_cell(gspread_row_idx, df.columns.get_loc("Turno")+1, nuevo_turno)
         st.success("📦 Tipo de envío y turno actualizados correctamente.")
         st.session_state["pedido_modificado"] = pedido_sel
-        st.experimental_rerun()  # 🔁 Recarga la app inmediatamente
+        st.rerun()  # ✅ reemplazo seguro
 
     completado = row.get("Completados_Limpiado", "")
     st.markdown("### 👁 Visibilidad en Pantalla de Producción")
@@ -414,5 +414,5 @@ with tabs[1]:
         hoja.update_cell(gspread_row_idx, df.columns.get_loc("Completados_Limpiado")+1, nuevo_valor_completado)
         st.success("👁 Visibilidad en pantalla de producción actualizada.")
         st.session_state["pedido_modificado"] = pedido_sel
-        st.experimental_rerun()  # 🔁 Recarga la app inmediatamente
+        st.rerun()  # ✅ reemplazo seguro
 
