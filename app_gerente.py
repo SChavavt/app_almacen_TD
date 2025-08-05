@@ -396,7 +396,13 @@ with tabs[1]:
 
     completado = row.get("Completados_Limpiado", "")
     st.markdown("### 👁 Visibilidad en Pantalla de Producción")
-    mostrar_en_app_i = st.checkbox("Mostrar en app_i", value=(completado.strip().lower() == "sí"))
+    opciones_visibilidad = {"Sí, mostrar en app_i": "", "No, ocultar de app_i": "sí"}
+    valor_actual = completado.strip().lower()
+    valor_preseleccionado = "No, ocultar de app_i" if valor_actual == "sí" else "Sí, mostrar en app_i"
+    seleccion = st.selectbox("¿Mostrar este pedido en la app de producción?", list(opciones_visibilidad.keys()), index=list(opciones_visibilidad.keys()).index(valor_preseleccionado))
+    nuevo_valor_completado = opciones_visibilidad[seleccion]
+
     if st.button("💾 Guardar visibilidad en app_i"):
-        hoja.update_cell(gspread_row_idx, df.columns.get_loc("Completados_Limpiado")+1, "sí" if mostrar_en_app_i else "")
+        hoja.update_cell(gspread_row_idx, df.columns.get_loc("Completados_Limpiado")+1, nuevo_valor_completado)
         st.success("👁 Visibilidad en pantalla de producción actualizada.")
+
