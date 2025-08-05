@@ -372,7 +372,7 @@ with tabs[1]:
     vendedores_opciones = [v for v in vendedores if v != vendedor_actual] or [vendedor_actual]
     nuevo_vendedor = st.selectbox("➡️ Cambiar a:", vendedores_opciones)
 
-    if st.button("💾 Guardar cambio de vendedor"):
+    if st.button("🧑‍💼 Guardar cambio de vendedor"):
         hoja.update_cell(gspread_row_idx, df.columns.get_loc("Vendedor_Registro")+1, nuevo_vendedor)
         st.success("🎈 Vendedor actualizado correctamente.")
 
@@ -389,20 +389,20 @@ with tabs[1]:
     else:
         nuevo_turno = ""
 
-    if st.button("💾 Guardar cambio de tipo de envío"):
+    if st.button("📦 Guardar cambio de tipo de envío"):
         hoja.update_cell(gspread_row_idx, df.columns.get_loc("Tipo_Envio")+1, tipo_envio)
         hoja.update_cell(gspread_row_idx, df.columns.get_loc("Turno")+1, nuevo_turno)
         st.success("📦 Tipo de envío y turno actualizados correctamente.")
 
     completado = row.get("Completados_Limpiado", "")
     st.markdown("### 👁 Visibilidad en Pantalla de Producción")
-    opciones_visibilidad = {"Sí, mostrar en app_i": "", "No, ocultar de app_i": "sí"}
+    opciones_visibilidad = {"Sí": "", "No": "sí"}
     valor_actual = completado.strip().lower()
-    valor_preseleccionado = "No, ocultar de app_i" if valor_actual == "sí" else "Sí, mostrar en app_i"
-    seleccion = st.selectbox("¿Mostrar este pedido en la app de producción?", list(opciones_visibilidad.keys()), index=list(opciones_visibilidad.keys()).index(valor_preseleccionado))
+    valor_preseleccionado = "No" if valor_actual == "sí" else "Sí"
+    seleccion = st.selectbox("¿Mostrar este pedido en el Panel?", list(opciones_visibilidad.keys()), index=list(opciones_visibilidad.keys()).index(valor_preseleccionado))
     nuevo_valor_completado = opciones_visibilidad[seleccion]
 
-    if st.button("💾 Guardar visibilidad en app_i"):
+    if st.button("👁 Guardar visibilidad en Panel"):
         hoja.update_cell(gspread_row_idx, df.columns.get_loc("Completados_Limpiado")+1, nuevo_valor_completado)
         st.success("👁 Visibilidad en pantalla de producción actualizada.")
 
