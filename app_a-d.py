@@ -14,6 +14,7 @@ from pytz import timezone
 
 
 st.set_page_config(page_title="Recepción de Pedidos TD", layout="wide")
+
 # 🔁 Restaurar pestañas activas si venimos de una acción que modificó datos
 if "preserve_main_tab" in st.session_state:
     st.session_state["active_main_tab_index"] = st.session_state.pop("preserve_main_tab", 0)
@@ -21,32 +22,23 @@ if "preserve_main_tab" in st.session_state:
     st.session_state["active_date_tab_m_index"] = st.session_state.pop("preserve_date_tab_m", 0)
     st.session_state["active_date_tab_t_index"] = st.session_state.pop("preserve_date_tab_t", 0)
 
+st.title("📬 Bandeja de Pedidos TD")
 
-# --- Recarga segura sin reiniciar pestañas (soft reload)
+# ✅ Versión única con claves para evitar errores de duplicado
 col_recarga, col_reintento = st.columns([1, 1])
 
 with col_recarga:
-    if st.button("🔄 Recargar Pedidos (seguro)", help="Actualiza datos sin reiniciar pestañas ni scroll"):
+    if st.button("🔄 Recargar Pedidos (seguro)", help="Actualiza datos sin reiniciar pestañas ni scroll", key="btn_recargar_seguro"):
         st.session_state["reload_pedidos_soft"] = True
         st.cache_data.clear()
         st.cache_resource.clear()
 
-
-st.title("📬 Bandeja de Pedidos TD")
-
-# Define columns for reload and retry buttons
-col_recarga, col_reintento = st.columns([1, 1])
-
-with col_recarga:
-    if st.button("🔄 Recargar Pedidos (seguro)", help="Actualiza datos sin reiniciar pestañas ni scroll"):
-        st.cache_data.clear()
-        st.session_state["reload_pedidos_soft"] = True
-
 with col_reintento:
-    if st.button("❌ Reparar Conexión", help="Borra todos los caches y recarga la app"):
+    if st.button("❌ Reparar Conexión", help="Borra todos los caches y recarga la app", key="btn_reparar_conexion"):
         st.cache_data.clear()
         st.cache_resource.clear()
         st.rerun()
+
 
 # --- Google Sheets Constants (pueden venir de st.secrets si se prefiere) ---
 GOOGLE_SHEET_ID = '1aWkSelodaz0nWfQx7FZAysGnIYGQFJxAN7RO3YgCiZY'
