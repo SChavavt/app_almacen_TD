@@ -91,20 +91,17 @@ def get_gspread_client(_credentials_json_dict):
 
     try:
         _ = client.open_by_key(GOOGLE_SHEET_ID)
+    except gspread.exceptions.APIError:
+        # Token expirado o inválido → limpiar y regenerar
+        st.cache_resource.clear()
+        st.warning("🔁 Token expirado. Reintentando autenticación...")
 
-    except gspread.exceptions.APIError as e:
-        if "ACCESS_TOKEN_EXPIRED" in str(e) or "UNAUTHENTICATED" in str(e):
-            st.cache_resource.clear()
-            st.warning("🔁 Token expirado. Reintentando autenticación con Google Sheets...")
-
-            creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
-            client = gspread.authorize(creds)
-            _ = client.open_by_key(GOOGLE_SHEET_ID)
-        else:
-            # No es error de autenticación → no regenerar
-            raise e
+        creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
+        client = gspread.authorize(creds)
+        _ = client.open_by_key(GOOGLE_SHEET_ID)
 
     return client
+
 
 def get_s3_client():
     """
@@ -930,7 +927,7 @@ if not df_main.empty:
 
         st.warning(f"⚠️ Hay {mod_surtido_count} pedido(s) con **Modificación de Surtido** ➤ {ubicaciones_str}")
 
-    df_pendientes_proceso_demorado = df_main[df_main["Estado"].isin(["🟡 Pendiente", "🔵 En Proceso", "🔴 Demorado"])].copy()
+    df_pendientes_proceso_demorado = df_main[df_main["Estado"].isin(["🟡 Pendiente", "🔵 En Proceso", "🔴 Demorado", "🛠 Modificación"])].copy()
     df_completados_historial = df_main[df_main["Estado"] == "🟢 Completado"].copy()
 
     st.markdown("### 📊 Resumen de Estados")
@@ -945,14 +942,31 @@ if not df_main.empty:
         '🟡 Pendiente': (df_main['Estado'] == '🟡 Pendiente').sum(),
         '🔵 En Proceso': (df_main['Estado'] == '🔵 En Proceso').sum(),
         '🔴 Demorado': (df_main['Estado'] == '🔴 Demorado').sum(),
+        '🛠 Modificación': (df_main['Estado'] == '🛠 Modificación').sum(),
         '🟢 Completado': len(completados_visibles)
     }
 
-    col1, col2, col3, col4 = st.columns(4)
-    col1.metric("🟡 Pendientes", estado_counts.get('🟡 Pendiente', 0))
-    col2.metric("🔵 En Proceso", estado_counts.get('🔵 En Proceso', 0))
-    col3.metric("🔴 Demorados", estado_counts.get('🔴 Demorado', 0))
-    col4.metric("🟢 Completados", estado_counts.get('🟢 Completado', 0))
+
+    # Mostrar solo contadores con al menos un pedido
+    estados_a_mostrar = []
+    for estado, etiqueta in [
+        ('🟡 Pendiente', "🟡 Pendientes"),
+        ('🔵 En Proceso', "🔵 En Proceso"),
+        ('🔴 Demorado', "🔴 Demorados"),
+        ('🛠 Modificación', "🛠 Modificación"),
+        ('🟢 Completado', "🟢 Completados")
+    ]:
+        cantidad = estado_counts.get(estado, 0)
+        if cantidad > 0:
+            estados_a_mostrar.append((etiqueta, cantidad))
+
+    # Mostrar métricas adaptativas
+    if estados_a_mostrar:
+        cols = st.columns(len(estados_a_mostrar))
+        for col, (nombre_estado, cantidad) in zip(cols, estados_a_mostrar):
+            col.metric(nombre_estado, cantidad)
+
+
 
     # --- Implementación de Pestañas con st.tabs ---
     tab_options = ["📍 Pedidos Locales", "🚚 Pedidos Foráneos", "🔁 Devoluciones", "🛠 Garantías", "✅ Historial Completados"]
