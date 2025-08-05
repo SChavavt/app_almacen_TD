@@ -273,7 +273,12 @@ with tabs[1]:
     df["Hora_Registro"] = pd.to_datetime(df["Hora_Registro"], errors='coerce')
     df = df.sort_values(by="Hora_Registro", ascending=False)
     df = df.sort_values(by="Hora_Registro", ascending=False)
-    pedido_sel = None  # ✅ evitar NameError si no se selecciona nada aún
+    
+    if "pedido_modificado" in st.session_state:
+        pedido_sel = st.session_state["pedido_modificado"]
+        del st.session_state["pedido_modificado"]  # ✅ limpia la variable tras usarla
+    else:
+       pedido_sel = None  # ✅ evitar NameError si no se selecciona nada aún
 
 
     usar_busqueda = st.checkbox("🔍 Buscar por nombre de cliente (activar para ocultar los últimos 10 pedidos)")
@@ -375,6 +380,7 @@ with tabs[1]:
     if st.button("🧑‍💼 Guardar cambio de vendedor"):
         hoja.update_cell(gspread_row_idx, df.columns.get_loc("Vendedor_Registro")+1, nuevo_vendedor)
         st.success("🎈 Vendedor actualizado correctamente.")
+        st.session_state["pedido_modificado"] = pedido_sel
         st.experimental_rerun()  # 🔁 Recarga la app inmediatamente
 
     tipo_envio_actual = row["Tipo_Envio"].strip()
@@ -393,6 +399,7 @@ with tabs[1]:
         hoja.update_cell(gspread_row_idx, df.columns.get_loc("Tipo_Envio")+1, tipo_envio)
         hoja.update_cell(gspread_row_idx, df.columns.get_loc("Turno")+1, nuevo_turno)
         st.success("📦 Tipo de envío y turno actualizados correctamente.")
+        st.session_state["pedido_modificado"] = pedido_sel
         st.experimental_rerun()  # 🔁 Recarga la app inmediatamente
 
     completado = row.get("Completados_Limpiado", "")
@@ -406,5 +413,6 @@ with tabs[1]:
     if st.button("👁 Guardar visibilidad en Panel"):
         hoja.update_cell(gspread_row_idx, df.columns.get_loc("Completados_Limpiado")+1, nuevo_valor_completado)
         st.success("👁 Visibilidad en pantalla de producción actualizada.")
+        st.session_state["pedido_modificado"] = pedido_sel
         st.experimental_rerun()  # 🔁 Recarga la app inmediatamente
 
