@@ -347,6 +347,10 @@ with tabs[1]:
 
     row = df[df["ID_Pedido"] == pedido_sel].iloc[0]
     gspread_row_idx = df[df["ID_Pedido"] == pedido_sel].index[0] + 2  # índice real en hoja
+    if "mensaje_exito" in st.session_state:
+        st.success(st.session_state["mensaje_exito"])
+        del st.session_state["mensaje_exito"]  # ✅ eliminar para que no se repita
+
 
     # Definir la hoja de Google Sheets para modificación
     hoja = gspread_client.open_by_key("1aWkSelodaz0nWfQx7FZAysGnIYGQFJxAN7RO3YgCiZY").worksheet("datos_pedidos")
@@ -379,9 +383,10 @@ with tabs[1]:
 
     if st.button("🧑‍💼 Guardar cambio de vendedor"):
         hoja.update_cell(gspread_row_idx, df.columns.get_loc("Vendedor_Registro")+1, nuevo_vendedor)
-        st.success("🎈 Vendedor actualizado correctamente.")
         st.session_state["pedido_modificado"] = pedido_sel
-        st.rerun()  # ✅ reemplazo seguro
+        st.session_state["mensaje_exito"] = "🎈 Vendedor actualizado correctamente."
+        st.rerun()
+
 
     tipo_envio_actual = row["Tipo_Envio"].strip()
     st.markdown("### 🚚 Cambio de Tipo de Envío")
@@ -398,9 +403,10 @@ with tabs[1]:
     if st.button("📦 Guardar cambio de tipo de envío"):
         hoja.update_cell(gspread_row_idx, df.columns.get_loc("Tipo_Envio")+1, tipo_envio)
         hoja.update_cell(gspread_row_idx, df.columns.get_loc("Turno")+1, nuevo_turno)
-        st.success("📦 Tipo de envío y turno actualizados correctamente.")
         st.session_state["pedido_modificado"] = pedido_sel
-        st.rerun()  # ✅ reemplazo seguro
+        st.session_state["mensaje_exito"] = "📦 Tipo de envío y turno actualizados correctamente."
+        st.rerun()
+
 
     completado = row.get("Completados_Limpiado", "")
     st.markdown("### 👁 Visibilidad en Pantalla de Producción")
@@ -412,7 +418,8 @@ with tabs[1]:
 
     if st.button("👁 Guardar visibilidad en Panel"):
         hoja.update_cell(gspread_row_idx, df.columns.get_loc("Completados_Limpiado")+1, nuevo_valor_completado)
-        st.success("👁 Visibilidad en pantalla de producción actualizada.")
         st.session_state["pedido_modificado"] = pedido_sel
-        st.rerun()  # ✅ reemplazo seguro
+        st.session_state["mensaje_exito"] = "👁 Visibilidad en pantalla de producción actualizada."
+        st.rerun()
+
 
