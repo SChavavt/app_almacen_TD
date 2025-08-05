@@ -196,8 +196,9 @@ def display_dataframe_with_formatting(df_to_display, num_columnas_actuales=1):
 
     if "Folio_Factura" in df_to_display.columns and "Cliente" in df_to_display.columns:
         df_vista["Cliente"] = df_to_display.apply(
-            lambda row: f"📄 <b>{row['Folio_Factura']}</b><br>🤝 {row['Cliente']}", axis=1
+            lambda row: f"📄 <b>{row['Folio_Factura']}</b> 🤝 {row['Cliente']}", axis=1
         )
+
 
     df_vista = df_vista.rename(columns={
         "Fecha_Entrega": "Fecha Entrega",
