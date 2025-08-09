@@ -250,6 +250,25 @@ def update_gsheet_cell(worksheet, headers, row_index, col_name, value):
     except Exception as e:
         st.error(f"❌ Error al actualizar la celda ({row_index}, {col_name}) en Google Sheets: {e}")
         return False
+    
+def cargar_pedidos_desde_google_sheet(sheet_id, worksheet_name):
+    """
+    Carga los datos de una hoja de Google Sheets y devuelve un DataFrame y los encabezados.
+    """
+    try:
+        client = get_gspread_client(_credentials_json_dict=GSHEETS_CREDENTIALS)
+        worksheet = client.open_by_key(sheet_id).worksheet(worksheet_name)
+        headers = worksheet.row_values(1)
+
+        if headers:
+            df = pd.DataFrame(worksheet.get_all_records())
+            return df, headers
+        else:
+            return pd.DataFrame(), []
+    except Exception as e:
+        st.error(f"❌ Error al cargar la hoja {worksheet_name}: {e}")
+        return pd.DataFrame(), []
+
 
 def batch_update_gsheet_cells(worksheet, updates_list):
     """
@@ -280,6 +299,8 @@ def batch_update_gsheet_cells(worksheet, updates_list):
     except Exception as e:
         st.error(f"❌ Error al realizar la actualización por lotes en Google Sheets: {e}")
         return False
+    
+
 # --- AWS S3 Helper Functions (Copied from app_admin.py directly) ---
 def upload_file_to_s3(s3_client_param, bucket_name, file_obj, s3_key):
     try:
@@ -1096,11 +1117,74 @@ if not df_main.empty:
             st.info("No hay pedidos foráneos.")
 
     with main_tabs[2]: # 🔁 Devoluciones
+        df_casos, headers_casos = cargar_pedidos_desde_google_sheet(GOOGLE_SHEET_ID, "casos_especiales")
+        worksheet_casos = get_gspread_client(_credentials_json_dict=GSHEETS_CREDENTIALS).open_by_key(GOOGLE_SHEET_ID).worksheet("casos_especiales")
+
         devoluciones_display = df_pendientes_proceso_demorado[(df_pendientes_proceso_demorado["Tipo_Envio"] == "🔁 Devolución")].copy()
         if not devoluciones_display.empty:
             devoluciones_display = ordenar_pedidos_custom(devoluciones_display)
             for orden, (idx, row) in enumerate(devoluciones_display.iterrows(), start=1):
                 mostrar_pedido(df_main, idx, row, orden, "Devolución", "🔁 Devoluciones", worksheet_main, headers_main, s3_client)
+
+                # --- Confirmación para almacén solo si el tipo es devolución
+                st.markdown("### ✅ Confirmación de Devolución Recibida")
+                row_caso = df_casos[df_casos["ID_Pedido"] == row["ID_Pedido"]]
+                if not row_caso.empty:
+                    row_caso = row_caso.iloc[0]
+                    gsheet_row_idx = df_casos[df_casos["ID_Pedido"] == row["ID_Pedido"]].index[0] + 2
+
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        fecha_recepcion = st.date_input(
+                            "📅 Fecha de recepción", value=datetime.today(),
+                            key=f"fecha_{row['ID_Pedido']}"
+                        )
+                    with col2:
+                        estado_recepcion = st.selectbox(
+                            "📦 Estado del paquete recibido",
+                            ["", "Todo correcto", "Faltan artículos"],
+                            key=f"estado_{row['ID_Pedido']}"
+                        )
+
+                    nota_file = st.file_uploader("🧾 Subir Nota de Crédito", key=f"nota_{row['ID_Pedido']}")
+                    doc_file = st.file_uploader("📂 Subir documento adicional", key=f"doc_{row['ID_Pedido']}")
+
+                    comentario_admin = st.text_area("📝 Comentarios finales", key=f"comentario_{row['ID_Pedido']}")
+
+                    if st.button(f"💾 Confirmar Devolución {row['ID_Pedido']}", key=f"btn_{row['ID_Pedido']}"):
+                        try:
+                            if not fecha_recepcion or not estado_recepcion:
+                                st.warning("⚠️ Completa los campos obligatorios.")
+                                st.stop()
+
+                            # Subida de archivos
+                            folder = row["ID_Pedido"]
+                            nota_url = ""
+                            doc_url = ""
+
+                            if nota_file:
+                                key_nota = f"{folder}/nota_credito_{datetime.now().isoformat()[:19].replace(':', '')}_{nota_file.name}"
+                                _, nota_url = upload_file_to_s3(s3_client, S3_BUCKET_NAME, nota_file, key_nota)
+                            if doc_file:
+                                key_doc = f"{folder}/doc_adicional_{datetime.now().isoformat()[:19].replace(':', '')}_{doc_file.name}"
+                                _, doc_url = upload_file_to_s3(s3_client, S3_BUCKET_NAME, doc_file, key_doc)
+
+                            # Actualizar hoja
+                            update_gsheet_cell(worksheet_casos, headers_casos, gsheet_row_idx, "Fecha_Recepcion_Devolucion", str(fecha_recepcion))
+                            update_gsheet_cell(worksheet_casos, headers_casos, gsheet_row_idx, "Estado_Recepcion", estado_recepcion)
+                            update_gsheet_cell(worksheet_casos, headers_casos, gsheet_row_idx, "Comentarios_Admin_Devolucion", comentario_admin)
+                            if nota_url:
+                                update_gsheet_cell(worksheet_casos, headers_casos, gsheet_row_idx, "Nota_Credito_URL", nota_url)
+                            if doc_url:
+                                update_gsheet_cell(worksheet_casos, headers_casos, gsheet_row_idx, "Documento_Adicional_URL", doc_url)
+                            update_gsheet_cell(worksheet_casos, headers_casos, gsheet_row_idx, "Estado_Caso", "Aprobado")
+
+                            st.success("✅ Devolución confirmada correctamente.")
+                            st.rerun()
+                        except Exception as e:
+                            st.error(f"❌ Error al guardar los datos: {e}")
+                st.markdown("---")
+
         else:
             st.info("No hay devoluciones.")
 
