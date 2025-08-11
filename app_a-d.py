@@ -1131,11 +1131,7 @@ if not df_main.empty:
     with main_tabs[2]:  # 🔁 Devoluciones (casos_especiales)
         st.markdown("### 🔁 Devoluciones (casos_especiales)")
 
-        # Cargar hoja 'casos_especiales'
-        df_casos, headers_casos = cargar_pedidos_desde_google_sheet(GOOGLE_SHEET_ID, "casos_especiales")
-        worksheet_casos = get_gspread_client(_credentials_json_dict=GSHEETS_CREDENTIALS).open_by_key(GOOGLE_SHEET_ID).worksheet("casos_especiales")
-
-        # Detectar columna que indica el tipo de caso
+        # Detectar columna que indica el tipo de caso (según cómo guardes en 'casos_especiales')
         tipo_col = "Tipo_Caso" if "Tipo_Caso" in df_casos.columns else ("Tipo_Envio" if "Tipo_Envio" in df_casos.columns else None)
         if not tipo_col:
             st.error("❌ En 'casos_especiales' falta la columna 'Tipo_Caso' o 'Tipo_Envio'.")
@@ -1147,7 +1143,7 @@ if not df_main.empty:
         if devoluciones_display.empty:
             st.info("No hay devoluciones en 'casos_especiales'.")
         else:
-            # Ordenar (ajusta si tienes otra columna de fecha)
+            # Ordenar (ajusta si tienes otra columna de fecha relevante)
             if "Fecha_Registro" in devoluciones_display.columns:
                 devoluciones_display = devoluciones_display.sort_values(by="Fecha_Registro", ascending=False)
             elif "ID_Pedido" in devoluciones_display.columns:
@@ -1161,10 +1157,10 @@ if not df_main.empty:
 
                 with st.expander(f"🔁 {idp} – {folio or 's/folio'} – {cliente}  |  Estado: {estado}", expanded=False):
                     # Formulario de confirmación de recepción (ALMACÉN)
-                    col1, col2 = st.columns(2)
-                    with col1:
+                    c1, c2 = st.columns(2)
+                    with c1:
                         fecha_recepcion = st.date_input("📅 Fecha de recepción", value=datetime.today(), key=f"fecha_{idp}")
-                    with col2:
+                    with c2:
                         estado_recepcion = st.selectbox("📦 Estado del paquete recibido",
                                                         ["", "Todo correcto", "Faltan artículos"],
                                                         key=f"estado_{idp}")
