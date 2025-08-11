@@ -1011,6 +1011,18 @@ if not df_main.empty:
     for col, (nombre_estado, cantidad) in zip(cols, estados_a_mostrar):
         col.metric(nombre_estado, cantidad)
 
+    # === CASOS ESPECIALES (Devoluciones/Garantías) ===
+    df_casos, headers_casos = cargar_pedidos_desde_google_sheet(GOOGLE_SHEET_ID, "casos_especiales")
+    gspread_client_tmp = get_gspread_client(_credentials_json_dict=GSHEETS_CREDENTIALS)
+    worksheet_casos = gspread_client_tmp.open_by_key(GOOGLE_SHEET_ID).worksheet("casos_especiales")
+
+    # Asegurar columnas clave para no fallar si faltan
+    for col in ["ID_Pedido","Cliente","Folio_Factura","Tipo_Envio","Estado_Caso",
+                "Fecha_Recepcion_Devolucion","Estado_Recepcion",
+                "Nota_Credito_URL","Documento_Adicional_URL","Comentarios_Admin_Devolucion"]:
+        if col not in df_casos.columns:
+            df_casos[col] = ""
+
 
     # --- Implementación de Pestañas con st.tabs ---
     tab_options = ["📍 Pedidos Locales", "🚚 Pedidos Foráneos", "🔁 Devoluciones", "🛠 Garantías", "✅ Historial Completados"]
@@ -1116,77 +1128,98 @@ if not df_main.empty:
         else:
             st.info("No hay pedidos foráneos.")
 
-    with main_tabs[2]: # 🔁 Devoluciones
+    with main_tabs[2]:  # 🔁 Devoluciones (casos_especiales)
+        st.markdown("### 🔁 Devoluciones (casos_especiales)")
+
+        # Cargar hoja 'casos_especiales'
         df_casos, headers_casos = cargar_pedidos_desde_google_sheet(GOOGLE_SHEET_ID, "casos_especiales")
         worksheet_casos = get_gspread_client(_credentials_json_dict=GSHEETS_CREDENTIALS).open_by_key(GOOGLE_SHEET_ID).worksheet("casos_especiales")
 
-        devoluciones_display = df_pendientes_proceso_demorado[(df_pendientes_proceso_demorado["Tipo_Envio"] == "🔁 Devolución")].copy()
-        if not devoluciones_display.empty:
-            devoluciones_display = ordenar_pedidos_custom(devoluciones_display)
-            for orden, (idx, row) in enumerate(devoluciones_display.iterrows(), start=1):
-                mostrar_pedido(df_main, idx, row, orden, "Devolución", "🔁 Devoluciones", worksheet_main, headers_main, s3_client)
+        # Detectar columna que indica el tipo de caso
+        tipo_col = "Tipo_Caso" if "Tipo_Caso" in df_casos.columns else ("Tipo_Envio" if "Tipo_Envio" in df_casos.columns else None)
+        if not tipo_col:
+            st.error("❌ En 'casos_especiales' falta la columna 'Tipo_Caso' o 'Tipo_Envio'.")
+            st.stop()
 
-                # --- Confirmación para almacén solo si el tipo es devolución
-                st.markdown("### ✅ Confirmación de Devolución Recibida")
-                row_caso = df_casos[df_casos["ID_Pedido"] == row["ID_Pedido"]]
-                if not row_caso.empty:
-                    row_caso = row_caso.iloc[0]
-                    gsheet_row_idx = df_casos[df_casos["ID_Pedido"] == row["ID_Pedido"]].index[0] + 2
+        # Filtrar SOLO devoluciones desde 'casos_especiales'
+        devoluciones_display = df_casos[df_casos[tipo_col].astype(str).str.contains("Devoluci", case=False, na=False)].copy()
 
+        if devoluciones_display.empty:
+            st.info("No hay devoluciones en 'casos_especiales'.")
+        else:
+            # Ordenar (ajusta si tienes otra columna de fecha)
+            if "Fecha_Registro" in devoluciones_display.columns:
+                devoluciones_display = devoluciones_display.sort_values(by="Fecha_Registro", ascending=False)
+            elif "ID_Pedido" in devoluciones_display.columns:
+                devoluciones_display = devoluciones_display.sort_values(by="ID_Pedido", ascending=True)
+
+            for _, row in devoluciones_display.iterrows():
+                idp     = str(row.get("ID_Pedido", "")).strip()
+                folio   = str(row.get("Folio_Factura", "")).strip()
+                cliente = str(row.get("Cliente", "")).strip()
+                estado  = str(row.get("Estado_Caso", "Pendiente")).strip()
+
+                with st.expander(f"🔁 {idp} – {folio or 's/folio'} – {cliente}  |  Estado: {estado}", expanded=False):
+                    # Formulario de confirmación de recepción (ALMACÉN)
                     col1, col2 = st.columns(2)
                     with col1:
-                        fecha_recepcion = st.date_input(
-                            "📅 Fecha de recepción", value=datetime.today(),
-                            key=f"fecha_{row['ID_Pedido']}"
-                        )
+                        fecha_recepcion = st.date_input("📅 Fecha de recepción", value=datetime.today(), key=f"fecha_{idp}")
                     with col2:
-                        estado_recepcion = st.selectbox(
-                            "📦 Estado del paquete recibido",
-                            ["", "Todo correcto", "Faltan artículos"],
-                            key=f"estado_{row['ID_Pedido']}"
-                        )
+                        estado_recepcion = st.selectbox("📦 Estado del paquete recibido",
+                                                        ["", "Todo correcto", "Faltan artículos"],
+                                                        key=f"estado_{idp}")
 
-                    nota_file = st.file_uploader("🧾 Subir Nota de Crédito", key=f"nota_{row['ID_Pedido']}")
-                    doc_file = st.file_uploader("📂 Subir documento adicional", key=f"doc_{row['ID_Pedido']}")
+                    nota_file = st.file_uploader("🧾 Subir Nota de Crédito", key=f"nota_{idp}")
+                    doc_file  = st.file_uploader("📂 Subir documento adicional", key=f"doc_{idp}")
+                    comentario_admin = st.text_area("📝 Comentarios finales", key=f"comentario_{idp}")
 
-                    comentario_admin = st.text_area("📝 Comentarios finales", key=f"comentario_{row['ID_Pedido']}")
-
-                    if st.button(f"💾 Confirmar Devolución {row['ID_Pedido']}", key=f"btn_{row['ID_Pedido']}"):
+                    if st.button(f"💾 Confirmar Devolución {idp}", key=f"btn_{idp}"):
                         try:
-                            if not fecha_recepcion or not estado_recepcion:
+                            if not estado_recepcion:
                                 st.warning("⚠️ Completa los campos obligatorios.")
                                 st.stop()
 
-                            # Subida de archivos
-                            folder = row["ID_Pedido"]
+                            # Subida de archivos a S3
+                            folder = idp if idp else "caso_sin_id"
                             nota_url = ""
-                            doc_url = ""
+                            doc_url  = ""
 
                             if nota_file:
-                                key_nota = f"{folder}/nota_credito_{datetime.now().isoformat()[:19].replace(':', '')}_{nota_file.name}"
+                                key_nota = f"{folder}/nota_credito_{datetime.now().isoformat()[:19].replace(':','')}_{nota_file.name}"
                                 _, nota_url = upload_file_to_s3(s3_client, S3_BUCKET_NAME, nota_file, key_nota)
                             if doc_file:
-                                key_doc = f"{folder}/doc_adicional_{datetime.now().isoformat()[:19].replace(':', '')}_{doc_file.name}"
+                                key_doc  = f"{folder}/doc_adicional_{datetime.now().isoformat()[:19].replace(':','')}_{doc_file.name}"
                                 _, doc_url = upload_file_to_s3(s3_client, S3_BUCKET_NAME, doc_file, key_doc)
 
-                            # Actualizar hoja
-                            update_gsheet_cell(worksheet_casos, headers_casos, gsheet_row_idx, "Fecha_Recepcion_Devolucion", str(fecha_recepcion))
-                            update_gsheet_cell(worksheet_casos, headers_casos, gsheet_row_idx, "Estado_Recepcion", estado_recepcion)
-                            update_gsheet_cell(worksheet_casos, headers_casos, gsheet_row_idx, "Comentarios_Admin_Devolucion", comentario_admin)
-                            if nota_url:
-                                update_gsheet_cell(worksheet_casos, headers_casos, gsheet_row_idx, "Nota_Credito_URL", nota_url)
-                            if doc_url:
-                                update_gsheet_cell(worksheet_casos, headers_casos, gsheet_row_idx, "Documento_Adicional_URL", doc_url)
-                            update_gsheet_cell(worksheet_casos, headers_casos, gsheet_row_idx, "Estado_Caso", "Aprobado")
+                            # Índice real en la hoja 'casos_especiales'
+                            matches = df_casos.index[df_casos["ID_Pedido"].astype(str).str.strip() == idp]
+                            if len(matches) == 0:
+                                st.error("❌ No se encontró el caso en 'casos_especiales'.")
+                                st.stop()
+                            gsheet_row_idx = int(matches[0]) + 2
 
-                            st.success("✅ Devolución confirmada correctamente.")
-                            st.rerun()
+                            # Escrituras SOLO en 'casos_especiales'
+                            ok = True
+                            ok &= update_gsheet_cell(worksheet_casos, headers_casos, gsheet_row_idx, "Fecha_Recepcion_Devolucion", str(fecha_recepcion))
+                            ok &= update_gsheet_cell(worksheet_casos, headers_casos, gsheet_row_idx, "Estado_Recepcion", estado_recepcion)
+                            ok &= update_gsheet_cell(worksheet_casos, headers_casos, gsheet_row_idx, "Comentarios_Admin_Devolucion", comentario_admin)
+                            if nota_url:
+                                ok &= update_gsheet_cell(worksheet_casos, headers_casos, gsheet_row_idx, "Nota_Credito_URL", nota_url)
+                            if doc_url:
+                                ok &= update_gsheet_cell(worksheet_casos, headers_casos, gsheet_row_idx, "Documento_Adicional_URL", doc_url)
+                            ok &= update_gsheet_cell(worksheet_casos, headers_casos, gsheet_row_idx, "Estado_Caso", "Aprobado")
+
+                            if ok:
+                                st.success("✅ Devolución confirmada correctamente en 'casos_especiales'.")
+                                st.cache_data.clear()
+                                st.rerun()
+                            else:
+                                st.error("❌ No se pudo guardar la confirmación.")
                         except Exception as e:
                             st.error(f"❌ Error al guardar los datos: {e}")
+
                 st.markdown("---")
 
-        else:
-            st.info("No hay devoluciones.")
 
     with main_tabs[3]: #🛠 Garantías
         garantias_display = df_pendientes_proceso_demorado[(df_pendientes_proceso_demorado["Tipo_Envio"] == "🛠 Garantía")].copy()
