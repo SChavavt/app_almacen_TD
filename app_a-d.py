@@ -1158,6 +1158,9 @@ if not df_main.empty:
                     estado_recepcion = str(row.get("Estado_Recepcion", "")).strip()
                     vendedor = str(row.get("Vendedor_Registro", "")).strip()
                     
+                    # Crear un ID único para cada devolución usando múltiples campos
+                    unique_id = f"{idp}_{folio}_{cliente}_{row_counter}_{abs(hash(str(row.to_dict())))}"
+                    
                     # Verificar si está confirmado por administración
                     confirmado_admin = (estado.lower() == "aprobado" and estado_recepcion.lower() == "todo correcto")
                     
@@ -1203,8 +1206,8 @@ if not df_main.empty:
                         st.markdown("**📦 Material a Devolver:**")
                         material_devolver = str(row.get("Motivo_Detallado", "")).strip()
                         if material_devolver:
-                            # Usar contador de filas + índice para garantizar uniqueness
-                            unique_material_key = f"material_{row_counter}_{row_index}"
+                            # Usar ID único basado en hash del contenido de la fila
+                            unique_material_key = f"material_{unique_id}"
                             st.text_area("", value=material_devolver, disabled=True, key=unique_material_key, height=80)
                         else:
                             st.info("No se especificó material a devolver")
@@ -1213,8 +1216,8 @@ if not df_main.empty:
                         st.markdown("**💬 Comentarios de Administración:**")
                         comentarios_admin = str(row.get("Comentarios_Admin_Devolucion", "")).strip()
                         if comentarios_admin:
-                            # Usar contador de filas + índice para garantizar uniqueness
-                            unique_comentarios_key = f"comentarios_{row_counter}_{row_index}"
+                            # Usar ID único basado en hash del contenido de la fila
+                            unique_comentarios_key = f"comentarios_{unique_id}"
                             st.text_area("", value=comentarios_admin, disabled=True, key=unique_comentarios_key, height=60)
                         else:
                             st.info("Sin comentarios de administración")
@@ -1224,8 +1227,8 @@ if not df_main.empty:
                         # Sección para subir guía de retorno (solo si no está confirmado)
                         if not confirmado_admin:
                             st.markdown("#### 📋 Documentación")
-                            # Crear claves únicas usando contador de filas + índice
-                            unique_guia_key = f"guia_{row_counter}_{row_index}"
+                            # Crear claves únicas usando el ID único
+                            unique_guia_key = f"guia_{unique_id}"
                             guia_file = st.file_uploader(
                                 "📋 Subir Guía de Retorno", 
                                 key=unique_guia_key,
@@ -1233,7 +1236,7 @@ if not df_main.empty:
                             )
 
                             # Crear clave única para el botón
-                            unique_btn_key = f"btn_{row_counter}_{row_index}"
+                            unique_btn_key = f"btn_{unique_id}"
                             if st.button(f"💾 Procesar Devolución {idp}", key=unique_btn_key):
                                 try:
                                     # Subida de archivo a S3
