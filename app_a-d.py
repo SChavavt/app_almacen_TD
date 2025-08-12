@@ -1160,6 +1160,51 @@ if not df_main.empty:
         elif "ID_Pedido" in devoluciones_display.columns:
             devoluciones_display = devoluciones_display.sort_values(by="ID_Pedido", ascending=True)
 
+        # 🔧 Helper para normalizar/extraer URLs desde texto o JSON
+        import json
+        import math
+        import re
+        def _normalize_urls(value):
+            if value is None:
+                return []
+            # Evitar NaN/None disfrazados
+            if isinstance(value, float) and math.isnan(value):
+                return []
+            s = str(value).strip()
+            if not s or s.lower() in ("nan", "none", "n/a"):
+                return []
+            urls = []
+            # Intentar JSON (lista o dict con campo url)
+            try:
+                obj = json.loads(s)
+                if isinstance(obj, list):
+                    for it in obj:
+                        if isinstance(it, str) and it.strip():
+                            urls.append(it.strip())
+                        elif isinstance(it, dict):
+                            u = it.get("url") or it.get("URL")
+                            if u and str(u).strip():
+                                urls.append(str(u).strip())
+                elif isinstance(obj, dict):
+                    for k in ("url", "URL", "link", "href"):
+                        if obj.get(k):
+                            urls.append(str(obj[k]).strip())
+            except Exception:
+                # No era JSON, separar por , ; nueva línea o espacios
+                parts = re.split(r"[,\n;]+", s)
+                for p in parts:
+                    p = p.strip()
+                    if p:
+                        urls.append(p)
+            # Quitar duplicados, mantener orden
+            seen = set()
+            out = []
+            for u in urls:
+                if u not in seen:
+                    seen.add(u)
+                    out.append(u)
+            return out
+
         # 4) Recorrer cada devolución
         for _, row in devoluciones_display.iterrows():
             idp         = str(row.get("ID_Pedido", "")).strip()  # NO se mostrará en el encabezado
@@ -1170,7 +1215,7 @@ if not df_main.empty:
             estado_rec  = str(row.get("Estado_Recepcion", "N/A")).strip()
             area_resp   = str(row.get("Area_Responsable", "")).strip()
 
-            # Encabezado del expander
+            # Encabezado del expander (sin ID) y lógica de confirmación visual
             if area_resp.lower() == "cliente":
                 if estado.lower() == "aprobado" and estado_rec.lower() == "todo correcto":
                     emoji_estado = "✅"
@@ -1187,23 +1232,23 @@ if not df_main.empty:
                 st.markdown("#### 📋 Información de la Devolución")
 
                 col1, col2 = st.columns(2)
-
                 with col1:
                     st.markdown(f"**👤 Vendedor:** {vendedor or 'N/A'}")
                     st.markdown(f"**📄 Factura de Origen:** {folio or 'N/A'}")
                     st.markdown(f"**🎯 Resultado Esperado:** {str(row.get('Resultado_Esperado', 'N/A')).strip()}")
                     st.markdown(f"**🆔 Número Cliente/RFC:** {str(row.get('Numero_Cliente_RFC', 'N/A')).strip()}")
-
                 with col2:
                     st.markdown(f"**🏢 Área Responsable:** {area_resp or 'N/A'}")
                     st.markdown(f"**👥 Responsable del Error:** {str(row.get('Nombre_Responsable', 'N/A')).strip()}")
                     st.markdown(f"**🚚 Tipo Envío Original:** {str(row.get('Tipo_Envio_Original', 'N/A')).strip()}")
 
+                # Comentario admin
                 coment_admin = str(row.get("Comentarios_Admin_Devolucion", "")).strip()
                 if coment_admin:
                     st.markdown("**📝 Comentario Administrativo:**")
                     st.info(coment_admin)
 
+                # Detalle / material
                 st.markdown("**📦 Material a Devolver / Detalle:**")
                 material_devolver = str(row.get("Motivo_Detallado", "")).strip()
                 if material_devolver:
@@ -1213,14 +1258,41 @@ if not df_main.empty:
 
                 st.markdown("---")
 
-                # 📋 Documentación
+                # 📎 Archivos del Caso (Adjuntos + Nota_Credito_URL + Documento_Adicional_URL)
+                st.markdown("#### 📎 Archivos del Caso")
+                adjuntos_urls = _normalize_urls(row.get("Adjuntos", ""))
+                nota_credito_url = str(row.get("Nota_Credito_URL", "")).strip()
+                documento_adic_url = str(row.get("Documento_Adicional_URL", "")).strip()
+
+                items = []
+                # Adjuntos (pueden ser múltiples)
+                for i, u in enumerate(adjuntos_urls, start=1):
+                    items.append((f"Adjunto {i}", u))
+                # Nota de crédito
+                if nota_credito_url and nota_credito_url.lower() not in ("nan", "none", "n/a"):
+                    items.append(("Nota de Crédito", nota_credito_url))
+                # Documento adicional
+                if documento_adic_url and documento_adic_url.lower() not in ("nan", "none", "n/a"):
+                    items.append(("Documento Adicional", documento_adic_url))
+
+                if items:
+                    for label, url in items:
+                        # Mostrar como lista con enlace clicable
+                        st.markdown(f"- [{label}]({url})")
+                else:
+                    st.info("No hay archivos registrados para esta devolución.")
+
+                st.markdown("---")
+
+                # 📋 Documentación (subir guía)
                 st.markdown("#### 📋 Documentación")
                 guia_file = st.file_uploader(
                     "📋 Subir Guía de Retorno",
                     key=f"guia_{folio}_{cliente}",
-                    help="Sube la guía de mensajería para el retorno del producto"
+                    help="Sube la guía de mensajería para el retorno del producto (PDF/JPG/PNG)"
                 )
 
+                # Botón simple (sin folio/cliente en la etiqueta)
                 if st.button("💾 Procesar Devolución", key=f"btn_proc_{folio}_{cliente}"):
                     try:
                         folder = idp or f"caso_{(folio or 'sfolio')}_{(cliente or 'scliente')}".replace(" ", "_")
@@ -1230,13 +1302,14 @@ if not df_main.empty:
                             key_guia = f"{folder}/guia_retorno_{datetime.now().isoformat()[:19].replace(':','')}_{guia_file.name}"
                             _, guia_url = upload_file_to_s3(s3_client, S3_BUCKET_NAME, guia_file, key_guia)
 
+                        # Buscar índice real en hoja 'casos_especiales'
                         gsheet_row_idx = None
                         if "ID_Pedido" in df_casos.columns and idp:
                             matches = df_casos.index[df_casos["ID_Pedido"].astype(str).str.strip() == idp]
                             if len(matches) > 0:
                                 gsheet_row_idx = int(matches[0]) + 2
-
                         if gsheet_row_idx is None:
+                            # Fallback por (Folio_Factura + Cliente)
                             filt = (
                                 df_casos.get("Folio_Factura", "").astype(str).str.strip().eq(folio) &
                                 df_casos.get("Cliente", "").astype(str).str.strip().eq(cliente)
@@ -1246,7 +1319,7 @@ if not df_main.empty:
                                 gsheet_row_idx = int(matches[0]) + 2
 
                         if gsheet_row_idx is None:
-                            st.error("❌ No se encontró el caso en 'casos_especiales'.")
+                            st.error("❌ No se encontró el caso en 'casos_especiales' (ni por ID_Pedido ni por Folio+Cliente).")
                             st.stop()
 
                         ok = True
