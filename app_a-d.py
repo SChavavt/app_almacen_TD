@@ -1129,92 +1129,99 @@ if not df_main.empty:
             st.info("No hay pedidos foráneos.")
 
     with main_tabs[2]:  # 🔁 Devoluciones (casos_especiales)
-        st.markdown("### 🔁 Devoluciones (casos_especiales)")
+            st.markdown("### 🔁 Devoluciones (casos_especiales)")
 
-        # Detectar columna que indica el tipo de caso (según cómo guardes en 'casos_especiales')
-        tipo_col = "Tipo_Caso" if "Tipo_Caso" in df_casos.columns else ("Tipo_Envio" if "Tipo_Envio" in df_casos.columns else None)
-        if not tipo_col:
-            st.error("❌ En 'casos_especiales' falta la columna 'Tipo_Caso' o 'Tipo_Envio'.")
-            st.stop()
+            # Detectar columna que indica el tipo de caso (según cómo guardes en 'casos_especiales')
+            tipo_col = "Tipo_Caso" if "Tipo_Caso" in df_casos.columns else ("Tipo_Envio" if "Tipo_Envio" in df_casos.columns else None)
+            if not tipo_col:
+                st.error("❌ En 'casos_especiales' falta la columna 'Tipo_Caso' o 'Tipo_Envio'.")
+                st.stop()
 
-        # Filtrar SOLO devoluciones desde 'casos_especiales'
-        devoluciones_display = df_casos[df_casos[tipo_col].astype(str).str.contains("Devoluci", case=False, na=False)].copy()
+            # Filtrar SOLO devoluciones desde 'casos_especiales'
+            devoluciones_display = df_casos[df_casos[tipo_col].astype(str).str.contains("Devoluci", case=False, na=False)].copy()
 
-        if devoluciones_display.empty:
-            st.info("No hay devoluciones en 'casos_especiales'.")
-        else:
-            # Ordenar (ajusta si tienes otra columna de fecha relevante)
-            if "Fecha_Registro" in devoluciones_display.columns:
-                devoluciones_display = devoluciones_display.sort_values(by="Fecha_Registro", ascending=False)
-            elif "ID_Pedido" in devoluciones_display.columns:
-                devoluciones_display = devoluciones_display.sort_values(by="ID_Pedido", ascending=True)
+            if devoluciones_display.empty:
+                st.info("No hay devoluciones en 'casos_especiales'.")
+            else:
+                # Ordenar (ajusta si tienes otra columna de fecha relevante)
+                if "Fecha_Registro" in devoluciones_display.columns:
+                    devoluciones_display = devoluciones_display.sort_values(by="Fecha_Registro", ascending=False)
+                elif "ID_Pedido" in devoluciones_display.columns:
+                    devoluciones_display = devoluciones_display.sort_values(by="ID_Pedido", ascending=True)
 
-            for _, row in devoluciones_display.iterrows():
-                idp     = str(row.get("ID_Pedido", "")).strip()
-                folio   = str(row.get("Folio_Factura", "")).strip()
-                cliente = str(row.get("Cliente", "")).strip()
-                estado  = str(row.get("Estado_Caso", "Pendiente")).strip()
+                for _, row in devoluciones_display.iterrows():
+                    idp     = str(row.get("ID_Pedido", "")).strip()
+                    folio   = str(row.get("Folio_Factura", "")).strip()
+                    cliente = str(row.get("Cliente", "")).strip()
+                    estado  = str(row.get("Estado_Caso", "Pendiente")).strip()
+                    vendedor = str(row.get("Vendedor_Registro", "")).strip()
 
-                with st.expander(f"🔁 {idp} – {folio or 's/folio'} – {cliente}  |  Estado: {estado}", expanded=False):
-                    # Formulario de confirmación de recepción (ALMACÉN)
-                    c1, c2 = st.columns(2)
-                    with c1:
-                        fecha_recepcion = st.date_input("📅 Fecha de recepción", value=datetime.today(), key=f"fecha_{idp}")
-                    with c2:
-                        estado_recepcion = st.selectbox("📦 Estado del paquete recibido",
-                                                        ["", "Todo correcto", "Faltan artículos"],
-                                                        key=f"estado_{idp}")
+                    with st.expander(f"🔁 {idp} – {folio or 's/folio'} – {cliente}  |  Estado: {estado}", expanded=False):
+                        
+                        # Información detallada de la devolución
+                        st.markdown("#### 📋 Información de la Devolución")
+                        
+                        col1, col2 = st.columns(2)
+                        
+                        with col1:
+                            st.markdown(f"**👤 Vendedor:** {vendedor or 'N/A'}")
+                            st.markdown(f"**📄 Factura de Origen:** {folio or 'N/A'}")
+                            st.markdown(f"**📦 Tipo de Pedido:** {str(row.get('Resultado_Esperado', 'N/A')).strip()}")
+                        
+                        with col2:
+                            st.markdown(f"**🏢 Área Responsable:** {str(row.get('Area_Responsable', 'N/A')).strip()}")
+                            st.markdown(f"**👥 Responsable del Error:** {str(row.get('Nombre_Responsable', 'N/A')).strip()}")
+                        
+                        st.markdown("**📦 Material a Devolver:**")
+                        material_devolver = str(row.get("Motivo_Detallado", "")).strip()
+                        if material_devolver:
+                            st.text_area("", value=material_devolver, disabled=True, key=f"material_{idp}", height=80)
+                        else:
+                            st.info("No se especificó material a devolver")
+                        
+                        st.markdown("---")
+                        
+                        # Sección para subir guía de retorno
+                        st.markdown("#### 📋 Documentación")
+                        guia_file = st.file_uploader(
+                            "📋 Subir Guía de Retorno", 
+                            key=f"guia_{idp}",
+                            help="Sube la guía de mensajería para el retorno del producto"
+                        )
 
-                    nota_file = st.file_uploader("🧾 Subir Nota de Crédito", key=f"nota_{idp}")
-                    doc_file  = st.file_uploader("📂 Subir documento adicional", key=f"doc_{idp}")
-                    comentario_admin = st.text_area("📝 Comentarios finales", key=f"comentario_{idp}")
+                        if st.button(f"💾 Procesar Devolución {idp}", key=f"btn_{idp}"):
+                            try:
+                                # Subida de archivo a S3
+                                folder = idp if idp else "caso_sin_id"
+                                guia_url = ""
 
-                    if st.button(f"💾 Confirmar Devolución {idp}", key=f"btn_{idp}"):
-                        try:
-                            if not estado_recepcion:
-                                st.warning("⚠️ Completa los campos obligatorios.")
-                                st.stop()
+                                if guia_file:
+                                    key_guia = f"{folder}/guia_retorno_{datetime.now().isoformat()[:19].replace(':','')}_{guia_file.name}"
+                                    _, guia_url = upload_file_to_s3(s3_client, S3_BUCKET_NAME, guia_file, key_guia)
 
-                            # Subida de archivos a S3
-                            folder = idp if idp else "caso_sin_id"
-                            nota_url = ""
-                            doc_url  = ""
+                                # Índice real en la hoja 'casos_especiales'
+                                matches = df_casos.index[df_casos["ID_Pedido"].astype(str).str.strip() == idp]
+                                if len(matches) == 0:
+                                    st.error("❌ No se encontró el caso en 'casos_especiales'.")
+                                    st.stop()
+                                gsheet_row_idx = int(matches[0]) + 2
 
-                            if nota_file:
-                                key_nota = f"{folder}/nota_credito_{datetime.now().isoformat()[:19].replace(':','')}_{nota_file.name}"
-                                _, nota_url = upload_file_to_s3(s3_client, S3_BUCKET_NAME, nota_file, key_nota)
-                            if doc_file:
-                                key_doc  = f"{folder}/doc_adicional_{datetime.now().isoformat()[:19].replace(':','')}_{doc_file.name}"
-                                _, doc_url = upload_file_to_s3(s3_client, S3_BUCKET_NAME, doc_file, key_doc)
+                                # Escrituras SOLO en 'casos_especiales'
+                                ok = True
+                                if guia_url:
+                                    ok &= update_gsheet_cell(worksheet_casos, headers_casos, gsheet_row_idx, "Hoja_Ruta_Mensajero", guia_url)
+                                ok &= update_gsheet_cell(worksheet_casos, headers_casos, gsheet_row_idx, "Estado_Caso", "En Proceso")
 
-                            # Índice real en la hoja 'casos_especiales'
-                            matches = df_casos.index[df_casos["ID_Pedido"].astype(str).str.strip() == idp]
-                            if len(matches) == 0:
-                                st.error("❌ No se encontró el caso en 'casos_especiales'.")
-                                st.stop()
-                            gsheet_row_idx = int(matches[0]) + 2
+                                if ok:
+                                    st.success("✅ Devolución procesada correctamente en 'casos_especiales'.")
+                                    st.cache_data.clear()
+                                    st.rerun()
+                                else:
+                                    st.error("❌ No se pudo procesar la devolución.")
+                            except Exception as e:
+                                st.error(f"❌ Error al procesar los datos: {e}")
 
-                            # Escrituras SOLO en 'casos_especiales'
-                            ok = True
-                            ok &= update_gsheet_cell(worksheet_casos, headers_casos, gsheet_row_idx, "Fecha_Recepcion_Devolucion", str(fecha_recepcion))
-                            ok &= update_gsheet_cell(worksheet_casos, headers_casos, gsheet_row_idx, "Estado_Recepcion", estado_recepcion)
-                            ok &= update_gsheet_cell(worksheet_casos, headers_casos, gsheet_row_idx, "Comentarios_Admin_Devolucion", comentario_admin)
-                            if nota_url:
-                                ok &= update_gsheet_cell(worksheet_casos, headers_casos, gsheet_row_idx, "Nota_Credito_URL", nota_url)
-                            if doc_url:
-                                ok &= update_gsheet_cell(worksheet_casos, headers_casos, gsheet_row_idx, "Documento_Adicional_URL", doc_url)
-                            ok &= update_gsheet_cell(worksheet_casos, headers_casos, gsheet_row_idx, "Estado_Caso", "Aprobado")
-
-                            if ok:
-                                st.success("✅ Devolución confirmada correctamente en 'casos_especiales'.")
-                                st.cache_data.clear()
-                                st.rerun()
-                            else:
-                                st.error("❌ No se pudo guardar la confirmación.")
-                        except Exception as e:
-                            st.error(f"❌ Error al guardar los datos: {e}")
-
-                st.markdown("---")
+                    st.markdown("---")
 
 
     with main_tabs[3]: #🛠 Garantías
