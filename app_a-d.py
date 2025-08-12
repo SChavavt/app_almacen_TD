@@ -1221,7 +1221,7 @@ if not df_main.empty:
                     help="Sube la guía de mensajería para el retorno del producto"
                 )
 
-                if st.button(f"💾 Procesar Devolución ({folio or 's/folio'} - {cliente or 's/cliente'})", key=f"btn_proc_{folio}_{cliente}"):
+                if st.button("💾 Procesar Devolución"):
                     try:
                         folder = idp or f"caso_{(folio or 'sfolio')}_{(cliente or 'scliente')}".replace(" ", "_")
                         guia_url = ""
