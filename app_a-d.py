@@ -1130,7 +1130,7 @@ if not df_main.empty:
 
     # --- TAB 3: 🔁 Devoluciones (casos_especiales) ---
     with main_tabs[2]:
-        st.markdown("### 🔁 Devoluciones (casos_especiales)")
+        st.markdown("### 🔁 Devoluciones")
 
         # 1) Validaciones mínimas
         if 'df_casos' not in locals() and 'df_casos' not in globals():
