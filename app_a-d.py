@@ -1202,7 +1202,9 @@ if not df_main.empty:
                             st.markdown("**📦 Material a Devolver:**")
                             material_devolver = str(row.get("Motivo_Detallado", "")).strip()
                             if material_devolver:
-                                st.text_area("", value=material_devolver, disabled=True, key=f"material_{idp}", height=80)
+                                # Usar índice único para evitar claves duplicadas
+                                unique_material_key = f"material_{idp}_{hash(str(row.name))}"
+                                st.text_area("", value=material_devolver, disabled=True, key=unique_material_key, height=80)
                             else:
                                 st.info("No se especificó material a devolver")
                             
@@ -1260,7 +1262,6 @@ if not df_main.empty:
                                 st.info("✅ Esta devolución ya está confirmada por administración y lista para viajar.")
 
                         st.markdown("---")
-
 
     with main_tabs[3]: #🛠 Garantías
         garantias_display = df_pendientes_proceso_demorado[(df_pendientes_proceso_demorado["Tipo_Envio"] == "🛠 Garantía")].copy()
