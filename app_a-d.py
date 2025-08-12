@@ -1258,29 +1258,31 @@ if not df_main.empty:
 
                 st.markdown("---")
 
-                # 📎 Archivos del Caso (Adjuntos + Nota_Credito_URL + Documento_Adicional_URL)
-                st.markdown("#### 📎 Archivos del Caso")
-                adjuntos_urls = _normalize_urls(row.get("Adjuntos", ""))
-                nota_credito_url = str(row.get("Nota_Credito_URL", "")).strip()
-                documento_adic_url = str(row.get("Documento_Adicional_URL", "")).strip()
+                # 📎 Archivos del Caso (en expander)
+                with st.expander("📎 Archivos del Caso", expanded=False):
+                    adjuntos_urls = _normalize_urls(row.get("Adjuntos", ""))
+                    nota_credito_url = str(row.get("Nota_Credito_URL", "")).strip()
+                    documento_adic_url = str(row.get("Documento_Adicional_URL", "")).strip()
 
-                items = []
-                # Adjuntos (pueden ser múltiples)
-                for i, u in enumerate(adjuntos_urls, start=1):
-                    items.append((f"Adjunto {i}", u))
-                # Nota de crédito
-                if nota_credito_url and nota_credito_url.lower() not in ("nan", "none", "n/a"):
-                    items.append(("Nota de Crédito", nota_credito_url))
-                # Documento adicional
-                if documento_adic_url and documento_adic_url.lower() not in ("nan", "none", "n/a"):
-                    items.append(("Documento Adicional", documento_adic_url))
+                    items = []
+                    # Adjuntos (mostrar nombre original del archivo)
+                    for u in adjuntos_urls:
+                        file_name = os.path.basename(u)
+                        items.append((file_name, u))
 
-                if items:
-                    for label, url in items:
-                        # Mostrar como lista con enlace clicable
-                        st.markdown(f"- [{label}]({url})")
-                else:
-                    st.info("No hay archivos registrados para esta devolución.")
+                    # Nota de crédito
+                    if nota_credito_url and nota_credito_url.lower() not in ("nan", "none", "n/a"):
+                        items.append(("Nota de Crédito", nota_credito_url))
+
+                    # Documento adicional
+                    if documento_adic_url and documento_adic_url.lower() not in ("nan", "none", "n/a"):
+                        items.append(("Documento Adicional", documento_adic_url))
+
+                    if items:
+                        for label, url in items:
+                            st.markdown(f"- [{label}]({url})")
+                    else:
+                        st.info("No hay archivos registrados para esta devolución.")
 
                 st.markdown("---")
 
