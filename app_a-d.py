@@ -1128,100 +1128,143 @@ if not df_main.empty:
         else:
             st.info("No hay pedidos foráneos.")
 
-    with main_tabs[2]:  # 🔁 Devoluciones (casos_especiales)
-            st.markdown("### 🔁 Devoluciones (casos_especiales)")
+    # --- TAB 3: 🔁 Devoluciones (casos_especiales) ---
+    with main_tabs[2]:
+        st.markdown("### 🔁 Devoluciones (casos_especiales)")
 
-            # Detectar columna que indica el tipo de caso (según cómo guardes en 'casos_especiales')
-            tipo_col = "Tipo_Caso" if "Tipo_Caso" in df_casos.columns else ("Tipo_Envio" if "Tipo_Envio" in df_casos.columns else None)
-            if not tipo_col:
-                st.error("❌ En 'casos_especiales' falta la columna 'Tipo_Caso' o 'Tipo_Envio'.")
-                st.stop()
+        # 1) Validaciones mínimas
+        if 'df_casos' not in locals() and 'df_casos' not in globals():
+            st.error("❌ No se encontró el DataFrame 'df_casos'. Asegúrate de haberlo cargado antes.")
+            st.stop()
 
-            # Filtrar SOLO devoluciones desde 'casos_especiales'
-            devoluciones_display = df_casos[df_casos[tipo_col].astype(str).str.contains("Devoluci", case=False, na=False)].copy()
+        # Detectar columna que indica el tipo de caso (Devoluciones)
+        tipo_col = "Tipo_Caso" if "Tipo_Caso" in df_casos.columns else ("Tipo_Envio" if "Tipo_Envio" in df_casos.columns else None)
+        if not tipo_col:
+            st.error("❌ En 'casos_especiales' falta la columna 'Tipo_Caso' o 'Tipo_Envio'.")
+            st.stop()
 
-            if devoluciones_display.empty:
-                st.info("No hay devoluciones en 'casos_especiales'.")
+        # 2) Filtrar SOLO devoluciones
+        devoluciones_display = df_casos[df_casos[tipo_col].astype(str).str.contains("Devoluci", case=False, na=False)].copy()
+
+        if devoluciones_display.empty:
+            st.info("ℹ️ No hay devoluciones en 'casos_especiales'.")
+            st.stop()
+
+        # 3) Orden sugerido por Fecha_Registro (desc) o por Folio/Cliente
+        if "Fecha_Registro" in devoluciones_display.columns:
+            try:
+                devoluciones_display["_FechaOrden"] = pd.to_datetime(devoluciones_display["Fecha_Registro"], errors="coerce")
+                devoluciones_display = devoluciones_display.sort_values(by="_FechaOrden", ascending=False)
+            except Exception:
+                devoluciones_display = devoluciones_display.sort_values(by="Fecha_Registro", ascending=False)
+        elif "ID_Pedido" in devoluciones_display.columns:
+            devoluciones_display = devoluciones_display.sort_values(by="ID_Pedido", ascending=True)
+
+        # 4) Recorrer cada devolución
+        for _, row in devoluciones_display.iterrows():
+            idp         = str(row.get("ID_Pedido", "")).strip()  # NO se mostrará en el encabezado
+            folio       = str(row.get("Folio_Factura", "")).strip()
+            cliente     = str(row.get("Cliente", "")).strip()
+            estado      = str(row.get("Estado_Caso", "Pendiente")).strip()
+            vendedor    = str(row.get("Vendedor_Registro", "")).strip()
+            estado_rec  = str(row.get("Estado_Recepcion", "N/A")).strip()
+            area_resp   = str(row.get("Area_Responsable", "")).strip()
+
+            # Encabezado del expander
+            if area_resp.lower() == "cliente":
+                if estado.lower() == "aprobado" and estado_rec.lower() == "todo correcto":
+                    emoji_estado = "✅"
+                    aviso_extra  = " | Confirmado por administración: puede viajar la devolución"
+                else:
+                    emoji_estado = "🟡"
+                    aviso_extra  = " | Pendiente de confirmación final"
+                expander_title = f"🔁 {folio or 's/folio'} – {cliente or 's/cliente'} | Estado: {estado} | Estado_Recepcion: {estado_rec} {emoji_estado}{aviso_extra}"
             else:
-                # Ordenar (ajusta si tienes otra columna de fecha relevante)
-                if "Fecha_Registro" in devoluciones_display.columns:
-                    devoluciones_display = devoluciones_display.sort_values(by="Fecha_Registro", ascending=False)
-                elif "ID_Pedido" in devoluciones_display.columns:
-                    devoluciones_display = devoluciones_display.sort_values(by="ID_Pedido", ascending=True)
+                expander_title = f"🔁 {folio or 's/folio'} – {cliente or 's/cliente'} | Estado: {estado} | Estado_Recepcion: {estado_rec}"
 
-                for _, row in devoluciones_display.iterrows():
-                    idp     = str(row.get("ID_Pedido", "")).strip()
-                    folio   = str(row.get("Folio_Factura", "")).strip()
-                    cliente = str(row.get("Cliente", "")).strip()
-                    estado  = str(row.get("Estado_Caso", "Pendiente")).strip()
-                    vendedor = str(row.get("Vendedor_Registro", "")).strip()
+            with st.expander(expander_title, expanded=False):
+                # 📋 Información de la Devolución
+                st.markdown("#### 📋 Información de la Devolución")
 
-                    with st.expander(f"🔁 {idp} – {folio or 's/folio'} – {cliente}  |  Estado: {estado}", expanded=False):
-                        
-                        # Información detallada de la devolución
-                        st.markdown("#### 📋 Información de la Devolución")
-                        
-                        col1, col2 = st.columns(2)
-                        
-                        with col1:
-                            st.markdown(f"**👤 Vendedor:** {vendedor or 'N/A'}")
-                            st.markdown(f"**📄 Factura de Origen:** {folio or 'N/A'}")
-                            st.markdown(f"**🎯 Resultado Esperado:** {str(row.get('Resultado_Esperado', 'N/A')).strip()}")
-                        
-                        with col2:
-                            st.markdown(f"**🏢 Área Responsable:** {str(row.get('Area_Responsable', 'N/A')).strip()}")
-                            st.markdown(f"**👥 Responsable del Error:** {str(row.get('Nombre_Responsable', 'N/A')).strip()}")
-                        
-                        st.markdown("**📦 Material a Devolver:**")
-                        material_devolver = str(row.get("Motivo_Detallado", "")).strip()
-                        if material_devolver:
-                            st.text_area("", value=material_devolver, disabled=True, key=f"material_{idp}", height=80)
-                        else:
-                            st.info("No se especificó material a devolver")
-                        
-                        st.markdown("---")
-                        
-                        # Sección para subir guía de retorno
-                        st.markdown("#### 📋 Documentación")
-                        guia_file = st.file_uploader(
-                            "📋 Subir Guía de Retorno", 
-                            key=f"guia_{idp}",
-                            help="Sube la guía de mensajería para el retorno del producto"
-                        )
+                col1, col2 = st.columns(2)
 
-                        if st.button(f"💾 Procesar Devolución {idp}", key=f"btn_{idp}"):
-                            try:
-                                # Subida de archivo a S3
-                                folder = idp if idp else "caso_sin_id"
-                                guia_url = ""
+                with col1:
+                    st.markdown(f"**👤 Vendedor:** {vendedor or 'N/A'}")
+                    st.markdown(f"**📄 Factura de Origen:** {folio or 'N/A'}")
+                    st.markdown(f"**🎯 Resultado Esperado:** {str(row.get('Resultado_Esperado', 'N/A')).strip()}")
+                    st.markdown(f"**🆔 Número Cliente/RFC:** {str(row.get('Numero_Cliente_RFC', 'N/A')).strip()}")
 
-                                if guia_file:
-                                    key_guia = f"{folder}/guia_retorno_{datetime.now().isoformat()[:19].replace(':','')}_{guia_file.name}"
-                                    _, guia_url = upload_file_to_s3(s3_client, S3_BUCKET_NAME, guia_file, key_guia)
+                with col2:
+                    st.markdown(f"**🏢 Área Responsable:** {area_resp or 'N/A'}")
+                    st.markdown(f"**👥 Responsable del Error:** {str(row.get('Nombre_Responsable', 'N/A')).strip()}")
+                    st.markdown(f"**🚚 Tipo Envío Original:** {str(row.get('Tipo_Envio_Original', 'N/A')).strip()}")
 
-                                # Índice real en la hoja 'casos_especiales'
-                                matches = df_casos.index[df_casos["ID_Pedido"].astype(str).str.strip() == idp]
-                                if len(matches) == 0:
-                                    st.error("❌ No se encontró el caso en 'casos_especiales'.")
-                                    st.stop()
+                coment_admin = str(row.get("Comentarios_Admin_Devolucion", "")).strip()
+                if coment_admin:
+                    st.markdown("**📝 Comentario Administrativo:**")
+                    st.info(coment_admin)
+
+                st.markdown("**📦 Material a Devolver / Detalle:**")
+                material_devolver = str(row.get("Motivo_Detallado", "")).strip()
+                if material_devolver:
+                    st.text_area("", value=material_devolver, disabled=True, key=f"material_{folio}_{cliente}", height=120)
+                else:
+                    st.info("No se especificó material a devolver.")
+
+                st.markdown("---")
+
+                # 📋 Documentación
+                st.markdown("#### 📋 Documentación")
+                guia_file = st.file_uploader(
+                    "📋 Subir Guía de Retorno",
+                    key=f"guia_{folio}_{cliente}",
+                    help="Sube la guía de mensajería para el retorno del producto"
+                )
+
+                if st.button(f"💾 Procesar Devolución ({folio or 's/folio'} - {cliente or 's/cliente'})", key=f"btn_proc_{folio}_{cliente}"):
+                    try:
+                        folder = idp or f"caso_{(folio or 'sfolio')}_{(cliente or 'scliente')}".replace(" ", "_")
+                        guia_url = ""
+
+                        if guia_file:
+                            key_guia = f"{folder}/guia_retorno_{datetime.now().isoformat()[:19].replace(':','')}_{guia_file.name}"
+                            _, guia_url = upload_file_to_s3(s3_client, S3_BUCKET_NAME, guia_file, key_guia)
+
+                        gsheet_row_idx = None
+                        if "ID_Pedido" in df_casos.columns and idp:
+                            matches = df_casos.index[df_casos["ID_Pedido"].astype(str).str.strip() == idp]
+                            if len(matches) > 0:
                                 gsheet_row_idx = int(matches[0]) + 2
 
-                                # Escrituras SOLO en 'casos_especiales'
-                                ok = True
-                                if guia_url:
-                                    ok &= update_gsheet_cell(worksheet_casos, headers_casos, gsheet_row_idx, "Hoja_Ruta_Mensajero", guia_url)
-                                ok &= update_gsheet_cell(worksheet_casos, headers_casos, gsheet_row_idx, "Estado_Caso", "En Proceso")
+                        if gsheet_row_idx is None:
+                            filt = (
+                                df_casos.get("Folio_Factura", "").astype(str).str.strip().eq(folio) &
+                                df_casos.get("Cliente", "").astype(str).str.strip().eq(cliente)
+                            )
+                            matches = df_casos.index[filt] if hasattr(filt, "any") else []
+                            if len(matches) > 0:
+                                gsheet_row_idx = int(matches[0]) + 2
 
-                                if ok:
-                                    st.success("✅ Devolución procesada correctamente en 'casos_especiales'.")
-                                    st.cache_data.clear()
-                                    st.rerun()
-                                else:
-                                    st.error("❌ No se pudo procesar la devolución.")
-                            except Exception as e:
-                                st.error(f"❌ Error al procesar los datos: {e}")
+                        if gsheet_row_idx is None:
+                            st.error("❌ No se encontró el caso en 'casos_especiales'.")
+                            st.stop()
 
-                    st.markdown("---")
+                        ok = True
+                        if guia_url:
+                            ok &= update_gsheet_cell(worksheet_casos, headers_casos, gsheet_row_idx, "Hoja_Ruta_Mensajero", guia_url)
+                        ok &= update_gsheet_cell(worksheet_casos, headers_casos, gsheet_row_idx, "Estado_Caso", "En Proceso")
+
+                        if ok:
+                            st.success("✅ Devolución procesada correctamente en 'casos_especiales'.")
+                            st.cache_data.clear()
+                            st.rerun()
+                        else:
+                            st.error("❌ No se pudo procesar la devolución.")
+                    except Exception as e:
+                        st.error(f"❌ Error al procesar la devolución: {e}")
+
+            # 🔹 Separador visual entre devoluciones aunque estén cerradas
+            st.markdown("---")
 
     with main_tabs[3]: #🛠 Garantías
         garantias_display = df_pendientes_proceso_demorado[(df_pendientes_proceso_demorado["Tipo_Envio"] == "🛠 Garantía")].copy()
