@@ -1,3 +1,4 @@
+
 import time
 import streamlit as st
 import pandas as pd
@@ -1137,6 +1138,18 @@ if not df_main.empty:
             st.error("❌ No se encontró el DataFrame 'df_casos'. Asegúrate de haberlo cargado antes.")
             st.stop()
 
+        import os
+        import json
+        import math
+        import re
+        from datetime import datetime
+        try:
+            from zoneinfo import ZoneInfo
+            _TZ = ZoneInfo("America/Mexico_City")
+        except Exception:
+            _TZ = None
+        import pandas as pd
+
         # Detectar columna que indica el tipo de caso (Devoluciones)
         tipo_col = "Tipo_Caso" if "Tipo_Caso" in df_casos.columns else ("Tipo_Envio" if "Tipo_Envio" in df_casos.columns else None)
         if not tipo_col:
@@ -1150,6 +1163,16 @@ if not df_main.empty:
             st.info("ℹ️ No hay devoluciones en 'casos_especiales'.")
             st.stop()
 
+        # 2.1 Excluir devoluciones ya completadas
+        if "Estado_Caso" in devoluciones_display.columns:
+            devoluciones_display = devoluciones_display[
+                devoluciones_display["Estado_Caso"].astype(str).str.strip() != "🟢 Completado"
+            ]
+
+        if devoluciones_display.empty:
+            st.success("🎉 No hay devoluciones pendientes. (Todas están 🟢 Completado)")
+            st.stop()
+
         # 3) Orden sugerido por Fecha_Registro (desc) o por Folio/Cliente
         if "Fecha_Registro" in devoluciones_display.columns:
             try:
@@ -1161,9 +1184,6 @@ if not df_main.empty:
             devoluciones_display = devoluciones_display.sort_values(by="ID_Pedido", ascending=True)
 
         # 🔧 Helper para normalizar/extraer URLs desde texto o JSON
-        import json
-        import math
-        import re
         def _normalize_urls(value):
             if value is None:
                 return []
@@ -1190,7 +1210,7 @@ if not df_main.empty:
                         if obj.get(k):
                             urls.append(str(obj[k]).strip())
             except Exception:
-                # No era JSON, separar por , ; nueva línea o espacios
+                # No era JSON, separar por , ; nueva línea
                 parts = re.split(r"[,\n;]+", s)
                 for p in parts:
                     p = p.strip()
@@ -1297,9 +1317,11 @@ if not df_main.empty:
                 # Botón simple (sin folio/cliente en la etiqueta)
                 if st.button("💾 Procesar Devolución", key=f"btn_proc_{folio}_{cliente}"):
                     try:
+                        # Carpeta para S3 (usa ID_Pedido si existe)
                         folder = idp or f"caso_{(folio or 'sfolio')}_{(cliente or 'scliente')}".replace(" ", "_")
                         guia_url = ""
 
+                        # Subir guía si existe
                         if guia_file:
                             key_guia = f"{folder}/guia_retorno_{datetime.now().isoformat()[:19].replace(':','')}_{guia_file.name}"
                             _, guia_url = upload_file_to_s3(s3_client, S3_BUCKET_NAME, guia_file, key_guia)
@@ -1313,8 +1335,8 @@ if not df_main.empty:
                         if gsheet_row_idx is None:
                             # Fallback por (Folio_Factura + Cliente)
                             filt = (
-                                df_casos.get("Folio_Factura", "").astype(str).str.strip().eq(folio) &
-                                df_casos.get("Cliente", "").astype(str).str.strip().eq(cliente)
+                                df_casos.get("Folio_Factura", pd.Series(dtype=str)).astype(str).str.strip().eq(folio) &
+                                df_casos.get("Cliente", pd.Series(dtype=str)).astype(str).str.strip().eq(cliente)
                             )
                             matches = df_casos.index[filt] if hasattr(filt, "any") else []
                             if len(matches) > 0:
@@ -1325,12 +1347,19 @@ if not df_main.empty:
                             st.stop()
 
                         ok = True
+                        # Escribir guía si se subió
                         if guia_url:
                             ok &= update_gsheet_cell(worksheet_casos, headers_casos, gsheet_row_idx, "Hoja_Ruta_Mensajero", guia_url)
-                        ok &= update_gsheet_cell(worksheet_casos, headers_casos, gsheet_row_idx, "Estado_Caso", "En Proceso")
+
+                        # Marcar la devolución como COMPLETADA
+                        ok &= update_gsheet_cell(worksheet_casos, headers_casos, gsheet_row_idx, "Estado_Caso", "🟢 Completado")
+
+                        # (Opcional) guardar fecha de cierre con zona horaria MX
+                        mx_now = datetime.now(_TZ).strftime("%Y-%m-%d %H:%M:%S") if _TZ else datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                        _ = update_gsheet_cell(worksheet_casos, headers_casos, gsheet_row_idx, "Fecha_Cierre_Caso", mx_now)
 
                         if ok:
-                            st.success("✅ Devolución procesada correctamente en 'casos_especiales'.")
+                            st.success("✅ Devolución procesada y marcada como 🟢 Completado.")
                             st.cache_data.clear()
                             st.rerun()
                         else:
@@ -1340,6 +1369,7 @@ if not df_main.empty:
 
             # 🔹 Separador visual entre devoluciones aunque estén cerradas
             st.markdown("---")
+
 
     with main_tabs[3]: #🛠 Garantías
         garantias_display = df_pendientes_proceso_demorado[(df_pendientes_proceso_demorado["Tipo_Envio"] == "🛠 Garantía")].copy()
