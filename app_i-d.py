@@ -266,7 +266,6 @@ if 'Adjuntos' in df_all_data.columns:
     df_all_data['Adjuntos_Enlaces'] = df_all_data['Adjuntos'].apply(
         lambda x: display_attachments(x, s3_client)
     )
-
 if not df_all_data.empty:
     df_display_data = df_all_data.copy()
     time_threshold = datetime.now() - timedelta(hours=24)
@@ -278,9 +277,13 @@ if not df_all_data.empty:
     df_display_data = df_display_data[
         (df_display_data['Estado'] != '🟢 Completado') |
         ((df_display_data['Estado'] == '🟢 Completado') &
-        (df_display_data['Completados_Limpiado'].astype(str).str.lower() != "sí"))
+         (df_display_data['Completados_Limpiado'].astype(str).str.lower() != "sí"))
     ].copy()
-    df_display_data = df_display_data[df_display_data['Estado'].isin(["🟡 Pendiente", "🔵 En Proceso", "🔴 Demorado", "🛠 Modificación", "🟢 Completado"])]
+
+    # ⬅️ Incluye también 🟣 Cancelado en la lista de estados visibles en la tabla
+    df_display_data = df_display_data[df_display_data['Estado'].isin(
+        ["🟡 Pendiente", "🔵 En Proceso", "🔴 Demorado", "🛠 Modificación", "🟣 Cancelado", "🟢 Completado"]
+    )]
 
     # --- Contador de estados (corrigiendo Completados limpiados) ---
     completados_visibles = df_all_data[
@@ -288,15 +291,15 @@ if not df_all_data.empty:
         (df_all_data.get('Completados_Limpiado', '').astype(str).str.lower() != 'sí')
     ]
 
+    # ⬅️ Agrega conteo de 🟣 Cancelado
     estado_counts = {
         '🟡 Pendiente': (df_all_data['Estado'] == '🟡 Pendiente').sum(),
         '🔵 En Proceso': (df_all_data['Estado'] == '🔵 En Proceso').sum(),
         '🔴 Demorado': (df_all_data['Estado'] == '🔴 Demorado').sum(),
         '🛠 Modificación': (df_all_data['Estado'] == '🛠 Modificación').sum(),
-        '🟢 Completado': len(completados_visibles)
+        '🟣 Cancelado': (df_all_data['Estado'] == '🟣 Cancelado').sum(),
+        '🟢 Completado': len(completados_visibles),
     }
-
-
 
     # 🔄 NUEVA agrupación por tipo de envío (turno o foráneo) y fecha de entrega
     df_display_data['Fecha_Entrega_Str'] = df_display_data['Fecha_Entrega'].dt.strftime("%d/%m")
@@ -306,7 +309,6 @@ if not df_all_data.empty:
 
     grupos_a_mostrar = []
     grouped = df_display_data.groupby(['Grupo_Clave', 'Fecha_Entrega'])
-
     for (clave, _), df_grupo in sorted(grouped, key=lambda x: x[0][1]):
         if not df_grupo.empty:
             grupos_a_mostrar.append((f"{clave} ({len(df_grupo)})", df_grupo))
@@ -314,32 +316,32 @@ if not df_all_data.empty:
     # --- Mostrar resumen de estados ---
     st.markdown("#### 📊 Resumen General de Pedidos")
 
-    # Calcular total
+    # Total
     total_pedidos_estados = sum(estado_counts.values())
 
-    # Mostrar siempre estas métricas, incluso si son cero
+    # Siempre visibles
     estados_fijos = ['🟡 Pendiente', '🔵 En Proceso', '🟢 Completado']
-    estados_condicionales = ['🔴 Demorado', '🛠 Modificación']
 
+    # Dinámicos (solo si > 0)
+    estados_condicionales = ['🔴 Demorado', '🛠 Modificación', '🟣 Cancelado']
+
+    # Construcción de métricas (sin plurales, nombres tal cual)
     estados_a_mostrar = []
+    estados_a_mostrar.append(("📦 Total Pedidos", total_pedidos_estados))
 
     for estado in estados_fijos:
-        etiqueta = estado + "s" if estado != "🟢 Completado" else "🟢 Completados"
-        estados_a_mostrar.append((etiqueta, estado_counts[estado]))
+        estados_a_mostrar.append((estado, estado_counts[estado]))
 
     for estado in estados_condicionales:
         cantidad = estado_counts.get(estado, 0)
         if cantidad > 0:
-            etiqueta = estado + "s" if estado != "🛠 Modificación" else estado
-            estados_a_mostrar.append((etiqueta, cantidad))
+            estados_a_mostrar.append((estado, cantidad))
 
-    # Agregar métrica total al inicio
-    estados_a_mostrar.insert(0, ("📦 Total Pedidos", total_pedidos_estados))
-
-    # Mostrar métricas
+    # Render de métricas
     cols = st.columns(len(estados_a_mostrar))
     for col, (nombre_estado, cantidad) in zip(cols, estados_a_mostrar):
-        col.metric(nombre_estado, cantidad)
+        col.metric(nombre_estado, int(cantidad))
+
 
     # 🔽 Mostrar los grupos
     if grupos_a_mostrar:
