@@ -1017,41 +1017,46 @@ if not df_main.empty:
         (df_main.get('Completados_Limpiado', '').astype(str).str.lower() != 'sí')
     ]
 
+    # Contadores por estado (incluye 🟣 Cancelado)
     estado_counts = {
         '🟡 Pendiente': (df_main['Estado'] == '🟡 Pendiente').sum(),
         '🔵 En Proceso': (df_main['Estado'] == '🔵 En Proceso').sum(),
         '🔴 Demorado': (df_main['Estado'] == '🔴 Demorado').sum(),
         '🛠 Modificación': (df_main['Estado'] == '🛠 Modificación').sum(),
-        '🟢 Completado': len(completados_visibles)
+        '🟣 Cancelado': (df_main['Estado'] == '🟣 Cancelado').sum(),
+        '🟢 Completado': len(completados_visibles),
     }
 
-    # Calcular el total sumando todos los estados
+    # Total de pedidos sumando todos los estados
     total_pedidos_estados = sum(estado_counts.values())
 
-
-    # Mostrar siempre estas métricas, incluso si son cero
+    # Estados siempre visibles
     estados_fijos = ['🟡 Pendiente', '🔵 En Proceso', '🟢 Completado']
-    estados_condicionales = ['🔴 Demorado', '🛠 Modificación']
 
+    # Estados dinámicos (solo si > 0)
+    estados_condicionales = ['🔴 Demorado', '🛠 Modificación', '🟣 Cancelado']
+
+    # Construcción de la lista a mostrar
     estados_a_mostrar = []
 
-    for estado in estados_fijos:
-        etiqueta = estado + "s" if estado != "🟢 Completado" else "🟢 Completados"
-        estados_a_mostrar.append((etiqueta, estado_counts[estado]))
+    # Total primero
+    estados_a_mostrar.append(("📦 Total Pedidos", total_pedidos_estados))
 
+    # Fijos (siempre)
+    for estado in estados_fijos:
+        estados_a_mostrar.append((estado, estado_counts[estado]))
+
+    # Dinámicos (solo si hay > 0)
     for estado in estados_condicionales:
         cantidad = estado_counts.get(estado, 0)
         if cantidad > 0:
-            etiqueta = estado + "s" if estado != "🛠 Modificación" else estado
-            estados_a_mostrar.append((etiqueta, cantidad))
+            estados_a_mostrar.append((estado, cantidad))
 
-    # Agregar métrica total
-    estados_a_mostrar.insert(0, ("📦 Total Pedidos", total_pedidos_estados))
-
-    # Mostrar métricas
+    # Render de métricas
     cols = st.columns(len(estados_a_mostrar))
     for col, (nombre_estado, cantidad) in zip(cols, estados_a_mostrar):
-        col.metric(nombre_estado, cantidad)
+        col.metric(nombre_estado, int(cantidad))
+
 
     # === CASOS ESPECIALES (Devoluciones/Garantías) ===
     df_casos, headers_casos = cargar_pedidos_desde_google_sheet(GOOGLE_SHEET_ID, "casos_especiales")
