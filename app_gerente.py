@@ -408,6 +408,24 @@ with tabs[1]:
         st.rerun()
 
 
+    # --- NUEVO: CAMBIO DE ESTADO A CANCELADO ---
+    estado_actual = row.get("Estado", "").strip()
+    st.markdown("### 🟣 Cancelar Pedido")
+    st.markdown(f"**Estado Actual:** {estado_actual}")
+    
+    # Solo mostrar la opción de cancelar si el pedido no está ya cancelado
+    if "Cancelado" not in estado_actual:
+        if st.button("🟣 Cambiar Estado a CANCELADO"):
+            # Actualizar el estado en la hoja de cálculo
+            nuevo_estado = "🟣 Cancelado"
+            hoja.update_cell(gspread_row_idx, df.columns.get_loc("Estado")+1, nuevo_estado)
+            st.session_state["pedido_modificado"] = pedido_sel
+            st.session_state["mensaje_exito"] = "🟣 Pedido marcado como CANCELADO correctamente."
+            st.rerun()
+    else:
+        st.info("ℹ️ Este pedido ya está marcado como CANCELADO.")
+
+
     completado = row.get("Completados_Limpiado", "")
     st.markdown("### 👁 Visibilidad en Pantalla de Producción")
     opciones_visibilidad = {"Sí": "", "No": "sí"}
@@ -421,5 +439,3 @@ with tabs[1]:
         st.session_state["pedido_modificado"] = pedido_sel
         st.session_state["mensaje_exito"] = "👁 Visibilidad en pantalla de producción actualizada."
         st.rerun()
-
-
