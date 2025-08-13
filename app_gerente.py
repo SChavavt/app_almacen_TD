@@ -420,8 +420,10 @@ with tabs[1]:
                 # Actualizar el estado en la hoja de cálculo
                 nuevo_estado = "🟣 Cancelado"
                 hoja.update_cell(gspread_row_idx, df.columns.get_loc("Estado")+1, nuevo_estado)
-                st.success("🟣 Pedido marcado como CANCELADO correctamente.")
-                st.rerun()  # Esto recarga la página
+                # Usar el mismo sistema que las otras secciones
+                st.session_state["pedido_modificado"] = pedido_sel
+                st.session_state["mensaje_exito"] = "🟣 Pedido marcado como CANCELADO correctamente."
+                st.rerun()
             except Exception as e:
                 st.error(f"❌ Error al cancelar el pedido: {str(e)}")
     else:
