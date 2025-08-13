@@ -9,12 +9,9 @@ import gspread.utils
 import time
 
 st.set_page_config(page_title="Panel de Almacén Integrado", layout="wide")
-if st.button("🔄 Recargar pedidos ahora"):
-    st.cache_data.clear()
-    st.cache_resource.clear()  # 💥 Limpia también el cliente de Google (y S3 si hiciera falta)
-    st.rerun()
 
-col_title, col_button = st.columns([0.7, 0.3])
+# --- Controles: recarga manual + autorefresco ---
+col_title, col_actions = st.columns([0.7, 0.3])
 with col_title:
     st.markdown("""
         <h2 style="color: white; font-size: 1.8rem; margin-bottom: 0rem;">
@@ -24,28 +21,40 @@ with col_title:
     st.markdown("""
         <style>
         /* 🔢 Ajuste compacto para métricas */
-        div[data-testid="metric-container"] {
-            padding: 0.1rem 0.5rem;
-        }
-        div[data-testid="metric-container"] > div {
-            font-size: 1.1rem !important;  /* número (ej: 13) */
-        }
-        div[data-testid="metric-container"] > label {
-            font-size: 0.85rem !important;  /* título (ej: Total Pedidos) */
-        }
+        div[data-testid="metric-container"] { padding: 0.1rem 0.5rem; }
+        div[data-testid="metric-container"] > div { font-size: 1.1rem !important; }
+        div[data-testid="metric-container"] > label { font-size: 0.85rem !important; }
         </style>
     """, unsafe_allow_html=True)
 
+with col_actions:
+    # Recarga manual: limpia cachés y rerun (pega a la API solo cuando TTL haya expirado)
+    if st.button("🔄 Recargar pedidos ahora", use_container_width=True):
+        st.cache_data.clear()
+        st.cache_resource.clear()
+        st.rerun()
+
+    # Toggle de autorefresco + selector de intervalo
+    st.checkbox("⚡ Autorefrescar", key="auto_reload", help="Rerun automático sin limpiar caché")
+    st.selectbox("Intervalo (seg)", [60, 45], index=0, key="auto_reload_interval")
+
+# ⏱️ Disparador de autorefresco (no limpia caché → evita 429)
+if st.session_state.get("auto_reload"):
+    interval = int(st.session_state.get("auto_reload_interval", 60))
+    # meta refresh: rerun de la página cada N segundos
+    st.markdown(f'<meta http-equiv="refresh" content="{interval}">', unsafe_allow_html=True)
+
+st.caption(f"🕒 Última actualización: {datetime.now().strftime('%d/%m %H:%M:%S')}")
+
 st.markdown("---")
 
+# Mantén tu CSS de tabla
 st.markdown("""
     <style>
-    .dataframe td {
-        white-space: unset !important;
-        word-break: break-word;
-    }
+    .dataframe td { white-space: unset !important; word-break: break-word; }
     </style>
 """, unsafe_allow_html=True)
+
 
 GOOGLE_SHEET_ID = '1aWkSelodaz0nWfQx7FZAysGnIYGQFJxAN7RO3YgCiZY'
 GOOGLE_SHEET_WORKSHEET_NAME = 'datos_pedidos'
