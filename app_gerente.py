@@ -416,12 +416,14 @@ with tabs[1]:
     # Solo mostrar la opción de cancelar si el pedido no está ya cancelado
     if "Cancelado" not in estado_actual:
         if st.button("🟣 Cambiar Estado a CANCELADO"):
-            # Actualizar el estado en la hoja de cálculo
-            nuevo_estado = "🟣 Cancelado"
-            hoja.update_cell(gspread_row_idx, df.columns.get_loc("Estado")+1, nuevo_estado)
-            st.session_state["pedido_modificado"] = pedido_sel
-            st.session_state["mensaje_exito"] = "🟣 Pedido marcado como CANCELADO correctamente."
-            st.rerun()
+            try:
+                # Actualizar el estado en la hoja de cálculo
+                nuevo_estado = "🟣 Cancelado"
+                hoja.update_cell(gspread_row_idx, df.columns.get_loc("Estado")+1, nuevo_estado)
+                st.success("🟣 Pedido marcado como CANCELADO correctamente.")
+                st.rerun()  # Esto recarga la página
+            except Exception as e:
+                st.error(f"❌ Error al cancelar el pedido: {str(e)}")
     else:
         st.info("ℹ️ Este pedido ya está marcado como CANCELADO.")
 
