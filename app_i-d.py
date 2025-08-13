@@ -7,6 +7,10 @@ from oauth2client.service_account import ServiceAccountCredentials
 import boto3
 import gspread.utils
 import time
+from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo  # <- nuevo
+
+TZ = ZoneInfo("America/Mexico_City")
 
 st.set_page_config(page_title="Panel de Almacén Integrado", layout="wide")
 
@@ -277,7 +281,7 @@ if 'Adjuntos' in df_all_data.columns:
     )
 if not df_all_data.empty:
     df_display_data = df_all_data.copy()
-    time_threshold = datetime.now() - timedelta(hours=24)
+    st.caption(f"🕒 Última actualización: {datetime.now(TZ).strftime('%d/%m %H:%M:%S')}")
 
     # Mostrar solo completados que NO estén marcados como limpiados
     if 'Completados_Limpiado' not in df_display_data.columns:
