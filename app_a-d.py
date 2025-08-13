@@ -1182,7 +1182,6 @@ if not df_main.empty:
         # 1) Validaciones mínimas
         if 'df_casos' not in locals() and 'df_casos' not in globals():
             st.error("❌ No se encontró el DataFrame 'df_casos'. Asegúrate de haberlo cargado antes.")
-            st.stop()
 
         import os
         import json
@@ -1200,14 +1199,12 @@ if not df_main.empty:
         tipo_col = "Tipo_Caso" if "Tipo_Caso" in df_casos.columns else ("Tipo_Envio" if "Tipo_Envio" in df_casos.columns else None)
         if not tipo_col:
             st.error("❌ En 'casos_especiales' falta la columna 'Tipo_Caso' o 'Tipo_Envio'.")
-            st.stop()
 
         # 2) Filtrar SOLO devoluciones
         devoluciones_display = df_casos[df_casos[tipo_col].astype(str).str.contains("Devoluci", case=False, na=False)].copy()
 
         if devoluciones_display.empty:
             st.info("ℹ️ No hay devoluciones en 'casos_especiales'.")
-            st.stop()
 
         # 2.1 Excluir devoluciones ya completadas
         if "Estado" in devoluciones_display.columns:
@@ -1217,7 +1214,6 @@ if not df_main.empty:
 
         if devoluciones_display.empty:
             st.success("🎉 No hay devoluciones pendientes. (Todas están 🟢 Completado)")
-            st.stop()
 
         # 3) Orden sugerido por Fecha_Registro (desc) o por Folio/Cliente
         if "Fecha_Registro" in devoluciones_display.columns:
@@ -1371,7 +1367,6 @@ if not df_main.empty:
 
                         if gsheet_row_idx is None:
                             st.error("❌ No se encontró el caso en 'casos_especiales'.")
-                            st.stop()
 
                         ok = True
                         if guia_url:
