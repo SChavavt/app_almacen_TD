@@ -741,6 +741,47 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
             except Exception as e:
                 st.error(f"Error al completar el pedido: {e}")
 
+                
+        # ✅ BOTÓN PROCESAR MODIFICACIÓN - Solo para pedidos con estado 🛠 Modificación
+        if row['Estado'] == "🛠 Modificación":
+            col_process_mod = st.columns(1)[0]  # Crear columna para el botón
+            if col_process_mod.button("🔧 Procesar Modificación", key=f"process_mod_{row['ID_Pedido']}_{origen_tab}"):
+                try:
+                    # 🧠 Preservar pestañas activas
+                    st.session_state["preserve_main_tab"] = st.session_state.get("active_main_tab_index", 0)
+                    st.session_state["preserve_local_tab"] = st.session_state.get("active_subtab_local_index", 0)
+                    st.session_state["preserve_date_tab_m"] = st.session_state.get("active_date_tab_m_index", 0)
+                    st.session_state["preserve_date_tab_t"] = st.session_state.get("active_date_tab_t_index", 0)
+                    
+                    # ✅ Expandir el pedido
+                    st.session_state["expanded_pedidos"][row['ID_Pedido']] = True
+                    
+                    # 🔄 Actualizar solo el estado a "En Proceso"
+                    estado_col_idx = headers.index("Estado") + 1
+                    updates = [
+                        {'range': gspread.utils.rowcol_to_a1(gsheet_row_index, estado_col_idx), 'values': [["🔵 En Proceso"]]}
+                    ]
+                    
+                    if batch_update_gsheet_cells(worksheet, updates):
+                        # ✅ Actualizar el DataFrame y la fila localmente
+                        df.at[idx, "Estado"] = "🔵 En Proceso"
+                        row["Estado"] = "🔵 En Proceso"  # Refleja el cambio en pantalla
+                        
+                        st.toast("🔧 Modificación procesada - Estado actualizado a 'En Proceso'", icon="✅")
+                        
+                        # 🔁 Mantener pestañas activas
+                        st.session_state["active_main_tab_index"] = st.session_state.get("active_main_tab_index", 0)
+                        st.session_state["active_subtab_local_index"] = st.session_state.get("active_subtab_local_index", 0)
+                        st.session_state["active_date_tab_m_index"] = st.session_state.get("active_date_tab_m_index", 0)
+                        st.session_state["active_date_tab_t_index"] = st.session_state.get("active_date_tab_t_index", 0)
+                        
+                        st.cache_data.clear()
+                        st.rerun()
+                    else:
+                        st.error("❌ Falló la actualización del estado a 'En Proceso'.")
+                        
+                except Exception as e:
+                    st.error(f"❌ Error al procesar la modificación: {e}")
 
         # --- Adjuntar archivos de guía ---
         if row['Estado'] != "🟢 Completado":
