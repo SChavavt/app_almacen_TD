@@ -943,7 +943,111 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
         """, height=0)
         st.session_state["scroll_to_pedido_id"] = None
 
+def mostrar_pedido_solo_guia(df, idx, row, orden, origen_tab, current_main_tab_label, worksheet, headers, s3_client_param):
+    """
+    Render minimalista SOLO para subir guía y marcar como completado.
+    - Sin botones de imprimir/completar
+    - Sin lógica de modificación de surtido
+    - El bloque de guía siempre visible
+    - Al subir guía => actualiza Adjuntos_Guia y cambia a 🟢 Completado + Fecha_Completado
+    """
+    gsheet_row_index = row.get('_gsheet_row_index')
+    if gsheet_row_index is None:
+        st.error(f"❌ Error interno: No se obtuvo _gsheet_row_index para '{row.get('ID_Pedido','?')}'.")
+        return
 
+    folio = (row.get("Folio_Factura", "") or "").strip() or row['ID_Pedido']
+    st.markdown(f'<a name="pedido_{row["ID_Pedido"]}"></a>', unsafe_allow_html=True)
+
+    # Expander simple con info básica (sin acciones extra)
+    with st.expander(f"{row['Estado']} - {folio} - {row.get('Cliente','')}", expanded=True):
+        st.markdown("---")
+
+        # Cabecera compacta
+        col_order_num, col_client, col_time, col_status, col_vendedor = st.columns([0.5, 2, 1.6, 1, 1.2])
+        col_order_num.write(f"**{orden}**")
+        col_client.markdown(f"📄 **{folio}**  \n🤝 **{row.get('Cliente','')}**")
+
+        hora_registro_dt = pd.to_datetime(row.get('Hora_Registro', ''), errors='coerce')
+        col_time.write(f"🕒 {hora_registro_dt.strftime('%Y-%m-%d %H:%M:%S')}" if pd.notna(hora_registro_dt) else "")
+        col_status.write(f"{row['Estado']}")
+        col_vendedor.write(f"👤 {row.get('Vendedor_Registro','')}")
+
+        st.markdown("---")
+        st.markdown("### 📦 Subir Archivos de Guía")
+
+        # Uploader siempre visible (sin expander)
+        upload_key = f"file_guia_only_{row['ID_Pedido']}"
+        archivos_guia = st.file_uploader(
+            "📎 Subir guía(s) del pedido",
+            type=["pdf", "jpg", "jpeg", "png"],
+            accept_multiple_files=True,
+            key=upload_key
+        )
+
+        # --- Botón para subir guía y completar ---
+        if st.button("📤 Subir Guía y Completar", key=f"btn_subir_guia_only_{row['ID_Pedido']}"):
+            # ✅ Validación: al menos un archivo
+            if not archivos_guia:
+                st.warning("⚠️ Primero sube al menos un archivo de guía.")
+                st.stop()
+
+            uploaded_urls = []
+            for archivo in archivos_guia:
+                ext = os.path.splitext(archivo.name)[1]
+                s3_key = f"{row['ID_Pedido']}/guia_{uuid.uuid4().hex[:6]}{ext}"
+                success, url = upload_file_to_s3(s3_client_param, S3_BUCKET_NAME, archivo, s3_key)
+                if success and url:
+                    uploaded_urls.append(url)
+
+            # Construir nueva lista de URLs
+            nueva_lista = str(row.get("Adjuntos_Guia", "")).strip()
+            if uploaded_urls:
+                nueva_lista = (nueva_lista + ", " if nueva_lista else "") + ", ".join(uploaded_urls)
+
+            # Preparar updates a Google Sheets
+            updates = []
+
+            if "Adjuntos_Guia" in headers:
+                col_idx = headers.index("Adjuntos_Guia") + 1
+                updates.append({
+                    'range': gspread.utils.rowcol_to_a1(gsheet_row_index, col_idx),
+                    'values': [[nueva_lista]]
+                })
+
+            if "Estado" in headers:
+                col_idx = headers.index("Estado") + 1
+                updates.append({
+                    'range': gspread.utils.rowcol_to_a1(gsheet_row_index, col_idx),
+                    'values': [["🟢 Completado"]]
+                })
+
+            mx_now = datetime.now(timezone("America/Mexico_City")).strftime("%Y-%m-%d %H:%M:%S")
+            if "Fecha_Completado" in headers:
+                col_idx = headers.index("Fecha_Completado") + 1
+                updates.append({
+                    'range': gspread.utils.rowcol_to_a1(gsheet_row_index, col_idx),
+                    'values': [[mx_now]]
+                })
+
+            # Ejecutar actualización en lote
+            if updates and batch_update_gsheet_cells(worksheet, updates):
+                # Refrescar DataFrame local para reflejo inmediato
+                if uploaded_urls:
+                    df.at[idx, "Adjuntos_Guia"] = nueva_lista
+                    row["Adjuntos_Guia"] = nueva_lista
+                df.at[idx, "Estado"] = "🟢 Completado"
+                df.at[idx, "Fecha_Completado"] = mx_now
+
+                st.toast(f"📤 {len(uploaded_urls)} guía(s) subida(s). Pedido completado.", icon="✅")
+                st.success("✅ Pedido marcado como **🟢 Completado**.")
+
+                # 🔒 Permanecer en 📋 Solicitudes de Guía (índice 3)
+                st.session_state["active_main_tab_index"] = 3
+                st.cache_data.clear()
+                st.rerun()
+            else:
+                st.error("❌ No se pudo actualizar Google Sheets con la guía y/o el estado.")
 
 # --- Main Application Logic ---
 
@@ -1072,8 +1176,15 @@ if not df_main.empty:
 
 
     # --- Implementación de Pestañas con st.tabs ---
-    tab_options = ["📍 Pedidos Locales", "🚚 Pedidos Foráneos", "🔁 Devoluciones", "🛠 Garantías", "✅ Historial Completados"]
-
+    tab_options = [
+        "📍 Pedidos Locales",
+        "🚚 Pedidos Foráneos",
+        "🏙️ Pedidos CDMX",
+        "📋 Solicitudes de Guía",
+        "🔁 Devoluciones",
+        "🛠 Garantías",
+        "✅ Historial Completados",
+    ]
     main_tabs = st.tabs(tab_options)
 
     with main_tabs[0]: # 📍 Pedidos Locales
@@ -1175,8 +1286,38 @@ if not df_main.empty:
         else:
             st.info("No hay pedidos foráneos.")
 
+    with main_tabs[2]:  # 🏙️ Pedidos CDMX
+        pedidos_cdmx_display = df_pendientes_proceso_demorado[
+            (df_pendientes_proceso_demorado["Tipo_Envio"] == "🏙️ Pedido CDMX")
+        ].copy()
+
+        if not pedidos_cdmx_display.empty:
+            pedidos_cdmx_display = ordenar_pedidos_custom(pedidos_cdmx_display)
+            st.markdown("### 🏙️ Pedidos CDMX")
+            for orden, (idx, row) in enumerate(pedidos_cdmx_display.iterrows(), start=1):
+                # Reutiliza el mismo render que Foráneo (con tus botones de imprimir/completar, etc.)
+                mostrar_pedido(df_main, idx, row, orden, "CDMX", "🏙️ Pedidos CDMX", worksheet_main, headers_main, s3_client)
+        else:
+            st.info("No hay pedidos CDMX.")
+
+    with main_tabs[3]:  # 📋 Solicitudes de Guía
+        solicitudes_display = df_pendientes_proceso_demorado[
+            (df_pendientes_proceso_demorado["Tipo_Envio"] == "📋 Solicitudes de Guía")
+        ].copy()
+
+        if not solicitudes_display.empty:
+            solicitudes_display = ordenar_pedidos_custom(solicitudes_display)
+            st.markdown("### 📋 Solicitudes de Guía")
+            st.info("En esta pestaña solo puedes **subir la(s) guía(s)**. Al subir se marca el pedido como **🟢 Completado**.")
+            for orden, (idx, row) in enumerate(solicitudes_display.iterrows(), start=1):
+                # ✅ Render minimalista: solo guía + completar automático
+                mostrar_pedido_solo_guia(df_main, idx, row, orden, "Solicitudes", "📋 Solicitudes de Guía", worksheet_main, headers_main, s3_client)
+        else:
+            st.info("No hay solicitudes de guía.")
+
+
     # --- TAB 3: 🔁 Devoluciones (casos_especiales) ---
-    with main_tabs[2]:
+    with main_tabs[4]:
         st.markdown("### 🔁 Devoluciones")
 
         # 1) Validaciones mínimas
@@ -1391,7 +1532,7 @@ if not df_main.empty:
             st.markdown("---")
 
 
-    with main_tabs[3]: #🛠 Garantías
+    with main_tabs[5]: #🛠 Garantías
         garantias_display = df_pendientes_proceso_demorado[(df_pendientes_proceso_demorado["Tipo_Envio"] == "🛠 Garantía")].copy()
         if not garantias_display.empty:
             garantias_display = ordenar_pedidos_custom(garantias_display)
@@ -1400,7 +1541,7 @@ if not df_main.empty:
         else:
             st.info("No hay garantías.")
 
-with main_tabs[4]:  # ✅ Historial Completados
+with main_tabs[6]:  # ✅ Historial Completados
     df_completados_historial = df_main[
         (df_main["Estado"] == "🟢 Completado") & 
         (df_main.get("Completados_Limpiado", "").astype(str).str.lower() != "sí")
@@ -1425,7 +1566,7 @@ with main_tabs[4]:  # ✅ Historial Completados
             if updates and batch_update_gsheet_cells(worksheet_main, updates):
                 st.success(f"✅ {len(updates)} pedidos marcados como limpiados.")
                 st.cache_data.clear()
-                st.session_state["active_main_tab_index"] = 4
+                st.session_state["active_main_tab_index"] = 6
                 st.rerun()
 
     # 🧹 Limpieza específica por grupo de completados locales
@@ -1465,7 +1606,7 @@ with main_tabs[4]:  # ✅ Historial Completados
                     if updates and batch_update_gsheet_cells(worksheet_main, updates):
                         st.success(f"✅ {len(updates)} pedidos completados en {grupo} marcados como limpiados.")
                         st.cache_data.clear()
-                        st.session_state["active_main_tab_index"] = 4
+                        st.session_state["active_main_tab_index"] = 6
                         st.rerun()
 
     # Mostrar pedidos completados individuales
@@ -1489,7 +1630,7 @@ with main_tabs[4]:  # ✅ Historial Completados
                 if updates and batch_update_gsheet_cells(worksheet_main, updates):
                     st.success(f"✅ {len(updates)} pedidos foráneos completados fueron marcados como limpiados.")
                     st.cache_data.clear()
-                    st.session_state["active_main_tab_index"] = 4
+                    st.session_state["active_main_tab_index"] = 6
                     st.rerun()
 
         df_completados_historial = df_completados_historial.sort_values(by="Fecha_Completado", ascending=False)
