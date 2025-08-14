@@ -48,8 +48,6 @@ if st.session_state.get("auto_reload"):
     # meta refresh: rerun de la página cada N segundos
     st.markdown(f'<meta http-equiv="refresh" content="{interval}">', unsafe_allow_html=True)
 
-st.caption(f"🕒 Última actualización: {datetime.now().strftime('%d/%m %H:%M:%S')}")
-
 st.markdown("---")
 
 # Mantén tu CSS de tabla
