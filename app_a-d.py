@@ -949,6 +949,7 @@ def mostrar_pedido_solo_guia(df, idx, row, orden, origen_tab, current_main_tab_l
     - Sin botones de imprimir/completar
     - Sin lógica de modificación de surtido
     - El bloque de guía siempre visible
+    - Muestra el comentario del pedido si existe
     - Al subir guía => actualiza Adjuntos_Guia y cambia a 🟢 Completado + Fecha_Completado
     """
     gsheet_row_index = row.get('_gsheet_row_index')
@@ -972,6 +973,12 @@ def mostrar_pedido_solo_guia(df, idx, row, orden, origen_tab, current_main_tab_l
         col_time.write(f"🕒 {hora_registro_dt.strftime('%Y-%m-%d %H:%M:%S')}" if pd.notna(hora_registro_dt) else "")
         col_status.write(f"{row['Estado']}")
         col_vendedor.write(f"👤 {row.get('Vendedor_Registro','')}")
+
+        # 📝 Comentario del pedido (NUEVO)
+        comentario = str(row.get("Comentario", "")).strip()
+        if comentario:
+            st.markdown("##### 📝 Comentario del Pedido")
+            st.info(comentario)
 
         st.markdown("---")
         st.markdown("### 📦 Subir Archivos de Guía")
@@ -1048,6 +1055,7 @@ def mostrar_pedido_solo_guia(df, idx, row, orden, origen_tab, current_main_tab_l
                 st.rerun()
             else:
                 st.error("❌ No se pudo actualizar Google Sheets con la guía y/o el estado.")
+
 
 # --- Main Application Logic ---
 
