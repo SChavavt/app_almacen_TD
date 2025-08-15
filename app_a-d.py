@@ -1549,7 +1549,7 @@ with main_tabs[4]:
                 st.info(coment_admin)
 
 
-            # === 🆕 NUEVO: Clasificar Tipo_Envio_Original, Turno (si Local) y Fecha_Entrega ===
+            # === 🆕 NUEVO: Clasificar Tipo_Envio_Original, Turno y Fecha_Entrega (sin opción vacía y sin recargar) ===
             st.markdown("---")
             st.markdown("#### 🚦 Clasificar envío y fecha")
 
@@ -1560,40 +1560,71 @@ with main_tabs[4]:
             fecha_actual_dt   = pd.to_datetime(fecha_actual_str, errors='coerce') if fecha_actual_str else None
             today_date        = (datetime.now(_TZ).date() if _TZ else datetime.now().date())
 
-            # Selects y fecha
-            c1, c2, c3 = st.columns([1.2, 1.2, 1])
-            with c1:
-                tipo_envio_sel = st.selectbox(
-                    "Tipo de envío original",
-                    options=["", "📍 Pedido Local", "🚚 Pedido Foráneo"],
-                    index=(["", "📍 Pedido Local", "🚚 Pedido Foráneo"].index(tipo_envio_actual) 
-                        if tipo_envio_actual in ["", "📍 Pedido Local", "🚚 Pedido Foráneo"] else 0),
-                    key=f"tipo_envio_orig_{idp or folio or cliente}"
-                )
-            with c2:
-                turno_sel = ""
-                if tipo_envio_sel == "📍 Pedido Local":
-                    turno_sel = st.selectbox(
-                        "Turno (si Local)",
-                        options=["", "☀️ Local Mañana", "🌙 Local Tarde", "🌵 Saltillo", "📦 Pasa a Bodega"],
-                        index=(["", "☀️ Local Mañana", "🌙 Local Tarde", "🌵 Saltillo", "📦 Pasa a Bodega"].index(turno_actual)
-                            if turno_actual in ["", "☀️ Local Mañana", "🌙 Local Tarde", "🌵 Saltillo", "📦 Pasa a Bodega"] else 0),
-                        key=f"turno_dev_{idp or folio or cliente}"
-                    )
-            with c3:
-                fecha_val = (fecha_actual_dt.date() if pd.notna(fecha_actual_dt) and fecha_actual_dt.date() >= today_date else today_date)
-                fecha_sel = st.date_input(
-                    "Fecha de envío",
-                    value=fecha_val,
-                    min_value=today_date,
-                    max_value=today_date + timedelta(days=365),
-                    format="DD/MM/YYYY",
-                    key=f"fecha_dev_{idp or folio or cliente}"
+            # Claves únicas por caso (para que los widgets no “salten”)
+            row_key = (idp or f"{folio}_{cliente}").replace(" ", "_")
+
+            tipo_key   = f"tipo_envio_orig_{row_key}"
+            turno_key  = f"turno_dev_{row_key}"
+            fecha_key  = f"fecha_dev_{row_key}"
+
+            # Opciones SIN vacío
+            TIPO_OPTS  = ["📍 Pedido Local", "🚚 Pedido Foráneo"]
+            TURNO_OPTS = ["☀️ Local Mañana", "🌙 Local Tarde", "🌵 Saltillo", "📦 Pasa a Bodega"]
+
+            # Inicializar valores en session_state (solo una vez)
+            if tipo_key not in st.session_state:
+                # Elegir por lo que ya trae la hoja; si no cuadra, por defecto Foráneo
+                if tipo_envio_actual in TIPO_OPTS:
+                    st.session_state[tipo_key] = tipo_envio_actual
+                else:
+                    low = tipo_envio_actual.lower()
+                    st.session_state[tipo_key] = "📍 Pedido Local" if "local" in low else "🚚 Pedido Foráneo"
+
+            if turno_key not in st.session_state:
+                st.session_state[turno_key] = turno_actual if turno_actual in TURNO_OPTS else TURNO_OPTS[0]
+
+            if fecha_key not in st.session_state:
+                st.session_state[fecha_key] = (
+                    fecha_actual_dt.date() if pd.notna(fecha_actual_dt) and fecha_actual_dt.date() >= today_date else today_date
                 )
 
-            # Botón aplicar
-            if st.button("✅ Aplicar cambios de envío/fecha", key=f"btn_aplicar_envio_fecha_{idp or folio or cliente}"):
+            # Selects y fecha (sin opción vacía). Cambiar aquí NO guarda en Sheets.
+            c1, c2, c3 = st.columns([1.2, 1.2, 1])
+
+            with c1:
+                st.selectbox(
+                    "Tipo de envío original",
+                    options=TIPO_OPTS,
+                    index=TIPO_OPTS.index(st.session_state[tipo_key]) if st.session_state[tipo_key] in TIPO_OPTS else 1,
+                    key=tipo_key
+                )
+
+            with c2:
+                st.selectbox(
+                    "Turno (si Local)",
+                    options=TURNO_OPTS,
+                    index=TURNO_OPTS.index(st.session_state[turno_key]) if st.session_state[turno_key] in TURNO_OPTS else 0,
+                    key=turno_key,
+                    disabled=(st.session_state[tipo_key] != "📍 Pedido Local"),
+                    help="Solo aplica para Pedido Local"
+                )
+
+            with c3:
+                st.date_input(
+                    "Fecha de envío",
+                    value=st.session_state[fecha_key],
+                    min_value= today_date,
+                    max_value= today_date + timedelta(days=365),
+                    format="DD/MM/YYYY",
+                    key=fecha_key
+                )
+
+            # Botón aplicar (AQUÍ SÍ se guardan cambios). No cambiamos de pestaña.
+            if st.button("✅ Aplicar cambios de envío/fecha", key=f"btn_aplicar_envio_fecha_{row_key}"):
                 try:
+                    # Por si acaso, preservar la pestaña actual (Devoluciones es índice 4)
+                    st.session_state["preserve_main_tab"] = 4
+
                     # Resolver fila en gsheet
                     gsheet_row_idx = None
                     if "ID_Pedido" in df_casos.columns and idp:
@@ -1615,51 +1646,46 @@ with main_tabs[4]:
                         updates = []
                         changed = False
 
-                        # 1) Tipo_Envio_Original
-                        if "Tipo_Envio_Original" in headers_casos:
-                            if tipo_envio_sel != tipo_envio_actual:
-                                col_idx = headers_casos.index("Tipo_Envio_Original") + 1
-                                updates.append({'range': gspread.utils.rowcol_to_a1(gsheet_row_idx, col_idx),
-                                                'values': [[tipo_envio_sel]]})
-                                changed = True
-                        else:
-                            st.warning("⚠️ La columna 'Tipo_Envio_Original' no existe en la hoja. Agrégala en la fila 1.")
+                        # 1) Tipo_Envio_Original (sin opción vacía)
+                        tipo_sel = st.session_state[tipo_key]
+                        if "Tipo_Envio_Original" in headers_casos and tipo_sel != tipo_envio_actual:
+                            col_idx = headers_casos.index("Tipo_Envio_Original") + 1
+                            updates.append({'range': gspread.utils.rowcol_to_a1(gsheet_row_idx, col_idx), 'values': [[tipo_sel]]})
+                            changed = True
 
-                        # 2) Turno (sólo si Local)
-                        if tipo_envio_sel == "📍 Pedido Local":
-                            if "Turno" in headers_casos:
-                                if not turno_sel:
-                                    st.warning("⚠️ Selecciona un turno para 'Pedido Local'.")
-                                elif turno_sel != turno_actual:
-                                    col_idx = headers_casos.index("Turno") + 1
-                                    updates.append({'range': gspread.utils.rowcol_to_a1(gsheet_row_idx, col_idx),
-                                                    'values': [[turno_sel]]})
-                                    changed = True
-                            else:
-                                st.warning("⚠️ La columna 'Turno' no existe en la hoja. Agrégala en la fila 1.")
+                        # 2) Turno (solo si Local)
+                        if tipo_sel == "📍 Pedido Local":
+                            turno_sel = st.session_state[turno_key]
+                            if "Turno" in headers_casos and turno_sel != turno_actual:
+                                col_idx = headers_casos.index("Turno") + 1
+                                updates.append({'range': gspread.utils.rowcol_to_a1(gsheet_row_idx, col_idx), 'values': [[turno_sel]]})
+                                changed = True
 
                         # 3) Fecha_Entrega
+                        fecha_sel = st.session_state[fecha_key]
                         fecha_sel_str = fecha_sel.strftime("%Y-%m-%d")
-                        if "Fecha_Entrega" in headers_casos:
-                            if fecha_sel_str != fecha_actual_str:
-                                col_idx = headers_casos.index("Fecha_Entrega") + 1
-                                updates.append({'range': gspread.utils.rowcol_to_a1(gsheet_row_idx, col_idx),
-                                                'values': [[fecha_sel_str]]})
-                                changed = True
-                        else:
-                            st.warning("⚠️ La columna 'Fecha_Entrega' no existe en la hoja. Agrégala en la fila 1.")
+                        if "Fecha_Entrega" in headers_casos and fecha_sel_str != fecha_actual_str:
+                            col_idx = headers_casos.index("Fecha_Entrega") + 1
+                            updates.append({'range': gspread.utils.rowcol_to_a1(gsheet_row_idx, col_idx), 'values': [[fecha_sel_str]]})
+                            changed = True
 
                         if updates and changed:
                             if batch_update_gsheet_cells(worksheet_casos, updates):
+                                # Reflejar en la UI sin recargar toda la app
+                                row["Tipo_Envio_Original"] = tipo_sel
+                                if tipo_sel == "📍 Pedido Local":
+                                    row["Turno"] = st.session_state[turno_key]
+                                row["Fecha_Entrega"] = fecha_sel_str
+
                                 st.toast("✅ Cambios aplicados.", icon="✅")
-                                st.cache_data.clear()
-                                st.rerun()
+                                # 🚫 Nada de st.rerun() ni cambio de pestaña
                             else:
                                 st.error("❌ No se pudieron aplicar los cambios.")
                         else:
                             st.info("ℹ️ No hubo cambios que guardar.")
                 except Exception as e:
                     st.error(f"❌ Error al aplicar cambios: {e}")
+
 
 
             # === 🔧 NUEVO: acciones rápidas (misma lógica que Local/Foráneo) ===
