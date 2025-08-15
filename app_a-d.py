@@ -13,6 +13,21 @@ import os
 import uuid
 from pytz import timezone
 
+from datetime import datetime
+from pytz import timezone
+
+_MX_TZ = timezone("America/Mexico_City")
+
+def mx_now():
+    return datetime.now(_MX_TZ)           # objeto datetime tz-aware
+
+def mx_now_str():
+    return mx_now().strftime("%Y-%m-%d %H:%M:%S")
+
+def mx_today():
+    return mx_now().date()
+
+
 
 st.set_page_config(page_title="Recepción de Pedidos TD", layout="wide")
 
@@ -24,6 +39,11 @@ if "preserve_main_tab" in st.session_state:
     st.session_state["active_date_tab_t_index"] = st.session_state.pop("preserve_date_tab_t", 0)
 
 st.title("📬 Bandeja de Pedidos TD")
+
+# Flash message tras refresh
+if "flash_msg" in st.session_state and st.session_state["flash_msg"]:
+    st.success(st.session_state.pop("flash_msg"))
+
 
 # ✅ Versión única con claves para evitar errores de duplicado
 col_recarga, col_reintento = st.columns([1, 1])
@@ -1687,15 +1707,17 @@ with main_tabs[4]:
                     st.error(f"❌ Error al aplicar cambios: {e}")
 
 
-
-            # === 🔧 NUEVO: acciones rápidas (misma lógica que Local/Foráneo) ===
+            # --- 🔧 Acciones rápidas (sin imprimir, sin cambiar pestaña) ---
             st.markdown("---")
             colA, colB = st.columns(2)
 
-            # 🖨 Imprimir → 🔵 En Proceso + Hora_Proceso (solo si estaba Pendiente o Demorado)
-            if colA.button("🖨 Imprimir", key=f"print_caso_{idp or folio or cliente}"):
+            # ⚙️ Procesar → 🔵 En Proceso + Hora_Proceso (si estaba Pendiente/Demorado/Modificación)
+            if colA.button("⚙️ Procesar", key=f"procesar_caso_{idp or folio or cliente}"):
                 try:
-                    # Buscar fila en Google Sheets
+                    # Mantener la pestaña de Devoluciones
+                    st.session_state["active_main_tab_index"] = 4
+
+                    # Localiza la fila en 'casos_especiales'
                     gsheet_row_idx = None
                     if "ID_Pedido" in df_casos.columns and idp:
                         matches = df_casos.index[df_casos["ID_Pedido"].astype(str).str.strip() == idp]
@@ -1713,11 +1735,8 @@ with main_tabs[4]:
                     if gsheet_row_idx is None:
                         st.error("❌ No se encontró el caso en 'casos_especiales' para actualizar.")
                     else:
-                        # Solo actualizar si estaba Pendiente/Demorado/Modificación
                         if estado in ["🟡 Pendiente", "🔴 Demorado", "🛠 Modificación"]:
-                            now_str = (datetime.now(_TZ).strftime("%Y-%m-%d %H:%M:%S") if _TZ
-                                       else datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
-
+                            now_str = mx_now_str()
                             ok = True
                             if "Estado" in headers_casos:
                                 ok &= update_gsheet_cell(worksheet_casos, headers_casos, gsheet_row_idx, "Estado", "🔵 En Proceso")
@@ -1725,9 +1744,10 @@ with main_tabs[4]:
                                 ok &= update_gsheet_cell(worksheet_casos, headers_casos, gsheet_row_idx, "Hora_Proceso", now_str)
 
                             if ok:
-                                st.toast("📄 Estado actualizado a '🔵 En Proceso'", icon="📌")
-                                st.cache_data.clear()
-                                st.rerun()
+                                # Reflejo inmediato local sin recargar
+                                row["Estado"] = "🔵 En Proceso"
+                                row["Hora_Proceso"] = now_str
+                                st.toast("✅ Caso marcado como '🔵 En Proceso'.", icon="✅")
                             else:
                                 st.error("❌ No se pudo actualizar a 'En Proceso'.")
                         else:
@@ -1735,10 +1755,16 @@ with main_tabs[4]:
                 except Exception as e:
                     st.error(f"❌ Error al actualizar: {e}")
 
-            # 🔧 Procesar Modificación → pasa a 🔵 En Proceso si está en 🛠 Modificación
+
+
+            # 🔧 Procesar Modificación → pasa a 🔵 En Proceso si está en 🛠 Modificación (sin recargar)
             if estado == "🛠 Modificación":
                 if colB.button("🔧 Procesar Modificación", key=f"proc_mod_caso_{idp or folio or cliente}"):
                     try:
+                        # Mantener la pestaña de Devoluciones
+                        st.session_state["active_main_tab_index"] = 4
+
+                        # Localiza la fila en 'casos_especiales'
                         gsheet_row_idx = None
                         if "ID_Pedido" in df_casos.columns and idp:
                             matches = df_casos.index[df_casos["ID_Pedido"].astype(str).str.strip() == idp]
@@ -1759,14 +1785,16 @@ with main_tabs[4]:
                             ok = True
                             if "Estado" in headers_casos:
                                 ok &= update_gsheet_cell(worksheet_casos, headers_casos, gsheet_row_idx, "Estado", "🔵 En Proceso")
+
                             if ok:
+                                # Reflejo inmediato en pantalla, sin recargar
+                                row["Estado"] = "🔵 En Proceso"
                                 st.toast("🔧 Modificación procesada - Estado actualizado a '🔵 En Proceso'", icon="✅")
-                                st.cache_data.clear()
-                                st.rerun()
                             else:
                                 st.error("❌ Falló la actualización del estado a 'En Proceso'.")
                     except Exception as e:
                         st.error(f"❌ Error al procesar la modificación: {e}")
+
 
             # === Sección de Modificación de Surtido (mostrar/confirmar) ===
             mod_texto = str(row.get("Modificacion_Surtido", "")).strip()
@@ -1849,7 +1877,8 @@ with main_tabs[4]:
                 help="Sube la guía de mensajería para el retorno del producto (PDF/JPG/PNG)"
             )
 
-            if st.button("💾 Procesar Devolución", key=f"btn_proc_{folio}_{cliente}"):
+            # Botón FINAL: Completar
+            if st.button("🟢 Completar", key=f"btn_completar_{folio}_{cliente}"):
                 try:
                     folder = idp or f"caso_{(folio or 'sfolio')}_{(cliente or 'scliente')}".replace(" ", "_")
                     guia_url = ""
@@ -1858,6 +1887,7 @@ with main_tabs[4]:
                         key_guia = f"{folder}/guia_retorno_{datetime.now().isoformat()[:19].replace(':','')}_{guia_file.name}"
                         _, guia_url = upload_file_to_s3(s3_client, S3_BUCKET_NAME, guia_file, key_guia)
 
+                    # Localiza la fila en 'casos_especiales'
                     gsheet_row_idx = None
                     if "ID_Pedido" in df_casos.columns and idp:
                         matches = df_casos.index[df_casos["ID_Pedido"].astype(str).str.strip() == idp]
@@ -1872,45 +1902,42 @@ with main_tabs[4]:
                         if len(matches) > 0:
                             gsheet_row_idx = int(matches[0]) + 2
 
+                    ok = True
                     if gsheet_row_idx is None:
                         st.error("❌ No se encontró el caso en 'casos_especiales'.")
-                    
-                    ok = True
-                    if guia_url:
-                        ok &= update_gsheet_cell(worksheet_casos, headers_casos, gsheet_row_idx, "Hoja_Ruta_Mensajero", guia_url)
+                        ok = False
+                    else:
+                        if guia_url:
+                            ok &= update_gsheet_cell(worksheet_casos, headers_casos, gsheet_row_idx, "Hoja_Ruta_Mensajero", guia_url)
+                        ok &= update_gsheet_cell(worksheet_casos, headers_casos, gsheet_row_idx, "Estado", "🟢 Completado")
 
-                    # ✅ Estado a Completado
-                    ok &= update_gsheet_cell(worksheet_casos, headers_casos, gsheet_row_idx, "Estado", "🟢 Completado")
-
-                    # ✅ Timestamp MX actual
-                    mx_now = datetime.now(_TZ).strftime("%Y-%m-%d %H:%M:%S") if _TZ else datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-
-                    # ✅ NUEVO: Fecha_Completado (además de Fecha_Entrega si quieres mantenerla)
-                    _ = update_gsheet_cell(worksheet_casos, headers_casos, gsheet_row_idx, "Fecha_Completado", mx_now)
-
-                    # (opcional) Mantener también Fecha_Entrega como hoy
-                    _ = update_gsheet_cell(worksheet_casos, headers_casos, gsheet_row_idx, "Fecha_Entrega", mx_now)
+                        mx_now = mx_now_str()
+                        _ = update_gsheet_cell(worksheet_casos, headers_casos, gsheet_row_idx, "Fecha_Completado", mx_now)
+                        _ = update_gsheet_cell(worksheet_casos, headers_casos, gsheet_row_idx, "Fecha_Entrega", mx_now)  # quítala si no la quieres
 
                     if ok:
-                        st.success("✅ Devolución procesada y marcada como 🟢 Completado.")
+                        # Confirmación tras el refresh y quedarse en Devoluciones
+                        st.session_state["flash_msg"] = "✅ Devolución completada correctamente."
+                        st.session_state["active_main_tab_index"] = 4
                         st.cache_data.clear()
                         st.rerun()
                     else:
-                        st.error("❌ No se pudo procesar la devolución.")
+                        st.error("❌ No se pudo completar la devolución.")
                 except Exception as e:
-                    st.error(f"❌ Error al procesar la devolución: {e}")
+                    st.error(f"❌ Error al completar la devolución: {e}")
+
 
 
     st.markdown("---")
 
-    with main_tabs[5]: #🛠 Garantías
-        garantias_display = df_pendientes_proceso_demorado[(df_pendientes_proceso_demorado["Tipo_Envio"] == "🛠 Garantía")].copy()
-        if not garantias_display.empty:
-            garantias_display = ordenar_pedidos_custom(garantias_display)
-            for orden, (idx, row) in enumerate(garantias_display.iterrows(), start=1):
-                mostrar_pedido(df_main, idx, row, orden, "Garantía", "🛠 Garantías", worksheet_main, headers_main, s3_client)
-        else:
-            st.info("No hay garantías.")
+with main_tabs[5]: #🛠 Garantías
+    garantias_display = df_pendientes_proceso_demorado[(df_pendientes_proceso_demorado["Tipo_Envio"] == "🛠 Garantía")].copy()
+    if not garantias_display.empty:
+        garantias_display = ordenar_pedidos_custom(garantias_display)
+        for orden, (idx, row) in enumerate(garantias_display.iterrows(), start=1):
+            mostrar_pedido(df_main, idx, row, orden, "Garantía", "🛠 Garantías", worksheet_main, headers_main, s3_client)
+    else:
+        st.info("No hay garantías.")
 
 with main_tabs[6]:  # ✅ Historial Completados
     df_completados_historial = df_main[
