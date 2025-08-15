@@ -305,13 +305,51 @@ def ensure_columns(worksheet, headers, required_cols):
     """
     Asegura que la hoja tenga todas las columnas requeridas en la fila 1.
     Si faltan, las agrega al final. Devuelve headers actualizados.
+    Es compatible con entornos donde Worksheet.update no existe.
     """
     missing = [c for c in required_cols if c not in headers]
-    if missing:
-        new_headers = headers + missing
-        worksheet.update('A1', [new_headers])
+    if not missing:
+        return headers
+
+    new_headers = headers + missing
+
+    # 1) Intento con update (si existe en tu versión de gspread)
+    try:
+        # Algunas versiones requieren rango tipo '1:1'
+        if hasattr(worksheet, "update"):
+            try:
+                worksheet.update('1:1', [new_headers])
+            except TypeError:
+                # En otras funciona 'A1'
+                worksheet.update('A1', [new_headers])
+            return new_headers
+    except AttributeError:
+        # No tiene update -> caemos al plan B
+        pass
+    except gspread.exceptions.APIError:
+        # Si falla por dimensiones, intentamos plan B
+        pass
+
+    # 2) Plan B: update_cells (compatible con versiones viejas)
+    try:
+        # Asegurar que existan suficientes columnas
+        try:
+            # add_cols puede no estar en todas las versiones; si falla, seguimos
+            if hasattr(worksheet, "add_cols"):
+                extra = len(new_headers) - len(headers)
+                if extra > 0:
+                    worksheet.add_cols(extra)
+        except Exception:
+            pass
+
+        cell_list = [gspread.Cell(row=1, col=i+1, value=val)
+                     for i, val in enumerate(new_headers)]
+        worksheet.update_cells(cell_list)
         return new_headers
-    return headers
+    except Exception as e:
+        st.error(f"❌ No se pudieron actualizar encabezados con compatibilidad: {e}")
+        return headers
+
 
 
 # --- AWS S3 Helper Functions (Copied from app_admin.py directly) ---
