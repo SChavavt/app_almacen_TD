@@ -472,50 +472,162 @@ with tabs[1]:
                     df_g = df_g.sort_values(by='Hora_Registro', ascending=False).reset_index(drop=True)
                     display_dataframe_with_formatting(df_g)
 
-# ---------------------------
+# =========================
+# Helpers para Casos Especiales (si no existen)
+# =========================
+if "load_casos_from_gsheets" not in globals():
+    @st.cache_data(ttl=60)
+    def load_casos_from_gsheets() -> pd.DataFrame:
+        """Lee la pestaña 'casos_especiales' y normaliza columnas básicas."""
+        ws = spreadsheet.worksheet("casos_especiales")
+        vals = ws.get_all_values()
+        if not vals:
+            return pd.DataFrame()
+        headers = vals[0]
+        df = pd.DataFrame(vals[1:], columns=headers)
+        df["gsheet_row_index"] = df.index + 2
+
+        # Fechas/horas
+        for c in ["Hora_Registro","Fecha_Entrega","Fecha_Completado","Hora_Proceso","Fecha_Recepcion_Devolucion"]:
+            if c in df.columns:
+                df[c] = pd.to_datetime(df[c], errors="coerce")
+
+        # Normalizaciones mínimas
+        for c in ["Cliente","Vendedor_Registro","Estado","Folio_Factura","Turno","Tipo_Envio_Original","Tipo_Envio","Tipo_Caso"]:
+            if c not in df.columns:
+                df[c] = ""
+            else:
+                df[c] = df[c].astype(str)
+
+        return df
+
+if "status_counts_block" not in globals():
+    def status_counts_block(df: pd.DataFrame):
+        """Métricas resumidas para pendientes / en proceso / completados."""
+        pend = (df["Estado"] == "🟡 Pendiente").sum() if "Estado" in df.columns else 0
+        proc = (df["Estado"] == "🔵 En Proceso").sum() if "Estado" in df.columns else 0
+        comp = (df["Estado"] == "🟢 Completado").sum() if "Estado" in df.columns else 0
+        total = len(df)
+
+        cols = st.columns(4)
+        cols[0].metric("Total Pedidos", int(total))
+        cols[1].metric("🟡 Pendiente", int(pend))
+        cols[2].metric("🔵 En Proceso", int(proc))
+        cols[3].metric("🟢 Completado", int(comp))
+
+if "show_grouped_panel_casos" not in globals():
+    def show_grouped_panel_casos(df: pd.DataFrame):
+        """Agrupa por Turno (Local) o Foráneo genérico y fecha; muestra tablas."""
+        df_local = df.copy()
+
+        # Fecha string para título de grupo
+        if "Fecha_Entrega" not in df_local.columns:
+            df_local["Fecha_Entrega"] = pd.NaT
+        df_local["Fecha_Entrega_Str"] = df_local["Fecha_Entrega"].dt.strftime("%d/%m")
+
+        # Determinar etiqueta de grupo
+        if "Turno" not in df_local.columns:
+            df_local["Turno"] = ""
+
+        # Si no hay turno pero viene marcado como Local en Tipo_Envio_Original → etiqueta genérica
+        if "Tipo_Envio_Original" in df_local.columns:
+            mask_local_sin_turno = (df_local["Turno"].astype(str).str.strip() == "") & (
+                df_local["Tipo_Envio_Original"].astype(str).str.contains("Local", case=False, na=False)
+            )
+            df_local.loc[mask_local_sin_turno, "Turno"] = "📍 Local (sin turno)"
+
+        # Cuando no sea local, foráneo genérico
+        es_local = df_local["Turno"].astype(str).str.contains("Local|Saltillo|Bodega|Mañana|Tarde", case=False, na=False)
+        df_local.loc[~es_local, "Turno"] = "🌍 Foráneo"
+
+        # Clave de grupo
+        df_local["Grupo_Clave"] = df_local.apply(
+            lambda r: f"{r['Turno']} – {r['Fecha_Entrega_Str']}", axis=1
+        )
+
+        # Agrupar y render
+        grupos = []
+        # sort por fecha real (NaT al final)
+        df_local["_fecha_sort"] = df_local["Fecha_Entrega"].fillna(pd.Timestamp.max)
+        for (clave, _), sub in sorted(df_local.groupby(["Grupo_Clave","Fecha_Entrega"]), key=lambda x: x[0][1]):
+            sub = sub.sort_values(by="Hora_Registro", ascending=False) if "Hora_Registro" in sub.columns else sub
+            grupos.append((f"{clave} ({len(sub)})", sub.drop(columns=["_fecha_sort"], errors="ignore")))
+
+        if not grupos:
+            st.info("Sin grupos para mostrar.")
+            return
+
+        num_cols_per_row = 3
+        for i in range(0, len(grupos), num_cols_per_row):
+            row = grupos[i:i+num_cols_per_row]
+            cols = st.columns(len(row))
+            for j, (titulo, df_grupo) in enumerate(row):
+                with cols[j]:
+                    st.markdown(f"### {titulo}")
+                    # Asegura columnas visibles clave
+                    for base in ["Tipo","Fecha_Entrega","Cliente","Vendedor_Registro","Estado","Folio_Factura"]:
+                        if base not in df_grupo.columns:
+                            df_grupo[base] = ""
+                    # Usa tu renderer global si ya lo adaptaste a mostrar "Tipo"
+                    if "display_dataframe_with_formatting" in globals():
+                        display_dataframe_with_formatting(df_grupo, num_columnas_actuales=len(row))
+                    else:
+                        # Fallback rápido
+                        vista = df_grupo[["Tipo","Fecha_Entrega","Cliente","Vendedor_Registro","Estado","Folio_Factura"]].copy()
+                        vista.rename(columns={
+                            "Fecha_Entrega":"Fecha Entrega",
+                            "Vendedor_Registro":"Vendedor"
+                        }, inplace=True)
+                        vista["Fecha Entrega"] = vista["Fecha Entrega"].apply(lambda x: x.strftime("%d/%m") if pd.notna(x) else "")
+                        # Cliente combinado
+                        vista["Cliente"] = df_grupo.apply(
+                            lambda r: f"📄 <b>{r['Folio_Factura']}</b> 🤝 {r['Cliente']}", axis=1
+                        )
+                        st.markdown(vista[["Tipo","Fecha Entrega","Cliente","Vendedor","Estado"]].to_html(escape=False, index=False), unsafe_allow_html=True)
+
+# =========================
 # TAB 2: Casos Especiales (Devoluciones + Garantías)
-# ---------------------------
+# =========================
 with tabs[2]:
     df_casos = load_casos_from_gsheets()
     if df_casos.empty:
         st.info("Sin datos en 'casos_especiales'.")
     else:
         # Detecta tipo de caso con Tipo_Caso o con Tipo_Envio
-        tipo_col = "Tipo_Caso" if "Tipo_Caso" in df_casos.columns else (
-            "Tipo_Envio" if "Tipo_Envio" in df_casos.columns else None
-        )
+        tipo_col = "Tipo_Caso" if "Tipo_Caso" in df_casos.columns else ("Tipo_Envio" if "Tipo_Envio" in df_casos.columns else None)
         if not tipo_col:
             st.error("En 'casos_especiales' falta la columna 'Tipo_Caso' o 'Tipo_Envio'.")
         else:
-            # Filtra devoluciones o garantías (contenga 'Devoluci' o 'Garant')
+            # Filtra devoluciones o garantías
             mask = df_casos[tipo_col].astype(str).str.contains("Devoluci|Garant", case=False, na=False)
             casos = df_casos[mask].copy()
 
             if casos.empty:
                 st.info("No hay devoluciones/garantías para mostrar.")
             else:
-                # Excluye Completados
-                if 'Estado' in casos.columns:
-                    casos = casos[casos['Estado'].astype(str).str.strip() != "🟢 Completado"]
+                # Excluir completados de la vista
+                if "Estado" in casos.columns:
+                    casos = casos[casos["Estado"].astype(str).str.strip() != "🟢 Completado"]
 
                 # Asegura columnas base para render
-                for base in ['Fecha_Entrega', 'Cliente', 'Vendedor_Registro', 'Estado', 'Folio_Factura']:
+                for base in ["Fecha_Entrega","Cliente","Vendedor_Registro","Estado","Folio_Factura","Turno","Tipo_Envio_Original"]:
                     if base not in casos.columns:
                         casos[base] = ""
 
+                # 🔎 Etiqueta visible del tipo (Devolución/Garantía)
+                def _etiqueta_tipo(v):
+                    s = str(v).lower()
+                    if "garant" in s:
+                        return "🛠 Garantía"
+                    if "devolu" in s:
+                        return "🔁 Devolución"
+                    return "—"
+                casos["Tipo"] = casos[tipo_col].apply(_etiqueta_tipo)
+
+                # --- Resumen
                 st.markdown("#### 📊 Resumen Casos Especiales")
                 status_counts_block(casos)
 
-                st.markdown("### 📚 Grupos (Local por Turno, Foráneo genérico)")
-                # Para decidir "Local" usamos Turno (si hay) o Tipo_Envio_Original contiene 'Local'
-                if 'Turno' not in casos.columns:
-                    casos['Turno'] = ''
-                if 'Fecha_Entrega' not in casos.columns:
-                    casos['Fecha_Entrega'] = pd.NaT
-                # Si no hay Turno, pero Tipo_Envio_Original dice Local → etiqueta genérica
-                if 'Tipo_Envio_Original' in casos.columns:
-                    casos.loc[(casos['Turno'] == '') &
-                              (casos['Tipo_Envio_Original'].astype(str).str.contains("Local", case=False, na=False)),
-                              'Turno'] = "📍 Local (sin turno)"
-
-                show_grouped_panel(casos)
+                # --- Grupos
+                st.markdown("### 📚 Grupos (Local por Turno / Foráneo genérico)")
+                show_grouped_panel_casos(casos)
