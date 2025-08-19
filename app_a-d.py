@@ -50,6 +50,9 @@ col_recarga, col_reintento = st.columns([1, 1])
 
 with col_recarga:
     if st.button("🔄 Recargar Pedidos (seguro)", help="Actualiza datos sin reiniciar pestañas ni scroll", key="btn_recargar_seguro"):
+        # Guardamos cuántos pedidos teníamos antes de recargar
+        st.session_state["prev_pedidos_count"] = st.session_state.get("last_pedidos_count", 0)
+        st.session_state["need_compare"] = True
         st.session_state["reload_pedidos_soft"] = True
         st.cache_data.clear()
         st.cache_resource.clear()
@@ -96,6 +99,12 @@ if "active_date_tab_t_index" not in st.session_state:
 if "expanded_pedidos" not in st.session_state:
     st.session_state["expanded_pedidos"] = {}
     st.session_state["expanded_attachments"] = {}
+if "last_pedidos_count" not in st.session_state:
+    st.session_state["last_pedidos_count"] = 0
+if "prev_pedidos_count" not in st.session_state:
+    st.session_state["prev_pedidos_count"] = 0
+if "need_compare" not in st.session_state:
+    st.session_state["need_compare"] = False
 
 # --- Soft reload si el usuario presionó "Recargar Pedidos (seguro)"
 if st.session_state.get("reload_pedidos_soft"):
@@ -1168,12 +1177,33 @@ def mostrar_pedido_solo_guia(df, idx, row, orden, origen_tab, current_main_tab_l
 
 # --- Main Application Logic ---
 
-raw_data = get_raw_sheet_data(
-    sheet_id=GOOGLE_SHEET_ID,
-    worksheet_name=GOOGLE_SHEET_WORKSHEET_NAME,
-    credentials=GSHEETS_CREDENTIALS
-)
-df_main, headers_main = process_sheet_data(raw_data)
+def _load_pedidos():
+    raw = get_raw_sheet_data(
+        sheet_id=GOOGLE_SHEET_ID,
+        worksheet_name=GOOGLE_SHEET_WORKSHEET_NAME,
+        credentials=GSHEETS_CREDENTIALS,
+    )
+    return process_sheet_data(raw)
+
+if st.session_state.get("need_compare"):
+    prev_count = st.session_state.get("prev_pedidos_count", 0)
+    for attempt in range(3):
+        st.cache_data.clear()
+        df_main, headers_main = _load_pedidos()
+        new_count = len(df_main)
+        if new_count > prev_count or attempt == 2:
+            break
+        time.sleep(1)
+    diff = new_count - prev_count
+    if diff > 0:
+        st.toast(f"✅ Se encontraron {diff} pedidos nuevos.")
+    else:
+        st.toast("🔄 Pedidos actualizados. No hay nuevos registros.")
+    st.session_state["last_pedidos_count"] = new_count
+    st.session_state["need_compare"] = False
+else:
+    df_main, headers_main = _load_pedidos()
+    st.session_state["last_pedidos_count"] = len(df_main)
 
 # --- Asegura que existan físicamente las columnas que vas a ESCRIBIR en datos_pedidos ---
 required_cols_main = [
