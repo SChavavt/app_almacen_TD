@@ -1457,6 +1457,7 @@ if not df_main.empty:
 
 # --- TAB 3: 🔁 Devoluciones (casos_especiales) ---
 with main_tabs[4]:
+    st.session_state["active_main_tab_index"] = 4
     st.markdown("### 🔁 Devoluciones")
 
     # 1) Validaciones mínimas
@@ -1938,7 +1939,10 @@ with main_tabs[4]:
                         ok = False
                     else:
                         if guia_url:
-                            ok &= update_gsheet_cell(worksheet_casos, headers_casos, gsheet_row_idx, "Hoja_Ruta_Mensajero", guia_url)
+                            existing = str(row.get("Hoja_Ruta_Mensajero", "")).strip()
+                            guia_final = f"{existing}, {guia_url}" if existing else guia_url
+                            ok &= update_gsheet_cell(worksheet_casos, headers_casos, gsheet_row_idx, "Hoja_Ruta_Mensajero", guia_final)
+                            row["Hoja_Ruta_Mensajero"] = guia_final
                         ok &= update_gsheet_cell(worksheet_casos, headers_casos, gsheet_row_idx, "Estado", "🟢 Completado")
 
                         mx_now = mx_now_str()
@@ -1961,6 +1965,7 @@ with main_tabs[4]:
     st.markdown("---")
 
 with main_tabs[5]:  # 🛠 Garantías
+    st.session_state["active_main_tab_index"] = 5
     st.markdown("### 🛠 Garantías")
 
     import os, json, math, re
@@ -2407,7 +2412,10 @@ with main_tabs[5]:  # 🛠 Garantías
                         ok = False
                     else:
                         if guia_url:
-                            ok &= update_gsheet_cell(worksheet_casos, headers_casos, gsheet_row_idx, "Hoja_Ruta_Mensajero", guia_url)
+                            existing = str(row.get("Hoja_Ruta_Mensajero", "")).strip()
+                            guia_final = f"{existing}, {guia_url}" if existing else guia_url
+                            ok &= update_gsheet_cell(worksheet_casos, headers_casos, gsheet_row_idx, "Hoja_Ruta_Mensajero", guia_final)
+                            row["Hoja_Ruta_Mensajero"] = guia_final
                         ok &= update_gsheet_cell(worksheet_casos, headers_casos, gsheet_row_idx, "Estado", "🟢 Completado")
 
                         mx_now = mx_now_str()
@@ -2416,6 +2424,7 @@ with main_tabs[5]:  # 🛠 Garantías
 
                     if ok:
                         st.session_state["flash_msg"] = "✅ Garantía completada correctamente."
+                        st.session_state["active_main_tab_index"] = 5
                         st.cache_data.clear()
                         st.rerun()
                     else:
