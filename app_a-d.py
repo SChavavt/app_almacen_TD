@@ -582,6 +582,29 @@ def fijar_estado_pestanas_guia(row, origen_tab):
     st.session_state["active_date_tab_m_index"] = st.session_state.get("active_date_tab_m_index", 0)
     st.session_state["active_date_tab_t_index"] = st.session_state.get("active_date_tab_t_index", 0)
 
+
+def preserve_tab_state():
+    """Guarda las pestañas activas actuales para restaurarlas tras un rerun."""
+    st.session_state["preserve_main_tab"] = st.session_state.get("active_main_tab_index", 0)
+    st.session_state["preserve_local_tab"] = st.session_state.get("active_subtab_local_index", 0)
+    st.session_state["preserve_date_tab_m"] = st.session_state.get("active_date_tab_m_index", 0)
+    st.session_state["preserve_date_tab_t"] = st.session_state.get("active_date_tab_t_index", 0)
+
+
+def handle_guia_upload(row, origen_tab):
+    """Callback al seleccionar archivos de guía; preserva pestañas y mantiene expandido el pedido."""
+    fijar_estado_pestanas_guia(row, origen_tab)
+    preserve_tab_state()
+    st.session_state["expanded_pedidos"].setdefault(row['ID_Pedido'], True)
+    st.session_state["expanded_attachments"].setdefault(row['ID_Pedido'], True)
+    st.rerun()
+
+
+def handle_generic_upload_change():
+    """Callback genérico para mantener pestañas al seleccionar archivos."""
+    preserve_tab_state()
+    st.rerun()
+
 def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, worksheet, headers, s3_client_param):
     """
     Displays a single order with its details, actions, and attachments.
@@ -715,13 +738,11 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
 
 
         # ✅ PRINT and UPDATE TO "IN PROCESS"
-        # 🧠 Preservar pestañas activas para evitar cambio visual
-        st.session_state["preserve_main_tab"] = st.session_state.get("active_main_tab_index", 0)
-        st.session_state["preserve_local_tab"] = st.session_state.get("active_subtab_local_index", 0)
-        st.session_state["preserve_date_tab_m"] = st.session_state.get("active_date_tab_m_index", 0)
-        st.session_state["preserve_date_tab_t"] = st.session_state.get("active_date_tab_t_index", 0)
-
-        if col_print_btn.button("🖨 Imprimir", key=f"print_{row['ID_Pedido']}_{origen_tab}"):
+        if col_print_btn.button(
+            "🖨 Imprimir",
+            key=f"print_{row['ID_Pedido']}_{origen_tab}",
+            on_click=preserve_tab_state,
+        ):
             # ✅ Expandir el pedido y sus adjuntos
             st.session_state["expanded_pedidos"][row['ID_Pedido']] = True
             st.session_state["expanded_attachments"][row['ID_Pedido']] = True
@@ -865,26 +886,24 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
         if row['Estado'] != "🟢 Completado":
             with st.expander("📦 Subir Archivos de Guía"):
                 upload_key = f"file_guia_{row['ID_Pedido']}"
-
                 archivos_guia = st.file_uploader(
                     "📎 Subir guía(s) del pedido",
                     type=["pdf", "jpg", "jpeg", "png"],
                     accept_multiple_files=True,
-                    key=upload_key
+                    key=upload_key,
+                    on_change=handle_guia_upload,
+                    args=(row, origen_tab),
                 )
 
                 if archivos_guia:
-                    fijar_estado_pestanas_guia(row, origen_tab)
-                    st.session_state["expanded_pedidos"][row['ID_Pedido']] = True  # ✅ se mantiene expandido
+                    # Mantener el pedido expandido tras seleccionar archivos
+                    st.session_state["expanded_pedidos"][row['ID_Pedido']] = True
 
-                    # 🧠 Preservar pestañas activas antes de subir guía
-                    st.session_state["preserve_main_tab"] = st.session_state.get("active_main_tab_index", 0)
-                    st.session_state["preserve_local_tab"] = st.session_state.get("active_subtab_local_index", 0)
-                    st.session_state["preserve_date_tab_m"] = st.session_state.get("active_date_tab_m_index", 0)
-                    st.session_state["preserve_date_tab_t"] = st.session_state.get("active_date_tab_t_index", 0)
-
-                    if st.button("📤 Subir Guía", key=f"btn_subir_guia_{row['ID_Pedido']}"):
-
+                    if st.button(
+                        "📤 Subir Guía",
+                        key=f"btn_subir_guia_{row['ID_Pedido']}",
+                        on_click=preserve_tab_state,
+                    ):
                         st.session_state["expanded_pedidos"][row['ID_Pedido']] = True
                         st.session_state["expanded_attachments"][row['ID_Pedido']] = True
                         uploaded_urls = []
@@ -897,20 +916,13 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
                                 uploaded_urls.append(url)
 
                         if uploaded_urls:
-                            # 1) Determinar la columna destino según el tipo de envío
                             tipo_envio_str = str(row.get("Tipo_Envio", "")).lower()
                             use_hoja_ruta = ("devol" in tipo_envio_str) or ("garant" in tipo_envio_str)
                             target_col_for_guide = "Hoja_Ruta_Mensajero" if use_hoja_ruta else "Adjuntos_Guia"
-
-                            # (Opcional) Asegurar que la columna exista en la hoja
                             if target_col_for_guide not in headers:
                                 headers = ensure_columns(worksheet, headers, [target_col_for_guide])
-
-                            # 2) Concatenar usando la misma columna destino
                             anterior = str(row.get(target_col_for_guide, "")).strip()
                             nueva_lista = (anterior + ", " if anterior else "") + ", ".join(uploaded_urls)
-
-                            # 3) Guardar en Sheets y reflejar en el DataFrame/UI
                             success = update_gsheet_cell(worksheet, headers, gsheet_row_index, target_col_for_guide, nueva_lista)
                             if success:
                                 if target_col_for_guide == "Hoja_Ruta_Mensajero":
@@ -919,7 +931,6 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
                                 else:
                                     df.at[idx, "Adjuntos_Guia"] = nueva_lista
                                     row["Adjuntos_Guia"] = nueva_lista
-
                                 st.toast(f"📤 {len(uploaded_urls)} guía(s) subida(s) con éxito.", icon="📦")
                                 st.success(f"📦 Se subieron correctamente {len(uploaded_urls)} archivo(s) de guía.")
                             else:
@@ -1082,11 +1093,16 @@ def mostrar_pedido_solo_guia(df, idx, row, orden, origen_tab, current_main_tab_l
             "📎 Subir guía(s) del pedido",
             type=["pdf", "jpg", "jpeg", "png"],
             accept_multiple_files=True,
-            key=upload_key
+            key=upload_key,
+            on_change=handle_generic_upload_change,
         )
 
         # --- Botón para subir guía y completar ---
-        if st.button("📤 Subir Guía y Completar", key=f"btn_subir_guia_only_{row['ID_Pedido']}"):
+        if st.button(
+            "📤 Subir Guía y Completar",
+            key=f"btn_subir_guia_only_{row['ID_Pedido']}",
+            on_click=preserve_tab_state,
+        ):
             # ✅ Validación: al menos un archivo
             if not archivos_guia:
                 st.warning("⚠️ Primero sube al menos un archivo de guía.")
@@ -1874,11 +1890,16 @@ with main_tabs[4]:
             guia_file = st.file_uploader(
                 "📋 Subir Guía de Retorno",
                 key=f"guia_{folio}_{cliente}",
-                help="Sube la guía de mensajería para el retorno del producto (PDF/JPG/PNG)"
+                help="Sube la guía de mensajería para el retorno del producto (PDF/JPG/PNG)",
+                on_change=handle_generic_upload_change,
             )
 
             # Botón FINAL: Completar
-            if st.button("🟢 Completar", key=f"btn_completar_{folio}_{cliente}"):
+            if st.button(
+                "🟢 Completar",
+                key=f"btn_completar_{folio}_{cliente}",
+                on_click=preserve_tab_state,
+            ):
                 try:
                     folder = idp or f"caso_{(folio or 'sfolio')}_{(cliente or 'scliente')}".replace(" ", "_")
                     guia_url = ""
@@ -2339,10 +2360,15 @@ with main_tabs[5]:  # 🛠 Garantías
             guia_file = st.file_uploader(
                 "📋 Subir Guía de Envío/Retorno (Garantía)",
                 key=f"guia_g_{folio}_{cliente}",
-                help="Sube la guía de mensajería para envío de reposición o retorno (PDF/JPG/PNG)"
+                help="Sube la guía de mensajería para envío de reposición o retorno (PDF/JPG/PNG)",
+                on_change=handle_generic_upload_change,
             )
 
-            if st.button("🟢 Completar Garantía", key=f"btn_completar_g_{folio}_{cliente}"):
+            if st.button(
+                "🟢 Completar Garantía",
+                key=f"btn_completar_g_{folio}_{cliente}",
+                on_click=preserve_tab_state,
+            ):
                 try:
                     folder = idp or f"garantia_{(folio or 'sfolio')}_{(cliente or 'scliente')}".replace(" ", "_")
                     guia_url = ""
