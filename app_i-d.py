@@ -8,6 +8,7 @@ import boto3
 import gspread.utils
 import time
 from zoneinfo import ZoneInfo
+from streamlit_autorefresh import st_autorefresh
 
 TZ = ZoneInfo("America/Mexico_City")
 
@@ -42,7 +43,8 @@ with col_actions:
 # ⏱️ Autorefresco (no limpia caché)
 if st.session_state.get("auto_reload"):
     interval = int(st.session_state.get("auto_reload_interval", 60))
-    st.markdown(f'<meta http-equiv="refresh" content="{interval}">', unsafe_allow_html=True)
+    # Utilizar st_autorefresh evita recargar la página y conserva la sesión
+    st_autorefresh(interval=interval * 1000, key="auto_refresh_counter")
 
 st.markdown("---")
 
