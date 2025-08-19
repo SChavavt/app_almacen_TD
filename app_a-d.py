@@ -1577,7 +1577,16 @@ with main_tabs[4]:
                 st.markdown(f"**🏢 Área Responsable:** {area_resp or 'N/A'}")
                 st.markdown(f"**👥 Responsable del Error:** {str(row.get('Nombre_Responsable', 'N/A')).strip()}")
                 st.markdown(f"**🚚 Tipo Envío Original:** {str(row.get('Tipo_Envio_Original', 'N/A')).strip()}")
+            # Mostrar detalle del motivo, material y monto devuelto
+            st.markdown("**📝 Motivo detallado:**")
+            st.info(str(row.get("Motivo_Detallado", "")).strip() or "N/A")
 
+            st.markdown("**📦 Material devuelto:**")
+            st.info(str(row.get("Material_Devuelto", "")).strip() or "N/A")
+
+            monto_txt = str(row.get("Monto_Devuelto", "")).strip()
+            if monto_txt:
+                st.markdown(f"**💵 Monto devuelto:** {monto_txt}")
 
             coment_admin = str(row.get("Comentarios_Admin_Devolucion", "")).strip()
             if coment_admin:
