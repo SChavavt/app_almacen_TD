@@ -2022,7 +2022,6 @@ with main_tabs[5]:  # 🛠 Garantías
     garantias_display = df_casos[df_casos[tipo_col].astype(str).str.contains("Garant", case=False, na=False)].copy()
     if garantias_display.empty:
         st.info("ℹ️ No hay garantías en 'casos_especiales'.")
-        st.stop()
 
     # 2.1 Excluir garantías ya completadas
     if "Estado" in garantias_display.columns:
@@ -2030,7 +2029,6 @@ with main_tabs[5]:  # 🛠 Garantías
 
     if garantias_display.empty:
         st.success("🎉 No hay garantías pendientes. (Todas están 🟢 Completado)")
-        st.stop()
 
     # 3) Orden sugerido por Hora_Registro (desc) o por ID
     if "Hora_Registro" in garantias_display.columns:
