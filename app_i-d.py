@@ -704,77 +704,50 @@ if "show_grouped_panel_casos" not in globals():
             for j, (titulo, df_grupo) in enumerate(fila):
                 with cols[j]:
                     st.markdown(f"### {titulo}")
-
-                    # 📌 Prefija emoji de tipo al Folio para que se vea (sin tocar tu renderer)
-                    if (
-                        "Tipo" in df_grupo.columns
-                        and "Folio_Factura" in df_grupo.columns
-                    ):
-
-                        def _prefijo_folio(r):
-                            t = str(r.get("Tipo", ""))
-                            if "Garant" in t:
-                                emoji = "🛠"
-                            elif "Devolu" in t:
-                                emoji = "🔁"
-                            else:
-                                emoji = ""
-                            folio = str(r.get("Folio_Factura", "")).strip()
-                            return f"{emoji} {folio}".strip()
-
-                        df_grupo = df_grupo.copy()
-                        df_grupo["Folio_Factura"] = df_grupo.apply(
-                            _prefijo_folio, axis=1
-                        )
-
-                    # Usa tu renderer global si existe; SIN keyword para evitar TypeError
-                    if "display_dataframe_with_formatting" in globals():
-                        display_dataframe_with_formatting(df_grupo)
-                    else:
-                        # Fallback simple que también muestra el tipo, envío y turno
-                        base_cols = [
-                            "Tipo",
-                            "Tipo_Envio_Original",
-                            "Turno",
-                            "Fecha_Entrega",
-                            "Cliente",
-                            "Vendedor_Registro",
-                            "Estado",
-                            "Folio_Factura",
-                        ]
-                        for c in base_cols:
-                            if c not in df_grupo.columns:
-                                df_grupo[c] = ""
-                        vista = df_grupo[base_cols].copy()
-                        vista.rename(
-                            columns={
-                                "Tipo_Envio_Original": "Tipo Envío",
-                                "Fecha_Entrega": "Fecha Entrega",
-                                "Vendedor_Registro": "Vendedor",
-                            },
-                            inplace=True,
-                        )
-                        vista["Fecha Entrega"] = vista["Fecha Entrega"].apply(
-                            lambda x: x.strftime("%d/%m") if pd.notna(x) else ""
-                        )
-                        vista["Cliente"] = vista.apply(
-                            lambda r: f"📄 <b>{r['Folio_Factura']}</b> 🤝 {r['Cliente']}",
-                            axis=1,
-                        )
-                        st.markdown(
-                            vista[
-                                [
-                                    "Tipo",
-                                    "Tipo Envío",
-                                    "Turno",
-                                    "Fecha Entrega",
-                                    "Cliente",
-                                    "Vendedor",
-                                    "Estado",
-                                ]
-                            ].to_html(escape=False, index=False),
-                            unsafe_allow_html=True,
-                        )
+                    # Vista enriquecida con tipo de caso, envío y turno
+                    base_cols = [
+                        "Tipo",
+                        "Tipo_Envio_Original",
+                        "Turno",
+                        "Fecha_Entrega",
+                        "Cliente",
+                        "Vendedor_Registro",
+                        "Estado",
+                        "Folio_Factura",
+                    ]
+                    for c in base_cols:
+                        if c not in df_grupo.columns:
+                            df_grupo[c] = ""
+                    vista = df_grupo[base_cols].copy()
+                    vista.rename(
+                        columns={
+                            "Tipo_Envio_Original": "Tipo Envío",
+                            "Fecha_Entrega": "Fecha Entrega",
+                            "Vendedor_Registro": "Vendedor",
+                        },
+                        inplace=True,
+                    )
+                    vista["Fecha Entrega"] = vista["Fecha Entrega"].apply(
+                        lambda x: x.strftime("%d/%m") if pd.notna(x) else ""
+                    )
+                    vista["Cliente"] = vista.apply(
+                        lambda r: f"📄 <b>{r['Folio_Factura']}</b> 🤝 {r['Cliente']}",
+                        axis=1,
+                    )
+                    st.markdown(
+                        vista[
+                            [
+                                "Tipo",
+                                "Tipo Envío",
+                                "Turno",
+                                "Fecha Entrega",
+                                "Cliente",
+                                "Vendedor",
+                                "Estado",
+                            ]
+                        ].to_html(escape=False, index=False),
+                        unsafe_allow_html=True,
+                    )
 
 
 # =========================
@@ -789,6 +762,13 @@ with tabs[2]:
         and "Tipo_Envio" in df_casos.columns
     ):
         df_casos["Tipo_Caso"] = df_casos["Tipo_Envio"]
+    # Asegura tipo de envío original para poder mostrarlo en la vista
+    if (
+        not df_casos.empty
+        and "Tipo_Envio_Original" not in df_casos.columns
+        and "Tipo_Envio" in df_casos.columns
+    ):
+        df_casos["Tipo_Envio_Original"] = df_casos["Tipo_Envio"]
 
     # También incluir pedidos con Tipo_Envio de garantía desde 'datos_pedidos'
     df_garantias_pedidos = pd.DataFrame()
