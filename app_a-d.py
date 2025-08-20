@@ -45,23 +45,18 @@ if "flash_msg" in st.session_state and st.session_state["flash_msg"]:
     st.success(st.session_state.pop("flash_msg"))
 
 
-# ✅ Versión única con claves para evitar errores de duplicado
-col_recarga, col_reintento = st.columns([1, 1])
-
-with col_recarga:
-    if st.button("🔄 Recargar Pedidos (seguro)", help="Actualiza datos sin reiniciar pestañas ni scroll", key="btn_recargar_seguro"):
-        # Guardamos cuántos pedidos teníamos antes de recargar
-        st.session_state["prev_pedidos_count"] = st.session_state.get("last_pedidos_count", 0)
-        st.session_state["need_compare"] = True
-        st.session_state["reload_pedidos_soft"] = True
-        st.cache_data.clear()
-        st.cache_resource.clear()
-
-with col_reintento:
-    if st.button("❌ Reparar Conexión", help="Borra todos los caches y recarga la app", key="btn_reparar_conexion"):
-        st.cache_data.clear()
-        st.cache_resource.clear()
-        st.rerun()
+# ✅ Recarga segura que también repara la conexión si es necesario
+if st.button(
+    "🔄 Recargar Pedidos (seguro)",
+    help="Actualiza datos sin reiniciar pestañas ni scroll",
+    key="btn_recargar_seguro",
+):
+    # Guardamos cuántos pedidos teníamos antes de recargar
+    st.session_state["prev_pedidos_count"] = st.session_state.get("last_pedidos_count", 0)
+    st.session_state["need_compare"] = True
+    st.session_state["reload_pedidos_soft"] = True
+    st.cache_data.clear()
+    st.cache_resource.clear()
 
 
 # --- Google Sheets Constants (pueden venir de st.secrets si se prefiere) ---
@@ -154,6 +149,36 @@ def get_s3_client():
         st.info("ℹ️ Revisa tus credenciales de AWS en st.secrets['aws'] y la configuración de la región.")
         st.stop()
 
+
+def _reconnect_and_rerun():
+    """Limpia cachés y fuerza un rerun de la aplicación."""
+    st.cache_data.clear()
+    st.cache_resource.clear()
+    time.sleep(1)
+    st.rerun()
+
+
+def handle_auth_error(exc: Exception):
+    """Intenta reparar la conexión ante errores comunes de autenticación o cuota."""
+    err_text = str(exc)
+    recoverable = [
+        "401",
+        "UNAUTHENTICATED",
+        "ACCESS_TOKEN_EXPIRED",
+        "RESOURCE_EXHAUSTED",
+        "RATE_LIMIT",
+        "429",
+    ]
+    if any(code in err_text for code in recoverable):
+        st.warning("🔁 Error de autenticación o cuota. Reintentando conexión...")
+        _reconnect_and_rerun()
+    else:
+        st.error(f"❌ Error general al autenticarse o inicializar clientes: {exc}")
+        st.info(
+            "ℹ️ Asegúrate de que las APIs de Google Sheets y Drive estén habilitadas para tu proyecto de Google Cloud. También, revisa tus credenciales de AWS S3 y Google Sheets en .streamlit/secrets.toml o en la interfaz de Streamlit Cloud."
+        )
+        st.stop()
+
 # Initialize clients globally
 try:
     # Obtener credenciales de Google Sheets de st.secrets
@@ -193,9 +218,7 @@ try:
         st.stop()
 
 except Exception as e:
-    st.error(f"❌ Error general al autenticarse o inicializar clientes: {e}")
-    st.info("ℹ️ Asegúrate de que las APIs de Google Sheets y Drive estén habilitadas para tu proyecto de Google Cloud. También, revisa tus credenciales de AWS S3 y Google Sheets en .streamlit/secrets.toml o en la interfaz de Streamlit Cloud.")
-    st.stop()
+    handle_auth_error(e)
 
 
 # --- Data Loading from Google Sheets (Cached) ---
