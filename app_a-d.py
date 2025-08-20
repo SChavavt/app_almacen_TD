@@ -1996,6 +1996,28 @@ with main_tabs[4]:
                             guia_final = f"{existing}, {guia_url}" if existing else guia_url
                             ok &= update_gsheet_cell(worksheet_casos, headers_casos, gsheet_row_idx, "Hoja_Ruta_Mensajero", guia_final)
                             row["Hoja_Ruta_Mensajero"] = guia_final
+                        # Guardar tipo de envío original y turno seleccionado
+                        tipo_sel = st.session_state.get(tipo_key, tipo_envio_actual)
+                        if "Tipo_Envio_Original" in headers_casos:
+                            ok &= update_gsheet_cell(
+                                worksheet_casos,
+                                headers_casos,
+                                gsheet_row_idx,
+                                "Tipo_Envio_Original",
+                                tipo_sel,
+                            )
+                            row["Tipo_Envio_Original"] = tipo_sel
+                        if tipo_sel == "📍 Pedido Local":
+                            turno_sel = st.session_state.get(turno_key, turno_actual)
+                            if "Turno" in headers_casos:
+                                ok &= update_gsheet_cell(
+                                    worksheet_casos,
+                                    headers_casos,
+                                    gsheet_row_idx,
+                                    "Turno",
+                                    turno_sel,
+                                )
+                                row["Turno"] = turno_sel
                         ok &= update_gsheet_cell(worksheet_casos, headers_casos, gsheet_row_idx, "Estado", "🟢 Completado")
 
                         mx_now = mx_now_str()
@@ -2467,6 +2489,28 @@ with main_tabs[5]:  # 🛠 Garantías
                             guia_final = f"{existing}, {guia_url}" if existing else guia_url
                             ok &= update_gsheet_cell(worksheet_casos, headers_casos, gsheet_row_idx, "Hoja_Ruta_Mensajero", guia_final)
                             row["Hoja_Ruta_Mensajero"] = guia_final
+                        # Guardar tipo de envío original y turno seleccionado
+                        tipo_sel = st.session_state.get(tipo_key, tipo_envio_actual)
+                        if "Tipo_Envio_Original" in headers_casos:
+                            ok &= update_gsheet_cell(
+                                worksheet_casos,
+                                headers_casos,
+                                gsheet_row_idx,
+                                "Tipo_Envio_Original",
+                                tipo_sel,
+                            )
+                            row["Tipo_Envio_Original"] = tipo_sel
+                        if tipo_sel == "📍 Pedido Local":
+                            turno_sel = st.session_state.get(turno_key, turno_actual)
+                            if "Turno" in headers_casos:
+                                ok &= update_gsheet_cell(
+                                    worksheet_casos,
+                                    headers_casos,
+                                    gsheet_row_idx,
+                                    "Turno",
+                                    turno_sel,
+                                )
+                                row["Turno"] = turno_sel
                         ok &= update_gsheet_cell(worksheet_casos, headers_casos, gsheet_row_idx, "Estado", "🟢 Completado")
 
                         mx_now = mx_now_str()
