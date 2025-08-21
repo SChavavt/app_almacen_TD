@@ -41,7 +41,17 @@ except Exception as e:
 def cargar_pedidos():
     sheet = gspread_client.open_by_key("1aWkSelodaz0nWfQx7FZAysGnIYGQFJxAN7RO3YgCiZY").worksheet("datos_pedidos")
     data = sheet.get_all_records()
-    return pd.DataFrame(data)
+    df = pd.DataFrame(data)
+    # columnas mínimas que usaremos (incluye modif. y refacturación)
+    needed = [
+        "ID_Pedido","Hora_Registro","Cliente","Estado","Vendedor_Registro","Folio_Factura",
+        "Modificacion_Surtido","Adjuntos_Surtido",
+        "Refacturacion_Tipo","Refacturacion_Subtipo","Folio_Factura_Refacturada"
+    ]
+    for c in needed:
+        if c not in df.columns:
+            df[c] = ""
+    return df
 
 @st.cache_data(ttl=300)
 def cargar_casos_especiales():
@@ -174,7 +184,7 @@ with tabs[0]:
         cliente_normalizado = normalizar(keyword.strip()) if keyword else ""
 
 
-# --- EJECUCIÓN DE LA BÚSQUEDA ---
+    # --- EJECUCIÓN DE LA BÚSQUEDA ---
     if buscar_btn:
         if modo_busqueda == "🔢 Por número de guía":
             st.info("🔄 Buscando, por favor espera... puede tardar unos segundos...")
@@ -225,6 +235,14 @@ with tabs[0]:
                     "Vendedor": row.get("Vendedor_Registro", ""),
                     "Folio": row.get("Folio_Factura", ""),
                     "Hora_Registro": row.get("Hora_Registro", ""),
+                    # 🛠 Modificación de surtido
+                    "Modificacion_Surtido": str(row.get("Modificacion_Surtido", "")).strip(),
+                    "Adjuntos_Surtido_urls": partir_urls(row.get("Adjuntos_Surtido", "")),
+                    # ♻️ Refacturación
+                    "Refacturacion_Tipo": str(row.get("Refacturacion_Tipo","")).strip(),
+                    "Refacturacion_Subtipo": str(row.get("Refacturacion_Subtipo","")).strip(),
+                    "Folio_Factura_Refacturada": str(row.get("Folio_Factura_Refacturada","")).strip(),
+                    # Archivos S3
                     "Coincidentes": [],  # En modo cliente no destacamos PDFs guía específicos
                     "Comprobantes": [(f["Key"], generar_url_s3(f["Key"])) for f in comprobantes],
                     "Facturas": [(f["Key"], generar_url_s3(f["Key"])) for f in facturas],
@@ -256,7 +274,7 @@ with tabs[0]:
                     "Hora_Registro": row.get("Hora_Registro",""),
                     "Tipo_Envio": row.get("Tipo_Envio",""),
                     "Estado": row.get("Estado",""),
-                    "Estado_Caso": row.get("Estado_Caso",""),
+                    "Estado_Caso": row.get("Estado_Caso",""),  # solo casos_especiales
                     "Resultado_Esperado": row.get("Resultado_Esperado",""),
                     "Material_Devuelto": row.get("Material_Devuelto",""),
                     "Monto_Devuelto": row.get("Monto_Devuelto",""),
@@ -273,7 +291,14 @@ with tabs[0]:
                     "Comentarios_Admin_Devolucion": row.get("Comentarios_Admin_Devolucion",""),
                     "Turno": row.get("Turno",""),
                     "Hora_Proceso": row.get("Hora_Proceso",""),
-                    # Secciones de archivos:
+                    # 🛠 Modificación de surtido
+                    "Modificacion_Surtido": str(row.get("Modificacion_Surtido","")).strip(),
+                    "Adjuntos_Surtido_urls": partir_urls(row.get("Adjuntos_Surtido","")),
+                    # ♻️ Refacturación
+                    "Refacturacion_Tipo": str(row.get("Refacturacion_Tipo","")).strip(),
+                    "Refacturacion_Subtipo": str(row.get("Refacturacion_Subtipo","")).strip(),
+                    "Folio_Factura_Refacturada": str(row.get("Folio_Factura_Refacturada","")).strip(),
+                    # Secciones de archivos del caso:
                     "Adjuntos_urls": adjuntos_urls,
                     "Guia_url": guia_url,
                 })
@@ -330,6 +355,14 @@ with tabs[0]:
                             "Vendedor": row.get("Vendedor_Registro", ""),
                             "Folio": row.get("Folio_Factura", ""),
                             "Hora_Registro": row.get("Hora_Registro", ""),
+                            # 🛠 Modificación de surtido
+                            "Modificacion_Surtido": str(row.get("Modificacion_Surtido", "")).strip(),
+                            "Adjuntos_Surtido_urls": partir_urls(row.get("Adjuntos_Surtido", "")),
+                            # ♻️ Refacturación
+                            "Refacturacion_Tipo": str(row.get("Refacturacion_Tipo","")).strip(),
+                            "Refacturacion_Subtipo": str(row.get("Refacturacion_Subtipo","")).strip(),
+                            "Folio_Factura_Refacturada": str(row.get("Folio_Factura_Refacturada","")).strip(),
+                            # Archivos S3
                             "Coincidentes": archivos_coincidentes,
                             "Comprobantes": [(f["Key"], generar_url_s3(f["Key"])) for f in comprobantes],
                             "Facturas": [(f["Key"], generar_url_s3(f["Key"])) for f in facturas],
@@ -368,6 +401,16 @@ with tabs[0]:
                     st.markdown(
                         f"**Estado:** {res.get('Estado','') or 'N/A'}  |  **Estado del Caso:** {res.get('Estado_Caso','') or 'N/A'}  |  **Turno:** {res.get('Turno','') or 'N/A'}"
                     )
+                    # ♻️ Refacturación (si hay)
+                    ref_t = res.get("Refacturacion_Tipo","")
+                    ref_st = res.get("Refacturacion_Subtipo","")
+                    ref_f = res.get("Folio_Factura_Refacturada","")
+                    if any([ref_t, ref_st, ref_f]):
+                        st.markdown("**♻️ Refacturación:**")
+                        st.markdown(f"- **Tipo:** {ref_t or 'N/A'}")
+                        st.markdown(f"- **Subtipo:** {ref_st or 'N/A'}")
+                        st.markdown(f"- **Folio refacturado:** {ref_f or 'N/A'}")
+
                     if str(res.get("Resultado_Esperado","")).strip():
                         st.markdown(f"**🎯 Resultado Esperado:** {res.get('Resultado_Esperado','')}")
                     if str(res.get("Motivo_Detallado","")).strip():
@@ -392,6 +435,19 @@ with tabs[0]:
                         st.markdown("**🗒️ Comentario Administrativo:**")
                         st.info(str(res.get("Comentarios_Admin_Devolucion","")).strip())
 
+                    # 🛠 Modificación de surtido (si existe)
+                    mod_txt = res.get("Modificacion_Surtido", "") or ""
+                    mod_urls = res.get("Adjuntos_Surtido_urls", []) or []
+                    if mod_txt or mod_urls:
+                        st.markdown("#### 🛠 Modificación de surtido")
+                        if mod_txt:
+                            st.info(mod_txt)
+                        if mod_urls:
+                            st.markdown("**Archivos de modificación:**")
+                            for u in mod_urls:
+                                nombre = u.split("/")[-1]
+                                st.markdown(f"- [{nombre}]({u})")
+
                     with st.expander("📎 Archivos (Adjuntos y Guía)", expanded=False):
                         # Adjuntos (lista de URLs)
                         adj = res.get("Adjuntos_urls", []) or []
@@ -415,6 +471,17 @@ with tabs[0]:
                     st.markdown(
                         f"📄 **Folio:** `{res['Folio'] or 'N/D'}`  |  🔍 **Estado:** `{res['Estado'] or 'N/D'}`  |  🧑‍💼 **Vendedor:** `{res['Vendedor'] or 'N/D'}`  |  🕒 **Hora:** `{res['Hora_Registro'] or 'N/D'}`"
                     )
+
+                    # ♻️ Refacturación (si hay)
+                    ref_t = res.get("Refacturacion_Tipo","")
+                    ref_st = res.get("Refacturacion_Subtipo","")
+                    ref_f = res.get("Folio_Factura_Refacturada","")
+                    if any([ref_t, ref_st, ref_f]):
+                        with st.expander("♻️ Refacturación", expanded=False):
+                            st.markdown(f"- **Tipo:** {ref_t or 'N/A'}")
+                            st.markdown(f"- **Subtipo:** {ref_st or 'N/A'}")
+                            st.markdown(f"- **Folio refacturado:** {ref_f or 'N/A'}")
+
                     with st.expander("📁 Archivos del Pedido", expanded=True):
                         if res.get("Coincidentes"):
                             st.markdown("#### 🔍 Guías:")
@@ -437,6 +504,19 @@ with tabs[0]:
                                 nombre = key.split("/")[-1]
                                 st.markdown(f"- [📌 {nombre}]({url})")
 
+                        # 🛠 Modificación de surtido (si existe)
+                        mod_txt = res.get("Modificacion_Surtido", "") or ""
+                        mod_urls = res.get("Adjuntos_Surtido_urls", []) or []
+                        if mod_txt or mod_urls:
+                            st.markdown("#### 🛠 Modificación de surtido")
+                            if mod_txt:
+                                st.info(mod_txt)
+                            if mod_urls:
+                                st.markdown("**Archivos de modificación:**")
+                                for u in mod_urls:
+                                    nombre = u.split("/")[-1]
+                                    st.markdown(f"- [{nombre}]({u})")
+
         else:
             mensaje = (
                 "⚠️ No se encontraron coincidencias en ningún archivo PDF."
@@ -444,7 +524,6 @@ with tabs[0]:
                 else "⚠️ No se encontraron pedidos o casos para el cliente ingresado."
             )
             st.warning(mensaje)
-
 
 
 CONTRASENA_ADMIN = "Ceci"  # puedes cambiar esta contraseña si lo deseas
