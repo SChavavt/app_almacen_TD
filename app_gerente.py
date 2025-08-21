@@ -52,7 +52,6 @@ def cargar_pedidos():
         if c not in df.columns:
             df[c] = ""
     return df
-
 @st.cache_data(ttl=300)
 def cargar_casos_especiales():
     """
@@ -64,7 +63,7 @@ def cargar_casos_especiales():
     df = pd.DataFrame(data)
 
     columnas_ejemplo = [
-        "ID_Pedido","Hora_Registro","Vendedor_Registro","Cliente","Folio_Factura","Tipo_Envio",
+        "ID_Pedido","Hora_Registro","Vendedor_Registro","Cliente","Folio_Factura","Folio_Factura_Error","Tipo_Envio",
         "Fecha_Entrega","Comentario","Adjuntos","Estado","Resultado_Esperado","Material_Devuelto",
         "Monto_Devuelto","Motivo_Detallado","Area_Responsable","Nombre_Responsable","Fecha_Completado",
         "Completados_Limpiado","Estado_Caso","Hoja_Ruta_Mensajero","Numero_Cliente_RFC","Tipo_Envio_Original",
@@ -270,7 +269,9 @@ with tabs[0]:
                     "ID_Pedido": str(row.get("ID_Pedido","")).strip(),
                     "Cliente": row.get("Cliente",""),
                     "Vendedor": row.get("Vendedor_Registro",""),
+                    # Folios
                     "Folio": row.get("Folio_Factura",""),
+                    "Folio_Factura_Error": row.get("Folio_Factura_Error",""),
                     "Hora_Registro": row.get("Hora_Registro",""),
                     "Tipo_Envio": row.get("Tipo_Envio",""),
                     "Estado": row.get("Estado",""),
@@ -299,9 +300,10 @@ with tabs[0]:
                     "Refacturacion_Subtipo": str(row.get("Refacturacion_Subtipo","")).strip(),
                     "Folio_Factura_Refacturada": str(row.get("Folio_Factura_Refacturada","")).strip(),
                     # Secciones de archivos del caso:
-                    "Adjuntos_urls": adjuntos_urls,
-                    "Guia_url": guia_url,
+                    "Adjuntos_urls": partir_urls(row.get("Adjuntos", "")),
+                    "Guia_url": str(row.get("Hoja_Ruta_Mensajero", "")).strip(),
                 })
+
 
         # ====== BÚSQUEDA POR NÚMERO DE GUÍA (tu flujo original sobre datos_pedidos + S3) ======
         elif modo_busqueda == "🔢 Por número de guía":
@@ -392,15 +394,29 @@ with tabs[0]:
                     # ---------- Render de CASOS ESPECIALES (solo lectura) ----------
                     titulo = f"🧾 Caso Especial – {res.get('Tipo_Envio','') or 'N/A'}"
                     st.markdown(f"### {titulo}")
-                    st.markdown(
-                        f"📄 **Folio:** `{res.get('Folio','') or 'N/A'}`  |  🧑‍💼 **Vendedor:** `{res.get('Vendedor','') or 'N/A'}`  |  🕒 **Hora:** `{res.get('Hora_Registro','') or 'N/A'}`"
-                    )
+
+                    # 📄 Folio Nuevo / Folio Error solo para Devoluciones
+                    is_devolucion = (str(res.get('Tipo_Envio','')).strip() == "🔁 Devolución")
+                    if is_devolucion:
+                        folio_nuevo = res.get("Folio","") or "N/A"
+                        folio_error = res.get("Folio_Factura_Error","") or "N/A"
+                        st.markdown(
+                            f"📄 **Folio Nuevo:** `{folio_nuevo}`  |  📄 **Folio Error:** `{folio_error}`  |  "
+                            f"🧑‍💼 **Vendedor:** `{res.get('Vendedor','') or 'N/A'}`  |  🕒 **Hora:** `{res.get('Hora_Registro','') or 'N/A'}`"
+                        )
+                    else:
+                        st.markdown(
+                            f"📄 **Folio:** `{res.get('Folio','') or 'N/A'}`  |  "
+                            f"🧑‍💼 **Vendedor:** `{res.get('Vendedor','') or 'N/A'}`  |  🕒 **Hora:** `{res.get('Hora_Registro','') or 'N/A'}`"
+                        )
+
                     st.markdown(
                         f"**👤 Cliente:** {res.get('Cliente','N/A')}  |  **RFC:** {res.get('Numero_Cliente_RFC','') or 'N/A'}"
                     )
                     st.markdown(
                         f"**Estado:** {res.get('Estado','') or 'N/A'}  |  **Estado del Caso:** {res.get('Estado_Caso','') or 'N/A'}  |  **Turno:** {res.get('Turno','') or 'N/A'}"
                     )
+
                     # ♻️ Refacturación (si hay)
                     ref_t = res.get("Refacturacion_Tipo","")
                     ref_st = res.get("Refacturacion_Subtipo","")
@@ -426,10 +442,13 @@ with tabs[0]:
                         f"**🏢 Área Responsable:** {res.get('Area_Responsable','') or 'N/A'}  |  **👥 Responsable del Error:** {res.get('Nombre_Responsable','') or 'N/A'}"
                     )
                     st.markdown(
-                        f"**📅 Fecha Entrega/Cierre (si aplica):** {res.get('Fecha_Entrega','') or 'N/A'}  |  **📅 Recepción:** {res.get('Fecha_Recepcion_Devolucion','') or 'N/A'}  |  **📦 Recepción:** {res.get('Estado_Recepcion','') or 'N/A'}"
+                        f"**📅 Fecha Entrega/Cierre (si aplica):** {res.get('Fecha_Entrega','') or 'N/A'}  |  "
+                        f"**📅 Recepción:** {res.get('Fecha_Recepcion_Devolucion','') or 'N/A'}  |  "
+                        f"**📦 Recepción:** {res.get('Estado_Recepcion','') or 'N/A'}"
                     )
                     st.markdown(
-                        f"**🧾 Nota de Crédito:** {res.get('Nota_Credito_URL','') or 'N/A'}  |  **📂 Documento Adicional:** {res.get('Documento_Adicional_URL','') or 'N/A'}"
+                        f"**🧾 Nota de Crédito:** {res.get('Nota_Credito_URL','') or 'N/A'}  |  "
+                        f"**📂 Documento Adicional:** {res.get('Documento_Adicional_URL','') or 'N/A'}"
                     )
                     if str(res.get("Comentarios_Admin_Devolucion","")).strip():
                         st.markdown("**🗒️ Comentario Administrativo:**")
@@ -449,7 +468,6 @@ with tabs[0]:
                                 st.markdown(f"- [{nombre}]({u})")
 
                     with st.expander("📎 Archivos (Adjuntos y Guía)", expanded=False):
-                        # Adjuntos (lista de URLs)
                         adj = res.get("Adjuntos_urls", []) or []
                         guia = res.get("Guia_url", "")
                         if adj:
@@ -464,6 +482,7 @@ with tabs[0]:
                             st.info("Sin archivos registrados en la hoja.")
 
                     st.markdown("---")
+
 
                 else:
                     # ---------- Render de PEDIDOS (flujo actual) ----------
