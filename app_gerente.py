@@ -43,6 +43,73 @@ def cargar_pedidos():
     data = sheet.get_all_records()
     return pd.DataFrame(data)
 
+@st.cache_data(ttl=300)
+def cargar_casos_especiales():
+    """
+    Lee la hoja 'casos_especiales' y regresa un DataFrame.
+    Si faltan columnas del ejemplo, las crea vacías para evitar KeyError.
+    """
+    sheet = gspread_client.open_by_key("1aWkSelodaz0nWfQx7FZAysGnIYGQFJxAN7RO3YgCiZY").worksheet("casos_especiales")
+    data = sheet.get_all_records()
+    df = pd.DataFrame(data)
+
+    columnas_ejemplo = [
+        "ID_Pedido","Hora_Registro","Vendedor_Registro","Cliente","Folio_Factura","Tipo_Envio",
+        "Fecha_Entrega","Comentario","Adjuntos","Estado","Resultado_Esperado","Material_Devuelto",
+        "Monto_Devuelto","Motivo_Detallado","Area_Responsable","Nombre_Responsable","Fecha_Completado",
+        "Completados_Limpiado","Estado_Caso","Hoja_Ruta_Mensajero","Numero_Cliente_RFC","Tipo_Envio_Original",
+        "Fecha_Recepcion_Devolucion","Estado_Recepcion","Nota_Credito_URL","Documento_Adicional_URL",
+        "Comentarios_Admin_Devolucion","Modificacion_Surtido","Adjuntos_Surtido","Refacturacion_Tipo",
+        "Refacturacion_Subtipo","Folio_Factura_Refacturada","Turno","Hora_Proceso"
+    ]
+    for c in columnas_ejemplo:
+        if c not in df.columns:
+            df[c] = ""
+    return df
+
+
+def partir_urls(value):
+    """
+    Devuelve una lista de URLs limpia a partir de un string que puede venir
+    como JSON, CSV, separado por ; o saltos de línea.
+    """
+    if value is None:
+        return []
+    s = str(value).strip()
+    if not s or s.lower() in ("nan", "none", "n/a"):
+        return []
+    urls = []
+    # Intento JSON
+    try:
+        obj = json.loads(s)
+        if isinstance(obj, list):
+            for it in obj:
+                if isinstance(it, str) and it.strip():
+                    urls.append(it.strip())
+                elif isinstance(it, dict):
+                    for k in ("url", "URL", "href", "link"):
+                        if k in it and str(it[k]).strip():
+                            urls.append(str(it[k]).strip())
+        elif isinstance(obj, dict):
+            for k in ("url", "URL", "href", "link"):
+                if k in obj and str(obj[k]).strip():
+                    urls.append(str(obj[k]).strip())
+    except Exception:
+        # Split por coma, punto y coma o salto de línea
+        for p in re.split(r"[,\n;]+", s):
+            p = p.strip()
+            if p:
+                urls.append(p)
+
+    # Quitar duplicados preservando orden
+    out, seen = [], set()
+    for u in urls:
+        if u not in seen:
+            seen.add(u)
+            out.append(u)
+    return out
+
+
 def obtener_prefijo_s3(pedido_id):
     posibles_prefijos = [
         f"{pedido_id}/", f"adjuntos_pedidos/{pedido_id}/",
@@ -107,39 +174,122 @@ with tabs[0]:
         cliente_normalizado = normalizar(keyword.strip()) if keyword else ""
 
 
-
 # --- EJECUCIÓN DE LA BÚSQUEDA ---
     if buscar_btn:
         if modo_busqueda == "🔢 Por número de guía":
             st.info("🔄 Buscando, por favor espera... puede tardar unos segundos...")
-        df_pedidos = cargar_pedidos()
+
         resultados = []
 
+        # ====== Siempre cargamos pedidos (datos_pedidos) porque la búsqueda por guía los necesita ======
+        df_pedidos = cargar_pedidos()
         if 'Hora_Registro' in df_pedidos.columns:
             df_pedidos['Hora_Registro'] = pd.to_datetime(df_pedidos['Hora_Registro'], errors='coerce')
             df_pedidos = df_pedidos.sort_values(by='Hora_Registro', ascending=False).reset_index(drop=True)
 
-        for _, row in df_pedidos.iterrows():
-            pedido_id = str(row.get("ID_Pedido", "")).strip()
-            if not pedido_id:
-                continue
+        # ====== BÚSQUEDA POR CLIENTE: también carga y filtra casos_especiales ======
+        if modo_busqueda == "🧑 Por cliente":
+            if not keyword.strip():
+                st.warning("⚠️ Ingresa un nombre de cliente.")
+                st.stop()
 
-            if modo_busqueda == "🧑 Por cliente":
-                cliente_row = row.get("Cliente", "").strip()
-                if not cliente_row:
+            cliente_normalizado = normalizar(keyword.strip())
+
+            # 2.1) Buscar en datos_pedidos (S3 + todos los archivos del pedido)
+            for _, row in df_pedidos.iterrows():
+                nombre = str(row.get("Cliente", "")).strip()
+                if not nombre:
                     continue
-                cliente_row_normalizado = normalizar(cliente_row)
-                if cliente_normalizado not in cliente_row_normalizado:
+                if cliente_normalizado not in normalizar(nombre):
+                    continue
+
+                pedido_id = str(row.get("ID_Pedido", "")).strip()
+                if not pedido_id:
                     continue
 
                 prefix = obtener_prefijo_s3(pedido_id)
-                if not prefix:
+                todos_los_archivos = obtener_todos_los_archivos(prefix) if prefix else []
+
+                comprobantes = [f for f in todos_los_archivos if "comprobante" in f["Key"].lower()]
+                facturas = [f for f in todos_los_archivos if "factura" in f["Key"].lower()]
+                otros = [
+                    f for f in todos_los_archivos
+                    if f not in comprobantes and f not in facturas
+                ]
+
+                resultados.append({
+                    "__source": "pedidos",
+                    "ID_Pedido": pedido_id,
+                    "Cliente": row.get("Cliente", ""),
+                    "Estado": row.get("Estado", ""),
+                    "Vendedor": row.get("Vendedor_Registro", ""),
+                    "Folio": row.get("Folio_Factura", ""),
+                    "Hora_Registro": row.get("Hora_Registro", ""),
+                    "Coincidentes": [],  # En modo cliente no destacamos PDFs guía específicos
+                    "Comprobantes": [(f["Key"], generar_url_s3(f["Key"])) for f in comprobantes],
+                    "Facturas": [(f["Key"], generar_url_s3(f["Key"])) for f in facturas],
+                    "Otros": [(f["Key"], generar_url_s3(f["Key"])) for f in otros],
+                })
+
+            # 2.2) Buscar en casos_especiales (mostrar campos de la hoja + links de Adjuntos y Hoja_Ruta_Mensajero)
+            df_casos = cargar_casos_especiales()
+            # Ordenar por Hora_Registro si existe
+            if "Hora_Registro" in df_casos.columns:
+                df_casos["Hora_Registro"] = pd.to_datetime(df_casos["Hora_Registro"], errors="coerce")
+
+            for _, row in df_casos.iterrows():
+                nombre = str(row.get("Cliente", "")).strip()
+                if not nombre:
+                    continue
+                if cliente_normalizado not in normalizar(nombre):
                     continue
 
-                archivos_coincidentes = []  # no se buscan coincidencias
-                todos_los_archivos = obtener_todos_los_archivos(prefix)
+                adjuntos_urls = partir_urls(row.get("Adjuntos", ""))
+                guia_url = str(row.get("Hoja_Ruta_Mensajero", "")).strip()
 
-            elif modo_busqueda == "🔢 Por número de guía":
+                resultados.append({
+                    "__source": "casos",
+                    "ID_Pedido": str(row.get("ID_Pedido","")).strip(),
+                    "Cliente": row.get("Cliente",""),
+                    "Vendedor": row.get("Vendedor_Registro",""),
+                    "Folio": row.get("Folio_Factura",""),
+                    "Hora_Registro": row.get("Hora_Registro",""),
+                    "Tipo_Envio": row.get("Tipo_Envio",""),
+                    "Estado": row.get("Estado",""),
+                    "Estado_Caso": row.get("Estado_Caso",""),
+                    "Resultado_Esperado": row.get("Resultado_Esperado",""),
+                    "Material_Devuelto": row.get("Material_Devuelto",""),
+                    "Monto_Devuelto": row.get("Monto_Devuelto",""),
+                    "Motivo_Detallado": row.get("Motivo_Detallado",""),
+                    "Area_Responsable": row.get("Area_Responsable",""),
+                    "Nombre_Responsable": row.get("Nombre_Responsable",""),
+                    "Numero_Cliente_RFC": row.get("Numero_Cliente_RFC",""),
+                    "Tipo_Envio_Original": row.get("Tipo_Envio_Original",""),
+                    "Fecha_Entrega": row.get("Fecha_Entrega",""),
+                    "Fecha_Recepcion_Devolucion": row.get("Fecha_Recepcion_Devolucion",""),
+                    "Estado_Recepcion": row.get("Estado_Recepcion",""),
+                    "Nota_Credito_URL": row.get("Nota_Credito_URL",""),
+                    "Documento_Adicional_URL": row.get("Documento_Adicional_URL",""),
+                    "Comentarios_Admin_Devolucion": row.get("Comentarios_Admin_Devolucion",""),
+                    "Turno": row.get("Turno",""),
+                    "Hora_Proceso": row.get("Hora_Proceso",""),
+                    # Secciones de archivos:
+                    "Adjuntos_urls": adjuntos_urls,
+                    "Guia_url": guia_url,
+                })
+
+        # ====== BÚSQUEDA POR NÚMERO DE GUÍA (tu flujo original sobre datos_pedidos + S3) ======
+        elif modo_busqueda == "🔢 Por número de guía":
+            clave = keyword.strip()
+            if not clave:
+                st.warning("⚠️ Ingresa una palabra clave o número de guía.")
+                st.stop()
+
+            for _, row in df_pedidos.iterrows():
+                pedido_id = str(row.get("ID_Pedido", "")).strip()
+                if not pedido_id:
+                    continue
+
                 prefix = obtener_prefijo_s3(pedido_id)
                 if not prefix:
                     continue
@@ -151,7 +301,6 @@ with tabs[0]:
                     key = archivo["Key"]
                     texto = extraer_texto_pdf(key)
 
-                    clave = keyword.strip()
                     clave_sin_espacios = clave.replace(" ", "")
                     texto_limpio = texto.replace(" ", "").replace("\n", "")
 
@@ -169,83 +318,133 @@ with tabs[0]:
 
                         archivos_coincidentes.append((key, generar_url_s3(key)))
                         todos_los_archivos = obtener_todos_los_archivos(prefix)
+                        comprobantes = [f for f in todos_los_archivos if "comprobante" in f["Key"].lower()]
+                        facturas = [f for f in todos_los_archivos if "factura" in f["Key"].lower()]
+                        otros = [f for f in todos_los_archivos if f not in comprobantes and f not in facturas and f["Key"] != archivos_coincidentes[0][0]]
+
+                        resultados.append({
+                            "__source": "pedidos",
+                            "ID_Pedido": pedido_id,
+                            "Cliente": row.get("Cliente", ""),
+                            "Estado": row.get("Estado", ""),
+                            "Vendedor": row.get("Vendedor_Registro", ""),
+                            "Folio": row.get("Folio_Factura", ""),
+                            "Hora_Registro": row.get("Hora_Registro", ""),
+                            "Coincidentes": archivos_coincidentes,
+                            "Comprobantes": [(f["Key"], generar_url_s3(f["Key"])) for f in comprobantes],
+                            "Facturas": [(f["Key"], generar_url_s3(f["Key"])) for f in facturas],
+                            "Otros": [(f["Key"], generar_url_s3(f["Key"])) for f in otros],
+                        })
                         break  # detener búsqueda tras encontrar coincidencia
                 else:
                     continue  # ningún PDF coincidió
 
-            else:
-                continue  # modo no reconocido
+                break  # Solo un pedido en búsqueda por guía
 
-            # Una vez tenemos los archivos del pedido
-            comprobantes = [f for f in todos_los_archivos if "comprobante" in f["Key"].lower()]
-            facturas = [f for f in todos_los_archivos if "factura" in f["Key"].lower()]
-            otros = [
-                f for f in todos_los_archivos
-                if f not in comprobantes and f not in facturas and
-                (modo_busqueda == "🧑 Por cliente" or f["Key"] != archivos_coincidentes[0][0])
-            ]
-
-            comprobantes_links = [(f["Key"], generar_url_s3(f["Key"])) for f in comprobantes]
-            facturas_links = [(f["Key"], generar_url_s3(f["Key"])) for f in facturas]
-            otros_links = [(f["Key"], generar_url_s3(f["Key"])) for f in otros]
-
-            resultados.append({
-                "ID_Pedido": pedido_id,
-                "Cliente": row.get("Cliente", ""),
-                "Estado": row.get("Estado", ""),
-                "Vendedor": row.get("Vendedor_Registro", ""),
-                "Folio": row.get("Folio_Factura", ""),
-                "Hora_Registro": row.get("Hora_Registro", ""),  # 🆕 Agregamos este campo
-                "Coincidentes": archivos_coincidentes,
-                "Comprobantes": comprobantes_links,
-                "Facturas": facturas_links,
-                "Otros": otros_links
-            })
-
-
-            if modo_busqueda == "🔢 Por número de guía":
-                break  # Solo detener si es búsqueda por guía
-
+        # ====== RENDER DE RESULTADOS ======
         st.markdown("---")
         if resultados:
-            st.success(f"✅ Se encontraron coincidencias en {len(resultados)} pedido(s).")
+            st.success(f"✅ Se encontraron coincidencias en {len(resultados)} registro(s).")
+
+            # Ordena por Hora_Registro descendente cuando exista
+            def _parse_dt(v):
+                try:
+                    return pd.to_datetime(v)
+                except Exception:
+                    return pd.NaT
+            resultados = sorted(resultados, key=lambda r: _parse_dt(r.get("Hora_Registro")), reverse=True)
 
             for res in resultados:
-                st.markdown(f"### 🤝 {res['Cliente']}")
-                st.markdown(f"📄 **Folio:** `{res['Folio']}`  |  🔍 **Estado:** `{res['Estado']}`  |  🧑‍💼 **Vendedor:** `{res['Vendedor']}`  |  🕒 **Hora:** `{res['Hora_Registro']}`")
+                if res.get("__source") == "casos":
+                    # ---------- Render de CASOS ESPECIALES (solo lectura) ----------
+                    titulo = f"🧾 Caso Especial – {res.get('Tipo_Envio','') or 'N/A'}"
+                    st.markdown(f"### {titulo}")
+                    st.markdown(
+                        f"📄 **Folio:** `{res.get('Folio','') or 'N/A'}`  |  🧑‍💼 **Vendedor:** `{res.get('Vendedor','') or 'N/A'}`  |  🕒 **Hora:** `{res.get('Hora_Registro','') or 'N/A'}`"
+                    )
+                    st.markdown(
+                        f"**👤 Cliente:** {res.get('Cliente','N/A')}  |  **RFC:** {res.get('Numero_Cliente_RFC','') or 'N/A'}"
+                    )
+                    st.markdown(
+                        f"**Estado:** {res.get('Estado','') or 'N/A'}  |  **Estado del Caso:** {res.get('Estado_Caso','') or 'N/A'}  |  **Turno:** {res.get('Turno','') or 'N/A'}"
+                    )
+                    if str(res.get("Resultado_Esperado","")).strip():
+                        st.markdown(f"**🎯 Resultado Esperado:** {res.get('Resultado_Esperado','')}")
+                    if str(res.get("Motivo_Detallado","")).strip():
+                        st.markdown("**📝 Motivo / Descripción:**")
+                        st.info(str(res.get("Motivo_Detallado","")).strip())
+                    if str(res.get("Material_Devuelto","")).strip():
+                        st.markdown("**📦 Piezas / Material:**")
+                        st.info(str(res.get("Material_Devuelto","")).strip())
+                    if str(res.get("Monto_Devuelto","")).strip():
+                        st.markdown(f"**💵 Monto (dev./estimado):** {res.get('Monto_Devuelto','')}")
 
-                with st.expander("📁 Archivos del Pedido", expanded=True):
-                    if res["Coincidentes"]:
-                        st.markdown("#### 🔍 Guías:")
-                        for key, url in res["Coincidentes"]:
-                            nombre = key.split("/")[-1]
-                            st.markdown(f"- [🔍 {nombre}]({url})")
+                    st.markdown(
+                        f"**🏢 Área Responsable:** {res.get('Area_Responsable','') or 'N/A'}  |  **👥 Responsable del Error:** {res.get('Nombre_Responsable','') or 'N/A'}"
+                    )
+                    st.markdown(
+                        f"**📅 Fecha Entrega/Cierre (si aplica):** {res.get('Fecha_Entrega','') or 'N/A'}  |  **📅 Recepción:** {res.get('Fecha_Recepcion_Devolucion','') or 'N/A'}  |  **📦 Recepción:** {res.get('Estado_Recepcion','') or 'N/A'}"
+                    )
+                    st.markdown(
+                        f"**🧾 Nota de Crédito:** {res.get('Nota_Credito_URL','') or 'N/A'}  |  **📂 Documento Adicional:** {res.get('Documento_Adicional_URL','') or 'N/A'}"
+                    )
+                    if str(res.get("Comentarios_Admin_Devolucion","")).strip():
+                        st.markdown("**🗒️ Comentario Administrativo:**")
+                        st.info(str(res.get("Comentarios_Admin_Devolucion","")).strip())
 
-                    if res["Comprobantes"]:
-                        st.markdown("#### 🧾 Comprobantes:")
-                        for key, url in res["Comprobantes"]:
-                            nombre = key.split("/")[-1]
-                            st.markdown(f"- [📄 {nombre}]({url})")
+                    with st.expander("📎 Archivos (Adjuntos y Guía)", expanded=False):
+                        # Adjuntos (lista de URLs)
+                        adj = res.get("Adjuntos_urls", []) or []
+                        guia = res.get("Guia_url", "")
+                        if adj:
+                            st.markdown("**Adjuntos:**")
+                            for u in adj:
+                                nombre = u.split("/")[-1]
+                                st.markdown(f"- [{nombre}]({u})")
+                        if guia and guia.lower() not in ("nan","none","n/a"):
+                            st.markdown("**Guía:**")
+                            st.markdown(f"- [Abrir guía]({guia})")
+                        if not adj and not guia:
+                            st.info("Sin archivos registrados en la hoja.")
 
-                    if res["Facturas"]:
-                        st.markdown("#### 📁 Facturas:")
-                        for key, url in res["Facturas"]:
-                            nombre = key.split("/")[-1]
-                            st.markdown(f"- [📄 {nombre}]({url})")
+                    st.markdown("---")
 
-                    if res["Otros"]:
-                        st.markdown("#### 📂 Otros Archivos:")
-                        for key, url in res["Otros"]:
-                            nombre = key.split("/")[-1]
-                            st.markdown(f"- [📌 {nombre}]({url})")
+                else:
+                    # ---------- Render de PEDIDOS (flujo actual) ----------
+                    st.markdown(f"### 🤝 {res['Cliente'] or 'Cliente N/D'}")
+                    st.markdown(
+                        f"📄 **Folio:** `{res['Folio'] or 'N/D'}`  |  🔍 **Estado:** `{res['Estado'] or 'N/D'}`  |  🧑‍💼 **Vendedor:** `{res['Vendedor'] or 'N/D'}`  |  🕒 **Hora:** `{res['Hora_Registro'] or 'N/D'}`"
+                    )
+                    with st.expander("📁 Archivos del Pedido", expanded=True):
+                        if res.get("Coincidentes"):
+                            st.markdown("#### 🔍 Guías:")
+                            for key, url in res["Coincidentes"]:
+                                nombre = key.split("/")[-1]
+                                st.markdown(f"- [🔍 {nombre}]({url})")
+                        if res.get("Comprobantes"):
+                            st.markdown("#### 🧾 Comprobantes:")
+                            for key, url in res["Comprobantes"]:
+                                nombre = key.split("/")[-1]
+                                st.markdown(f"- [📄 {nombre}]({url})")
+                        if res.get("Facturas"):
+                            st.markdown("#### 📁 Facturas:")
+                            for key, url in res["Facturas"]:
+                                nombre = key.split("/")[-1]
+                                st.markdown(f"- [📄 {nombre}]({url})")
+                        if res.get("Otros"):
+                            st.markdown("#### 📂 Otros Archivos:")
+                            for key, url in res["Otros"]:
+                                nombre = key.split("/")[-1]
+                                st.markdown(f"- [📌 {nombre}]({url})")
 
         else:
             mensaje = (
                 "⚠️ No se encontraron coincidencias en ningún archivo PDF."
                 if modo_busqueda == "🔢 Por número de guía"
-                else "⚠️ No se encontraron pedidos para el cliente ingresado."
+                else "⚠️ No se encontraron pedidos o casos para el cliente ingresado."
             )
             st.warning(mensaje)
+
 
 
 CONTRASENA_ADMIN = "Ceci"  # puedes cambiar esta contraseña si lo deseas
