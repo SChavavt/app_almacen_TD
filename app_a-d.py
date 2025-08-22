@@ -800,6 +800,15 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
                 else:
                     st.error("❌ Falló la actualización del estado a 'En Proceso'.")
 
+            # 🔁 Mantener pestañas activas y recargar para reflejar cambios
+            st.session_state["active_main_tab_index"] = st.session_state.get("active_main_tab_index", 0)
+            st.session_state["active_subtab_local_index"] = st.session_state.get("active_subtab_local_index", 0)
+            st.session_state["active_date_tab_m_index"] = st.session_state.get("active_date_tab_m_index", 0)
+            st.session_state["active_date_tab_t_index"] = st.session_state.get("active_date_tab_t_index", 0)
+
+            st.cache_data.clear()
+            st.rerun()
+
 
 
         # This block displays attachments if they are expanded
