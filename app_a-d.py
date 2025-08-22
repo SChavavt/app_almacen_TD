@@ -94,6 +94,7 @@ if "active_date_tab_t_index" not in st.session_state:
 if "expanded_pedidos" not in st.session_state:
     st.session_state["expanded_pedidos"] = {}
     st.session_state["expanded_attachments"] = {}
+    st.session_state["expanded_subir_guia"] = {}
 if "last_pedidos_count" not in st.session_state:
     st.session_state["last_pedidos_count"] = 0
 if "prev_pedidos_count" not in st.session_state:
@@ -605,14 +606,23 @@ def check_and_update_demorados(df_to_check, worksheet, headers):
 
     return df_to_check, False
 
-def fijar_estado_pestanas_guia(row, origen_tab):
+def fijar_estado_pestanas_guia(row, origen_tab, main_idx, sub_idx, date_idx):
+    """Actualiza los índices activos de pestañas según el contexto actual."""
     st.session_state["pedido_editado"] = row['ID_Pedido']
     st.session_state["fecha_seleccionada"] = row.get("Fecha_Entrega", "")
     st.session_state["subtab_local"] = origen_tab
-    st.session_state["active_main_tab_index"] = st.session_state.get("active_main_tab_index", 0)
-    st.session_state["active_subtab_local_index"] = st.session_state.get("active_subtab_local_index", 0)
-    st.session_state["active_date_tab_m_index"] = st.session_state.get("active_date_tab_m_index", 0)
-    st.session_state["active_date_tab_t_index"] = st.session_state.get("active_date_tab_t_index", 0)
+    st.session_state["active_main_tab_index"] = main_idx
+    st.session_state["active_subtab_local_index"] = sub_idx
+    if origen_tab == "Mañana":
+        st.session_state["active_date_tab_m_index"] = date_idx
+    elif origen_tab == "Tarde":
+        st.session_state["active_date_tab_t_index"] = date_idx
+
+
+def fijar_y_preservar(row, origen_tab, main_idx, sub_idx, date_idx):
+    """Fija los índices de pestañas y los marca para preservarlos en el próximo rerun."""
+    fijar_estado_pestanas_guia(row, origen_tab, main_idx, sub_idx, date_idx)
+    preserve_tab_state()
 
 
 def preserve_tab_state():
@@ -623,21 +633,20 @@ def preserve_tab_state():
     st.session_state["preserve_date_tab_t"] = st.session_state.get("active_date_tab_t_index", 0)
 
 
-def handle_guia_upload(row, origen_tab):
+def handle_guia_upload(row, origen_tab, main_idx, sub_idx, date_idx):
     """Callback al seleccionar archivos de guía; preserva pestañas y mantiene expandido el pedido."""
-    fijar_estado_pestanas_guia(row, origen_tab)
-    preserve_tab_state()
-    st.session_state["expanded_pedidos"].setdefault(row['ID_Pedido'], True)
-    st.session_state["expanded_attachments"].setdefault(row['ID_Pedido'], True)
-    st.rerun()
+    fijar_y_preservar(row, origen_tab, main_idx, sub_idx, date_idx)
+    st.session_state["expanded_pedidos"][row['ID_Pedido']] = True
+    st.session_state["expanded_attachments"][row['ID_Pedido']] = True
+    st.session_state["expanded_subir_guia"][row['ID_Pedido']] = True
 
 
 def handle_generic_upload_change():
     """Callback genérico para mantener pestañas al seleccionar archivos."""
     preserve_tab_state()
-    st.rerun()
 
-def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, worksheet, headers, s3_client_param):
+def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, worksheet, headers, s3_client_param,
+                   main_idx=0, sub_idx=0, date_idx=0):
     """
     Displays a single order with its details, actions, and attachments.
     Includes logic for updating status, surtidor, notes, and handling attachments.
@@ -925,7 +934,7 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
 
         # --- Adjuntar archivos de guía ---
         if row['Estado'] != "🟢 Completado":
-            with st.expander("📦 Subir Archivos de Guía"):
+            with st.expander("📦 Subir Archivos de Guía", expanded=st.session_state["expanded_subir_guia"].get(row['ID_Pedido'], False)):
                 upload_key = f"file_guia_{row['ID_Pedido']}"
                 archivos_guia = st.file_uploader(
                     "📎 Subir guía(s) del pedido",
@@ -933,20 +942,23 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
                     accept_multiple_files=True,
                     key=upload_key,
                     on_change=handle_guia_upload,
-                    args=(row, origen_tab),
+                    args=(row, origen_tab, main_idx, sub_idx, date_idx),
                 )
 
                 if archivos_guia:
-                    # Mantener el pedido expandido tras seleccionar archivos
+                    # Mantener el pedido y el expander abiertos tras seleccionar archivos
                     st.session_state["expanded_pedidos"][row['ID_Pedido']] = True
+                    st.session_state["expanded_subir_guia"][row['ID_Pedido']] = True
 
                     if st.button(
                         "📤 Subir Guía",
                         key=f"btn_subir_guia_{row['ID_Pedido']}",
-                        on_click=preserve_tab_state,
+                        on_click=fijar_y_preservar,
+                        args=(row, origen_tab, main_idx, sub_idx, date_idx),
                     ):
                         st.session_state["expanded_pedidos"][row['ID_Pedido']] = True
                         st.session_state["expanded_attachments"][row['ID_Pedido']] = True
+                        st.session_state["expanded_subir_guia"][row['ID_Pedido']] = True
                         uploaded_urls = []
 
                         for archivo in archivos_guia:
@@ -1386,15 +1398,21 @@ if not df_main.empty:
         "🛠 Garantías",
         "✅ Historial Completados",
     ]
-    main_tabs = st.tabs(tab_options)
+    active_main_idx = st.session_state.get("active_main_tab_index", 0)
+    ordered_main = tab_options[active_main_idx:] + tab_options[:active_main_idx]
+    main_tabs_list = st.tabs(ordered_main)
+    main_tabs = dict(zip(ordered_main, main_tabs_list))
 
-    with main_tabs[0]: # 📍 Pedidos Locales
+    with main_tabs["📍 Pedidos Locales"]:
         st.markdown("### 📋 Pedidos Locales")
         subtab_options_local = ["🌅 Mañana", "🌇 Tarde", "⛰️ Saltillo", "📦 En Bodega"]
-        
-        subtabs_local = st.tabs(subtab_options_local)
 
-        with subtabs_local[0]: # 🌅 Mañana
+        sub_idx = st.session_state.get("active_subtab_local_index", 0)
+        ordered_sub = subtab_options_local[sub_idx:] + subtab_options_local[:sub_idx]
+        subtabs_local_list = st.tabs(ordered_sub)
+        subtabs_local = dict(zip(ordered_sub, subtabs_local_list))
+
+        with subtabs_local["🌅 Mañana"]:
             pedidos_m_display = df_pendientes_proceso_demorado[
                 (df_pendientes_proceso_demorado["Tipo_Envio"] == "📍 Pedido Local") &
                 (df_pendientes_proceso_demorado["Turno"] == "☀️ Local Mañana")
@@ -1404,25 +1422,30 @@ if not df_main.empty:
                 fechas_unicas_dt = sorted(pedidos_m_display["Fecha_Entrega_dt"].dropna().unique())
 
                 if fechas_unicas_dt:
-                    date_tab_labels = [f"📅 {pd.to_datetime(fecha).strftime('%d/%m/%Y')}" for fecha in fechas_unicas_dt]
-                    
-                    date_tabs_m = st.tabs(date_tab_labels)
-                    
-                    for i, fecha_dt in enumerate(fechas_unicas_dt):
-                        date_label = f"📅 {pd.to_datetime(fecha_dt).strftime('%d/%m/%Y')}"
-                        with date_tabs_m[i]:
+                    date_tab_data = [
+                        (i, fecha_dt, f"📅 {pd.to_datetime(fecha_dt).strftime('%d/%m/%Y')}")
+                        for i, fecha_dt in enumerate(fechas_unicas_dt)
+                    ]
+                    m_idx = st.session_state.get("active_date_tab_m_index", 0)
+                    ordered_data = date_tab_data[m_idx:] + date_tab_data[:m_idx]
+                    date_tabs_m_list = st.tabs([label for _, _, label in ordered_data])
+                    date_tabs_m = dict(zip([label for _, _, label in ordered_data], date_tabs_m_list))
+
+                    for original_i, fecha_dt, label in ordered_data:
+                        with date_tabs_m[label]:
                             pedidos_fecha = pedidos_m_display[pedidos_m_display["Fecha_Entrega_dt"] == fecha_dt].copy()
                             pedidos_fecha = ordenar_pedidos_custom(pedidos_fecha)
-                            st.markdown(f"#### 🌅 Pedidos Locales - Mañana - {date_label}")
+                            st.markdown(f"#### 🌅 Pedidos Locales - Mañana - {label}")
                             for orden, (idx, row) in enumerate(pedidos_fecha.iterrows(), start=1):
-                                mostrar_pedido(df_main, idx, row, orden, "Mañana", "📍 Pedidos Locales", worksheet_main, headers_main, s3_client)
+                                mostrar_pedido(df_main, idx, row, orden, "Mañana", "📍 Pedidos Locales", worksheet_main, headers_main, s3_client,
+                                              main_idx=0, sub_idx=0, date_idx=original_i)
                                 
                 else: # Added: Message if no orders for morning shift
                     st.info("No hay pedidos para el turno mañana.")
             else: # Added: Message if no orders for morning shift
                 st.info("No hay pedidos para el turno mañana.")
                                 
-        with subtabs_local[1]:  # 🌇 Tarde
+        with subtabs_local["🌇 Tarde"]:
             pedidos_t_display = df_pendientes_proceso_demorado[
                 (df_pendientes_proceso_demorado["Tipo_Envio"] == "📍 Pedido Local") &
                 (df_pendientes_proceso_demorado["Turno"] == "🌙 Local Tarde")
@@ -1432,25 +1455,28 @@ if not df_main.empty:
                 fechas_unicas_dt = sorted(pedidos_t_display["Fecha_Entrega_dt"].dropna().unique())
 
                 if fechas_unicas_dt:
-                    date_tab_labels = [f"📅 {pd.to_datetime(fecha).strftime('%d/%m/%Y')}" for fecha in fechas_unicas_dt]
-                    
-                    date_tabs_t = st.tabs(date_tab_labels)
-                    for i, date_label in enumerate(date_tab_labels):
-                        with date_tabs_t[i]:
-                            current_selected_date_dt_str = date_label.replace("📅 ", "")
-                            current_selected_date_dt = pd.to_datetime(current_selected_date_dt_str, format='%d/%m/%Y')
-                            
-                            pedidos_fecha = pedidos_t_display[pedidos_t_display["Fecha_Entrega_dt"] == current_selected_date_dt].copy()
+                    date_tab_data = [
+                        (i, fecha_dt, f"📅 {pd.to_datetime(fecha_dt).strftime('%d/%m/%Y')}")
+                        for i, fecha_dt in enumerate(fechas_unicas_dt)
+                    ]
+                    t_idx = st.session_state.get("active_date_tab_t_index", 0)
+                    ordered_data = date_tab_data[t_idx:] + date_tab_data[:t_idx]
+                    date_tabs_t_list = st.tabs([label for _, _, label in ordered_data])
+                    date_tabs_t = dict(zip([label for _, _, label in ordered_data], date_tabs_t_list))
+                    for original_i, fecha_dt, label in ordered_data:
+                        with date_tabs_t[label]:
+                            pedidos_fecha = pedidos_t_display[pedidos_t_display["Fecha_Entrega_dt"] == fecha_dt].copy()
                             pedidos_fecha = ordenar_pedidos_custom(pedidos_fecha)
-                            st.markdown(f"#### 🌇 Pedidos Locales - Tarde - {date_label}")
+                            st.markdown(f"#### 🌇 Pedidos Locales - Tarde - {label}")
                             for orden, (idx, row) in enumerate(pedidos_fecha.iterrows(), start=1):
-                                mostrar_pedido(df_main, idx, row, orden, "Tarde", "📍 Pedidos Locales", worksheet_main, headers_main, s3_client)
+                                mostrar_pedido(df_main, idx, row, orden, "Tarde", "📍 Pedidos Locales", worksheet_main, headers_main, s3_client,
+                                              main_idx=0, sub_idx=1, date_idx=original_i)
                 else:
                     st.info("No hay pedidos para el turno tarde.")
             else:
                 st.info("No hay pedidos para el turno tarde.")
 
-        with subtabs_local[2]: # ⛰️ Saltillo
+        with subtabs_local["⛰️ Saltillo"]:
             pedidos_s_display = df_pendientes_proceso_demorado[
                 (df_pendientes_proceso_demorado["Tipo_Envio"] == "📍 Pedido Local") &
                 (df_pendientes_proceso_demorado["Turno"] == "🌵 Saltillo")
@@ -1459,11 +1485,12 @@ if not df_main.empty:
                 pedidos_s_display = ordenar_pedidos_custom(pedidos_s_display)
                 st.markdown("#### ⛰️ Pedidos Locales - Saltillo")
                 for orden, (idx, row) in enumerate(pedidos_s_display.iterrows(), start=1):
-                    mostrar_pedido(df_main, idx, row, orden, "Saltillo", "📍 Pedidos Locales", worksheet_main, headers_main, s3_client)
+                    mostrar_pedido(df_main, idx, row, orden, "Saltillo", "📍 Pedidos Locales", worksheet_main, headers_main, s3_client,
+                                   main_idx=0, sub_idx=2, date_idx=0)
             else:
                 st.info("No hay pedidos para Saltillo.")
 
-        with subtabs_local[3]: # 📦 En Bodega
+        with subtabs_local["📦 En Bodega"]:
             pedidos_b_display = df_pendientes_proceso_demorado[
                 (df_pendientes_proceso_demorado["Tipo_Envio"] == "📍 Pedido Local") &
                 (df_pendientes_proceso_demorado["Turno"] == "📦 Pasa a Bodega")
@@ -1472,22 +1499,24 @@ if not df_main.empty:
                 pedidos_b_display = ordenar_pedidos_custom(pedidos_b_display)
                 st.markdown("#### 📦 Pedidos Locales - En Bodega")
                 for orden, (idx, row) in enumerate(pedidos_b_display.iterrows(), start=1):
-                    mostrar_pedido(df_main, idx, row, orden, "Pasa a Bodega", "📍 Pedidos Locales", worksheet_main, headers_main, s3_client)
+                    mostrar_pedido(df_main, idx, row, orden, "Pasa a Bodega", "📍 Pedidos Locales", worksheet_main, headers_main, s3_client,
+                                   main_idx=0, sub_idx=3, date_idx=0)
             else:
                 st.info("No hay pedidos para pasar a bodega.")
 
-    with main_tabs[1]: # 🚚 Pedidos Foráneos
+    with main_tabs["🚚 Pedidos Foráneos"]:
         pedidos_foraneos_display = df_pendientes_proceso_demorado[
             (df_pendientes_proceso_demorado["Tipo_Envio"] == "🚚 Pedido Foráneo")
         ].copy()
         if not pedidos_foraneos_display.empty:
             pedidos_foraneos_display = ordenar_pedidos_custom(pedidos_foraneos_display)
             for orden, (idx, row) in enumerate(pedidos_foraneos_display.iterrows(), start=1):
-                mostrar_pedido(df_main, idx, row, orden, "Foráneo", "🚚 Pedidos Foráneos", worksheet_main, headers_main, s3_client)
+                mostrar_pedido(df_main, idx, row, orden, "Foráneo", "🚚 Pedidos Foráneos", worksheet_main, headers_main, s3_client,
+                               main_idx=1, sub_idx=0, date_idx=0)
         else:
             st.info("No hay pedidos foráneos.")
 
-    with main_tabs[2]:  # 🏙️ Pedidos CDMX
+    with main_tabs["🏙️ Pedidos CDMX"]:
         pedidos_cdmx_display = df_pendientes_proceso_demorado[
             (df_pendientes_proceso_demorado["Tipo_Envio"] == "🏙️ Pedido CDMX")
         ].copy()
@@ -1497,11 +1526,12 @@ if not df_main.empty:
             st.markdown("### 🏙️ Pedidos CDMX")
             for orden, (idx, row) in enumerate(pedidos_cdmx_display.iterrows(), start=1):
                 # Reutiliza el mismo render que Foráneo (con tus botones de imprimir/completar, etc.)
-                mostrar_pedido(df_main, idx, row, orden, "CDMX", "🏙️ Pedidos CDMX", worksheet_main, headers_main, s3_client)
+                mostrar_pedido(df_main, idx, row, orden, "CDMX", "🏙️ Pedidos CDMX", worksheet_main, headers_main, s3_client,
+                               main_idx=2, sub_idx=0, date_idx=0)
         else:
             st.info("No hay pedidos CDMX.")
 
-    with main_tabs[3]:  # 📋 Solicitudes de Guía
+    with main_tabs["📋 Solicitudes de Guía"]:
         solicitudes_display = df_pendientes_proceso_demorado[
             (df_pendientes_proceso_demorado["Tipo_Envio"] == "📋 Solicitudes de Guía")
         ].copy()
@@ -1518,7 +1548,7 @@ if not df_main.empty:
 
 
 # --- TAB 3: 🔁 Devoluciones (casos_especiales) ---
-with main_tabs[4]:
+with main_tabs["🔁 Devoluciones"]:
     st.session_state["active_main_tab_index"] = 4
     st.markdown("### 🔁 Devoluciones")
 
@@ -2048,7 +2078,7 @@ with main_tabs[4]:
 
     st.markdown("---")
 
-with main_tabs[5]:  # 🛠 Garantías
+with main_tabs["🛠 Garantías"]:
     st.session_state["active_main_tab_index"] = 5
     st.markdown("### 🛠 Garantías")
 
@@ -2537,7 +2567,7 @@ with main_tabs[5]:  # 🛠 Garantías
                     st.error(f"❌ Error al completar la garantía: {e}")
 
 
-with main_tabs[6]:  # ✅ Historial Completados
+with main_tabs["✅ Historial Completados"]:
     df_completados_historial = df_main[
         (df_main["Estado"] == "🟢 Completado") & 
         (df_main.get("Completados_Limpiado", "").astype(str).str.lower() != "sí")
@@ -2631,6 +2661,7 @@ with main_tabs[6]:  # ✅ Historial Completados
 
         df_completados_historial = df_completados_historial.sort_values(by="Fecha_Completado", ascending=False)
         for orden, (idx, row) in enumerate(df_completados_historial.iterrows(), start=1):
-            mostrar_pedido(df_main, idx, row, orden, "Historial", "✅ Historial Completados", worksheet_main, headers_main, s3_client)
+            mostrar_pedido(df_main, idx, row, orden, "Historial", "✅ Historial Completados", worksheet_main, headers_main, s3_client,
+                           main_idx=6, sub_idx=0, date_idx=0)
     else:
         st.info("No hay pedidos completados recientes o ya fueron limpiados.") 
