@@ -639,13 +639,15 @@ def handle_guia_upload(row, origen_tab, main_idx, sub_idx, date_idx):
     st.session_state["expanded_pedidos"][row['ID_Pedido']] = True
     st.session_state["expanded_attachments"][row['ID_Pedido']] = True
     st.session_state["expanded_subir_guia"][row['ID_Pedido']] = True
-    st.rerun()
+    # Streamlit reruns automáticamente tras ejecutar el callback,
+    # por lo que no es necesario llamar a st.rerun() aquí.
 
 
 def handle_generic_upload_change():
     """Callback genérico para mantener pestañas al seleccionar archivos."""
     preserve_tab_state()
-    st.rerun()
+    # El script se vuelve a ejecutar automáticamente después de este callback,
+    # así que evitamos una llamada explícita a st.rerun().
 
 def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, worksheet, headers, s3_client_param,
                    main_idx=0, sub_idx=0, date_idx=0):
