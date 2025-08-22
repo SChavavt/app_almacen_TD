@@ -639,8 +639,9 @@ def handle_guia_upload(row, origen_tab, main_idx, sub_idx, date_idx):
     st.session_state["expanded_pedidos"][row['ID_Pedido']] = True
     st.session_state["expanded_attachments"][row['ID_Pedido']] = True
     st.session_state["expanded_subir_guia"][row['ID_Pedido']] = True
-    # Streamlit reruns automáticamente tras ejecutar el callback,
-    # por lo que no es necesario llamar a st.rerun() aquí.
+    # Forzamos un rerun inmediato para evitar que otras secciones del script
+    # sobrescriban el índice de pestaña activo antes de guardarlo.
+    st.rerun()
 
 
 def handle_generic_upload_change():
