@@ -12,6 +12,7 @@ import json # Import json for parsing credentials
 import os
 import uuid
 from pytz import timezone
+from urllib.parse import urlparse, unquote
 
 from datetime import datetime
 from pytz import timezone
@@ -1675,6 +1676,122 @@ with main_tabs[4]:
                 out.append(u)
         return out
 
+    def render_caso_especial_devolucion(row):
+        st.markdown("### 🧾 Caso Especial – 🔁 Devolución")
+
+        folio_new = str(row.get("Folio_Factura", "")).strip() or "N/A"
+        folio_err = str(row.get("Folio_Factura_Error", "")).strip() or "N/A"
+        vendedor = str(row.get("Vendedor_Registro", "")).strip() or "N/A"
+        hora = str(row.get("Hora_Registro", "")).strip() or "N/A"
+        st.markdown(
+            f"📄 Folio Nuevo: `{folio_new}` | 📄 Folio Error: `{folio_err}` | 🧑‍💼 Vendedor: `{vendedor}` | 🕒 Hora: `{hora}`"
+        )
+
+        cliente = str(row.get("Cliente", "")).strip() or "N/A"
+        rfc = str(row.get("Numero_Cliente_RFC", "")).strip() or "N/A"
+        st.markdown(f"👤 Cliente: {cliente} | RFC: {rfc}")
+
+        estado = str(row.get("Estado", "")).strip() or "N/A"
+        estado_caso = str(row.get("Estado_Caso", "")).strip() or "N/A"
+        turno = str(row.get("Turno", "")).strip() or "N/A"
+        st.markdown(f"Estado: {estado} | Estado del Caso: {estado_caso} | Turno: {turno}")
+
+        r_tipo = str(row.get("Refacturacion_Tipo", "")).strip()
+        r_subtipo = str(row.get("Refacturacion_Subtipo", "")).strip()
+        r_folio = str(row.get("Folio_Factura_Refacturada", "")).strip()
+        if any([r_tipo, r_subtipo, r_folio]):
+            st.markdown("#### ♻️ Refacturación")
+            bullets = []
+            if r_tipo:
+                bullets.append(f"- Tipo: {r_tipo}")
+            if r_subtipo:
+                bullets.append(f"- Subtipo: {r_subtipo}")
+            if r_folio:
+                bullets.append(f"- Folio refacturado: {r_folio}")
+            st.markdown("\n".join(bullets))
+
+        resultado = str(row.get("Resultado_Esperado", "")).strip()
+        if resultado:
+            st.markdown(f"🎯 Resultado Esperado: {resultado}")
+
+        motivo = str(row.get("Motivo_Detallado", "")).strip()
+        if motivo:
+            st.markdown("📝 Motivo / Descripción:")
+            st.info(motivo)
+
+        material = str(row.get("Material_Devuelto", "")).strip()
+        if material:
+            st.markdown("📦 Piezas / Material:")
+            st.info(material)
+
+        monto = str(row.get("Monto_Devuelto", "")).strip()
+        if monto:
+            st.markdown(f"💵 Monto (dev./estimado): {monto}")
+
+        area_resp = str(row.get("Area_Responsable", "")).strip() or "N/A"
+        resp_error = str(row.get("Nombre_Responsable", "")).strip() or "N/A"
+        st.markdown(f"🏢 Área Responsable: {area_resp} | 👥 Responsable del Error: {resp_error}")
+
+        fecha_entrega = str(row.get("Fecha_Entrega", "")).strip() or "N/A"
+        fecha_rec = str(row.get("Fecha_Recepcion_Devolucion", "")).strip() or "N/A"
+        estado_rec = str(row.get("Estado_Recepcion", "")).strip() or "N/A"
+        st.markdown(
+            f"📅 Fecha Entrega/Cierre: {fecha_entrega} | 📅 Recepción: {fecha_rec} | 📦 Recepción: {estado_rec}"
+        )
+
+        nota = str(row.get("Nota_Credito_URL", "")).strip()
+        if nota:
+            if nota.startswith("http"):
+                st.markdown(f"🧾 [Nota de Crédito]({nota})")
+            else:
+                st.markdown(f"🧾 Nota de Crédito: {nota}")
+
+        doc_extra = str(row.get("Documento_Adicional_URL", "")).strip()
+        if doc_extra:
+            if doc_extra.startswith("http"):
+                st.markdown(f"📂 [Documento Adicional]({doc_extra})")
+            else:
+                st.markdown(f"📂 Documento Adicional: {doc_extra}")
+
+        coment_admin = str(row.get("Comentarios_Admin_Devolucion", "")).strip()
+        if coment_admin:
+            st.markdown("🗒️ Comentario Administrativo:")
+            st.info(coment_admin)
+
+        mod_surtido = str(row.get("Modificacion_Surtido", "")).strip()
+        adj_surtido = _normalize_urls(row.get("Adjuntos_Surtido", ""))
+        if mod_surtido or adj_surtido:
+            st.markdown("### 🛠 Modificación de surtido")
+            if mod_surtido:
+                st.info(mod_surtido)
+            if adj_surtido:
+                st.markdown("**Archivos de modificación:**")
+                for u in adj_surtido:
+                    nombre = os.path.basename(urlparse(u).path) or u
+                    nombre = unquote(nombre)
+                    st.markdown(f"- [{nombre}]({u})")
+
+        adjuntos = _normalize_urls(row.get("Adjuntos", ""))
+        guia = str(row.get("Hoja_Ruta_Mensajero", "")).strip()
+        with st.expander("📎 Archivos (Adjuntos y Guía)", expanded=False):
+            contenido = False
+            if adjuntos:
+                contenido = True
+                st.markdown("**Adjuntos:**")
+                for u in adjuntos:
+                    nombre = os.path.basename(urlparse(u).path) or u
+                    nombre = unquote(nombre)
+                    st.markdown(f"- [{nombre}]({u})")
+            if guia:
+                contenido = True
+                st.markdown("**Guía:**")
+                if guia.startswith("http"):
+                    st.markdown(f"[Abrir guía]({guia})")
+                else:
+                    st.markdown(guia)
+            if not contenido:
+                st.info("Sin archivos registrados en la hoja.")
+
     # 4) Recorrer cada devolución
     for _, row in devoluciones_display.iterrows():
         idp         = str(row.get("ID_Pedido", "")).strip()
@@ -1697,34 +1814,7 @@ with main_tabs[4]:
             expander_title = f"🔁 {folio or 's/folio'} – {cliente or 's/cliente'} | Estado: {estado} | Estado_Recepcion: {estado_rec}"
 
         with st.expander(expander_title, expanded=False):
-            st.markdown("#### 📋 Información de la Devolución")
-
-            col1, col2 = st.columns(2)
-            with col1:
-                st.markdown(f"**👤 Vendedor:** {vendedor or 'N/A'}")
-                st.markdown(f"**📄 Factura de Origen:** {folio or 'N/A'}")
-                st.markdown(f"**🎯 Resultado Esperado:** {str(row.get('Resultado_Esperado', 'N/A')).strip()}")
-                st.markdown(f"**🆔 Número Cliente/RFC:** {str(row.get('Numero_Cliente_RFC', 'N/A')).strip()}")
-            with col2:
-                st.markdown(f"**🏢 Área Responsable:** {area_resp or 'N/A'}")
-                st.markdown(f"**👥 Responsable del Error:** {str(row.get('Nombre_Responsable', 'N/A')).strip()}")
-                st.markdown(f"**🚚 Tipo Envío Original:** {str(row.get('Tipo_Envio_Original', 'N/A')).strip()}")
-            # Mostrar detalle del motivo, material y monto devuelto
-            st.markdown("**📝 Motivo detallado:**")
-            st.info(str(row.get("Motivo_Detallado", "")).strip() or "N/A")
-
-            st.markdown("**📦 Material devuelto:**")
-            st.info(str(row.get("Material_Devuelto", "")).strip() or "N/A")
-
-            monto_txt = str(row.get("Monto_Devuelto", "")).strip()
-            if monto_txt:
-                st.markdown(f"**💵 Monto devuelto:** {monto_txt}")
-
-            coment_admin = str(row.get("Comentarios_Admin_Devolucion", "")).strip()
-            if coment_admin:
-                st.markdown("**📝 Comentario Administrativo:**")
-                st.info(coment_admin)
-
+            render_caso_especial_devolucion(row)
 
             # === 🆕 NUEVO: Clasificar Tipo_Envio_Original, Turno y Fecha_Entrega (sin opción vacía y sin recargar) ===
             st.markdown("---")
