@@ -633,17 +633,6 @@ def preserve_tab_state():
     st.session_state["preserve_date_tab_t"] = st.session_state.get("active_date_tab_t_index", 0)
 
 
-def handle_guia_upload(row, origen_tab, main_idx, sub_idx, date_idx):
-    """Callback al seleccionar archivos de guía; preserva pestañas y mantiene expandido el pedido."""
-    fijar_y_preservar(row, origen_tab, main_idx, sub_idx, date_idx)
-    st.session_state["expanded_pedidos"][row['ID_Pedido']] = True
-    st.session_state["expanded_attachments"][row['ID_Pedido']] = True
-    st.session_state["expanded_subir_guia"][row['ID_Pedido']] = True
-    # Forzamos un rerun inmediato para evitar que otras secciones del script
-    # sobrescriban el índice de pestaña activo antes de guardarlo.
-    st.rerun()
-
-
 def handle_generic_upload_change():
     """Callback genérico para mantener pestañas al seleccionar archivos."""
     preserve_tab_state()
@@ -939,49 +928,57 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
 
         # --- Adjuntar archivos de guía ---
         if row['Estado'] != "🟢 Completado":
-            with st.expander("📦 Subir Archivos de Guía", expanded=st.session_state["expanded_subir_guia"].get(row['ID_Pedido'], False)):
+            with st.expander(
+                "📦 Subir Archivos de Guía",
+                expanded=st.session_state["expanded_subir_guia"].get(row['ID_Pedido'], False),
+            ):
                 upload_key = f"file_guia_{row['ID_Pedido']}"
-                archivos_guia = st.file_uploader(
-                    "📎 Subir guía(s) del pedido",
-                    type=["pdf", "jpg", "jpeg", "png"],
-                    accept_multiple_files=True,
-                    key=upload_key,
-                    on_change=handle_guia_upload,
-                    args=(row, origen_tab, main_idx, sub_idx, date_idx),
-                )
-
-                if archivos_guia:
-                    # Mantener el pedido y el expander abiertos tras seleccionar archivos
-                    st.session_state["expanded_pedidos"][row['ID_Pedido']] = True
-                    st.session_state["expanded_subir_guia"][row['ID_Pedido']] = True
-
-                    if st.button(
+                form_key = f"form_subir_guia_{row['ID_Pedido']}"
+                with st.form(form_key):
+                    archivos_guia = st.file_uploader(
+                        "📎 Subir guía(s) del pedido",
+                        type=["pdf", "jpg", "jpeg", "png"],
+                        accept_multiple_files=True,
+                        key=upload_key,
+                    )
+                    submitted = st.form_submit_button(
                         "📤 Subir Guía",
-                        key=f"btn_subir_guia_{row['ID_Pedido']}",
                         on_click=fijar_y_preservar,
                         args=(row, origen_tab, main_idx, sub_idx, date_idx),
-                    ):
-                        st.session_state["expanded_pedidos"][row['ID_Pedido']] = True
-                        st.session_state["expanded_attachments"][row['ID_Pedido']] = True
-                        st.session_state["expanded_subir_guia"][row['ID_Pedido']] = True
-                        uploaded_urls = []
+                    )
 
+                if submitted:
+                    st.session_state["expanded_pedidos"][row['ID_Pedido']] = True
+                    st.session_state["expanded_attachments"][row['ID_Pedido']] = True
+                    st.session_state["expanded_subir_guia"][row['ID_Pedido']] = True
+
+                    if archivos_guia:
+                        uploaded_urls = []
                         for archivo in archivos_guia:
                             ext = os.path.splitext(archivo.name)[1]
                             s3_key = f"{row['ID_Pedido']}/guia_{uuid.uuid4().hex[:6]}{ext}"
-                            success, url = upload_file_to_s3(s3_client_param, S3_BUCKET_NAME, archivo, s3_key)
+                            success, url = upload_file_to_s3(
+                                s3_client_param, S3_BUCKET_NAME, archivo, s3_key
+                            )
                             if success:
                                 uploaded_urls.append(url)
 
                         if uploaded_urls:
                             tipo_envio_str = str(row.get("Tipo_Envio", "")).lower()
                             use_hoja_ruta = ("devol" in tipo_envio_str) or ("garant" in tipo_envio_str)
-                            target_col_for_guide = "Hoja_Ruta_Mensajero" if use_hoja_ruta else "Adjuntos_Guia"
+                            target_col_for_guide = (
+                                "Hoja_Ruta_Mensajero" if use_hoja_ruta else "Adjuntos_Guia"
+                            )
                             if target_col_for_guide not in headers:
                                 headers = ensure_columns(worksheet, headers, [target_col_for_guide])
                             anterior = str(row.get(target_col_for_guide, "")).strip()
-                            nueva_lista = (anterior + ", " if anterior else "") + ", ".join(uploaded_urls)
-                            success = update_gsheet_cell(worksheet, headers, gsheet_row_index, target_col_for_guide, nueva_lista)
+                            nueva_lista = (
+                                (anterior + ", " if anterior else "")
+                                + ", ".join(uploaded_urls)
+                            )
+                            success = update_gsheet_cell(
+                                worksheet, headers, gsheet_row_index, target_col_for_guide, nueva_lista
+                            )
                             if success:
                                 if target_col_for_guide == "Hoja_Ruta_Mensajero":
                                     df.at[idx, "Hoja_Ruta_Mensajero"] = nueva_lista
@@ -989,12 +986,21 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
                                 else:
                                     df.at[idx, "Adjuntos_Guia"] = nueva_lista
                                     row["Adjuntos_Guia"] = nueva_lista
-                                st.toast(f"📤 {len(uploaded_urls)} guía(s) subida(s) con éxito.", icon="📦")
-                                st.success(f"📦 Se subieron correctamente {len(uploaded_urls)} archivo(s) de guía.")
+                                st.toast(
+                                    f"📤 {len(uploaded_urls)} guía(s) subida(s) con éxito.",
+                                    icon="📦",
+                                )
+                                st.success(
+                                    f"📦 Se subieron correctamente {len(uploaded_urls)} archivo(s) de guía."
+                                )
                             else:
-                                st.error("❌ No se pudo actualizar el Google Sheet con los archivos de guía.")
+                                st.error(
+                                    "❌ No se pudo actualizar el Google Sheet con los archivos de guía."
+                                )
                         else:
                             st.warning("⚠️ No se subió ningún archivo válido.")
+                    else:
+                        st.warning("⚠️ No seleccionaste archivos de guía.")
 
         refact_tipo = str(row.get("Refacturacion_Tipo", "")).strip()
         refact_subtipo = str(row.get("Refacturacion_Subtipo", "")).strip()
