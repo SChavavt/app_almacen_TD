@@ -1585,59 +1585,51 @@ if not df_main.empty:
         else:
             st.info("No hay solicitudes de guía.")
 
-
-# --- TAB 3: 🔁 Devoluciones (casos_especiales) ---
+# --- TAB 4: 🔁 Devoluciones (casos_especiales) ---
 with main_tabs[4]:
+    # Mantener índice activo en esta pestaña
     st.session_state["active_main_tab_index"] = 4
     st.markdown("### 🔁 Devoluciones")
 
-    # 1) Validaciones mínimas
-    if 'df_casos' not in locals() and 'df_casos' not in globals():
-        st.error("❌ No se encontró el DataFrame 'df_casos'. Asegúrate de haberlo cargado antes.")
-
+    # =============================
+    # Imports y utilitarios mínimos
+    # =============================
     import os
     import json
     import math
     import re
+    import gspread
+    import gspread.utils
+    import pandas as pd
     from datetime import datetime, timedelta
     try:
         from zoneinfo import ZoneInfo
         _TZ = ZoneInfo("America/Mexico_City")
     except Exception:
         _TZ = None
-    import pandas as pd
 
-    # Detectar columna que indica el tipo de caso (Devoluciones)
-    tipo_col = "Tipo_Caso" if "Tipo_Caso" in df_casos.columns else ("Tipo_Envio" if "Tipo_Envio" in df_casos.columns else None)
-    if not tipo_col:
-        st.error("❌ En 'casos_especiales' falta la columna 'Tipo_Caso' o 'Tipo_Envio'.")
+    # Worksheet y headers (solo lectura y escritura)
+    try:
+        worksheet_casos = get_worksheet_casos_especiales()  # <- ya definido en tu app
+    except Exception as e:
+        st.error(f"❌ No se pudo abrir la hoja 'casos_especiales': {e}")
+        st.stop()
 
-    # 2) Filtrar SOLO devoluciones
-    devoluciones_display = df_casos[df_casos[tipo_col].astype(str).str.contains("Devoluci", case=False, na=False)].copy()
-
-    if devoluciones_display.empty:
-        st.info("ℹ️ No hay devoluciones en 'casos_especiales'.")
-
-    # 2.1 Excluir devoluciones ya completadas
-    if "Estado" in devoluciones_display.columns:
-        devoluciones_display = devoluciones_display[
-            devoluciones_display["Estado"].astype(str).str.strip() != "🟢 Completado"
-        ]
-
-    if devoluciones_display.empty:
-        st.success("🎉 No hay devoluciones pendientes. (Todas están 🟢 Completado)")
-
-    # 3) Orden sugerido por Fecha_Registro (desc) o por Folio/Cliente
-    if "Fecha_Registro" in devoluciones_display.columns:
+    # Asegura df_casos (si no viene preparado de antes)
+    if 'df_casos' not in locals() and 'df_casos' not in globals():
         try:
-            devoluciones_display["_FechaOrden"] = pd.to_datetime(devoluciones_display["Fecha_Registro"], errors="coerce")
-            devoluciones_display = devoluciones_display.sort_values(by="_FechaOrden", ascending=False)
-        except Exception:
-            devoluciones_display = devoluciones_display.sort_values(by="Fecha_Registro", ascending=False)
-    elif "ID_Pedido" in devoluciones_display.columns:
-        devoluciones_display = devoluciones_display.sort_values(by="ID_Pedido", ascending=True)
+            raw = worksheet_casos.get_all_values()
+            headers_casos = raw[0] if raw else []
+            df_casos = pd.DataFrame(raw[1:], columns=headers_casos) if headers_casos else pd.DataFrame()
+        except Exception as e:
+            st.error(f"❌ Error al cargar datos de 'casos_especiales': {e}")
+            st.stop()
+    # Headers directos de df para mapear columnas (coinciden con cabeceras de hoja)
+    headers_casos = list(df_casos.columns)
 
-    # 🔧 Helper para normalizar/extraer URLs desde texto o JSON
+    # -----------------------------
+    # Helper: normalizar URLs (tu estilo)
+    # -----------------------------
     def _normalize_urls(value):
         if value is None:
             return []
@@ -1675,7 +1667,186 @@ with main_tabs[4]:
                 out.append(u)
         return out
 
-    # 4) Recorrer cada devolución
+    # =============================
+    # RENDER: Tarjeta de presentación
+    # =============================
+    def render_devolucion_card(row):
+        """Renderiza la tarjeta '🧾 Caso Especial – 🔁 Devolución' con reglas de vista."""
+        import os, re
+
+        # Helpers locales de vista
+        def _clean(v):
+            s = str(v).strip()
+            return "" if s.lower() in ("", "none", "nan", "n/a") else s
+
+        def _meta(v):
+            s = _clean(v)
+            return s if s else "N/A"  # Solo en metadatos
+
+        def _has(v):
+            return _clean(v) != ""
+
+        def _is_url(s):
+            s = _clean(s)
+            return bool(re.match(r"^(https?://|s3://)", s, re.I))
+
+        def _urls(x):
+            try:
+                return _normalize_urls(x)
+            except Exception:
+                s = _clean(x)
+                return [s] if _is_url(s) else []
+
+        # (1) Encabezado
+        st.markdown("### 🧾 Caso Especial – 🔁 Devolución")
+        st.markdown(
+            f"**📄 Folio Nuevo:** {_meta(row.get('Folio_Factura',''))} | "
+            f"**📄 Folio Error:** {_meta(row.get('Folio_Factura_Error',''))} | "
+            f"**🧑‍💼 Vendedor:** {_meta(row.get('Vendedor_Registro',''))} | "
+            f"**🕒 Hora:** {_meta(row.get('Hora_Registro',''))}"
+        )
+
+        # (2) Cliente y estado
+        st.markdown(
+            f"**👤 Cliente:** {_meta(row.get('Cliente',''))} | "
+            f"**RFC:** {_meta(row.get('Numero_Cliente_RFC',''))}"
+        )
+        st.markdown(
+            f"**Estado:** {_meta(row.get('Estado',''))} | "
+            f"**Estado del Caso:** {_meta(row.get('Estado_Caso',''))} | "
+            f"**Turno:** {_meta(row.get('Turno',''))}"
+        )
+
+        # (3) ♻️ Refacturación (condicional)
+        ref_tipo   = _clean(row.get("Refacturacion_Tipo",""))
+        ref_sub    = _clean(row.get("Refacturacion_Subtipo",""))
+        ref_folio  = _clean(row.get("Folio_Factura_Refacturada",""))
+        if any([_has(ref_tipo), _has(ref_sub), _has(ref_folio)]):
+            st.markdown("#### ♻️ Refacturación")
+            if _has(ref_tipo):  st.markdown(f"- **Tipo:** {ref_tipo}")
+            if _has(ref_sub):   st.markdown(f"- **Subtipo:** {ref_sub}")
+            if _has(ref_folio): st.markdown(f"- **Folio refacturado:** {ref_folio}")
+
+        # (4) Bloques informativos
+        res_esp  = _clean(row.get("Resultado_Esperado",""))
+        motivo   = _clean(row.get("Motivo_Detallado",""))
+        material = _clean(row.get("Material_Devuelto",""))
+        monto    = _clean(row.get("Monto_Devuelto",""))
+
+        if _has(res_esp):
+            st.markdown(f"**🎯 Resultado Esperado:** {res_esp}")
+        if _has(motivo):
+            st.markdown("**📝 Motivo / Descripción:**")
+            st.info(motivo)
+        if _has(material):
+            st.markdown("**📦 Piezas / Material:**")
+            st.info(material)
+        if _has(monto):
+            st.markdown(f"**💵 Monto (dev./estimado):** {monto}")
+
+        # (5) Responsables
+        area_resp = _clean(row.get("Area_Responsable",""))
+        nom_resp  = _clean(row.get("Nombre_Responsable",""))
+        if _has(area_resp) or _has(nom_resp):
+            st.markdown(
+                f"**🏢 Área Responsable:** {area_resp or 'N/A'} | "
+                f"**👥 Responsable del Error:** {nom_resp or 'N/A'}"
+            )
+
+        # (6) Fechas/recepción
+        f_entrega   = _clean(row.get("Fecha_Entrega",""))
+        f_recepcion = _clean(row.get("Fecha_Recepcion_Devolucion",""))
+        estado_rec  = _clean(row.get("Estado_Recepcion",""))
+        if _has(f_entrega) or _has(f_recepcion) or _has(estado_rec):
+            st.markdown(
+                f"**📅 Fecha Entrega/Cierre:** {f_entrega or 'N/A'} | "
+                f"**📅 Recepción:** {f_recepcion or 'N/A'} | "
+                f"**📦 Recepción:** {estado_rec or 'N/A'}"
+            )
+
+        # (7) Documentos de cierre
+        nota_tc = _clean(row.get("Nota_Credito_URL",""))
+        if _has(nota_tc):
+            if _is_url(nota_tc): st.markdown(f"**🧾 Nota de Crédito:** [Nota de Crédito]({nota_tc})")
+            else:                st.markdown(f"**🧾 Nota de Crédito:** {nota_tc}")
+
+        doc_adic = _clean(row.get("Documento_Adicional_URL",""))
+        if _has(doc_adic):
+            if _is_url(doc_adic): st.markdown(f"**📂 Documento Adicional:** [Documento Adicional]({doc_adic})")
+            else:                 st.markdown(f"**📂 Documento Adicional:** {doc_adic}")
+
+        com_admin = _clean(row.get("Comentarios_Admin_Devolucion",""))
+        if _has(com_admin):
+            st.markdown("**🗒️ Comentario Administrativo:**")
+            st.info(com_admin)
+
+        # (8) 🛠 Modificación de surtido (solo vista)
+        mod_txt   = _clean(row.get("Modificacion_Surtido",""))
+        mod_files = _urls(row.get("Adjuntos_Surtido",""))
+        if _has(mod_txt) or len(mod_files) > 0:
+            st.markdown("#### 🛠 Modificación de surtido")
+            if _has(mod_txt): st.info(mod_txt)
+            if len(mod_files) > 0:
+                st.markdown("**Archivos de modificación:**")
+                for u in mod_files:
+                    label = os.path.basename(u) or "Archivo"
+                    st.markdown(f"- [{label}]({u})")
+
+        # (9) 📎 Archivos (Adjuntos y Guía)
+        with st.expander("📎 Archivos (Adjuntos y Guía)", expanded=False):
+            adjuntos = _urls(row.get("Adjuntos",""))
+            guias    = _urls(row.get("Hoja_Ruta_Mensajero",""))
+            if len(adjuntos) > 0:
+                st.markdown("**Adjuntos:**")
+                for u in adjuntos:
+                    label = os.path.basename(u) or "Archivo"
+                    st.markdown(f"- [{label}]({u})")
+            if len(guias) > 0:
+                st.markdown("**Guía:**")
+                for u in guias:
+                    st.markdown(f"- [Abrir guía]({u})")
+            if len(adjuntos) == 0 and len(guias) == 0:
+                st.info("Sin archivos registrados en la hoja.")
+
+    # =============================
+    # Filtro y orden de devoluciones
+    # =============================
+    if df_casos.empty:
+        st.info("ℹ️ 'casos_especiales' está vacío.")
+        st.stop()
+
+    tipo_col = "Tipo_Caso" if "Tipo_Caso" in df_casos.columns else ("Tipo_Envio" if "Tipo_Envio" in df_casos.columns else None)
+    if not tipo_col:
+        st.error("❌ En 'casos_especiales' falta la columna 'Tipo_Caso' o 'Tipo_Envio'.")
+        st.stop()
+
+    devoluciones_display = df_casos[df_casos[tipo_col].astype(str).str.contains("Devoluci", case=False, na=False)].copy()
+    if devoluciones_display.empty:
+        st.info("ℹ️ No hay devoluciones en 'casos_especiales'.")
+        st.stop()
+
+    # Excluir completadas
+    if "Estado" in devoluciones_display.columns:
+        devoluciones_display = devoluciones_display[
+            devoluciones_display["Estado"].astype(str).str.strip() != "🟢 Completado"
+        ]
+    if devoluciones_display.empty:
+        st.success("🎉 No hay devoluciones pendientes. (Todas están 🟢 Completado)")
+        st.stop()
+
+    # Orden sugerido
+    if "Fecha_Registro" in devoluciones_display.columns:
+        try:
+            devoluciones_display["_FechaOrden"] = pd.to_datetime(devoluciones_display["Fecha_Registro"], errors="coerce")
+            devoluciones_display = devoluciones_display.sort_values(by="_FechaOrden", ascending=False)
+        except Exception:
+            devoluciones_display = devoluciones_display.sort_values(by="Fecha_Registro", ascending=False)
+    elif "ID_Pedido" in devoluciones_display.columns:
+        devoluciones_display = devoluciones_display.sort_values(by="ID_Pedido", ascending=True)
+
+    # =============================
+    # LOOP por cada devolución
+    # =============================
     for _, row in devoluciones_display.iterrows():
         idp         = str(row.get("ID_Pedido", "")).strip()
         folio       = str(row.get("Folio_Factura", "")).strip()
@@ -1685,6 +1856,7 @@ with main_tabs[4]:
         estado_rec  = str(row.get("Estado_Recepcion", "N/A")).strip()
         area_resp   = str(row.get("Area_Responsable", "")).strip()
 
+        # Título del expander (igual que antes)
         if area_resp.lower() == "cliente":
             if estado.lower() == "aprobado" and estado_rec.lower() == "todo correcto":
                 emoji_estado = "✅"
@@ -1697,77 +1869,46 @@ with main_tabs[4]:
             expander_title = f"🔁 {folio or 's/folio'} – {cliente or 's/cliente'} | Estado: {estado} | Estado_Recepcion: {estado_rec}"
 
         with st.expander(expander_title, expanded=False):
-            st.markdown("#### 📋 Información de la Devolución")
 
-            col1, col2 = st.columns(2)
-            with col1:
-                st.markdown(f"**👤 Vendedor:** {vendedor or 'N/A'}")
-                st.markdown(f"**📄 Factura de Origen:** {folio or 'N/A'}")
-                st.markdown(f"**🎯 Resultado Esperado:** {str(row.get('Resultado_Esperado', 'N/A')).strip()}")
-                st.markdown(f"**🆔 Número Cliente/RFC:** {str(row.get('Numero_Cliente_RFC', 'N/A')).strip()}")
-            with col2:
-                st.markdown(f"**🏢 Área Responsable:** {area_resp or 'N/A'}")
-                st.markdown(f"**👥 Responsable del Error:** {str(row.get('Nombre_Responsable', 'N/A')).strip()}")
-                st.markdown(f"**🚚 Tipo Envío Original:** {str(row.get('Tipo_Envio_Original', 'N/A')).strip()}")
-            # Mostrar detalle del motivo, material y monto devuelto
-            st.markdown("**📝 Motivo detallado:**")
-            st.info(str(row.get("Motivo_Detallado", "")).strip() or "N/A")
+            # =========
+            # PRESENTACIÓN (solo vista)
+            # =========
+            render_devolucion_card(row)
 
-            st.markdown("**📦 Material devuelto:**")
-            st.info(str(row.get("Material_Devuelto", "")).strip() or "N/A")
-
-            monto_txt = str(row.get("Monto_Devuelto", "")).strip()
-            if monto_txt:
-                st.markdown(f"**💵 Monto devuelto:** {monto_txt}")
-
-            coment_admin = str(row.get("Comentarios_Admin_Devolucion", "")).strip()
-            if coment_admin:
-                st.markdown("**📝 Comentario Administrativo:**")
-                st.info(coment_admin)
-
-
-            # === 🆕 NUEVO: Clasificar Tipo_Envio_Original, Turno y Fecha_Entrega (sin opción vacía y sin recargar) ===
+            # =========
+            # CLASIFICAR envío/fecha (sin tocar tu lógica)
+            # =========
             st.markdown("---")
             st.markdown("#### 🚦 Clasificar envío y fecha")
 
-            # Valores actuales
             tipo_envio_actual = str(row.get("Tipo_Envio_Original", "")).strip()
             turno_actual      = str(row.get("Turno", "")).strip()
             fecha_actual_str  = str(row.get("Fecha_Entrega", "")).strip()
             fecha_actual_dt   = pd.to_datetime(fecha_actual_str, errors='coerce') if fecha_actual_str else None
             today_date        = (datetime.now(_TZ).date() if _TZ else datetime.now().date())
 
-            # Claves únicas por caso (para que los widgets no “salten”)
             row_key = (idp or f"{folio}_{cliente}").replace(" ", "_")
-
             tipo_key   = f"tipo_envio_orig_{row_key}"
             turno_key  = f"turno_dev_{row_key}"
             fecha_key  = f"fecha_dev_{row_key}"
 
-            # Opciones SIN vacío
             TIPO_OPTS  = ["📍 Pedido Local", "🚚 Pedido Foráneo"]
             TURNO_OPTS = ["☀️ Local Mañana", "🌙 Local Tarde", "🌵 Saltillo", "📦 Pasa a Bodega"]
 
-            # Inicializar valores en session_state (solo una vez)
             if tipo_key not in st.session_state:
-                # Elegir por lo que ya trae la hoja; si no cuadra, por defecto Foráneo
                 if tipo_envio_actual in TIPO_OPTS:
                     st.session_state[tipo_key] = tipo_envio_actual
                 else:
                     low = tipo_envio_actual.lower()
                     st.session_state[tipo_key] = "📍 Pedido Local" if "local" in low else "🚚 Pedido Foráneo"
-
             if turno_key not in st.session_state:
                 st.session_state[turno_key] = turno_actual if turno_actual in TURNO_OPTS else TURNO_OPTS[0]
-
             if fecha_key not in st.session_state:
                 st.session_state[fecha_key] = (
                     fecha_actual_dt.date() if pd.notna(fecha_actual_dt) and fecha_actual_dt.date() >= today_date else today_date
                 )
 
-            # Selects y fecha (sin opción vacía). Cambiar aquí NO guarda en Sheets.
             c1, c2, c3 = st.columns([1.2, 1.2, 1])
-
             with c1:
                 st.selectbox(
                     "Tipo de envío original",
@@ -1775,7 +1916,6 @@ with main_tabs[4]:
                     index=TIPO_OPTS.index(st.session_state[tipo_key]) if st.session_state[tipo_key] in TIPO_OPTS else 1,
                     key=tipo_key
                 )
-
             with c2:
                 st.selectbox(
                     "Turno (si Local)",
@@ -1785,24 +1925,20 @@ with main_tabs[4]:
                     disabled=(st.session_state[tipo_key] != "📍 Pedido Local"),
                     help="Solo aplica para Pedido Local"
                 )
-
             with c3:
                 st.date_input(
                     "Fecha de envío",
                     value=st.session_state[fecha_key],
-                    min_value= today_date,
-                    max_value= today_date + timedelta(days=365),
+                    min_value=today_date,
+                    max_value=today_date + timedelta(days=365),
                     format="DD/MM/YYYY",
                     key=fecha_key
                 )
 
-            # Botón aplicar (AQUÍ SÍ se guardan cambios). No cambiamos de pestaña.
             if st.button("✅ Aplicar cambios de envío/fecha", key=f"btn_aplicar_envio_fecha_{row_key}"):
                 try:
-                    # Por si acaso, preservar la pestaña actual (Devoluciones es índice 4)
                     st.session_state["preserve_main_tab"] = 4
 
-                    # Resolver fila en gsheet
                     gsheet_row_idx = None
                     if "ID_Pedido" in df_casos.columns and idp:
                         matches = df_casos.index[df_casos["ID_Pedido"].astype(str).str.strip() == idp]
@@ -1823,14 +1959,12 @@ with main_tabs[4]:
                         updates = []
                         changed = False
 
-                        # 1) Tipo_Envio_Original (sin opción vacía)
                         tipo_sel = st.session_state[tipo_key]
                         if "Tipo_Envio_Original" in headers_casos and tipo_sel != tipo_envio_actual:
                             col_idx = headers_casos.index("Tipo_Envio_Original") + 1
                             updates.append({'range': gspread.utils.rowcol_to_a1(gsheet_row_idx, col_idx), 'values': [[tipo_sel]]})
                             changed = True
 
-                        # 2) Turno (solo si Local)
                         if tipo_sel == "📍 Pedido Local":
                             turno_sel = st.session_state[turno_key]
                             if "Turno" in headers_casos and turno_sel != turno_actual:
@@ -1838,7 +1972,6 @@ with main_tabs[4]:
                                 updates.append({'range': gspread.utils.rowcol_to_a1(gsheet_row_idx, col_idx), 'values': [[turno_sel]]})
                                 changed = True
 
-                        # 3) Fecha_Entrega
                         fecha_sel = st.session_state[fecha_key]
                         fecha_sel_str = fecha_sel.strftime("%Y-%m-%d")
                         if "Fecha_Entrega" in headers_casos and fecha_sel_str != fecha_actual_str:
@@ -1848,14 +1981,11 @@ with main_tabs[4]:
 
                         if updates and changed:
                             if batch_update_gsheet_cells(worksheet_casos, updates):
-                                # Reflejar en la UI sin recargar toda la app
                                 row["Tipo_Envio_Original"] = tipo_sel
                                 if tipo_sel == "📍 Pedido Local":
                                     row["Turno"] = st.session_state[turno_key]
                                 row["Fecha_Entrega"] = fecha_sel_str
-
                                 st.toast("✅ Cambios aplicados.", icon="✅")
-                                # 🚫 Nada de st.rerun() ni cambio de pestaña
                             else:
                                 st.error("❌ No se pudieron aplicar los cambios.")
                         else:
@@ -1863,18 +1993,16 @@ with main_tabs[4]:
                 except Exception as e:
                     st.error(f"❌ Error al aplicar cambios: {e}")
 
-
-            # --- 🔧 Acciones rápidas (sin imprimir, sin cambiar pestaña) ---
+            # =========
+            # ACCIONES rápidas + DETECCIÓN de modificación
+            # (SIN CAMBIOS: se deja intacto)
+            # =========
             st.markdown("---")
             colA, colB = st.columns(2)
 
-            # ⚙️ Procesar → 🔵 En Proceso + Hora_Proceso (si estaba Pendiente/Demorado/Modificación)
             if colA.button("⚙️ Procesar", key=f"procesar_caso_{idp or folio or cliente}"):
                 try:
-                    # Mantener la pestaña de Devoluciones
                     st.session_state["active_main_tab_index"] = 4
-
-                    # Localiza la fila en 'casos_especiales'
                     gsheet_row_idx = None
                     if "ID_Pedido" in df_casos.columns and idp:
                         matches = df_casos.index[df_casos["ID_Pedido"].astype(str).str.strip() == idp]
@@ -1901,7 +2029,6 @@ with main_tabs[4]:
                                 ok &= update_gsheet_cell(worksheet_casos, headers_casos, gsheet_row_idx, "Hora_Proceso", now_str)
 
                             if ok:
-                                # Reflejo inmediato local sin recargar
                                 row["Estado"] = "🔵 En Proceso"
                                 row["Hora_Proceso"] = now_str
                                 st.toast("✅ Caso marcado como '🔵 En Proceso'.", icon="✅")
@@ -1912,16 +2039,10 @@ with main_tabs[4]:
                 except Exception as e:
                     st.error(f"❌ Error al actualizar: {e}")
 
-
-
-            # 🔧 Procesar Modificación → pasa a 🔵 En Proceso si está en 🛠 Modificación (sin recargar)
             if estado == "🛠 Modificación":
                 if colB.button("🔧 Procesar Modificación", key=f"proc_mod_caso_{idp or folio or cliente}"):
                     try:
-                        # Mantener la pestaña de Devoluciones
                         st.session_state["active_main_tab_index"] = 4
-
-                        # Localiza la fila en 'casos_especiales'
                         gsheet_row_idx = None
                         if "ID_Pedido" in df_casos.columns and idp:
                             matches = df_casos.index[df_casos["ID_Pedido"].astype(str).str.strip() == idp]
@@ -1944,7 +2065,6 @@ with main_tabs[4]:
                                 ok &= update_gsheet_cell(worksheet_casos, headers_casos, gsheet_row_idx, "Estado", "🔵 En Proceso")
 
                             if ok:
-                                # Reflejo inmediato en pantalla, sin recargar
                                 row["Estado"] = "🔵 En Proceso"
                                 st.toast("🔧 Modificación procesada - Estado actualizado a '🔵 En Proceso'", icon="✅")
                             else:
@@ -1952,8 +2072,9 @@ with main_tabs[4]:
                     except Exception as e:
                         st.error(f"❌ Error al procesar la modificación: {e}")
 
-
-            # === Sección de Modificación de Surtido (mostrar/confirmar) ===
+            # =========
+            # BLOQUE de detección/confirmación de Modificación de Surtido (INTACTO)
+            # =========
             mod_texto = str(row.get("Modificacion_Surtido", "")).strip()
             refact_tipo = str(row.get("Refacturacion_Tipo", "")).strip()
             refact_subtipo = str(row.get("Refacturacion_Subtipo", "")).strip()
@@ -2004,6 +2125,9 @@ with main_tabs[4]:
 
             st.markdown("---")
 
+            # =========
+            # Subida de Guía + Completar (INTACTO)
+            # =========
             with st.expander("📎 Archivos del Caso", expanded=False):
                 adjuntos_urls = _normalize_urls(row.get("Adjuntos", ""))
                 nota_credito_url = str(row.get("Nota_Credito_URL", "")).strip()
@@ -2035,7 +2159,6 @@ with main_tabs[4]:
                 on_change=handle_generic_upload_change,
             )
 
-            # Botón FINAL: Completar
             if st.button(
                 "🟢 Completar",
                 key=f"btn_completar_{folio}_{cliente}",
@@ -2049,7 +2172,6 @@ with main_tabs[4]:
                         key_guia = f"{folder}/guia_retorno_{datetime.now().isoformat()[:19].replace(':','')}_{guia_file.name}"
                         _, guia_url = upload_file_to_s3(s3_client, S3_BUCKET_NAME, guia_file, key_guia)
 
-                    # Localiza la fila en 'casos_especiales'
                     gsheet_row_idx = None
                     if "ID_Pedido" in df_casos.columns and idp:
                         matches = df_casos.index[df_casos["ID_Pedido"].astype(str).str.strip() == idp]
@@ -2074,36 +2196,23 @@ with main_tabs[4]:
                             guia_final = f"{existing}, {guia_url}" if existing else guia_url
                             ok &= update_gsheet_cell(worksheet_casos, headers_casos, gsheet_row_idx, "Hoja_Ruta_Mensajero", guia_final)
                             row["Hoja_Ruta_Mensajero"] = guia_final
-                        # Guardar tipo de envío original y turno seleccionado
+
                         tipo_sel = st.session_state.get(tipo_key, tipo_envio_actual)
                         if "Tipo_Envio_Original" in headers_casos:
-                            ok &= update_gsheet_cell(
-                                worksheet_casos,
-                                headers_casos,
-                                gsheet_row_idx,
-                                "Tipo_Envio_Original",
-                                tipo_sel,
-                            )
+                            ok &= update_gsheet_cell(worksheet_casos, headers_casos, gsheet_row_idx, "Tipo_Envio_Original", tipo_sel)
                             row["Tipo_Envio_Original"] = tipo_sel
                         if tipo_sel == "📍 Pedido Local":
                             turno_sel = st.session_state.get(turno_key, turno_actual)
                             if "Turno" in headers_casos:
-                                ok &= update_gsheet_cell(
-                                    worksheet_casos,
-                                    headers_casos,
-                                    gsheet_row_idx,
-                                    "Turno",
-                                    turno_sel,
-                                )
+                                ok &= update_gsheet_cell(worksheet_casos, headers_casos, gsheet_row_idx, "Turno", turno_sel)
                                 row["Turno"] = turno_sel
-                        ok &= update_gsheet_cell(worksheet_casos, headers_casos, gsheet_row_idx, "Estado", "🟢 Completado")
 
+                        ok &= update_gsheet_cell(worksheet_casos, headers_casos, gsheet_row_idx, "Estado", "🟢 Completado")
                         mx_now = mx_now_str()
                         _ = update_gsheet_cell(worksheet_casos, headers_casos, gsheet_row_idx, "Fecha_Completado", mx_now)
                         _ = update_gsheet_cell(worksheet_casos, headers_casos, gsheet_row_idx, "Fecha_Entrega", mx_now)  # quítala si no la quieres
 
                     if ok:
-                        # Confirmación tras el refresh y quedarse en Devoluciones
                         st.session_state["flash_msg"] = "✅ Devolución completada correctamente."
                         st.session_state["active_main_tab_index"] = 4
                         st.cache_data.clear()
@@ -2112,8 +2221,6 @@ with main_tabs[4]:
                         st.error("❌ No se pudo completar la devolución.")
                 except Exception as e:
                     st.error(f"❌ Error al completar la devolución: {e}")
-
-
 
     st.markdown("---")
 
