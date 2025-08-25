@@ -68,6 +68,7 @@ if st.button(
 ):
     # Guardamos cuántos pedidos teníamos antes de recargar
     st.session_state["prev_pedidos_count"] = st.session_state.get("last_pedidos_count", 0)
+    st.session_state["prev_casos_count"] = st.session_state.get("last_casos_count", 0)
     st.session_state["need_compare"] = True
     st.session_state["reload_pedidos_soft"] = True
     st.cache_data.clear()
@@ -116,8 +117,12 @@ if "expanded_garantias" not in st.session_state:
     st.session_state["expanded_garantias"] = {}
 if "last_pedidos_count" not in st.session_state:
     st.session_state["last_pedidos_count"] = 0
+if "last_casos_count" not in st.session_state:
+    st.session_state["last_casos_count"] = 0
 if "prev_pedidos_count" not in st.session_state:
     st.session_state["prev_pedidos_count"] = 0
+if "prev_casos_count" not in st.session_state:
+    st.session_state["prev_casos_count"] = 0
 if "need_compare" not in st.session_state:
     st.session_state["need_compare"] = False
 
@@ -1304,25 +1309,44 @@ def _load_pedidos():
     )
     return process_sheet_data(raw)
 
+def _load_casos():
+    raw = get_raw_sheet_data(
+        sheet_id=GOOGLE_SHEET_ID,
+        worksheet_name="casos_especiales",
+        credentials=GSHEETS_CREDENTIALS,
+    )
+    return process_sheet_data(raw)
+
 if st.session_state.get("need_compare"):
-    prev_count = st.session_state.get("prev_pedidos_count", 0)
+    prev_pedidos = st.session_state.get("prev_pedidos_count", 0)
+    prev_casos = st.session_state.get("prev_casos_count", 0)
     for attempt in range(3):
         st.cache_data.clear()
         df_main, headers_main = _load_pedidos()
-        new_count = len(df_main)
-        if new_count > prev_count or attempt == 2:
+        df_casos, headers_casos = _load_casos()
+        new_pedidos = len(df_main)
+        new_casos = len(df_casos)
+        if (new_pedidos > prev_pedidos or new_casos > prev_casos) or attempt == 2:
             break
         time.sleep(1)
-    diff = new_count - prev_count
-    if diff > 0:
-        st.toast(f"✅ Se encontraron {diff} pedidos nuevos.")
+    diff_ped = new_pedidos - prev_pedidos
+    diff_casos = new_casos - prev_casos
+    if diff_ped > 0:
+        st.toast(f"✅ Se encontraron {diff_ped} pedidos nuevos.")
     else:
         st.toast("🔄 Pedidos actualizados. No hay nuevos registros.")
-    st.session_state["last_pedidos_count"] = new_count
+    if diff_casos > 0:
+        st.toast(f"✅ Se encontraron {diff_casos} casos nuevos en 'casos_especiales'.")
+    else:
+        st.toast("🔄 'casos_especiales' actualizado. No hay nuevos registros.")
+    st.session_state["last_pedidos_count"] = new_pedidos
+    st.session_state["last_casos_count"] = new_casos
     st.session_state["need_compare"] = False
 else:
     df_main, headers_main = _load_pedidos()
+    df_casos, headers_casos = _load_casos()
     st.session_state["last_pedidos_count"] = len(df_main)
+    st.session_state["last_casos_count"] = len(df_casos)
 
 # --- Asegura que existan físicamente las columnas que vas a ESCRIBIR en datos_pedidos ---
 required_cols_main = [
@@ -1391,60 +1415,8 @@ if not df_main.empty:
         st.warning(f"⚠️ Hay {mod_surtido_count} pedido(s) con **Modificación de Surtido** ➤ {ubicaciones_str}")
 
     df_pendientes_proceso_demorado = df_main[df_main["Estado"].isin(["🟡 Pendiente", "🔵 En Proceso", "🔴 Demorado", "🛠 Modificación"])].copy()
-    df_completados_historial = df_main[df_main["Estado"] == "🟢 Completado"].copy()
-
-    st.markdown("### 📊 Resumen de Estados")
-
-    # Contador corregido que excluye completados ya limpiados
-    completados_visibles = df_main[
-        (df_main['Estado'] == '🟢 Completado') &
-        (df_main.get('Completados_Limpiado', '').astype(str).str.lower() != 'sí')
-    ]
-
-    # Contadores por estado (incluye 🟣 Cancelado)
-    estado_counts = {
-        '🟡 Pendiente': (df_main['Estado'] == '🟡 Pendiente').sum(),
-        '🔵 En Proceso': (df_main['Estado'] == '🔵 En Proceso').sum(),
-        '🔴 Demorado': (df_main['Estado'] == '🔴 Demorado').sum(),
-        '🛠 Modificación': (df_main['Estado'] == '🛠 Modificación').sum(),
-        '🟣 Cancelado': (df_main['Estado'] == '🟣 Cancelado').sum(),
-        '🟢 Completado': len(completados_visibles),
-    }
-
-    # Total de pedidos sumando todos los estados
-    total_pedidos_estados = sum(estado_counts.values())
-
-    # Estados siempre visibles
-    estados_fijos = ['🟡 Pendiente', '🔵 En Proceso', '🟢 Completado']
-
-    # Estados dinámicos (solo si > 0)
-    estados_condicionales = ['🔴 Demorado', '🛠 Modificación', '🟣 Cancelado']
-
-    # Construcción de la lista a mostrar
-    estados_a_mostrar = []
-
-    # Total primero
-    estados_a_mostrar.append(("📦 Total Pedidos", total_pedidos_estados))
-
-    # Fijos (siempre)
-    for estado in estados_fijos:
-        estados_a_mostrar.append((estado, estado_counts[estado]))
-
-    # Dinámicos (solo si hay > 0)
-    for estado in estados_condicionales:
-        cantidad = estado_counts.get(estado, 0)
-        if cantidad > 0:
-            estados_a_mostrar.append((estado, cantidad))
-
-    # Render de métricas
-    cols = st.columns(len(estados_a_mostrar))
-    for col, (nombre_estado, cantidad) in zip(cols, estados_a_mostrar):
-        col.metric(nombre_estado, int(cantidad))
-
 
     # === CASOS ESPECIALES (Devoluciones/Garantías) ===
-    raw_casos = get_raw_sheet_data(GOOGLE_SHEET_ID, "casos_especiales", GSHEETS_CREDENTIALS)
-    df_casos, headers_casos = process_sheet_data(raw_casos)  # ← añade _gsheet_row_index y normaliza
     worksheet_casos = g_spread_client.open_by_key(GOOGLE_SHEET_ID).worksheet("casos_especiales")
 
     # Asegurar físicamente en la hoja las columnas que vamos a escribir (si faltan, se agregan)
@@ -1459,11 +1431,49 @@ if not df_main.empty:
         "Tipo_Envio_Original", "Turno",
         # Campos específicos de garantías
         "Numero_Serie", "Fecha_Compra",
+        "Completados_Limpiado",
     ]
     headers_casos = ensure_columns(worksheet_casos, headers_casos, required_cols_casos)
-    for c in ["Numero_Serie", "Fecha_Compra"]:
+    for c in ["Numero_Serie", "Fecha_Compra", "Completados_Limpiado"]:
         if c not in df_casos.columns:
             df_casos[c] = ""
+
+    # 📊 Resumen de Estados combinando datos_pedidos y casos_especiales
+    st.markdown("### 📊 Resumen de Estados")
+
+    def _count_states(df):
+        completados_visible = df[
+            (df["Estado"] == "🟢 Completado") &
+            (df.get("Completados_Limpiado", "").astype(str).str.lower() != "sí")
+        ]
+        return {
+            '🟡 Pendiente': (df["Estado"] == '🟡 Pendiente').sum(),
+            '🔵 En Proceso': (df["Estado"] == '🔵 En Proceso').sum(),
+            '🔴 Demorado': (df["Estado"] == '🔴 Demorado').sum(),
+            '🛠 Modificación': (df["Estado"] == '🛠 Modificación').sum(),
+            '🟣 Cancelado': (df["Estado"] == '🟣 Cancelado').sum(),
+            '🟢 Completado': len(completados_visible),
+        }
+
+    counts_main = _count_states(df_main)
+    counts_casos = _count_states(df_casos)
+    estado_counts = {k: counts_main.get(k, 0) + counts_casos.get(k, 0)
+                     for k in ['🟡 Pendiente', '🔵 En Proceso', '🔴 Demorado', '🛠 Modificación', '🟣 Cancelado', '🟢 Completado']}
+
+    total_pedidos_estados = sum(estado_counts.values())
+    estados_fijos = ['🟡 Pendiente', '🔵 En Proceso', '🟢 Completado']
+    estados_condicionales = ['🔴 Demorado', '🛠 Modificación', '🟣 Cancelado']
+    estados_a_mostrar = []
+    estados_a_mostrar.append(("📦 Total Pedidos", total_pedidos_estados))
+    for estado in estados_fijos:
+        estados_a_mostrar.append((estado, estado_counts.get(estado, 0)))
+    for estado in estados_condicionales:
+        cantidad = estado_counts.get(estado, 0)
+        if cantidad > 0:
+            estados_a_mostrar.append((estado, cantidad))
+    cols = st.columns(len(estados_a_mostrar))
+    for col, (nombre_estado, cantidad) in zip(cols, estados_a_mostrar):
+        col.metric(nombre_estado, int(cantidad))
 
 
 
@@ -2769,11 +2779,23 @@ with main_tabs[5]:  # 🛠 Garantías
 
 with main_tabs[6]:  # ✅ Historial Completados
     df_completados_historial = df_main[
-        (df_main["Estado"] == "🟢 Completado") & 
+        (df_main["Estado"] == "🟢 Completado") &
         (df_main.get("Completados_Limpiado", "").astype(str).str.lower() != "sí")
     ].copy()
 
     df_completados_historial['_gsheet_row_index'] = df_completados_historial['_gsheet_row_index'].astype(int)
+
+    tipo_casos_col = None
+    if 'Tipo_Caso' in df_casos.columns:
+        tipo_casos_col = 'Tipo_Caso'
+    elif 'Tipo_Envio' in df_casos.columns:
+        tipo_casos_col = 'Tipo_Envio'
+    df_casos_completados = df_casos[
+        (df_casos["Estado"] == "🟢 Completado") &
+        (df_casos.get("Completados_Limpiado", "").astype(str).str.lower() != "sí")
+    ].copy()
+    if not df_casos_completados.empty:
+        df_casos_completados['_gsheet_row_index'] = df_casos_completados['_gsheet_row_index'].astype(int)
 
     col_titulo, col_btn = st.columns([0.75, 0.25])
     with col_titulo:
@@ -2864,4 +2886,100 @@ with main_tabs[6]:  # ✅ Historial Completados
             mostrar_pedido(df_main, idx, row, orden, "Historial", "✅ Historial Completados", worksheet_main, headers_main, s3_client,
                            main_idx=6, sub_idx=0, date_idx=0)
     else:
-        st.info("No hay pedidos completados recientes o ya fueron limpiados.") 
+        st.info("No hay pedidos completados recientes o ya fueron limpiados.")
+
+    # === Casos Especiales Completados ===
+    if tipo_casos_col:
+        if not df_casos_completados.empty:
+            def render_caso_especial_garantia_hist(row):
+                st.markdown("### 🧾 Caso Especial – 🛠 Garantía")
+                folio = str(row.get("Folio_Factura", "")).strip() or "N/A"
+                vendedor = str(row.get("Vendedor_Registro", "")).strip() or "N/A"
+                cliente = str(row.get("Cliente", "")).strip() or "N/A"
+                st.markdown(f"📄 Factura: `{folio}` | 🧑‍💼 Vendedor: `{vendedor}`")
+                st.markdown(f"👤 Cliente: {cliente}")
+                estado = str(row.get("Estado", "")).strip() or "N/A"
+                estado_rec = str(row.get("Estado_Recepcion", "")).strip() or "N/A"
+                st.markdown(f"Estado: {estado} | Estado Recepción: {estado_rec}")
+                numero_serie = str(row.get("Numero_Serie", "")).strip() or "N/A"
+                fecha_compra = str(row.get("Fecha_Compra", "")).strip() or "N/A"
+                st.markdown(f"🔢 Número de Serie: {numero_serie} | 📅 Fecha de Compra: {fecha_compra}")
+                motivo = str(row.get("Motivo_Detallado", "")).strip()
+                if motivo:
+                    st.markdown("📝 Motivo / Descripción:")
+                    st.info(motivo)
+                piezas = str(row.get("Material_Devuelto", "")).strip()
+                if piezas:
+                    st.markdown("📦 Piezas afectadas:")
+                    st.info(piezas)
+                monto = str(row.get("Monto_Devuelto", "")).strip()
+                if monto:
+                    st.markdown(f"💵 Monto estimado: {monto}")
+                adjuntos = _normalize_urls(row.get("Adjuntos", ""))
+                guia = str(row.get("Hoja_Ruta_Mensajero", "")).strip()
+                with st.expander("📎 Archivos del Caso", expanded=False):
+                    contenido = False
+                    if adjuntos:
+                        contenido = True
+                        st.markdown("**Adjuntos:**")
+                        for u in adjuntos:
+                            nombre = os.path.basename(urlparse(u).path) or u
+                            nombre = unquote(nombre)
+                            st.markdown(f"- [{nombre}]({u})")
+                    if guia:
+                        contenido = True
+                        st.markdown("**Guía:**")
+                        if guia.startswith("http"):
+                            st.markdown(f"[Abrir guía]({guia})")
+                        else:
+                            st.markdown(guia)
+                    if not contenido:
+                        st.info("Sin archivos registrados en la hoja.")
+
+            # Devoluciones completadas
+            comp_dev = df_casos_completados[df_casos_completados[tipo_casos_col].astype(str).str.contains("Devoluci", case=False, na=False)]
+            if not comp_dev.empty:
+                st.markdown("### 🔁 Devoluciones Completadas")
+                if st.button("🧹 Limpiar Devoluciones Completadas"):
+                    col_idx = headers_casos.index("Completados_Limpiado") + 1
+                    updates = [
+                        {
+                            'range': gspread.utils.rowcol_to_a1(int(row['_gsheet_row_index']), col_idx),
+                            'values': [["sí"]]
+                        }
+                        for _, row in comp_dev.iterrows()
+                    ]
+                    if updates and batch_update_gsheet_cells(worksheet_casos, updates):
+                        st.success(f"✅ {len(updates)} devoluciones marcadas como limpiadas.")
+                        st.cache_data.clear()
+                        set_active_main_tab(6)
+                        st.rerun()
+                comp_dev = comp_dev.sort_values(by="Fecha_Completado", ascending=False)
+                for _, row in comp_dev.iterrows():
+                    with st.expander(f"🔁 {row.get('Folio_Factura', 'N/A')} – {row.get('Cliente', 'N/A')}"):
+                        render_caso_especial_devolucion(row)
+
+            # Garantías completadas
+            comp_gar = df_casos_completados[df_casos_completados[tipo_casos_col].astype(str).str.contains("Garant", case=False, na=False)]
+            if not comp_gar.empty:
+                st.markdown("### 🛠 Garantías Completadas")
+                if st.button("🧹 Limpiar Garantías Completadas"):
+                    col_idx = headers_casos.index("Completados_Limpiado") + 1
+                    updates = [
+                        {
+                            'range': gspread.utils.rowcol_to_a1(int(row['_gsheet_row_index']), col_idx),
+                            'values': [["sí"]]
+                        }
+                        for _, row in comp_gar.iterrows()
+                    ]
+                    if updates and batch_update_gsheet_cells(worksheet_casos, updates):
+                        st.success(f"✅ {len(updates)} garantías marcadas como limpiadas.")
+                        st.cache_data.clear()
+                        set_active_main_tab(6)
+                        st.rerun()
+                comp_gar = comp_gar.sort_values(by="Fecha_Completado", ascending=False)
+                for _, row in comp_gar.iterrows():
+                    with st.expander(f"🛠 {row.get('Folio_Factura', 'N/A')} – {row.get('Cliente', 'N/A')}"):
+                        render_caso_especial_garantia_hist(row)
+        else:
+            st.info("No hay casos especiales completados o ya fueron limpiados.")
