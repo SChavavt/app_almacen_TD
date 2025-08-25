@@ -7,6 +7,7 @@ from oauth2client.service_account import ServiceAccountCredentials
 import boto3
 import gspread.utils
 import time
+import unicodedata
 from zoneinfo import ZoneInfo
 from streamlit_autorefresh import st_autorefresh
 
@@ -242,23 +243,21 @@ def load_casos_from_gsheets():
     data = worksheet_casos.get_all_values()
     if not data:
         return pd.DataFrame()
-    headers = data[0]
-    # Sanea headers vacíos duplicados
+    raw_headers = data[0]
     fixed = []
     seen_empty = 0
-    for h in headers:
-        if not h.strip():
+    for h in raw_headers:
+        h = unicodedata.normalize("NFKD", h or "").encode("ascii", "ignore").decode("ascii")
+        h = h.strip().replace(" ", "_")
+        if not h:
             seen_empty += 1
-            fixed.append(f"_col_vacia_{seen_empty}")
-        elif h in fixed:
-            k = 2
-            nh = f"{h}_{k}"
-            while nh in fixed:
-                k += 1
-                nh = f"{h}_{k}"
-            fixed.append(nh)
-        else:
-            fixed.append(h)
+            h = f"_col_vacia_{seen_empty}"
+        base = h
+        k = 2
+        while h in fixed:
+            h = f"{base}_{k}"
+            k += 1
+        fixed.append(h)
     df = pd.DataFrame(data[1:], columns=fixed)
     df["gsheet_row_index"] = df.index + 2
 
@@ -608,18 +607,17 @@ if "load_casos_from_gsheets" not in globals():
         return df
 
 
-if "status_counts_block" not in globals():
-
-    def status_counts_block(df: pd.DataFrame):
-        pend = (df["Estado"] == "🟡 Pendiente").sum() if "Estado" in df.columns else 0
-        proc = (df["Estado"] == "🔵 En Proceso").sum() if "Estado" in df.columns else 0
-        comp = (df["Estado"] == "🟢 Completado").sum() if "Estado" in df.columns else 0
-        total = len(df)
-        cols = st.columns(4)
-        cols[0].metric("Total Pedidos", int(total))
-        cols[1].metric("🟡 Pendiente", int(pend))
-        cols[2].metric("🔵 En Proceso", int(proc))
-        cols[3].metric("🟢 Completado", int(comp))
+def status_counts_block_casos(df: pd.DataFrame):
+    estados = df.get("Estado", pd.Series(dtype=str)).astype(str)
+    total = len(df)
+    pend = estados.str.contains("Pendiente", case=False, na=False).sum()
+    proc = estados.str.contains("En Proceso", case=False, na=False).sum()
+    comp = estados.str.contains("Completado", case=False, na=False).sum()
+    cols = st.columns(4)
+    cols[0].metric("Total Pedidos", int(total))
+    cols[1].metric("🟡 Pendiente", int(pend))
+    cols[2].metric("🔵 En Proceso", int(proc))
+    cols[3].metric("🟢 Completado", int(comp))
 
 
 if "show_grouped_panel_casos" not in globals():
@@ -831,7 +829,7 @@ with tabs[2]:
 
             # --- Resumen
             st.markdown("#### 📊 Resumen Casos Especiales")
-            status_counts_block(casos)
+            status_counts_block_casos(casos)
 
             # --- Grupos
             st.markdown("### 📚 Grupos (Local por Turno / Foráneo genérico)")
