@@ -436,7 +436,6 @@ def upload_file_to_s3(s3_client_param, bucket_name, file_obj, s3_key):
             Bucket=bucket_name,
             Key=s3_key,
             Body=file_obj.getvalue(),
-            ACL="public-read",  # 👈 hace el objeto público
             **extra_args
         )
 
@@ -536,7 +535,7 @@ def get_files_in_s3_prefix(s3_client_param, prefix):
 
 def get_s3_file_download_url(s3_client_param, object_key):
     """
-    Retorna una URL pública permanente para archivos subidos con ACL='public-read'.
+    Retorna una URL pública permanente para archivos almacenados en S3.
     """
     return f"https://{S3_BUCKET_NAME}.s3.{AWS_REGION}.amazonaws.com/{object_key}"
 
