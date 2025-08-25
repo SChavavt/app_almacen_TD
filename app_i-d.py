@@ -797,10 +797,19 @@ with tabs[2]:
         if casos.empty:
             st.info("No hay devoluciones/garantías para mostrar.")
         else:
-            # Excluir Completados de la vista
+            # Excluir completados limpiados, mostrar el resto
+            if "Completados_Limpiado" not in casos.columns:
+                casos["Completados_Limpiado"] = ""
             if "Estado" in casos.columns:
                 casos = casos[
-                    casos["Estado"].astype(str).str.strip() != "🟢 Completado"
+                    (casos["Estado"].astype(str).str.strip() != "🟢 Completado")
+                    | (
+                        (casos["Estado"].astype(str).str.strip() == "🟢 Completado")
+                        & (
+                            casos["Completados_Limpiado"].astype(str).str.lower()
+                            != "sí"
+                        )
+                    )
                 ]
 
             # Asegura columnas base
