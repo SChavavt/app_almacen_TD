@@ -1434,8 +1434,13 @@ if not df_main.empty:
         "Tipo_Envio", "Fecha_Entrega", "Comentario",
         # 👇 nuevas para clasificar envío/turno en devoluciones
         "Tipo_Envio_Original", "Turno",
+        # Campos específicos de garantías
+        "Numero_Serie", "Fecha_Compra",
     ]
     headers_casos = ensure_columns(worksheet_casos, headers_casos, required_cols_casos)
+    for c in ["Numero_Serie", "Fecha_Compra"]:
+        if c not in df_casos.columns:
+            df_casos[c] = ""
 
 
 
@@ -2299,6 +2304,8 @@ with main_tabs[5]:  # 🛠 Garantías
         vendedor    = str(row.get("Vendedor_Registro", "")).strip()
         estado_rec  = str(row.get("Estado_Recepcion", "N/A")).strip()
         area_resp   = str(row.get("Area_Responsable", "")).strip()
+        numero_serie = str(row.get("Numero_Serie", "")).strip()
+        fecha_compra = str(row.get("Fecha_Compra", "")).strip()
 
         # Título del expander
         expander_title = f"🛠 {folio or 's/folio'} – {cliente or 's/cliente'} | Estado: {estado} | Estado_Recepcion: {estado_rec}"
@@ -2314,6 +2321,8 @@ with main_tabs[5]:  # 🛠 Garantías
             with col2:
                 st.markdown(f"**🏢 Área Responsable:** {area_resp or 'N/A'}")
                 st.markdown(f"**👥 Responsable del Error:** {str(row.get('Nombre_Responsable', 'N/A')).strip()}")
+                st.markdown(f"**🔢 Número de Serie:** {numero_serie or 'N/A'}")
+                st.markdown(f"**📅 Fecha de Compra:** {fecha_compra or 'N/A'}")
 
             # Motivo / piezas / monto (en garantía guardamos piezas en Material_Devuelto y monto estimado en Monto_Devuelto)
             st.markdown("**📝 Motivo / Descripción de la falla:**")
