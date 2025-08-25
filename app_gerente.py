@@ -69,7 +69,9 @@ def cargar_casos_especiales():
         "Completados_Limpiado","Estado_Caso","Hoja_Ruta_Mensajero","Numero_Cliente_RFC","Tipo_Envio_Original",
         "Fecha_Recepcion_Devolucion","Estado_Recepcion","Nota_Credito_URL","Documento_Adicional_URL",
         "Comentarios_Admin_Devolucion","Modificacion_Surtido","Adjuntos_Surtido","Refacturacion_Tipo",
-        "Refacturacion_Subtipo","Folio_Factura_Refacturada","Turno","Hora_Proceso"
+        "Refacturacion_Subtipo","Folio_Factura_Refacturada","Turno","Hora_Proceso",
+        # Campos específicos de garantías
+        "Numero_Serie","Fecha_Compra"
     ]
     for c in columnas_ejemplo:
         if c not in df.columns:
@@ -292,6 +294,8 @@ with tabs[0]:
                     "Comentarios_Admin_Devolucion": row.get("Comentarios_Admin_Devolucion",""),
                     "Turno": row.get("Turno",""),
                     "Hora_Proceso": row.get("Hora_Proceso",""),
+                    "Numero_Serie": row.get("Numero_Serie",""),
+                    "Fecha_Compra": row.get("Fecha_Compra",""),
                     # 🛠 Modificación de surtido
                     "Modificacion_Surtido": str(row.get("Modificacion_Surtido","")).strip(),
                     "Adjuntos_Surtido_urls": partir_urls(row.get("Adjuntos_Surtido","")),
@@ -396,7 +400,9 @@ with tabs[0]:
                     st.markdown(f"### {titulo}")
 
                     # 📄 Folio Nuevo / Folio Error solo para Devoluciones
-                    is_devolucion = (str(res.get('Tipo_Envio','')).strip() == "🔁 Devolución")
+                    tipo_envio_val = str(res.get('Tipo_Envio',''))
+                    is_devolucion = (tipo_envio_val.strip() == "🔁 Devolución")
+                    is_garantia = "garant" in tipo_envio_val.lower()
                     if is_devolucion:
                         folio_nuevo = res.get("Folio","") or "N/A"
                         folio_error = res.get("Folio_Factura_Error","") or "N/A"
@@ -416,6 +422,10 @@ with tabs[0]:
                     st.markdown(
                         f"**Estado:** {res.get('Estado','') or 'N/A'}  |  **Estado del Caso:** {res.get('Estado_Caso','') or 'N/A'}  |  **Turno:** {res.get('Turno','') or 'N/A'}"
                     )
+                    if is_garantia:
+                        st.markdown(
+                            f"**🔢 Número de Serie:** {res.get('Numero_Serie','') or 'N/A'}  |  **📅 Fecha de Compra:** {res.get('Fecha_Compra','') or 'N/A'}"
+                        )
 
                     # ♻️ Refacturación (si hay)
                     ref_t = res.get("Refacturacion_Tipo","")
