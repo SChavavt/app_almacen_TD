@@ -96,6 +96,10 @@ if "expanded_pedidos" not in st.session_state:
     st.session_state["expanded_pedidos"] = {}
     st.session_state["expanded_attachments"] = {}
     st.session_state["expanded_subir_guia"] = {}
+if "expanded_devoluciones" not in st.session_state:
+    st.session_state["expanded_devoluciones"] = {}
+if "expanded_garantias" not in st.session_state:
+    st.session_state["expanded_garantias"] = {}
 if "last_pedidos_count" not in st.session_state:
     st.session_state["last_pedidos_count"] = 0
 if "prev_pedidos_count" not in st.session_state:
@@ -1806,6 +1810,7 @@ with main_tabs[4]:
         vendedor    = str(row.get("Vendedor_Registro", "")).strip()
         estado_rec  = str(row.get("Estado_Recepcion", "N/A")).strip()
         area_resp   = str(row.get("Area_Responsable", "")).strip()
+        row_key     = (idp or f"{folio}_{cliente}").replace(" ", "_")
 
         if area_resp.lower() == "cliente":
             if estado.lower() == "aprobado" and estado_rec.lower() == "todo correcto":
@@ -1818,7 +1823,8 @@ with main_tabs[4]:
         else:
             expander_title = f"🔁 {folio or 's/folio'} – {cliente or 's/cliente'} | Estado: {estado} | Estado_Recepcion: {estado_rec}"
 
-        with st.expander(expander_title, expanded=False):
+        with st.expander(expander_title, expanded=st.session_state["expanded_devoluciones"].get(row_key, False)):
+            st.session_state["expanded_devoluciones"][row_key] = True
             render_caso_especial_devolucion(row)
 
             # === 🆕 NUEVO: Clasificar Tipo_Envio_Original, Turno y Fecha_Entrega (sin opción vacía y sin recargar) ===
@@ -1833,8 +1839,6 @@ with main_tabs[4]:
             today_date        = (datetime.now(_TZ).date() if _TZ else datetime.now().date())
 
             # Claves únicas por caso (para que los widgets no “salten”)
-            row_key = (idp or f"{folio}_{cliente}").replace(" ", "_")
-
             tipo_key   = f"tipo_envio_orig_{row_key}"
             turno_key  = f"turno_dev_{row_key}"
             fecha_key  = f"fecha_dev_{row_key}"
@@ -1868,7 +1872,8 @@ with main_tabs[4]:
                     "Tipo de envío original",
                     options=TIPO_OPTS,
                     index=TIPO_OPTS.index(st.session_state[tipo_key]) if st.session_state[tipo_key] in TIPO_OPTS else 1,
-                    key=tipo_key
+                    key=tipo_key,
+                    on_change=preserve_tab_state,
                 )
 
             with c2:
@@ -1878,7 +1883,8 @@ with main_tabs[4]:
                     index=TURNO_OPTS.index(st.session_state[turno_key]) if st.session_state[turno_key] in TURNO_OPTS else 0,
                     key=turno_key,
                     disabled=(st.session_state[tipo_key] != "📍 Pedido Local"),
-                    help="Solo aplica para Pedido Local"
+                    help="Solo aplica para Pedido Local",
+                    on_change=preserve_tab_state,
                 )
 
             with c3:
@@ -1888,11 +1894,12 @@ with main_tabs[4]:
                     min_value= today_date,
                     max_value= today_date + timedelta(days=365),
                     format="DD/MM/YYYY",
-                    key=fecha_key
+                    key=fecha_key,
+                    on_change=preserve_tab_state,
                 )
 
             # Botón aplicar (AQUÍ SÍ se guardan cambios). No cambiamos de pestaña.
-            if st.button("✅ Aplicar cambios de envío/fecha", key=f"btn_aplicar_envio_fecha_{row_key}"):
+            if st.button("✅ Aplicar cambios de envío/fecha", key=f"btn_aplicar_envio_fecha_{row_key}", on_click=preserve_tab_state):
                 try:
                     # Por si acaso, preservar la pestaña actual (Devoluciones es índice 4)
                     st.session_state["preserve_main_tab"] = 4
@@ -2306,10 +2313,12 @@ with main_tabs[5]:  # 🛠 Garantías
         area_resp   = str(row.get("Area_Responsable", "")).strip()
         numero_serie = str(row.get("Numero_Serie", "")).strip()
         fecha_compra = str(row.get("Fecha_Compra", "")).strip()
+        row_key     = (idp or f"{folio}_{cliente}").replace(" ", "_")
 
         # Título del expander
         expander_title = f"🛠 {folio or 's/folio'} – {cliente or 's/cliente'} | Estado: {estado} | Estado_Recepcion: {estado_rec}"
-        with st.expander(expander_title, expanded=False):
+        with st.expander(expander_title, expanded=st.session_state["expanded_garantias"].get(row_key, False)):
+            st.session_state["expanded_garantias"][row_key] = True
             st.markdown("#### 📋 Información de la Garantía")
 
             col1, col2 = st.columns(2)
@@ -2352,9 +2361,6 @@ with main_tabs[5]:  # 🛠 Garantías
             fecha_actual_dt   = pd.to_datetime(fecha_actual_str, errors='coerce') if fecha_actual_str else None
             today_date        = (datetime.now(_TZ).date() if _TZ else datetime.now().date())
 
-            # Claves únicas por caso
-            row_key = (idp or f"{folio}_{cliente}").replace(" ", "_")
-
             tipo_key   = f"g_tipo_envio_orig_{row_key}"
             turno_key  = f"g_turno_{row_key}"
             fecha_key  = f"g_fecha_{row_key}"
@@ -2384,7 +2390,8 @@ with main_tabs[5]:  # 🛠 Garantías
                     "Tipo de envío original",
                     options=TIPO_OPTS,
                     index=TIPO_OPTS.index(st.session_state[tipo_key]) if st.session_state[tipo_key] in TIPO_OPTS else 1,
-                    key=tipo_key
+                    key=tipo_key,
+                    on_change=preserve_tab_state,
                 )
             with c2:
                 st.selectbox(
@@ -2393,7 +2400,8 @@ with main_tabs[5]:  # 🛠 Garantías
                     index=TURNO_OPTS.index(st.session_state[turno_key]) if st.session_state[turno_key] in TURNO_OPTS else 0,
                     key=turno_key,
                     disabled=(st.session_state[tipo_key] != "📍 Pedido Local"),
-                    help="Solo aplica para Pedido Local"
+                    help="Solo aplica para Pedido Local",
+                    on_change=preserve_tab_state,
                 )
             with c3:
                 st.date_input(
@@ -2402,11 +2410,12 @@ with main_tabs[5]:  # 🛠 Garantías
                     min_value=today_date,
                     max_value=today_date + timedelta(days=365),
                     format="DD/MM/YYYY",
-                    key=fecha_key
+                    key=fecha_key,
+                    on_change=preserve_tab_state,
                 )
 
             # Guardar cambios de envío/fecha
-            if st.button("✅ Aplicar cambios de envío/fecha (Garantía)", key=f"btn_aplicar_envio_fecha_g_{row_key}"):
+            if st.button("✅ Aplicar cambios de envío/fecha (Garantía)", key=f"btn_aplicar_envio_fecha_g_{row_key}", on_click=preserve_tab_state):
                 try:
                     # Resolver fila en gsheet
                     gsheet_row_idx = None
