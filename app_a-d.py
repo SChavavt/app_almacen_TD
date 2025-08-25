@@ -13,6 +13,7 @@ import os
 import uuid
 from pytz import timezone
 from urllib.parse import urlparse, unquote
+import streamlit.components.v1 as components
 
 from datetime import datetime
 from pytz import timezone
@@ -32,12 +33,22 @@ def mx_today():
 
 st.set_page_config(page_title="Recepción de Pedidos TD", layout="wide")
 
+# 🧭 Leer pestaña activa desde parámetros de URL
+params = st.experimental_get_query_params()
+if "tab" in params:
+    try:
+        st.session_state["active_main_tab_index"] = int(params["tab"][0])
+    except (ValueError, TypeError):
+        st.session_state["active_main_tab_index"] = 0
+
 # 🔁 Restaurar pestañas activas si venimos de una acción que modificó datos
 if "preserve_main_tab" in st.session_state:
     st.session_state["active_main_tab_index"] = st.session_state.pop("preserve_main_tab", 0)
     st.session_state["active_subtab_local_index"] = st.session_state.pop("preserve_local_tab", 0)
     st.session_state["active_date_tab_m_index"] = st.session_state.pop("preserve_date_tab_m", 0)
     st.session_state["active_date_tab_t_index"] = st.session_state.pop("preserve_date_tab_t", 0)
+
+st.experimental_set_query_params(tab=str(st.session_state.get("active_main_tab_index", 0)))
 
 st.title("📬 Bandeja de Pedidos TD")
 
@@ -616,7 +627,7 @@ def fijar_estado_pestanas_guia(row, origen_tab, main_idx, sub_idx, date_idx):
     st.session_state["pedido_editado"] = row['ID_Pedido']
     st.session_state["fecha_seleccionada"] = row.get("Fecha_Entrega", "")
     st.session_state["subtab_local"] = origen_tab
-    st.session_state["active_main_tab_index"] = main_idx
+    set_active_main_tab(main_idx)
     st.session_state["active_subtab_local_index"] = sub_idx
     if origen_tab == "Mañana":
         st.session_state["active_date_tab_m_index"] = date_idx
@@ -636,6 +647,12 @@ def preserve_tab_state():
     st.session_state["preserve_local_tab"] = st.session_state.get("active_subtab_local_index", 0)
     st.session_state["preserve_date_tab_m"] = st.session_state.get("active_date_tab_m_index", 0)
     st.session_state["preserve_date_tab_t"] = st.session_state.get("active_date_tab_t_index", 0)
+
+
+def set_active_main_tab(idx: int):
+    """Actualiza la pestaña principal activa y sincroniza la URL."""
+    st.session_state["active_main_tab_index"] = idx
+    st.experimental_set_query_params(tab=str(idx))
 
 
 def handle_generic_upload_change():
@@ -849,7 +866,7 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
                     st.error("❌ Falló la actualización del estado a 'En Proceso'.")
 
             # 🔁 Mantener pestañas activas y recargar para reflejar cambios
-            st.session_state["active_main_tab_index"] = st.session_state.get("active_main_tab_index", 0)
+            set_active_main_tab(st.session_state.get("active_main_tab_index", 0))
             st.session_state["active_subtab_local_index"] = st.session_state.get("active_subtab_local_index", 0)
             st.session_state["active_date_tab_m_index"] = st.session_state.get("active_date_tab_m_index", 0)
             st.session_state["active_date_tab_t_index"] = st.session_state.get("active_date_tab_t_index", 0)
@@ -919,7 +936,7 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
 
                     st.cache_data.clear()
 
-                    st.session_state["active_main_tab_index"] = st.session_state.get("active_main_tab_index", 0)
+                    set_active_main_tab(st.session_state.get("active_main_tab_index", 0))
                     st.session_state["active_subtab_local_index"] = st.session_state.get("active_subtab_local_index", 0)
                     st.session_state["active_date_tab_m_index"] = st.session_state.get("active_date_tab_m_index", 0)
                     st.session_state["active_date_tab_t_index"] = st.session_state.get("active_date_tab_t_index", 0)
@@ -958,7 +975,7 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
                         st.toast("🔧 Modificación procesada - Estado actualizado a 'En Proceso'", icon="✅")
                         
                         # 🔁 Mantener pestañas activas
-                        st.session_state["active_main_tab_index"] = st.session_state.get("active_main_tab_index", 0)
+                        set_active_main_tab(st.session_state.get("active_main_tab_index", 0))
                         st.session_state["active_subtab_local_index"] = st.session_state.get("active_subtab_local_index", 0)
                         st.session_state["active_date_tab_m_index"] = st.session_state.get("active_date_tab_m_index", 0)
                         st.session_state["active_date_tab_t_index"] = st.session_state.get("active_date_tab_t_index", 0)
@@ -1268,7 +1285,7 @@ def mostrar_pedido_solo_guia(df, idx, row, orden, origen_tab, current_main_tab_l
                 st.success("✅ Pedido marcado como **🟢 Completado**.")
 
                 # 🔒 Permanecer en 📋 Solicitudes de Guía (índice 3)
-                st.session_state["active_main_tab_index"] = 3
+                set_active_main_tab(3)
                 st.cache_data.clear()
                 st.rerun()
             else:
@@ -1325,7 +1342,7 @@ if not df_main.empty:
     if changes_made_by_demorado_check:
         st.cache_data.clear()
 
-        st.session_state["active_main_tab_index"] = st.session_state.get("active_main_tab_index", 0)
+        set_active_main_tab(st.session_state.get("active_main_tab_index", 0))
         st.session_state["active_subtab_local_index"] = st.session_state.get("active_subtab_local_index", 0)
         st.session_state["active_date_tab_m_index"] = st.session_state.get("active_date_tab_m_index", 0)
         st.session_state["active_date_tab_t_index"] = st.session_state.get("active_date_tab_t_index", 0)
@@ -1460,6 +1477,22 @@ if not df_main.empty:
         "✅ Historial Completados",
     ]
     main_tabs = st.tabs(tab_options)
+    components.html(f"""
+    <script>
+    const tabs = window.parent.document.querySelectorAll('.stTabs [data-baseweb="tab"]');
+    const activeIndex = {st.session_state.get("active_main_tab_index", 0)};
+    if (tabs[activeIndex]) {{
+        tabs[activeIndex].click();
+    }}
+    tabs.forEach((tab, idx) => {{
+        tab.addEventListener('click', () => {{
+            const params = new URLSearchParams(window.parent.location.search);
+            params.set('tab', idx);
+            window.parent.history.replaceState(null, '', window.parent.location.pathname + '?' + params.toString());
+        }});
+    }});
+    </script>
+    """, height=0)
 
     with main_tabs[0]: # 📍 Pedidos Locales
         st.markdown("### 📋 Pedidos Locales")
@@ -1598,7 +1631,6 @@ if not df_main.empty:
 
 # --- TAB 3: 🔁 Devoluciones (casos_especiales) ---
 with main_tabs[4]:
-    st.session_state["active_main_tab_index"] = 4
     st.markdown("### 🔁 Devoluciones")
 
     # 1) Validaciones mínimas
@@ -1974,7 +2006,7 @@ with main_tabs[4]:
             if colA.button("⚙️ Procesar", key=f"procesar_caso_{idp or folio or cliente}"):
                 try:
                     # Mantener la pestaña de Devoluciones
-                    st.session_state["active_main_tab_index"] = 4
+                    set_active_main_tab(4)
 
                     # Localiza la fila en 'casos_especiales'
                     gsheet_row_idx = None
@@ -2021,7 +2053,7 @@ with main_tabs[4]:
                 if colB.button("🔧 Procesar Modificación", key=f"proc_mod_caso_{idp or folio or cliente}"):
                     try:
                         # Mantener la pestaña de Devoluciones
-                        st.session_state["active_main_tab_index"] = 4
+                        set_active_main_tab(4)
 
                         # Localiza la fila en 'casos_especiales'
                         gsheet_row_idx = None
@@ -2207,7 +2239,7 @@ with main_tabs[4]:
                     if ok:
                         # Confirmación tras el refresh y quedarse en Devoluciones
                         st.session_state["flash_msg"] = "✅ Devolución completada correctamente."
-                        st.session_state["active_main_tab_index"] = 4
+                        set_active_main_tab(4)
                         st.cache_data.clear()
                         st.rerun()
                     else:
@@ -2220,7 +2252,6 @@ with main_tabs[4]:
     st.markdown("---")
 
 with main_tabs[5]:  # 🛠 Garantías
-    st.session_state["active_main_tab_index"] = 5
     st.markdown("### 🛠 Garantías")
 
     import os, json, math, re
@@ -2705,7 +2736,7 @@ with main_tabs[5]:  # 🛠 Garantías
 
                     if ok:
                         st.session_state["flash_msg"] = "✅ Garantía completada correctamente."
-                        st.session_state["active_main_tab_index"] = 5
+                        set_active_main_tab(5)
                         st.cache_data.clear()
                         st.rerun()
                     else:
@@ -2739,7 +2770,7 @@ with main_tabs[6]:  # ✅ Historial Completados
             if updates and batch_update_gsheet_cells(worksheet_main, updates):
                 st.success(f"✅ {len(updates)} pedidos marcados como limpiados.")
                 st.cache_data.clear()
-                st.session_state["active_main_tab_index"] = 6
+                set_active_main_tab(6)
                 st.rerun()
 
     # 🧹 Limpieza específica por grupo de completados locales
@@ -2779,7 +2810,7 @@ with main_tabs[6]:  # ✅ Historial Completados
                     if updates and batch_update_gsheet_cells(worksheet_main, updates):
                         st.success(f"✅ {len(updates)} pedidos completados en {grupo} marcados como limpiados.")
                         st.cache_data.clear()
-                        st.session_state["active_main_tab_index"] = 6
+                        set_active_main_tab(6)
                         st.rerun()
 
     # Mostrar pedidos completados individuales
@@ -2803,7 +2834,7 @@ with main_tabs[6]:  # ✅ Historial Completados
                 if updates and batch_update_gsheet_cells(worksheet_main, updates):
                     st.success(f"✅ {len(updates)} pedidos foráneos completados fueron marcados como limpiados.")
                     st.cache_data.clear()
-                    st.session_state["active_main_tab_index"] = 6
+                    set_active_main_tab(6)
                     st.rerun()
 
         df_completados_historial = df_completados_historial.sort_values(by="Fecha_Completado", ascending=False)
