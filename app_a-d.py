@@ -2184,7 +2184,9 @@ with main_tabs[4]:
 
                     if guia_file:
                         key_guia = f"{folder}/guia_retorno_{datetime.now().isoformat()[:19].replace(':','')}_{guia_file.name}"
-                        _, guia_url = upload_file_to_s3(s3_client, S3_BUCKET_NAME, guia_file, key_guia)
+                        success, tmp_url = upload_file_to_s3(s3_client, S3_BUCKET_NAME, guia_file, key_guia)
+                        if success and tmp_url:
+                            guia_url = tmp_url
 
                     # Localiza la fila en 'casos_especiales'
                     gsheet_row_idx = None
@@ -2208,8 +2210,16 @@ with main_tabs[4]:
                     else:
                         if guia_url:
                             existing = str(row.get("Hoja_Ruta_Mensajero", "")).strip()
+                            if existing.lower() in ("nan", "none", "n/a"):
+                                existing = ""
                             guia_final = f"{existing}, {guia_url}" if existing else guia_url
-                            ok &= update_gsheet_cell(worksheet_casos, headers_casos, gsheet_row_idx, "Hoja_Ruta_Mensajero", guia_final)
+                            ok &= update_gsheet_cell(
+                                worksheet_casos,
+                                headers_casos,
+                                gsheet_row_idx,
+                                "Hoja_Ruta_Mensajero",
+                                guia_final,
+                            )
                             row["Hoja_Ruta_Mensajero"] = guia_final
                         # Guardar tipo de envío original y turno seleccionado
                         tipo_sel = st.session_state.get(tipo_key, tipo_envio_actual)
@@ -2682,7 +2692,9 @@ with main_tabs[5]:  # 🛠 Garantías
 
                     if guia_file:
                         key_guia = f"{folder}/guia_garantia_{datetime.now().isoformat()[:19].replace(':','')}_{guia_file.name}"
-                        _, guia_url = upload_file_to_s3(s3_client, S3_BUCKET_NAME, guia_file, key_guia)
+                        success, tmp_url = upload_file_to_s3(s3_client, S3_BUCKET_NAME, guia_file, key_guia)
+                        if success and tmp_url:
+                            guia_url = tmp_url
 
                     # Localiza la fila
                     gsheet_row_idx = None
@@ -2706,8 +2718,16 @@ with main_tabs[5]:  # 🛠 Garantías
                     else:
                         if guia_url:
                             existing = str(row.get("Hoja_Ruta_Mensajero", "")).strip()
+                            if existing.lower() in ("nan", "none", "n/a"):
+                                existing = ""
                             guia_final = f"{existing}, {guia_url}" if existing else guia_url
-                            ok &= update_gsheet_cell(worksheet_casos, headers_casos, gsheet_row_idx, "Hoja_Ruta_Mensajero", guia_final)
+                            ok &= update_gsheet_cell(
+                                worksheet_casos,
+                                headers_casos,
+                                gsheet_row_idx,
+                                "Hoja_Ruta_Mensajero",
+                                guia_final,
+                            )
                             row["Hoja_Ruta_Mensajero"] = guia_final
                         # Guardar tipo de envío original y turno seleccionado
                         tipo_sel = st.session_state.get(tipo_key, tipo_envio_actual)
