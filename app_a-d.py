@@ -34,10 +34,13 @@ def mx_today():
 st.set_page_config(page_title="Recepción de Pedidos TD", layout="wide")
 
 # 🧭 Leer pestaña activa desde parámetros de URL
-params = st.experimental_get_query_params()
+params = st.query_params
 if "tab" in params:
     try:
-        st.session_state["active_main_tab_index"] = int(params["tab"][0])
+        tab_val = params["tab"]
+        if isinstance(tab_val, list):
+            tab_val = tab_val[0]
+        st.session_state["active_main_tab_index"] = int(tab_val)
     except (ValueError, TypeError):
         st.session_state["active_main_tab_index"] = 0
 
@@ -48,7 +51,7 @@ if "preserve_main_tab" in st.session_state:
     st.session_state["active_date_tab_m_index"] = st.session_state.pop("preserve_date_tab_m", 0)
     st.session_state["active_date_tab_t_index"] = st.session_state.pop("preserve_date_tab_t", 0)
 
-st.experimental_set_query_params(tab=str(st.session_state.get("active_main_tab_index", 0)))
+st.query_params["tab"] = str(st.session_state.get("active_main_tab_index", 0))
 
 st.title("📬 Bandeja de Pedidos TD")
 
@@ -652,7 +655,7 @@ def preserve_tab_state():
 def set_active_main_tab(idx: int):
     """Actualiza la pestaña principal activa y sincroniza la URL."""
     st.session_state["active_main_tab_index"] = idx
-    st.experimental_set_query_params(tab=str(idx))
+    st.query_params["tab"] = str(idx)
 
 
 def handle_generic_upload_change():
