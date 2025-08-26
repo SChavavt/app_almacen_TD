@@ -1307,7 +1307,9 @@ def _load_pedidos():
         worksheet_name=GOOGLE_SHEET_WORKSHEET_NAME,
         credentials=GSHEETS_CREDENTIALS,
     )
-    return process_sheet_data(raw)
+    df, headers = process_sheet_data(raw)
+    df = df[df["Tipo_Envio"] != "🎓 Cursos y Eventos"].copy()
+    return df, headers
 
 def _load_casos():
     raw = get_raw_sheet_data(
@@ -1484,7 +1486,6 @@ if not df_main.empty:
         "🚚 Pedidos Foráneos",
         "🏙️ Pedidos CDMX",
         "📋 Solicitudes de Guía",
-        "🎓 Cursos y Eventos",
         "🔁 Devoluciones",
         "🛠 Garantías",
         "✅ Historial Completados",
@@ -1642,32 +1643,8 @@ if not df_main.empty:
             st.info("No hay solicitudes de guía.")
 
 
-    with main_tabs[4]:  # 🎓 Cursos y Eventos
-        pedidos_cursos_display = df_pendientes_proceso_demorado[
-            df_pendientes_proceso_demorado["Tipo_Envio"] == "🎓 Cursos y Eventos"
-        ].copy()
-        if not pedidos_cursos_display.empty:
-            pedidos_cursos_display = ordenar_pedidos_custom(pedidos_cursos_display)
-            for orden, (idx, row) in enumerate(pedidos_cursos_display.iterrows(), start=1):
-                mostrar_pedido(
-                    df_main,
-                    idx,
-                    row,
-                    orden,
-                    "Cursos y Eventos",
-                    "🎓 Cursos y Eventos",
-                    worksheet_main,
-                    headers_main,
-                    s3_client,
-                    main_idx=4,
-                    sub_idx=0,
-                    date_idx=0,
-                )
-        else:
-            st.info("No hay pedidos de Cursos y Eventos.")
-
-# --- TAB 5: 🔁 Devoluciones (casos_especiales) ---
-with main_tabs[5]:
+# --- TAB 4: 🔁 Devoluciones (casos_especiales) ---
+with main_tabs[4]:
     st.markdown("### 🔁 Devoluciones")
 
     # 1) Validaciones mínimas
@@ -2043,7 +2020,7 @@ with main_tabs[5]:
             if colA.button("⚙️ Procesar", key=f"procesar_caso_{idp or folio or cliente}"):
                 try:
                     # Mantener la pestaña de Devoluciones
-                    set_active_main_tab(5)
+                    set_active_main_tab(4)
 
                     # Localiza la fila en 'casos_especiales'
                     gsheet_row_idx = None
@@ -2090,7 +2067,7 @@ with main_tabs[5]:
                 if colB.button("🔧 Procesar Modificación", key=f"proc_mod_caso_{idp or folio or cliente}"):
                     try:
                         # Mantener la pestaña de Devoluciones
-                        set_active_main_tab(5)
+                        set_active_main_tab(4)
 
                         # Localiza la fila en 'casos_especiales'
                         gsheet_row_idx = None
@@ -2286,7 +2263,7 @@ with main_tabs[5]:
                     if ok:
                         # Confirmación tras el refresh y quedarse en Devoluciones
                         st.session_state["flash_msg"] = "✅ Devolución completada correctamente."
-                        set_active_main_tab(5)
+                        set_active_main_tab(4)
                         st.cache_data.clear()
                         st.rerun()
                     else:
@@ -2298,7 +2275,7 @@ with main_tabs[5]:
 
     st.markdown("---")
 
-with main_tabs[6]:  # 🛠 Garantías
+with main_tabs[5]:  # 🛠 Garantías
     st.markdown("### 🛠 Garantías")
 
     import os, json, math, re
@@ -2793,7 +2770,7 @@ with main_tabs[6]:  # 🛠 Garantías
 
                     if ok:
                         st.session_state["flash_msg"] = "✅ Garantía completada correctamente."
-                        set_active_main_tab(6)
+                        set_active_main_tab(5)
                         st.cache_data.clear()
                         st.rerun()
                     else:
@@ -2802,7 +2779,7 @@ with main_tabs[6]:  # 🛠 Garantías
                     st.error(f"❌ Error al completar la garantía: {e}")
 
 
-with main_tabs[7]:  # ✅ Historial Completados
+with main_tabs[6]:  # ✅ Historial Completados
     df_completados_historial = df_main[
         (df_main["Estado"] == "🟢 Completado") &
         (df_main.get("Completados_Limpiado", "").astype(str).str.lower() != "sí")
@@ -2839,7 +2816,7 @@ with main_tabs[7]:  # ✅ Historial Completados
             if updates and batch_update_gsheet_cells(worksheet_main, updates):
                 st.success(f"✅ {len(updates)} pedidos marcados como limpiados.")
                 st.cache_data.clear()
-                set_active_main_tab(7)
+                set_active_main_tab(6)
                 st.rerun()
 
     # 🧹 Limpieza específica por grupo de completados locales
@@ -2879,7 +2856,7 @@ with main_tabs[7]:  # ✅ Historial Completados
                     if updates and batch_update_gsheet_cells(worksheet_main, updates):
                         st.success(f"✅ {len(updates)} pedidos completados en {grupo} marcados como limpiados.")
                         st.cache_data.clear()
-                        set_active_main_tab(7)
+                        set_active_main_tab(6)
                         st.rerun()
 
     # Mostrar pedidos completados individuales
@@ -2903,13 +2880,13 @@ with main_tabs[7]:  # ✅ Historial Completados
                 if updates and batch_update_gsheet_cells(worksheet_main, updates):
                     st.success(f"✅ {len(updates)} pedidos foráneos completados fueron marcados como limpiados.")
                     st.cache_data.clear()
-                    set_active_main_tab(7)
+                    set_active_main_tab(6)
                     st.rerun()
 
         df_completados_historial = df_completados_historial.sort_values(by="Fecha_Completado", ascending=False)
         for orden, (idx, row) in enumerate(df_completados_historial.iterrows(), start=1):
             mostrar_pedido(df_main, idx, row, orden, "Historial", "✅ Historial Completados", worksheet_main, headers_main, s3_client,
-                           main_idx=7, sub_idx=0, date_idx=0)
+                           main_idx=6, sub_idx=0, date_idx=0)
     else:
         st.info("No hay pedidos completados recientes o ya fueron limpiados.")
 
@@ -2977,7 +2954,7 @@ with main_tabs[7]:  # ✅ Historial Completados
                     if updates and batch_update_gsheet_cells(worksheet_casos, updates):
                         st.success(f"✅ {len(updates)} devoluciones marcadas como limpiadas.")
                         st.cache_data.clear()
-                        set_active_main_tab(7)
+                        set_active_main_tab(6)
                         st.rerun()
                 comp_dev = comp_dev.sort_values(by="Fecha_Completado", ascending=False)
                 for _, row in comp_dev.iterrows():
@@ -3000,7 +2977,7 @@ with main_tabs[7]:  # ✅ Historial Completados
                     if updates and batch_update_gsheet_cells(worksheet_casos, updates):
                         st.success(f"✅ {len(updates)} garantías marcadas como limpiadas.")
                         st.cache_data.clear()
-                        set_active_main_tab(7)
+                        set_active_main_tab(6)
                         st.rerun()
                 comp_gar = comp_gar.sort_values(by="Fecha_Completado", ascending=False)
                 for _, row in comp_gar.iterrows():
