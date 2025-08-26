@@ -325,7 +325,13 @@ def display_attachments(adjuntos_str):
 
 # --- Render tabla compacta ---
 def display_dataframe_with_formatting(df_to_display):
-    columnas_deseadas = ["Fecha_Entrega", "Cliente", "Vendedor_Registro", "Estado"]
+    columnas_deseadas = [
+        "Fecha_Entrega",
+        "Tipo_Envio",
+        "Cliente",
+        "Vendedor_Registro",
+        "Estado",
+    ]
     cols_exist = [c for c in columnas_deseadas if c in df_to_display.columns]
     if not cols_exist:
         st.info("No hay columnas relevantes para mostrar.")
@@ -340,7 +346,11 @@ def display_dataframe_with_formatting(df_to_display):
         )
 
     # Renombrar columnas
-    ren = {"Fecha_Entrega": "Fecha Entrega", "Vendedor_Registro": "Vendedor"}
+    ren = {
+        "Fecha_Entrega": "Fecha Entrega",
+        "Vendedor_Registro": "Vendedor",
+        "Tipo_Envio": "Tipo Envío",
+    }
     for k, v in ren.items():
         if k in df_vista.columns:
             df_vista.rename(columns={k: v}, inplace=True)
@@ -352,7 +362,7 @@ def display_dataframe_with_formatting(df_to_display):
 
     mostrar_cols = [
         c
-        for c in ["Fecha Entrega", "Cliente", "Vendedor", "Estado"]
+        for c in ["Fecha Entrega", "Tipo Envío", "Cliente", "Vendedor", "Estado"]
         if c in df_vista.columns
     ]
     df_vista = df_vista[mostrar_cols]
@@ -393,9 +403,14 @@ def status_counts_block(df_src):
 
 
 def group_key_local_foraneo(row, local_flag_col="Turno"):
-    """Devuelve Turno si hay (Local), sino etiqueta genérica Foráneo."""
+    """Devuelve Turno si hay, Cursos y Eventos si aplica o Foráneo genérico."""
     turno = str(row.get(local_flag_col, "") or "")
-    return turno if turno else "🌍 Foráneo"
+    if turno:
+        return turno
+    tipo_envio = str(row.get("Tipo_Envio", "") or "")
+    if tipo_envio == "🎓 Cursos y Eventos":
+        return "🎓 Cursos y Eventos"
+    return "🌍 Foráneo"
 
 
 def show_grouped_panel(df_source):
@@ -449,9 +464,11 @@ with tabs[0]:
     if df_all.empty:
         st.info("Sin datos en 'datos_pedidos'.")
     else:
-        # Filtra solo Local y Foráneo (excluye CDMX y Solicitudes de Guía)
+        # Filtra Local, Foráneo y Cursos/Eventos (excluye CDMX y Solicitudes de Guía)
         df0 = df_all[
-            df_all["Tipo_Envio"].isin(["📍 Pedido Local", "🚚 Pedido Foráneo"])
+            df_all["Tipo_Envio"].isin(
+                ["📍 Pedido Local", "🚚 Pedido Foráneo", "🎓 Cursos y Eventos"]
+            )
         ].copy()
 
         # Excluye Completados limpiados
