@@ -68,6 +68,7 @@ def cargar_casos_especiales():
         "Monto_Devuelto","Motivo_Detallado","Area_Responsable","Nombre_Responsable","Fecha_Completado",
         "Completados_Limpiado","Estado_Caso","Hoja_Ruta_Mensajero","Numero_Cliente_RFC","Tipo_Envio_Original",
         "Fecha_Recepcion_Devolucion","Estado_Recepcion","Nota_Credito_URL","Documento_Adicional_URL",
+        "Seguimiento",
         "Comentarios_Admin_Devolucion","Modificacion_Surtido","Adjuntos_Surtido","Refacturacion_Tipo",
         "Refacturacion_Subtipo","Folio_Factura_Refacturada","Turno","Hora_Proceso",
         # Campos específicos de garantías
@@ -291,6 +292,7 @@ with tabs[0]:
                     "Estado_Recepcion": row.get("Estado_Recepcion",""),
                     "Nota_Credito_URL": row.get("Nota_Credito_URL",""),
                     "Documento_Adicional_URL": row.get("Documento_Adicional_URL",""),
+                    "Seguimiento": row.get("Seguimiento",""),
                     "Comentarios_Admin_Devolucion": row.get("Comentarios_Admin_Devolucion",""),
                     "Turno": row.get("Turno",""),
                     "Hora_Proceso": row.get("Hora_Proceso",""),
@@ -464,6 +466,11 @@ with tabs[0]:
                         st.markdown("**🗒️ Comentario Administrativo:**")
                         st.info(str(res.get("Comentarios_Admin_Devolucion","")).strip())
 
+                    seguimiento_txt = str(res.get("Seguimiento",""))
+                    if (is_devolucion or is_garantia) and seguimiento_txt.strip():
+                        st.markdown("**📌 Seguimiento:**")
+                        st.info(seguimiento_txt.strip())
+
                     # 🛠 Modificación de surtido (si existe)
                     mod_txt = res.get("Modificacion_Surtido", "") or ""
                     mod_urls = res.get("Adjuntos_Surtido_urls", []) or []
@@ -501,6 +508,18 @@ with tabs[0]:
                         f"📄 **Folio:** `{res['Folio'] or 'N/D'}`  |  🔍 **Estado:** `{res['Estado'] or 'N/D'}`  |  🧑‍💼 **Vendedor:** `{res['Vendedor'] or 'N/D'}`  |  🕒 **Hora:** `{res['Hora_Registro'] or 'N/D'}`"
                     )
 
+                    mod_txt = res.get("Modificacion_Surtido", "") or ""
+                    mod_urls = res.get("Adjuntos_Surtido_urls", []) or []
+                    if mod_txt or mod_urls:
+                        st.markdown("#### 🛠 Modificación de surtido")
+                        if mod_txt:
+                            st.info(mod_txt)
+                        if mod_urls:
+                            st.markdown("**Archivos de modificación:**")
+                            for u in mod_urls:
+                                nombre = u.split("/")[-1]
+                                st.markdown(f"- [{nombre}]({u})")
+
                     # ♻️ Refacturación (si hay)
                     ref_t = res.get("Refacturacion_Tipo","")
                     ref_st = res.get("Refacturacion_Subtipo","")
@@ -532,19 +551,6 @@ with tabs[0]:
                             for key, url in res["Otros"]:
                                 nombre = key.split("/")[-1]
                                 st.markdown(f"- [📌 {nombre}]({url})")
-
-                        # 🛠 Modificación de surtido (si existe)
-                        mod_txt = res.get("Modificacion_Surtido", "") or ""
-                        mod_urls = res.get("Adjuntos_Surtido_urls", []) or []
-                        if mod_txt or mod_urls:
-                            st.markdown("#### 🛠 Modificación de surtido")
-                            if mod_txt:
-                                st.info(mod_txt)
-                            if mod_urls:
-                                st.markdown("**Archivos de modificación:**")
-                                for u in mod_urls:
-                                    nombre = u.split("/")[-1]
-                                    st.markdown(f"- [{nombre}]({u})")
 
         else:
             mensaje = (
