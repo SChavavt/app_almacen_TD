@@ -30,25 +30,6 @@ def mx_today():
     return mx_now().date()
 
 
-def double_confirm_button(label, key, container=st, help=None, disabled=False):
-    """Muestra un botón que requiere confirmación para ejecutar una acción."""
-    confirm_flag = f"{key}_confirm"
-    if st.session_state.get(confirm_flag):
-        col_confirm, col_cancel = container.columns(2)
-        confirmed = col_confirm.button("✅ Confirmar", key=f"{confirm_flag}_yes")
-        cancelled = col_cancel.button("❌ Cancelar", key=f"{confirm_flag}_no")
-        if confirmed:
-            st.session_state.pop(confirm_flag, None)
-            return True
-        if cancelled:
-            st.session_state.pop(confirm_flag, None)
-        return False
-    else:
-        if container.button(label, key=key, help=help, disabled=disabled):
-            st.session_state[confirm_flag] = True
-        return False
-
-
 
 st.set_page_config(page_title="Recepción de Pedidos TD", layout="wide")
 
@@ -929,8 +910,8 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
                 st.error(f"❌ No se encontró la carpeta (prefijo S3) del pedido '{row['ID_Pedido']}'.")
 
 
-        # Complete Button con doble verificación
-        if double_confirm_button("🟢 Completar", key=f"complete_button_{row['ID_Pedido']}_{origen_tab}", container=col_complete_btn, disabled=disabled_if_completed):
+        # Complete Button
+        if col_complete_btn.button("🟢 Completar", key=f"complete_button_{row['ID_Pedido']}_{origen_tab}", disabled=disabled_if_completed):
             try:
                 updates = []
                 estado_col_idx = headers.index('Estado') + 1
@@ -1249,9 +1230,12 @@ def mostrar_pedido_solo_guia(df, idx, row, orden, origen_tab, current_main_tab_l
             on_change=handle_generic_upload_change,
         )
 
-        # --- Botón para subir guía y completar (doble verificación) ---
-        if double_confirm_button("📤 Subir Guía y Completar", key=f"btn_subir_guia_only_{row['ID_Pedido']}"):
-            preserve_tab_state()
+        # --- Botón para subir guía y completar ---
+        if st.button(
+            "📤 Subir Guía y Completar",
+            key=f"btn_subir_guia_only_{row['ID_Pedido']}",
+            on_click=preserve_tab_state,
+        ):
             # ✅ Validación: al menos un archivo
             if not archivos_guia:
                 st.warning("⚠️ Primero sube al menos un archivo de guía.")
@@ -1394,7 +1378,7 @@ if not df_main.empty:
     # --- 🔔 Alerta de Modificación de Surtido ---  
     mod_surtido_df = df_main[
         (df_main['Modificacion_Surtido'].astype(str).str.strip() != '') &
-        (~df_main['Modificacion_Surtido'].astype(str).str.contains(r'\[✔CONFIRMADO\]', na=False)) &
+        (~df_main['Modificacion_Surtido'].astype(str).str.endswith('[✔CONFIRMADO]')) &
         (df_main['Estado'] != '🟢 Completado') &
         (df_main['Refacturacion_Tipo'].fillna("").str.strip() != "Datos Fiscales")
     ]
@@ -2223,8 +2207,11 @@ with main_tabs[5]:
             )
 
             # Botón FINAL: Completar
-            if double_confirm_button("🟢 Completar", key=f"btn_completar_{folio}_{cliente}"):
-                preserve_tab_state()
+            if st.button(
+                "🟢 Completar",
+                key=f"btn_completar_{folio}_{cliente}",
+                on_click=preserve_tab_state,
+            ):
                 try:
                     folder = idp or f"caso_{(folio or 'sfolio')}_{(cliente or 'scliente')}".replace(" ", "_")
                     guia_url = ""
@@ -2728,8 +2715,11 @@ with main_tabs[6]:  # 🛠 Garantías
                 on_change=handle_generic_upload_change,
             )
 
-            if double_confirm_button("🟢 Completar Garantía", key=f"btn_completar_g_{folio}_{cliente}"):
-                preserve_tab_state()
+            if st.button(
+                "🟢 Completar Garantía",
+                key=f"btn_completar_g_{folio}_{cliente}",
+                on_click=preserve_tab_state,
+            ):
                 try:
                     folder = idp or f"garantia_{(folio or 'sfolio')}_{(cliente or 'scliente')}".replace(" ", "_")
                     guia_url = ""
