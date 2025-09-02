@@ -658,9 +658,9 @@ if "show_grouped_panel_casos" not in globals():
 
         # Fecha string para el título
         df_local["Fecha_Entrega_Str"] = (
-            df_local["Fecha_Entrega"].dt.strftime("%d/%m")
+            df_local["Fecha_Entrega"].dt.strftime("%d/%m").fillna("Sin Fecha")
             if "Fecha_Entrega" in df_local.columns
-            else ""
+            else "Sin Fecha"
         )
 
         # Determinar etiqueta de grupo
@@ -697,7 +697,8 @@ if "show_grouped_panel_casos" not in globals():
 
         grupos = []
         for (clave, _), sub in sorted(
-            df_local.groupby(["Grupo_Clave", "Fecha_Entrega"]), key=lambda x: x[0][1]
+            df_local.groupby(["Grupo_Clave", "Fecha_Entrega"], dropna=False),
+            key=lambda x: x[0][1],
         ):
             if "Hora_Registro" in sub.columns:
                 sub = sub.sort_values(by="Hora_Registro", ascending=False)
