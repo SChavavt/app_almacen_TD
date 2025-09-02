@@ -910,60 +910,72 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
                 st.error(f"❌ No se encontró la carpeta (prefijo S3) del pedido '{row['ID_Pedido']}'.")
 
 
-        # Complete Button with confirmation
+        # Complete Button with modal confirmation
         confirm_key = f"confirm_complete_{row['ID_Pedido']}_{origen_tab}"
-        if st.session_state.get(confirm_key):
-            col_complete_btn.warning("¿Confirmar completar el pedido?")
-            if col_complete_btn.button(
-                "✅ Confirmar completado",
-                key=f"confirm_button_{row['ID_Pedido']}_{origen_tab}",
-            ):
-                st.session_state.pop(confirm_key, None)
-                try:
-                    updates = []
-                    estado_col_idx = headers.index('Estado') + 1
-                    fecha_completado_col_idx = headers.index('Fecha_Completado') + 1
 
-                    zona_mexico = timezone("America/Mexico_City")
-                    now = datetime.now(zona_mexico)
-                    now_str = now.strftime("%Y-%m-%d %H:%M:%S")
-
-                    updates.append({
-                        'range': gspread.utils.rowcol_to_a1(gsheet_row_index, estado_col_idx),
-                        'values': [["🟢 Completado"]]
-                    })
-                    updates.append({
-                        'range': gspread.utils.rowcol_to_a1(gsheet_row_index, fecha_completado_col_idx),
-                        'values': [[now_str]]
-                    })
-
-                    if batch_update_gsheet_cells(worksheet, updates):
-                        df.loc[idx, "Estado"] = "🟢 Completado"
-                        df.loc[idx, "Fecha_Completado"] = now
-                        st.success(f"✅ Pedido {row['ID_Pedido']} completado exitosamente.")
-
-                        # 🔁 Mantener pestaña activa
-                        st.session_state["pedido_editado"] = row['ID_Pedido']
-                        st.session_state["fecha_seleccionada"] = row.get("Fecha_Entrega", "")
-                        st.session_state["subtab_local"] = origen_tab
-
-                        st.cache_data.clear()
-
-                        set_active_main_tab(st.session_state.get("active_main_tab_index", 0))
-                        st.session_state["active_subtab_local_index"] = st.session_state.get("active_subtab_local_index", 0)
-                        st.session_state["active_date_tab_m_index"] = st.session_state.get("active_date_tab_m_index", 0)
-                        st.session_state["active_date_tab_t_index"] = st.session_state.get("active_date_tab_t_index", 0)
-                        st.rerun()
-                    else:
-                        st.error("❌ No se pudo completar el pedido.")
-                except Exception as e:
-                    st.error(f"Error al completar el pedido: {e}")
-        elif col_complete_btn.button(
+        if col_complete_btn.button(
             "🟢 Completar",
             key=f"complete_button_{row['ID_Pedido']}_{origen_tab}",
             disabled=disabled_if_completed,
         ):
             st.session_state[confirm_key] = True
+            st.session_state["expanded_pedidos"][row['ID_Pedido']] = True
+
+        if st.session_state.get(confirm_key):
+            with st.modal("Confirmación"):
+                st.write("¿Confirmar completar el pedido?")
+                confirm_col, cancel_col = st.columns(2)
+                if confirm_col.button(
+                    "✅ Confirmar",
+                    key=f"confirm_button_{row['ID_Pedido']}_{origen_tab}",
+                ):
+                    st.session_state.pop(confirm_key, None)
+                    try:
+                        updates = []
+                        estado_col_idx = headers.index('Estado') + 1
+                        fecha_completado_col_idx = headers.index('Fecha_Completado') + 1
+
+                        zona_mexico = timezone("America/Mexico_City")
+                        now = datetime.now(zona_mexico)
+                        now_str = now.strftime("%Y-%m-%d %H:%M:%S")
+
+                        updates.append({
+                            'range': gspread.utils.rowcol_to_a1(gsheet_row_index, estado_col_idx),
+                            'values': [["🟢 Completado"]]
+                        })
+                        updates.append({
+                            'range': gspread.utils.rowcol_to_a1(gsheet_row_index, fecha_completado_col_idx),
+                            'values': [[now_str]]
+                        })
+
+                        if batch_update_gsheet_cells(worksheet, updates):
+                            df.loc[idx, "Estado"] = "🟢 Completado"
+                            df.loc[idx, "Fecha_Completado"] = now
+                            st.success(f"✅ Pedido {row['ID_Pedido']} completado exitosamente.")
+
+                            # 🔁 Mantener pestaña activa
+                            st.session_state["pedido_editado"] = row['ID_Pedido']
+                            st.session_state["fecha_seleccionada"] = row.get("Fecha_Entrega", "")
+                            st.session_state["subtab_local"] = origen_tab
+
+                            st.cache_data.clear()
+
+                            set_active_main_tab(st.session_state.get("active_main_tab_index", 0))
+                            st.session_state["active_subtab_local_index"] = st.session_state.get("active_subtab_local_index", 0)
+                            st.session_state["active_date_tab_m_index"] = st.session_state.get("active_date_tab_m_index", 0)
+                            st.session_state["active_date_tab_t_index"] = st.session_state.get("active_date_tab_t_index", 0)
+                            st.session_state["expanded_pedidos"][row['ID_Pedido']] = True
+                            st.rerun()
+                        else:
+                            st.error("❌ No se pudo completar el pedido.")
+                    except Exception as e:
+                        st.error(f"Error al completar el pedido: {e}")
+                if cancel_col.button(
+                    "❌ Cancelar",
+                    key=f"cancel_button_{row['ID_Pedido']}_{origen_tab}",
+                ):
+                    st.session_state.pop(confirm_key, None)
+                    st.session_state["expanded_pedidos"][row['ID_Pedido']] = True
 
                 
         # ✅ BOTÓN PROCESAR MODIFICACIÓN - Solo para pedidos con estado 🛠 Modificación
