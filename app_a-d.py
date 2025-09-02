@@ -1378,7 +1378,7 @@ if not df_main.empty:
     # --- 🔔 Alerta de Modificación de Surtido ---  
     mod_surtido_df = df_main[
         (df_main['Modificacion_Surtido'].astype(str).str.strip() != '') &
-        (~df_main['Modificacion_Surtido'].astype(str).str.strip().str.contains('[✔CONFIRMADO]', regex=False)) &
+        (~df_main['Modificacion_Surtido'].astype(str).str.endswith('[✔CONFIRMADO]')) &
         (df_main['Estado'] != '🟢 Completado') &
         (df_main['Refacturacion_Tipo'].fillna("").str.strip() != "Datos Fiscales")
     ]
