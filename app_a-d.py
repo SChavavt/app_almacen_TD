@@ -1417,7 +1417,14 @@ if not df_main.empty:
     df_pendientes_proceso_demorado = df_main[df_main["Estado"].isin(["🟡 Pendiente", "🔵 En Proceso", "🔴 Demorado", "🛠 Modificación"])].copy()
 
     # === CASOS ESPECIALES (Devoluciones/Garantías) ===
-    worksheet_casos = g_spread_client.open_by_key(GOOGLE_SHEET_ID).worksheet("casos_especiales")
+    try:
+        worksheet_casos = g_spread_client.open_by_key(GOOGLE_SHEET_ID).worksheet("casos_especiales")
+    except gspread.exceptions.APIError as e:
+        st.error(f"❌ Error al abrir 'casos_especiales': {e}")
+        st.cache_resource.clear()
+        time.sleep(1)
+        g_spread_client = get_gspread_client(_credentials_json_dict=GSHEETS_CREDENTIALS)
+        worksheet_casos = g_spread_client.open_by_key(GOOGLE_SHEET_ID).worksheet("casos_especiales")
 
     # Asegurar físicamente en la hoja las columnas que vamos a escribir (si faltan, se agregan)
     required_cols_casos = [
