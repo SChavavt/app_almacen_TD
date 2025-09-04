@@ -1838,10 +1838,15 @@ with main_tabs[5]:
             else:
                 st.markdown(f"📂 Documento Adicional: {doc_extra}")
 
+        seguimiento = str(row.get("Seguimiento", "")).strip()
         coment_admin = str(row.get("Comentarios_Admin_Devolucion", "")).strip()
         if coment_admin:
             st.markdown("🗒️ Comentario Administrativo:")
             st.info(coment_admin)
+
+        if seguimiento:
+            st.markdown("📌 Seguimiento:")
+            st.info(seguimiento)
 
         mod_surtido = str(row.get("Modificacion_Surtido", "")).strip()
         adj_surtido = _normalize_urls(row.get("Adjuntos_Surtido", ""))
