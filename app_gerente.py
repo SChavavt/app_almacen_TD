@@ -827,82 +827,25 @@ with tabs[1]:
 
 with tabs[2]:
     st.header("📂 Casos Especiales")
+    nombre_caso = st.text_input("👤 Ingresa el nombre del cliente a buscar en casos especiales:")
+    buscar_caso = st.button("🔎 Buscar Caso Especial")
 
-    # --- Cargar y mostrar últimos 10 casos ---
-    df_casos = cargar_casos_especiales()
-    df_casos["Hora_Registro"] = pd.to_datetime(df_casos["Hora_Registro"], errors="coerce")
-    df_casos = df_casos.sort_values(by="Hora_Registro", ascending=False)
-    ultimos_10 = df_casos.head(10).copy()
-    st.dataframe(ultimos_10[["ID_Pedido", "Cliente", "Estado_Caso", "Vendedor_Registro", "Hora_Registro"]])
+    if buscar_caso:
+        df_casos = cargar_casos_especiales()
+        cliente_norm = normalizar(nombre_caso.strip())
+        resultados = []
+        for _, row in df_casos.iterrows():
+            nombre = str(row.get("Cliente", "")).strip()
+            if not nombre:
+                continue
+            if cliente_norm not in normalizar(nombre):
+                continue
+            resultados.append(preparar_resultado_caso(row))
 
-    ultimos_10["display"] = ultimos_10.apply(
-        lambda row: f"{row['ID_Pedido']} – 👤 {row['Cliente']} – 🔍 {row.get('Estado_Caso','')} – 🧑‍💼 {row.get('Vendedor_Registro','')} – 🕒 {row['Hora_Registro'].strftime('%d/%m %H:%M') if pd.notnull(row['Hora_Registro']) else ''}",
-        axis=1
-    )
-    seleccion_label = st.selectbox("⬇️ Selecciona un caso:", ultimos_10["display"].tolist())
-    caso_sel = seleccion_label.split(" – ")[0]
-
-    # --- Cargar datos del caso seleccionado ---
-    row = df_casos[df_casos["ID_Pedido"].astype(str) == str(caso_sel)].iloc[0]
-    gspread_row_idx = df_casos[df_casos["ID_Pedido"].astype(str) == str(caso_sel)].index[0] + 2
-
-    if "mensaje_caso_exito" in st.session_state:
-        st.success(st.session_state["mensaje_caso_exito"])
-        del st.session_state["mensaje_caso_exito"]
-
-    hoja = gspread_client.open_by_key("1aWkSelodaz0nWfQx7FZAysGnIYGQFJxAN7RO3YgCiZY").worksheet("casos_especiales")
-
-    # --- Cambio de Vendedor ---
-    vendedores = [
-        "ALEJANDRO RODRIGUEZ",
-        "ANA KAREN ORTEGA MAHUAD",
-        "DANIELA LOPEZ RAMIREZ",
-        "EDGAR ORLANDO GOMEZ VILLAGRAN",
-        "GLORIA MICHELLE GARCIA TORRES",
-        "GRISELDA CAROLINA SANCHEZ GARCIA",
-        "HECTOR DEL ANGEL AREVALO ALCALA",
-        "JOSELIN TRUJILLO PATRACA",
-        "NORA ALEJANDRA MARTINEZ MORENO",
-        "PAULINA TREJO"
-    ]
-    vendedor_actual = row.get("Vendedor_Registro", "").strip()
-
-    st.markdown("### 🧑‍💼 Cambio de Vendedor")
-    st.markdown(f"**Actual:** {vendedor_actual}")
-
-    vendedores_opciones = [v for v in vendedores if v != vendedor_actual] or [vendedor_actual]
-    nuevo_vendedor = st.selectbox("➡️ Cambiar a:", vendedores_opciones)
-
-    if st.button("🧑‍💼 Guardar cambio de vendedor", key="guardar_vendedor_caso"):
-        hoja.update_cell(gspread_row_idx, df_casos.columns.get_loc("Vendedor_Registro") + 1, nuevo_vendedor)
-        st.session_state["mensaje_caso_exito"] = "🎈 Vendedor actualizado correctamente."
-        st.rerun()
-
-    # --- Cambio de Estado del Caso ---
-    estado_col = "Estado_Caso" if "Estado_Caso" in df_casos.columns else "Estado"
-    estado_actual = row.get(estado_col, "").strip()
-    st.markdown("### 🔍 Estado del Caso")
-    nuevo_estado = st.text_input("📝 Nuevo estado:", estado_actual)
-
-    if st.button("💾 Guardar estado del caso"):
-        hoja.update_cell(gspread_row_idx, df_casos.columns.get_loc(estado_col) + 1, nuevo_estado)
-        st.session_state["mensaje_caso_exito"] = "🔍 Estado del caso actualizado correctamente."
-        st.rerun()
-
-    # --- Visibilidad en Panel ---
-    completado = row.get("Completados_Limpiado", "")
-    st.markdown("### 👁 Visibilidad en Pantalla de Producción")
-    opciones_visibilidad = {"Sí": "", "No": "sí"}
-    valor_actual = completado.strip().lower()
-    valor_preseleccionado = "No" if valor_actual == "sí" else "Sí"
-    seleccion = st.selectbox(
-        "¿Mostrar este caso en el Panel?",
-        list(opciones_visibilidad.keys()),
-        index=list(opciones_visibilidad.keys()).index(valor_preseleccionado)
-    )
-    nuevo_valor_completado = opciones_visibilidad[seleccion]
-
-    if st.button("👁 Guardar visibilidad en Panel", key="guardar_visibilidad_caso"):
-        hoja.update_cell(gspread_row_idx, df_casos.columns.get_loc("Completados_Limpiado") + 1, nuevo_valor_completado)
-        st.session_state["mensaje_caso_exito"] = "👁 Visibilidad en pantalla de producción actualizada."
-        st.rerun()
+        st.markdown("---")
+        if resultados:
+            st.success(f"✅ Se encontraron {len(resultados)} caso(s).")
+            for res in resultados:
+                render_caso_especial(res)
+        else:
+            st.warning("⚠️ No se encontraron casos especiales para ese cliente.")
