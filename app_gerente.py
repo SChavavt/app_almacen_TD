@@ -67,7 +67,7 @@ def cargar_casos_especiales():
         "Fecha_Entrega","Comentario","Adjuntos","Estado","Resultado_Esperado","Material_Devuelto",
         "Monto_Devuelto","Motivo_Detallado","Area_Responsable","Nombre_Responsable","Fecha_Completado",
         "Completados_Limpiado","Estado_Caso","Hoja_Ruta_Mensajero","Numero_Cliente_RFC","Tipo_Envio_Original",
-        "Fecha_Recepcion_Devolucion","Estado_Recepcion","Nota_Credito_URL","Documento_Adicional_URL",
+        "Tipo_Caso","Fecha_Recepcion_Devolucion","Estado_Recepcion","Nota_Credito_URL","Documento_Adicional_URL",
         "Seguimiento",
         "Comentarios_Admin_Devolucion","Modificacion_Surtido","Adjuntos_Surtido","Refacturacion_Tipo",
         "Refacturacion_Subtipo","Folio_Factura_Refacturada","Turno","Hora_Proceso",
@@ -581,17 +581,36 @@ with tabs[1]:
                 st.error("❌ Contraseña incorrecta.")
         st.stop()
 
-    df = cargar_pedidos()
+    df_pedidos = cargar_pedidos()
+    df_casos = cargar_casos_especiales()
+
+    def es_devol_o_garant(row):
+        for col in ("Tipo_Envio", "Tipo_Caso"):
+            valor = str(row.get(col, ""))
+            if valor and ("devolu" in normalizar(valor) or "garant" in normalizar(valor)):
+                return True
+        return False
+
+    df_casos = df_casos[df_casos.apply(es_devol_o_garant, axis=1)]
+
+    for d in (df_pedidos, df_casos):
+        d["Hora_Registro"] = pd.to_datetime(d["Hora_Registro"], errors="coerce")
+
+    df_pedidos["__source"] = "pedidos"
+    df_casos["__source"] = "casos"
+    df = pd.concat([df_pedidos, df_casos], ignore_index=True, sort=False)
     df = df[df["ID_Pedido"].notna()]
-    df["Hora_Registro"] = pd.to_datetime(df["Hora_Registro"], errors='coerce')
     df = df.sort_values(by="Hora_Registro", ascending=False)
-    df = df.sort_values(by="Hora_Registro", ascending=False)
-    
+
     if "pedido_modificado" in st.session_state:
         pedido_sel = st.session_state["pedido_modificado"]
+        source_sel = st.session_state.get("pedido_modificado_source", "pedidos")
         del st.session_state["pedido_modificado"]  # ✅ limpia la variable tras usarla
+        if "pedido_modificado_source" in st.session_state:
+            del st.session_state["pedido_modificado_source"]
     else:
        pedido_sel = None  # ✅ evitar NameError si no se selecciona nada aún
+       source_sel = None
 
 
     usar_busqueda = st.checkbox("🔍 Buscar por nombre de cliente (activar para ocultar los últimos 10 pedidos)")
@@ -619,36 +638,38 @@ with tabs[1]:
 
             if len(coincidencias) == 1:
                 pedido_sel = coincidencias[0]["ID_Pedido"]
+                source_sel = coincidencias[0]["__source"]
                 row = coincidencias[0]
                 st.markdown(
-                    f"👤 {row['Cliente']} – 🔍 {row['Estado']} – 🧑‍💼 {row['Vendedor_Registro']} – 🕒 {row['Hora_Registro'].strftime('%d/%m %H:%M')}"
+                    f"👤 {row['Cliente']} – 🔍 {row.get('Estado', row.get('Estado_Caso',''))} – 🧑‍💼 {row.get('Vendedor_Registro','')} – 🕒 {row['Hora_Registro'].strftime('%d/%m %H:%M')}"
                 )
 
             else:
                 opciones = [
-                    f"👤 {r['Cliente']} – 🔍 {r['Estado']} – 🧑‍💼 {r['Vendedor_Registro']} – 🕒 {r['Hora_Registro'].strftime('%d/%m %H:%M')}"
+                    f"{r['ID_Pedido']} – 👤 {r['Cliente']} – 🔍 {r.get('Estado', r.get('Estado_Caso',''))} – 🧑‍💼 {r.get('Vendedor_Registro','')} – 🕒 {r['Hora_Registro'].strftime('%d/%m %H:%M')}"
                     for r in coincidencias
                 ]
                 seleccion = st.selectbox("👥 Se encontraron múltiples pedidos, selecciona uno:", opciones)
-                cliente_seleccionado = seleccion.split(" – ")[0].replace("👤 ", "").strip()
-                pedido_sel = next(
-                    r["ID_Pedido"]
+                pedido_sel = seleccion.split(" – ")[0]
+                source_sel = next(
+                    r["__source"]
                     for r in coincidencias
-                    if r["Cliente"].strip() == cliente_seleccionado
+                    if str(r["ID_Pedido"]) == pedido_sel
                 )
 
     else:
         ultimos_10 = df.head(10)
         st.markdown("### 🕒 Últimos 10 Pedidos Registrados")
         ultimos_10["display"] = ultimos_10.apply(
-            lambda row: f"👤 {row['Cliente']} – 🔍 {row['Estado']} – 🧑‍💼 {row['Vendedor_Registro']} – 🕒 {row['Hora_Registro'].strftime('%d/%m %H:%M')}",
+            lambda row: f"{row['ID_Pedido']} – 👤 {row['Cliente']} – 🔍 {row.get('Estado', row.get('Estado_Caso',''))} – 🧑‍💼 {row.get('Vendedor_Registro','')} – 🕒 {row['Hora_Registro'].strftime('%d/%m %H:%M')}",
             axis=1
         )
         pedido_rapido_label = st.selectbox(
             "⬇️ Selecciona uno de los pedidos recientes:",
             ultimos_10["display"].tolist()
         )
-        pedido_sel = ultimos_10[ultimos_10["display"] == pedido_rapido_label]["ID_Pedido"].values[0]
+        pedido_sel = pedido_rapido_label.split(" – ")[0]
+        source_sel = ultimos_10[ultimos_10["ID_Pedido"].astype(str) == pedido_sel]["__source"].values[0]
 
 
     # --- Cargar datos del pedido seleccionado ---
@@ -658,15 +679,17 @@ with tabs[1]:
         st.warning("⚠️ No se ha seleccionado ningún pedido válido.")
         st.stop()
 
-    row = df[df["ID_Pedido"] == pedido_sel].iloc[0]
-    gspread_row_idx = df[df["ID_Pedido"] == pedido_sel].index[0] + 2  # índice real en hoja
+    row_df = df_pedidos if source_sel == "pedidos" else df_casos
+    row = row_df[row_df["ID_Pedido"].astype(str) == str(pedido_sel)].iloc[0]
+    gspread_row_idx = row_df[row_df["ID_Pedido"].astype(str) == str(pedido_sel)].index[0] + 2  # índice real en hoja
     if "mensaje_exito" in st.session_state:
         st.success(st.session_state["mensaje_exito"])
         del st.session_state["mensaje_exito"]  # ✅ eliminar para que no se repita
 
 
     # Definir la hoja de Google Sheets para modificación
-    hoja = gspread_client.open_by_key("1aWkSelodaz0nWfQx7FZAysGnIYGQFJxAN7RO3YgCiZY").worksheet("datos_pedidos")
+    hoja_nombre = "datos_pedidos" if source_sel == "pedidos" else "casos_especiales"
+    hoja = gspread_client.open_by_key("1aWkSelodaz0nWfQx7FZAysGnIYGQFJxAN7RO3YgCiZY").worksheet(hoja_nombre)
 
     st.markdown(
         f"📦 **Cliente:** {row['Cliente']} &nbsp;&nbsp;&nbsp;&nbsp; 🧾 **Folio Factura:** {row.get('Folio_Factura', 'N/A')}"
@@ -695,30 +718,33 @@ with tabs[1]:
     nuevo_vendedor = st.selectbox("➡️ Cambiar a:", vendedores_opciones)
 
     if st.button("🧑‍💼 Guardar cambio de vendedor"):
-        hoja.update_cell(gspread_row_idx, df.columns.get_loc("Vendedor_Registro")+1, nuevo_vendedor)
+        hoja.update_cell(gspread_row_idx, row_df.columns.get_loc("Vendedor_Registro")+1, nuevo_vendedor)
         st.session_state["pedido_modificado"] = pedido_sel
+        st.session_state["pedido_modificado_source"] = source_sel
         st.session_state["mensaje_exito"] = "🎈 Vendedor actualizado correctamente."
         st.rerun()
 
 
-    tipo_envio_actual = row["Tipo_Envio"].strip()
-    st.markdown("### 🚚 Cambio de Tipo de Envío")
-    st.markdown(f"**Actual:** {tipo_envio_actual}")
+    if source_sel == "pedidos":
+        tipo_envio_actual = row["Tipo_Envio"].strip()
+        st.markdown("### 🚚 Cambio de Tipo de Envío")
+        st.markdown(f"**Actual:** {tipo_envio_actual}")
 
-    opcion_contraria = "📍 Pedido Local" if "Foráneo" in tipo_envio_actual else "🚚 Pedido Foráneo"
-    tipo_envio = st.selectbox("➡️ Cambiar a:", [opcion_contraria])
+        opcion_contraria = "📍 Pedido Local" if "Foráneo" in tipo_envio_actual else "🚚 Pedido Foráneo"
+        tipo_envio = st.selectbox("➡️ Cambiar a:", [opcion_contraria])
 
-    if tipo_envio == "📍 Pedido Local":
-        nuevo_turno = st.selectbox("⏰ Turno", ["☀ Local Mañana", "🌙 Local Tarde", "🌵 Saltillo", "📦 Pasa a Bodega"])
-    else:
-        nuevo_turno = ""
+        if tipo_envio == "📍 Pedido Local":
+            nuevo_turno = st.selectbox("⏰ Turno", ["☀ Local Mañana", "🌙 Local Tarde", "🌵 Saltillo", "📦 Pasa a Bodega"])
+        else:
+            nuevo_turno = ""
 
-    if st.button("📦 Guardar cambio de tipo de envío"):
-        hoja.update_cell(gspread_row_idx, df.columns.get_loc("Tipo_Envio")+1, tipo_envio)
-        hoja.update_cell(gspread_row_idx, df.columns.get_loc("Turno")+1, nuevo_turno)
-        st.session_state["pedido_modificado"] = pedido_sel
-        st.session_state["mensaje_exito"] = "📦 Tipo de envío y turno actualizados correctamente."
-        st.rerun()
+        if st.button("📦 Guardar cambio de tipo de envío"):
+            hoja.update_cell(gspread_row_idx, row_df.columns.get_loc("Tipo_Envio")+1, tipo_envio)
+            hoja.update_cell(gspread_row_idx, row_df.columns.get_loc("Turno")+1, nuevo_turno)
+            st.session_state["pedido_modificado"] = pedido_sel
+            st.session_state["pedido_modificado_source"] = source_sel
+            st.session_state["mensaje_exito"] = "📦 Tipo de envío y turno actualizados correctamente."
+            st.rerun()
 
 
     # --- NUEVO: CAMBIO DE ESTADO A CANCELADO ---
@@ -732,9 +758,10 @@ with tabs[1]:
             try:
                 # Actualizar el estado en la hoja de cálculo
                 nuevo_estado = "🟣 Cancelado"
-                hoja.update_cell(gspread_row_idx, df.columns.get_loc("Estado")+1, nuevo_estado)
+                hoja.update_cell(gspread_row_idx, row_df.columns.get_loc("Estado")+1, nuevo_estado)
                 # Usar el mismo sistema que las otras secciones
                 st.session_state["pedido_modificado"] = pedido_sel
+                st.session_state["pedido_modificado_source"] = source_sel
                 st.session_state["mensaje_exito"] = "🟣 Pedido marcado como CANCELADO correctamente."
                 st.rerun()
             except Exception as e:
@@ -752,7 +779,8 @@ with tabs[1]:
     nuevo_valor_completado = opciones_visibilidad[seleccion]
 
     if st.button("👁 Guardar visibilidad en Panel"):
-        hoja.update_cell(gspread_row_idx, df.columns.get_loc("Completados_Limpiado")+1, nuevo_valor_completado)
+        hoja.update_cell(gspread_row_idx, row_df.columns.get_loc("Completados_Limpiado")+1, nuevo_valor_completado)
         st.session_state["pedido_modificado"] = pedido_sel
+        st.session_state["pedido_modificado_source"] = source_sel
         st.session_state["mensaje_exito"] = "👁 Visibilidad en pantalla de producción actualizada."
         st.rerun()
