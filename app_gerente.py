@@ -600,7 +600,11 @@ with tabs[1]:
                 return True
         return False
 
-    df_casos = df_casos[df_casos.apply(es_devol_o_garant, axis=1)]
+    filtrar_devoluciones = st.checkbox(
+        "Mostrar solo devoluciones o garantías", value=False
+    )
+    if filtrar_devoluciones:
+        df_casos = df_casos[df_casos.apply(es_devol_o_garant, axis=1)]
 
     for d in (df_pedidos, df_casos):
         d["Hora_Registro"] = pd.to_datetime(d["Hora_Registro"], errors="coerce")
