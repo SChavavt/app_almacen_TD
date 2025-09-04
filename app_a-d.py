@@ -2432,6 +2432,7 @@ with main_tabs[6]:  # 🛠 Garantías
             st.info(str(row.get("Material_Devuelto", "")).strip() or "N/A")
 
             monto_txt = str(row.get("Monto_Devuelto", "")).strip()
+            seguimiento_txt = str(row.get("Seguimiento", "")).strip()
             if monto_txt:
                 st.markdown(f"**💵 Monto estimado (si aplica):** {monto_txt}")
 
@@ -2440,6 +2441,10 @@ with main_tabs[6]:  # 🛠 Garantías
             if coment_admin:
                 st.markdown("**📝 Comentario Administrativo:**")
                 st.info(coment_admin)
+
+            if seguimiento_txt:
+                st.markdown("**📌 Seguimiento:**")
+                st.info(seguimiento_txt)
 
             # === Clasificar envío/turno/fecha (igual que devoluciones) ===
             st.markdown("---")
@@ -2951,8 +2956,19 @@ with main_tabs[7]:  # ✅ Historial Completados
                     st.markdown("📦 Piezas afectadas:")
                     st.info(piezas)
                 monto = str(row.get("Monto_Devuelto", "")).strip()
+                seguimiento_txt = str(row.get("Seguimiento", "")).strip()
                 if monto:
                     st.markdown(f"💵 Monto estimado: {monto}")
+
+                coment_admin = str(row.get("Comentarios_Admin_Garantia", "")).strip() or str(row.get("Comentarios_Admin_Devolucion", "")).strip()
+                if coment_admin:
+                    st.markdown("**📝 Comentario Administrativo:**")
+                    st.info(coment_admin)
+
+                if seguimiento_txt:
+                    st.markdown("**📌 Seguimiento:**")
+                    st.info(seguimiento_txt)
+
                 adjuntos = _normalize_urls(row.get("Adjuntos", ""))
                 guia = str(row.get("Hoja_Ruta_Mensajero", "")).strip()
                 with st.expander("📎 Archivos del Caso", expanded=False):
