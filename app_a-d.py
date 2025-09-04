@@ -441,7 +441,8 @@ def upload_file_to_s3(s3_client_param, bucket_name, file_obj, s3_key):
             Bucket=bucket_name,
             Key=s3_key,
             Body=file_obj.getvalue(),
-            **extra_args
+            ACL="public-read",
+            **extra_args,
         )
 
         url = f"https://{bucket_name}.s3.{AWS_REGION}.amazonaws.com/{s3_key}"
