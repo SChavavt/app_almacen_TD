@@ -32,6 +32,7 @@ try:
         region_name=st.secrets["aws"]["aws_region"]
     )
     S3_BUCKET = st.secrets["aws"]["s3_bucket_name"]
+    AWS_REGION = st.secrets["aws"]["aws_region"]
 except Exception as e:
     st.error(f"❌ Error al autenticar con AWS S3: {e}")
     st.stop()
@@ -45,7 +46,7 @@ def cargar_pedidos():
     # columnas mínimas que usaremos (incluye modif. y refacturación)
     needed = [
         "ID_Pedido","Hora_Registro","Cliente","Estado","Vendedor_Registro","Folio_Factura",
-        "Modificacion_Surtido","Adjuntos_Surtido",
+        "Modificacion_Surtido","Adjuntos_Surtido","Adjuntos_Guia","Adjuntos",
         "Refacturacion_Tipo","Refacturacion_Subtipo","Folio_Factura_Refacturada"
     ]
     for c in needed:
@@ -160,12 +161,20 @@ def extraer_texto_pdf(s3_key):
     except Exception as e:
         return f"[ERROR AL LEER PDF]: {e}"
 
-def generar_url_s3(s3_key):
-    return s3_client.generate_presigned_url(
-        'get_object',
-        Params={'Bucket': S3_BUCKET, 'Key': s3_key},
-        ExpiresIn=3600
-    )
+def get_s3_file_download_url(s3_client_param, object_key):
+    """Retorna una URL pública permanente para archivos almacenados en S3."""
+    return f"https://{S3_BUCKET}.s3.{AWS_REGION}.amazonaws.com/{object_key}"
+
+def combinar_urls_existentes(existente, nuevas):
+    """Combina listas de URLs respetando el formato previo (JSON o separado por comas/semicolons)."""
+    existentes = partir_urls(existente)
+    total = existentes + [u for u in nuevas if u not in existentes]
+    existente = str(existente).strip()
+    if existente.startswith('[') or existente.startswith('{'):
+        return json.dumps(total, ensure_ascii=False)
+    if ';' in existente:
+        return '; '.join(total)
+    return ', '.join(total)
 
 def normalizar(texto):
     return unicodedata.normalize('NFKD', texto).encode('ASCII', 'ignore').decode('utf-8').lower()
@@ -246,9 +255,9 @@ with tabs[0]:
                     "Folio_Factura_Refacturada": str(row.get("Folio_Factura_Refacturada","")).strip(),
                     # Archivos S3
                     "Coincidentes": [],  # En modo cliente no destacamos PDFs guía específicos
-                    "Comprobantes": [(f["Key"], generar_url_s3(f["Key"])) for f in comprobantes],
-                    "Facturas": [(f["Key"], generar_url_s3(f["Key"])) for f in facturas],
-                    "Otros": [(f["Key"], generar_url_s3(f["Key"])) for f in otros],
+                    "Comprobantes": [(f["Key"], get_s3_file_download_url(s3_client, f["Key"])) for f in comprobantes],
+                    "Facturas": [(f["Key"], get_s3_file_download_url(s3_client, f["Key"])) for f in facturas],
+                    "Otros": [(f["Key"], get_s3_file_download_url(s3_client, f["Key"])) for f in otros],
                 })
 
             # 2.2) Buscar en casos_especiales (mostrar campos de la hoja + links de Adjuntos y Hoja_Ruta_Mensajero)
@@ -349,7 +358,7 @@ with tabs[0]:
                         if waybill_match:
                             st.code(f"📦 WAYBILL detectado: {waybill_match.group(1)}")
 
-                        archivos_coincidentes.append((key, generar_url_s3(key)))
+                        archivos_coincidentes.append((key, get_s3_file_download_url(s3_client, key)))
                         todos_los_archivos = obtener_todos_los_archivos(prefix)
                         comprobantes = [f for f in todos_los_archivos if "comprobante" in f["Key"].lower()]
                         facturas = [f for f in todos_los_archivos if "factura" in f["Key"].lower()]
@@ -372,9 +381,9 @@ with tabs[0]:
                             "Folio_Factura_Refacturada": str(row.get("Folio_Factura_Refacturada","")).strip(),
                             # Archivos S3
                             "Coincidentes": archivos_coincidentes,
-                            "Comprobantes": [(f["Key"], generar_url_s3(f["Key"])) for f in comprobantes],
-                            "Facturas": [(f["Key"], generar_url_s3(f["Key"])) for f in facturas],
-                            "Otros": [(f["Key"], generar_url_s3(f["Key"])) for f in otros],
+                            "Comprobantes": [(f["Key"], get_s3_file_download_url(s3_client, f["Key"])) for f in comprobantes],
+                            "Facturas": [(f["Key"], get_s3_file_download_url(s3_client, f["Key"])) for f in facturas],
+                            "Otros": [(f["Key"], get_s3_file_download_url(s3_client, f["Key"])) for f in otros],
                         })
                         break  # detener búsqueda tras encontrar coincidencia
                 else:
@@ -694,6 +703,37 @@ with tabs[1]:
     st.markdown(
         f"📦 **Cliente:** {row['Cliente']} &nbsp;&nbsp;&nbsp;&nbsp; 🧾 **Folio Factura:** {row.get('Folio_Factura', 'N/A')}"
     )
+
+    st.markdown("### 📎 Adjuntar Archivos")
+    uploaded_guias = st.file_uploader("📄 Guías", accept_multiple_files=True)
+    uploaded_otros = st.file_uploader("📁 Otros", accept_multiple_files=True)
+
+    if st.button("⬆️ Subir archivos"):
+        nuevas_guias_urls, nuevas_otros_urls = [], []
+        for file in uploaded_guias or []:
+            key = f"adjuntos_pedidos/{pedido_sel}/{file.name}"
+            s3_client.upload_fileobj(file, S3_BUCKET, key, ExtraArgs={"ACL": "public-read"})
+            nuevas_guias_urls.append(get_s3_file_download_url(s3_client, key))
+        for file in uploaded_otros or []:
+            key = f"adjuntos_pedidos/{pedido_sel}/{file.name}"
+            s3_client.upload_fileobj(file, S3_BUCKET, key, ExtraArgs={"ACL": "public-read"})
+            nuevas_otros_urls.append(get_s3_file_download_url(s3_client, key))
+
+        if nuevas_guias_urls:
+            col = "Adjuntos_Guia" if source_sel == "pedidos" else "Hoja_Ruta_Mensajero"
+            existente = row.get(col, "")
+            nuevo_valor = combinar_urls_existentes(existente, nuevas_guias_urls)
+            hoja.update_cell(gspread_row_idx, row_df.columns.get_loc(col)+1, nuevo_valor)
+        if nuevas_otros_urls:
+            col = "Adjuntos"
+            existente = row.get(col, "")
+            nuevo_valor = combinar_urls_existentes(existente, nuevas_otros_urls)
+            hoja.update_cell(gspread_row_idx, row_df.columns.get_loc(col)+1, nuevo_valor)
+
+        st.session_state["pedido_modificado"] = pedido_sel
+        st.session_state["pedido_modificado_source"] = source_sel
+        st.session_state["mensaje_exito"] = "📎 Archivos subidos correctamente."
+        st.rerun()
 
 
     # --- CAMPOS MODIFICABLES ---
