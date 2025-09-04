@@ -441,11 +441,14 @@ def upload_file_to_s3(s3_client_param, bucket_name, file_obj, s3_key):
             Bucket=bucket_name,
             Key=s3_key,
             Body=file_obj.getvalue(),
-            ACL="public-read",
             **extra_args,
         )
 
-        url = f"https://{bucket_name}.s3.{AWS_REGION}.amazonaws.com/{s3_key}"
+        url = s3_client_param.generate_presigned_url(
+            "get_object",
+            Params={"Bucket": bucket_name, "Key": s3_key},
+            ExpiresIn=3600,
+        )
         return True, url
 
     except Exception as e:
@@ -539,11 +542,17 @@ def get_files_in_s3_prefix(s3_client_param, prefix):
         st.error(f"❌ Error al obtener archivos del prefijo S3 '{prefix}': {e}")
         return []
 
-def get_s3_file_download_url(s3_client_param, object_key):
-    """
-    Retorna una URL pública permanente para archivos almacenados en S3.
-    """
-    return f"https://{S3_BUCKET_NAME}.s3.{AWS_REGION}.amazonaws.com/{object_key}"
+def get_s3_file_download_url(s3_client_param, object_key, expires_in=3600):
+    """Genera y retorna una URL prefirmada para archivos almacenados en S3."""
+    try:
+        return s3_client_param.generate_presigned_url(
+            "get_object",
+            Params={"Bucket": S3_BUCKET_NAME, "Key": object_key},
+            ExpiresIn=expires_in,
+        )
+    except Exception as e:
+        st.error(f"❌ Error al generar URL prefirmada: {e}")
+        return "#"
 
 
 # --- Helper Functions (existing in app.py) ---
