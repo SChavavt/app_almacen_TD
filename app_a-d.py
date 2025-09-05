@@ -11,6 +11,7 @@ import gspread.utils
 import json # Import json for parsing credentials
 import os
 import uuid
+import math
 from pytz import timezone
 from urllib.parse import urlparse, unquote
 import streamlit.components.v1 as components
@@ -29,6 +30,45 @@ def mx_now_str():
 def mx_today():
     return mx_now().date()
 
+def extract_s3_keys(value):
+    """Return a list of S3 object keys without any presigned query parameters."""
+    if value is None:
+        return []
+    if isinstance(value, float) and math.isnan(value):
+        return []
+    s = str(value).strip()
+    if not s or s.lower() in ("nan", "none", "n/a"):
+        return []
+    candidates = []
+    try:
+        obj = json.loads(s)
+        if isinstance(obj, list):
+            for it in obj:
+                if isinstance(it, str) and it.strip():
+                    candidates.append(it.strip())
+                elif isinstance(it, dict):
+                    u = it.get("url") or it.get("URL")
+                    if u and str(u).strip():
+                        candidates.append(str(u).strip())
+        elif isinstance(obj, dict):
+            for k in ("url", "URL", "link", "href"):
+                if obj.get(k):
+                    candidates.append(str(obj[k]).strip())
+    except Exception:
+        candidates.extend(re.split(r"[,\n;]+", s))
+
+    cleaned = []
+    seen = set()
+    for c in candidates:
+        c = c.strip()
+        if not c:
+            continue
+        c = c.split("?")[0]
+        c = urlparse(c).path.lstrip('/')
+        if c and c not in seen:
+            seen.add(c)
+            cleaned.append(c)
+    return cleaned
 
 
 st.set_page_config(page_title="Recepción de Pedidos TD", layout="wide")
@@ -328,6 +368,20 @@ def update_gsheet_cell(worksheet, headers, row_index, col_name, value):
     except Exception as e:
         st.error(f"❌ Error al actualizar la celda ({row_index}, {col_name}) en Google Sheets: {e}")
         return False
+
+
+def sanitize_existing_s3_keys(df, worksheet, headers, column_name):
+    """Clean legacy presigned URLs in the given column and persist S3 keys."""
+    if column_name not in df.columns:
+        return
+    for idx, raw in df[column_name].items():
+        keys = extract_s3_keys(raw)
+        cleaned = ", ".join(keys)
+        if cleaned != str(raw).strip():
+            gsheet_row = df.at[idx, "_gsheet_row_index"]
+            if gsheet_row is not None and column_name in headers:
+                update_gsheet_cell(worksheet, headers, gsheet_row, column_name, cleaned)
+            df.at[idx, column_name] = cleaned
     
 def cargar_pedidos_desde_google_sheet(sheet_id, worksheet_name):
     """
@@ -916,6 +970,14 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
             else:
                 st.error(f"❌ No se encontró la carpeta (prefijo S3) del pedido '{row['ID_Pedido']}'.")
 
+            guia_keys = extract_s3_keys(row.get("Adjuntos_Guia", ""))
+            if guia_keys:
+                st.markdown("**Guía(s) registradas:**")
+                for g in guia_keys:
+                    nombre = os.path.basename(g)
+                    url = get_s3_file_download_url(s3_client_param, g)
+                    st.markdown(f"- [{nombre}]({url})")
+
 
         # Complete Button
         if col_complete_btn.button("🟢 Completar", key=f"complete_button_{row['ID_Pedido']}_{origen_tab}", disabled=disabled_if_completed):
@@ -1227,6 +1289,14 @@ def mostrar_pedido_solo_guia(df, idx, row, orden, origen_tab, current_main_tab_l
         st.markdown("---")
         st.markdown("### 📦 Subir Archivos de Guía")
 
+        existing_keys = extract_s3_keys(row.get("Adjuntos_Guia", ""))
+        if existing_keys:
+            st.markdown("**Guía(s) registradas:**")
+            for g in existing_keys:
+                nombre = os.path.basename(g)
+                url = get_s3_file_download_url(s3_client_param, g)
+                st.markdown(f"- [{nombre}]({url})")
+
         # Uploader siempre visible (sin expander)
         upload_key = f"file_guia_only_{row['ID_Pedido']}"
         archivos_guia = st.file_uploader(
@@ -1369,6 +1439,8 @@ for col in required_cols_main:
     if col not in df_main.columns:
         df_main[col] = ""
 
+sanitize_existing_s3_keys(df_main, worksheet_main, headers_main, "Adjuntos_Guia")
+
 
 if not df_main.empty:
     df_main, changes_made_by_demorado_check = check_and_update_demorados(df_main, worksheet_main, headers_main)
@@ -1451,6 +1523,8 @@ if not df_main.empty:
     for c in ["Numero_Serie", "Fecha_Compra", "Completados_Limpiado"]:
         if c not in df_casos.columns:
             df_casos[c] = ""
+
+    sanitize_existing_s3_keys(df_casos, worksheet_casos, headers_casos, "Hoja_Ruta_Mensajero")
 
     # 📊 Resumen de Estados combinando datos_pedidos y casos_especiales
     st.markdown("### 📊 Resumen de Estados")
@@ -1732,41 +1806,7 @@ with main_tabs[5]:
 
     # 🔧 Helper para normalizar/extraer URLs desde texto o JSON
     def _normalize_urls(value):
-        if value is None:
-            return []
-        if isinstance(value, float) and math.isnan(value):
-            return []
-        s = str(value).strip()
-        if not s or s.lower() in ("nan", "none", "n/a"):
-            return []
-        urls = []
-        try:
-            obj = json.loads(s)
-            if isinstance(obj, list):
-                for it in obj:
-                    if isinstance(it, str) and it.strip():
-                        urls.append(it.strip())
-                    elif isinstance(it, dict):
-                        u = it.get("url") or it.get("URL")
-                        if u and str(u).strip():
-                            urls.append(str(u).strip())
-            elif isinstance(obj, dict):
-                for k in ("url", "URL", "link", "href"):
-                    if obj.get(k):
-                        urls.append(str(obj[k]).strip())
-        except Exception:
-            parts = re.split(r"[,\n;]+", s)
-            for p in parts:
-                p = p.strip()
-                if p:
-                    urls.append(p)
-        seen = set()
-        out = []
-        for u in urls:
-            if u not in seen:
-                seen.add(u)
-                out.append(u)
-        return out
+        return extract_s3_keys(value)
 
     def render_caso_especial_devolucion(row):
         st.markdown("### 🧾 Caso Especial – 🔁 Devolución")
@@ -2367,40 +2407,7 @@ with main_tabs[6]:  # 🛠 Garantías
 
     # 🔧 Helper para normalizar/extraer URLs desde texto o JSON
     def _normalize_urls(value):
-        if value is None:
-            return []
-        if isinstance(value, float) and math.isnan(value):
-            return []
-        s = str(value).strip()
-        if not s or s.lower() in ("nan", "none", "n/a"):
-            return []
-        urls = []
-        try:
-            obj = json.loads(s)
-            if isinstance(obj, list):
-                for it in obj:
-                    if isinstance(it, str) and it.strip():
-                        urls.append(it.strip())
-                    elif isinstance(it, dict):
-                        u = it.get("url") or it.get("URL")
-                        if u and str(u).strip():
-                            urls.append(str(u).strip())
-            elif isinstance(obj, dict):
-                for k in ("url", "URL", "link", "href"):
-                    if obj.get(k):
-                        urls.append(str(obj[k]).strip())
-        except Exception:
-            parts = re.split(r"[,\n;]+", s)
-            for p in parts:
-                p = p.strip()
-                if p:
-                    urls.append(p)
-        seen, out = set(), []
-        for u in urls:
-            if u not in seen:
-                seen.add(u)
-                out.append(u)
-        return out
+        return extract_s3_keys(value)
 
     # ====== RECORRER CADA GARANTÍA ======
     for _, row in garantias_display.iterrows():
