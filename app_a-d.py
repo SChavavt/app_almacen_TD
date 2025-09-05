@@ -444,12 +444,9 @@ def upload_file_to_s3(s3_client_param, bucket_name, file_obj, s3_key):
             **extra_args,
         )
 
-        url = s3_client_param.generate_presigned_url(
-            "get_object",
-            Params={"Bucket": bucket_name, "Key": s3_key},
-            ExpiresIn=3600,
-        )
-        return True, url
+        # Return the S3 object key so it can be stored and later used to
+        # generate a fresh presigned URL when needed.
+        return True, s3_key
 
     except Exception as e:
         st.error(f"❌ Error al subir archivo a S3: {e}")
@@ -542,7 +539,7 @@ def get_files_in_s3_prefix(s3_client_param, prefix):
         st.error(f"❌ Error al obtener archivos del prefijo S3 '{prefix}': {e}")
         return []
 
-def get_s3_file_download_url(s3_client_param, object_key, expires_in=3600):
+def get_s3_file_download_url(s3_client_param, object_key, expires_in=86400):
     """Genera y retorna una URL prefirmada para archivos almacenados en S3."""
     try:
         return s3_client_param.generate_presigned_url(
@@ -1032,17 +1029,17 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
                     st.session_state["expanded_subir_guia"][row['ID_Pedido']] = True
 
                     if archivos_guia:
-                        uploaded_urls = []
+                        uploaded_keys = []
                         for archivo in archivos_guia:
                             ext = os.path.splitext(archivo.name)[1]
                             s3_key = f"{row['ID_Pedido']}/guia_{uuid.uuid4().hex[:6]}{ext}"
-                            success, url = upload_file_to_s3(
+                            success, uploaded_key = upload_file_to_s3(
                                 s3_client_param, S3_BUCKET_NAME, archivo, s3_key
                             )
-                            if success:
-                                uploaded_urls.append(url)
+                            if success and uploaded_key:
+                                uploaded_keys.append(uploaded_key)
 
-                        if uploaded_urls:
+                        if uploaded_keys:
                             tipo_envio_str = str(row.get("Tipo_Envio", "")).lower()
                             use_hoja_ruta = ("devol" in tipo_envio_str) or ("garant" in tipo_envio_str)
                             target_col_for_guide = (
@@ -1053,7 +1050,7 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
                             anterior = str(row.get(target_col_for_guide, "")).strip()
                             nueva_lista = (
                                 (anterior + ", " if anterior else "")
-                                + ", ".join(uploaded_urls)
+                                + ", ".join(uploaded_keys)
                             )
                             success = update_gsheet_cell(
                                 worksheet, headers, gsheet_row_index, target_col_for_guide, nueva_lista
@@ -1066,11 +1063,11 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
                                     df.at[idx, "Adjuntos_Guia"] = nueva_lista
                                     row["Adjuntos_Guia"] = nueva_lista
                                 st.toast(
-                                    f"📤 {len(uploaded_urls)} guía(s) subida(s) con éxito.",
+                                    f"📤 {len(uploaded_keys)} guía(s) subida(s) con éxito.",
                                     icon="📦",
                                 )
                                 st.success(
-                                    f"📦 Se subieron correctamente {len(uploaded_urls)} archivo(s) de guía."
+                                    f"📦 Se subieron correctamente {len(uploaded_keys)} archivo(s) de guía."
                                 )
                             else:
                                 st.error(
@@ -1251,18 +1248,18 @@ def mostrar_pedido_solo_guia(df, idx, row, orden, origen_tab, current_main_tab_l
                 st.warning("⚠️ Primero sube al menos un archivo de guía.")
                 st.stop()
 
-            uploaded_urls = []
+            uploaded_keys = []
             for archivo in archivos_guia:
                 ext = os.path.splitext(archivo.name)[1]
                 s3_key = f"{row['ID_Pedido']}/guia_{uuid.uuid4().hex[:6]}{ext}"
-                success, url = upload_file_to_s3(s3_client_param, S3_BUCKET_NAME, archivo, s3_key)
-                if success and url:
-                    uploaded_urls.append(url)
+                success, uploaded_key = upload_file_to_s3(s3_client_param, S3_BUCKET_NAME, archivo, s3_key)
+                if success and uploaded_key:
+                    uploaded_keys.append(uploaded_key)
 
-            # Construir nueva lista de URLs
+            # Construir nueva lista de claves S3
             nueva_lista = str(row.get("Adjuntos_Guia", "")).strip()
-            if uploaded_urls:
-                nueva_lista = (nueva_lista + ", " if nueva_lista else "") + ", ".join(uploaded_urls)
+            if uploaded_keys:
+                nueva_lista = (nueva_lista + ", " if nueva_lista else "") + ", ".join(uploaded_keys)
 
             # Preparar updates a Google Sheets
             updates = []
@@ -1292,13 +1289,13 @@ def mostrar_pedido_solo_guia(df, idx, row, orden, origen_tab, current_main_tab_l
             # Ejecutar actualización en lote
             if updates and batch_update_gsheet_cells(worksheet, updates):
                 # Refrescar DataFrame local para reflejo inmediato
-                if uploaded_urls:
+                if uploaded_keys:
                     df.at[idx, "Adjuntos_Guia"] = nueva_lista
                     row["Adjuntos_Guia"] = nueva_lista
                 df.at[idx, "Estado"] = "🟢 Completado"
                 df.at[idx, "Fecha_Completado"] = mx_now
 
-                st.toast(f"📤 {len(uploaded_urls)} guía(s) subida(s). Pedido completado.", icon="✅")
+                st.toast(f"📤 {len(uploaded_keys)} guía(s) subida(s). Pedido completado.", icon="✅")
                 st.success("✅ Pedido marcado como **🟢 Completado**.")
 
                 # 🔒 Permanecer en 📋 Solicitudes de Guía (índice 3)
@@ -1875,7 +1872,7 @@ with main_tabs[5]:
                     st.markdown(f"- [{nombre}]({u})")
 
         adjuntos = _normalize_urls(row.get("Adjuntos", ""))
-        guia = str(row.get("Hoja_Ruta_Mensajero", "")).strip()
+        guias = _normalize_urls(row.get("Hoja_Ruta_Mensajero", ""))
         with st.expander("📎 Archivos (Adjuntos y Guía)", expanded=False):
             contenido = False
             if adjuntos:
@@ -1885,13 +1882,13 @@ with main_tabs[5]:
                     nombre = os.path.basename(urlparse(u).path) or u
                     nombre = unquote(nombre)
                     st.markdown(f"- [{nombre}]({u})")
-            if guia:
+            if guias:
                 contenido = True
                 st.markdown("**Guía:**")
-                if guia.startswith("http"):
-                    st.markdown(f"[Abrir guía]({guia})")
-                else:
-                    st.markdown(guia)
+                for g in guias:
+                    nombre = os.path.basename(g)
+                    url = get_s3_file_download_url(s3_client, g)
+                    st.markdown(f"- [{nombre}]({url})")
             if not contenido:
                 st.info("Sin archivos registrados en la hoja.")
 
@@ -2239,13 +2236,13 @@ with main_tabs[5]:
             ):
                 try:
                     folder = idp or f"caso_{(folio or 'sfolio')}_{(cliente or 'scliente')}".replace(" ", "_")
-                    guia_url = ""
+                    guia_key = ""
 
                     if guia_file:
                         key_guia = f"{folder}/guia_retorno_{datetime.now().isoformat()[:19].replace(':','')}_{guia_file.name}"
-                        success, tmp_url = upload_file_to_s3(s3_client, S3_BUCKET_NAME, guia_file, key_guia)
-                        if success and tmp_url:
-                            guia_url = tmp_url
+                        success, tmp_key = upload_file_to_s3(s3_client, S3_BUCKET_NAME, guia_file, key_guia)
+                        if success and tmp_key:
+                            guia_key = tmp_key
 
                     # Localiza la fila en 'casos_especiales'
                     gsheet_row_idx = None
@@ -2267,11 +2264,11 @@ with main_tabs[5]:
                         st.error("❌ No se encontró el caso en 'casos_especiales'.")
                         ok = False
                     else:
-                        if guia_url:
+                        if guia_key:
                             existing = str(row.get("Hoja_Ruta_Mensajero", "")).strip()
                             if existing.lower() in ("nan", "none", "n/a"):
                                 existing = ""
-                            guia_final = f"{existing}, {guia_url}" if existing else guia_url
+                            guia_final = f"{existing}, {guia_key}" if existing else guia_key
                             ok &= update_gsheet_cell(
                                 worksheet_casos,
                                 headers_casos,
@@ -2752,13 +2749,13 @@ with main_tabs[6]:  # 🛠 Garantías
             ):
                 try:
                     folder = idp or f"garantia_{(folio or 'sfolio')}_{(cliente or 'scliente')}".replace(" ", "_")
-                    guia_url = ""
+                    guia_key = ""
 
                     if guia_file:
                         key_guia = f"{folder}/guia_garantia_{datetime.now().isoformat()[:19].replace(':','')}_{guia_file.name}"
-                        success, tmp_url = upload_file_to_s3(s3_client, S3_BUCKET_NAME, guia_file, key_guia)
-                        if success and tmp_url:
-                            guia_url = tmp_url
+                        success, tmp_key = upload_file_to_s3(s3_client, S3_BUCKET_NAME, guia_file, key_guia)
+                        if success and tmp_key:
+                            guia_key = tmp_key
 
                     # Localiza la fila
                     gsheet_row_idx = None
@@ -2780,11 +2777,11 @@ with main_tabs[6]:  # 🛠 Garantías
                         st.error("❌ No se encontró el caso en 'casos_especiales'.")
                         ok = False
                     else:
-                        if guia_url:
+                        if guia_key:
                             existing = str(row.get("Hoja_Ruta_Mensajero", "")).strip()
                             if existing.lower() in ("nan", "none", "n/a"):
                                 existing = ""
-                            guia_final = f"{existing}, {guia_url}" if existing else guia_url
+                            guia_final = f"{existing}, {guia_key}" if existing else guia_key
                             ok &= update_gsheet_cell(
                                 worksheet_casos,
                                 headers_casos,
@@ -2982,7 +2979,7 @@ with main_tabs[7]:  # ✅ Historial Completados
                     st.info(seguimiento_txt)
 
                 adjuntos = _normalize_urls(row.get("Adjuntos", ""))
-                guia = str(row.get("Hoja_Ruta_Mensajero", "")).strip()
+                guias = _normalize_urls(row.get("Hoja_Ruta_Mensajero", ""))
                 with st.expander("📎 Archivos del Caso", expanded=False):
                     contenido = False
                     if adjuntos:
@@ -2992,13 +2989,13 @@ with main_tabs[7]:  # ✅ Historial Completados
                             nombre = os.path.basename(urlparse(u).path) or u
                             nombre = unquote(nombre)
                             st.markdown(f"- [{nombre}]({u})")
-                    if guia:
+                    if guias:
                         contenido = True
                         st.markdown("**Guía:**")
-                        if guia.startswith("http"):
-                            st.markdown(f"[Abrir guía]({guia})")
-                        else:
-                            st.markdown(guia)
+                        for g in guias:
+                            nombre = os.path.basename(g)
+                            url = get_s3_file_download_url(s3_client, g)
+                            st.markdown(f"- [{nombre}]({url})")
                     if not contenido:
                         st.info("Sin archivos registrados en la hoja.")
 
