@@ -539,12 +539,23 @@ def get_files_in_s3_prefix(s3_client_param, prefix):
         st.error(f"❌ Error al obtener archivos del prefijo S3 '{prefix}': {e}")
         return []
 
-def get_s3_file_download_url(s3_client_param, object_key, expires_in=86400):
+def extract_s3_key(url_or_key: str) -> str:
+    """Return a clean S3 object key from a raw key or a (possibly expired) URL."""
+    if not isinstance(url_or_key, str):
+        return url_or_key
+    parsed = urlparse(url_or_key)
+    if parsed.scheme and parsed.netloc:
+        return unquote(parsed.path.lstrip("/"))
+    return url_or_key
+
+
+def get_s3_file_download_url(s3_client_param, object_key_or_url, expires_in=604800):
     """Genera y retorna una URL prefirmada para archivos almacenados en S3."""
     try:
+        clean_key = extract_s3_key(object_key_or_url)
         return s3_client_param.generate_presigned_url(
             "get_object",
-            Params={"Bucket": S3_BUCKET_NAME, "Key": object_key},
+            Params={"Bucket": S3_BUCKET_NAME, "Key": clean_key},
             ExpiresIn=expires_in,
         )
     except Exception as e:
