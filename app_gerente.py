@@ -161,9 +161,17 @@ def extraer_texto_pdf(s3_key):
     except Exception as e:
         return f"[ERROR AL LEER PDF]: {e}"
 
-def get_s3_file_download_url(s3_client_param, object_key):
-    """Retorna una URL pública permanente para archivos almacenados en S3."""
-    return f"https://{S3_BUCKET}.s3.{AWS_REGION}.amazonaws.com/{object_key}"
+def get_s3_file_download_url(s3_client_param, object_key, expires_in=3600):
+    """Genera y retorna una URL prefirmada para archivos almacenados en S3."""
+    try:
+        return s3_client_param.generate_presigned_url(
+            "get_object",
+            Params={"Bucket": S3_BUCKET, "Key": object_key},
+            ExpiresIn=expires_in,
+        )
+    except Exception as e:
+        st.error(f"❌ Error al generar URL prefirmada: {e}")
+        return "#"
 
 def combinar_urls_existentes(existente, nuevas):
     """Combina listas de URLs respetando el formato previo (JSON o separado por comas/semicolons)."""
@@ -711,11 +719,11 @@ with tabs[1]:
         nuevas_guias_urls, nuevas_otros_urls = [], []
         for file in uploaded_guias or []:
             key = f"adjuntos_pedidos/{pedido_sel}/{file.name}"
-            s3_client.upload_fileobj(file, S3_BUCKET, key, ExtraArgs={"ACL": "public-read"})
+            s3_client.upload_fileobj(file, S3_BUCKET, key)
             nuevas_guias_urls.append(get_s3_file_download_url(s3_client, key))
         for file in uploaded_otros or []:
             key = f"adjuntos_pedidos/{pedido_sel}/{file.name}"
-            s3_client.upload_fileobj(file, S3_BUCKET, key, ExtraArgs={"ACL": "public-read"})
+            s3_client.upload_fileobj(file, S3_BUCKET, key)
             nuevas_otros_urls.append(get_s3_file_download_url(s3_client, key))
 
         if nuevas_guias_urls:
