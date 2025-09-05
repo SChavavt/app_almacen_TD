@@ -852,6 +852,33 @@ with tabs[2]:
 
     hoja = gspread_client.open_by_key("1aWkSelodaz0nWfQx7FZAysGnIYGQFJxAN7RO3YgCiZY").worksheet("casos_especiales")
 
+    st.markdown("### 📎 Adjuntar Archivos")
+    uploaded_guias = st.file_uploader("📄 Guías", accept_multiple_files=True, key="guias_caso")
+    uploaded_otros = st.file_uploader("📁 Otros", accept_multiple_files=True, key="otros_caso")
+
+    if st.button("⬆️ Subir archivos", key="subir_archivos_caso"):
+        nuevas_guias_urls, nuevas_otros_urls = [], []
+        for file in uploaded_guias or []:
+            key = f"adjuntos_casos/{caso_sel}/{file.name}"
+            s3_client.upload_fileobj(file, S3_BUCKET, key, ExtraArgs={"ACL": "public-read"})
+            nuevas_guias_urls.append(get_s3_file_download_url(s3_client, key))
+        for file in uploaded_otros or []:
+            key = f"adjuntos_casos/{caso_sel}/{file.name}"
+            s3_client.upload_fileobj(file, S3_BUCKET, key, ExtraArgs={"ACL": "public-read"})
+            nuevas_otros_urls.append(get_s3_file_download_url(s3_client, key))
+
+        if nuevas_guias_urls:
+            existente = row.get("Hoja_Ruta_Mensajero", "")
+            nuevo_valor = combinar_urls_existentes(existente, nuevas_guias_urls)
+            hoja.update_cell(gspread_row_idx, df_casos.columns.get_loc("Hoja_Ruta_Mensajero") + 1, nuevo_valor)
+        if nuevas_otros_urls:
+            existente = row.get("Adjuntos", "")
+            nuevo_valor = combinar_urls_existentes(existente, nuevas_otros_urls)
+            hoja.update_cell(gspread_row_idx, df_casos.columns.get_loc("Adjuntos") + 1, nuevo_valor)
+
+        st.session_state["mensaje_caso_exito"] = "📎 Archivos subidos correctamente."
+        st.rerun()
+
     # --- Cambio de Vendedor ---
     vendedores = [
         "ALEJANDRO RODRIGUEZ",
