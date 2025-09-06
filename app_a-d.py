@@ -669,6 +669,9 @@ def fijar_estado_pestanas_guia(row, origen_tab, main_idx, sub_idx, date_idx):
 def fijar_y_preservar(row, origen_tab, main_idx, sub_idx, date_idx):
     """Fija los índices de pestañas y los marca para preservarlos en el próximo rerun."""
     fijar_estado_pestanas_guia(row, origen_tab, main_idx, sub_idx, date_idx)
+    # ✅ Preservar estado de expansores antes del rerun
+    st.session_state["expanded_pedidos"][row["ID_Pedido"]] = True
+    st.session_state["expanded_attachments"][row["ID_Pedido"]] = True
     preserve_tab_state()
 
 
@@ -713,9 +716,6 @@ def mostrar_pedido_detalle(
         on_click=fijar_y_preservar,
         args=(row, origen_tab, main_idx, sub_idx, date_idx),
     ):
-        st.session_state["expanded_pedidos"][row["ID_Pedido"]] = True
-        st.session_state["expanded_attachments"][row["ID_Pedido"]] = True
-
         if row["Estado"] in ["🟡 Pendiente", "🔴 Demorado"]:
             zona_mexico = timezone("America/Mexico_City")
             now = datetime.now(zona_mexico)
@@ -745,17 +745,6 @@ def mostrar_pedido_detalle(
                 st.toast("📄 Estado actualizado a 'En Proceso'", icon="📌")
             else:
                 st.error("❌ Falló la actualización del estado a 'En Proceso'.")
-
-        set_active_main_tab(st.session_state.get("active_main_tab_index", 0))
-        st.session_state["active_subtab_local_index"] = st.session_state.get(
-            "active_subtab_local_index", 0
-        )
-        st.session_state["active_date_tab_m_index"] = st.session_state.get(
-            "active_date_tab_m_index", 0
-        )
-        st.session_state["active_date_tab_t_index"] = st.session_state.get(
-            "active_date_tab_t_index", 0
-        )
 
         st.session_state["scroll_to_pedido_id"] = row["ID_Pedido"]
         st.session_state["print_clicked"] = row["ID_Pedido"]
