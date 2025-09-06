@@ -924,7 +924,10 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
                             display_name = file_info['title']
                             if row['ID_Pedido'] in display_name:
                                 display_name = display_name.replace(row['ID_Pedido'], "").replace("__", "_").replace("_-", "_").replace("-_", "_").strip('_').strip('-')
-                            st.markdown(f"- 📄 **{display_name}** ([🔗 Ver/Descargar]({file_url}))")
+                            st.markdown(
+                                f'- 📄 **{display_name}** (<a href="{file_url}" target="_blank">🔗 Ver/Descargar</a>)',
+                                unsafe_allow_html=True,
+                            )
                     else:
                         st.info("No hay adjuntos para mostrar (excluyendo comprobantes y surtidos).")
                 else:
@@ -1179,7 +1182,10 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
 
                         presigned_url = get_s3_file_download_url(s3_client_param, object_key_to_download)
                         if presigned_url and presigned_url != "#":
-                            st.markdown(f"- 📄 [{file_name_to_display}]({presigned_url})")
+                            st.markdown(
+                                f'- 📄 <a href="{presigned_url}" target="_blank">{file_name_to_display}</a>',
+                                unsafe_allow_html=True,
+                            )
                         else:
                             st.warning(f"⚠️ No se pudo generar el enlace para: {file_name_to_display}")
                     except Exception as e:
@@ -1850,14 +1856,20 @@ with main_tabs[5]:
         nota = str(row.get("Nota_Credito_URL", "")).strip()
         if nota:
             if nota.startswith("http"):
-                st.markdown(f"🧾 [Nota de Crédito]({nota})")
+                st.markdown(
+                    f'🧾 <a href="{nota}" target="_blank">Nota de Crédito</a>',
+                    unsafe_allow_html=True,
+                )
             else:
                 st.markdown(f"🧾 Nota de Crédito: {nota}")
 
         doc_extra = str(row.get("Documento_Adicional_URL", "")).strip()
         if doc_extra:
             if doc_extra.startswith("http"):
-                st.markdown(f"📂 [Documento Adicional]({doc_extra})")
+                st.markdown(
+                    f'📂 <a href="{doc_extra}" target="_blank">Documento Adicional</a>',
+                    unsafe_allow_html=True,
+                )
             else:
                 st.markdown(f"📂 Documento Adicional: {doc_extra}")
 
@@ -1885,7 +1897,10 @@ with main_tabs[5]:
                 for u in adj_surtido:
                     nombre = os.path.basename(urlparse(u).path) or u
                     nombre = unquote(nombre)
-                    st.markdown(f"- [{nombre}]({u})")
+                    st.markdown(
+                        f'- <a href="{u}" target="_blank">{nombre}</a>',
+                        unsafe_allow_html=True,
+                    )
 
         adjuntos = _normalize_urls(row.get("Adjuntos", ""))
         guias = _normalize_urls(row.get("Hoja_Ruta_Mensajero", ""))
@@ -1897,14 +1912,20 @@ with main_tabs[5]:
                 for u in adjuntos:
                     nombre = os.path.basename(urlparse(u).path) or u
                     nombre = unquote(nombre)
-                    st.markdown(f"- [{nombre}]({u})")
+                    st.markdown(
+                        f'- <a href="{u}" target="_blank">{nombre}</a>',
+                        unsafe_allow_html=True,
+                    )
             if guias:
                 contenido = True
                 st.markdown("**Guía:**")
                 for g in guias:
                     nombre = os.path.basename(g)
                     url = get_s3_file_download_url(s3_client, g)
-                    st.markdown(f"- [{nombre}]({url})")
+                    st.markdown(
+                        f'- <a href="{url}" target="_blank">{nombre}</a>',
+                        unsafe_allow_html=True,
+                    )
             if not contenido:
                 st.info("Sin archivos registrados en la hoja.")
 
@@ -2230,7 +2251,10 @@ with main_tabs[5]:
 
                 if items:
                     for label, url in items:
-                        st.markdown(f"- [{label}]({url})")
+                        st.markdown(
+                            f'- <a href="{url}" target="_blank">{label}</a>',
+                            unsafe_allow_html=True,
+                        )
                 else:
                     st.info("No hay archivos registrados para esta devolución.")
 
@@ -2743,7 +2767,10 @@ with main_tabs[6]:  # 🛠 Garantías
 
                 if items:
                     for label, url in items:
-                        st.markdown(f"- [{label}]({url})")
+                        st.markdown(
+                            f'- <a href="{url}" target="_blank">{label}</a>',
+                            unsafe_allow_html=True,
+                        )
                 else:
                     st.info("No hay archivos registrados para esta garantía.")
 
@@ -3004,14 +3031,20 @@ with main_tabs[7]:  # ✅ Historial Completados
                         for u in adjuntos:
                             nombre = os.path.basename(urlparse(u).path) or u
                             nombre = unquote(nombre)
-                            st.markdown(f"- [{nombre}]({u})")
+                            st.markdown(
+                                f'- <a href="{u}" target="_blank">{nombre}</a>',
+                                unsafe_allow_html=True,
+                            )
                     if guias:
                         contenido = True
                         st.markdown("**Guía:**")
                         for g in guias:
                             nombre = os.path.basename(g)
                             url = get_s3_file_download_url(s3_client, g)
-                            st.markdown(f"- [{nombre}]({url})")
+                            st.markdown(
+                                f'- <a href="{url}" target="_blank">{nombre}</a>',
+                                unsafe_allow_html=True,
+                            )
                     if not contenido:
                         st.info("Sin archivos registrados en la hoja.")
 
