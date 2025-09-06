@@ -692,6 +692,74 @@ def handle_generic_upload_change():
     # El script se vuelve a ejecutar automáticamente después de este callback,
     # así que evitamos una llamada explícita a st.rerun().
 
+
+def mostrar_pedido_detalle(
+    df,
+    idx,
+    row,
+    origen_tab,
+    worksheet,
+    headers,
+    gsheet_row_index,
+    col_print_btn,
+    main_idx,
+    sub_idx,
+    date_idx,
+):
+    """Muestra el botón de impresión y actualiza el estado del pedido."""
+    if col_print_btn.button(
+        "🖨 Imprimir",
+        key=f"print_{row['ID_Pedido']}_{origen_tab}",
+        on_click=fijar_y_preservar,
+        args=(row, origen_tab, main_idx, sub_idx, date_idx),
+    ):
+        st.session_state["expanded_pedidos"][row["ID_Pedido"]] = True
+        st.session_state["expanded_attachments"][row["ID_Pedido"]] = True
+
+        if row["Estado"] in ["🟡 Pendiente", "🔴 Demorado"]:
+            zona_mexico = timezone("America/Mexico_City")
+            now = datetime.now(zona_mexico)
+            now_str = now.strftime("%Y-%m-%d %H:%M:%S")
+
+            estado_col_idx = headers.index("Estado") + 1
+            hora_proc_col_idx = headers.index("Hora_Proceso") + 1
+
+            updates = [
+                {
+                    "range": gspread.utils.rowcol_to_a1(
+                        gsheet_row_index, estado_col_idx
+                    ),
+                    "values": [["🔵 En Proceso"]],
+                },
+                {
+                    "range": gspread.utils.rowcol_to_a1(
+                        gsheet_row_index, hora_proc_col_idx
+                    ),
+                    "values": [[now_str]],
+                },
+            ]
+            if batch_update_gsheet_cells(worksheet, updates):
+                df.at[idx, "Estado"] = "🔵 En Proceso"
+                df.at[idx, "Hora_Proceso"] = now_str
+                row["Estado"] = "🔵 En Proceso"
+                st.toast("📄 Estado actualizado a 'En Proceso'", icon="📌")
+            else:
+                st.error("❌ Falló la actualización del estado a 'En Proceso'.")
+
+        set_active_main_tab(st.session_state.get("active_main_tab_index", 0))
+        st.session_state["active_subtab_local_index"] = st.session_state.get(
+            "active_subtab_local_index", 0
+        )
+        st.session_state["active_date_tab_m_index"] = st.session_state.get(
+            "active_date_tab_m_index", 0
+        )
+        st.session_state["active_date_tab_t_index"] = st.session_state.get(
+            "active_date_tab_t_index", 0
+        )
+
+        st.cache_data.clear()
+        st.session_state["print_clicked"] = row["ID_Pedido"]
+
 def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, worksheet, headers, s3_client_param,
                    main_idx=0, sub_idx=0, date_idx=0):
     """
@@ -869,46 +937,19 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
 
 
 
-        # ✅ PRINT and UPDATE TO "IN PROCESS"
-        if col_print_btn.button(
-            "🖨 Imprimir",
-            key=f"print_{row['ID_Pedido']}_{origen_tab}",
-            on_click=preserve_tab_state,
-        ):
-            # ✅ Expandir el pedido y sus adjuntos
-            st.session_state["expanded_pedidos"][row['ID_Pedido']] = True
-            st.session_state["expanded_attachments"][row['ID_Pedido']] = True
-
-            # ✅ Solo actualizar si estaba en Pendiente o Demorado
-            if row["Estado"] in ["🟡 Pendiente", "🔴 Demorado"]:
-                zona_mexico = timezone("America/Mexico_City")
-                now = datetime.now(zona_mexico)
-                now_str = now.strftime("%Y-%m-%d %H:%M:%S")
-
-                estado_col_idx = headers.index("Estado") + 1
-                hora_proc_col_idx = headers.index("Hora_Proceso") + 1
-
-                updates = [
-                    {'range': gspread.utils.rowcol_to_a1(gsheet_row_index, estado_col_idx), 'values': [["🔵 En Proceso"]]},
-                    {'range': gspread.utils.rowcol_to_a1(gsheet_row_index, hora_proc_col_idx), 'values': [[now_str]]}
-                ]
-                if batch_update_gsheet_cells(worksheet, updates):
-                    df.at[idx, "Estado"] = "🔵 En Proceso"
-                    df.at[idx, "Hora_Proceso"] = now_str
-                    row["Estado"] = "🔵 En Proceso"  # ✅ Refleja el cambio en pantalla
-                    st.toast("📄 Estado actualizado a 'En Proceso'", icon="📌")
-                else:
-                    st.error("❌ Falló la actualización del estado a 'En Proceso'.")
-
-            # 🔁 Mantener pestañas activas y recargar para reflejar cambios
-            set_active_main_tab(st.session_state.get("active_main_tab_index", 0))
-            st.session_state["active_subtab_local_index"] = st.session_state.get("active_subtab_local_index", 0)
-            st.session_state["active_date_tab_m_index"] = st.session_state.get("active_date_tab_m_index", 0)
-            st.session_state["active_date_tab_t_index"] = st.session_state.get("active_date_tab_t_index", 0)
-
-            st.cache_data.clear()
-            st.session_state["print_clicked"] = row["ID_Pedido"]
-            st.session_state["expanded_pedidos"][row["ID_Pedido"]] = True
+        mostrar_pedido_detalle(
+            df,
+            idx,
+            row,
+            origen_tab,
+            worksheet,
+            headers,
+            gsheet_row_index,
+            col_print_btn,
+            main_idx,
+            sub_idx,
+            date_idx,
+        )
 
 
 
