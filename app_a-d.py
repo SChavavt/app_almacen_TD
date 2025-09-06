@@ -700,10 +700,14 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
     if gsheet_row_index is None:
         st.error(f"❌ Error interno: No se pudo obtener el índice de fila de Google Sheets para el pedido '{row['ID_Pedido']}'.")
         return
+    if st.session_state.get("print_clicked") == row["ID_Pedido"]:
+        st.session_state["expanded_pedidos"][row["ID_Pedido"]] = True
+        st.session_state["expanded_attachments"][row["ID_Pedido"]] = True
+        st.session_state.pop("print_clicked", None)
 
     folio = row.get("Folio_Factura", "").strip() or row['ID_Pedido']
     st.markdown(f'<a name="pedido_{row["ID_Pedido"]}"></a>', unsafe_allow_html=True)
-    with st.expander(f"{row['Estado']} - {folio} - {row['Cliente']}", expanded=st.session_state["expanded_pedidos"].get(row['ID_Pedido'], False)):  
+    with st.expander(f"{row['Estado']} - {folio} - {row['Cliente']}", expanded=st.session_state["expanded_pedidos"].get(row['ID_Pedido'], False)):
         st.markdown("---")
         mod_texto = str(row.get("Modificacion_Surtido", "")).strip()
         hay_modificacion = mod_texto != ""
@@ -897,7 +901,8 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
             st.session_state["active_date_tab_t_index"] = st.session_state.get("active_date_tab_t_index", 0)
 
             st.cache_data.clear()
-            st.rerun()
+            st.session_state["print_clicked"] = row["ID_Pedido"]
+            st.session_state["expanded_pedidos"][row["ID_Pedido"]] = True
 
 
 
