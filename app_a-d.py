@@ -757,7 +757,7 @@ def mostrar_pedido_detalle(
             "active_date_tab_t_index", 0
         )
 
-        st.cache_data.clear()
+        st.session_state["scroll_to_pedido_id"] = row["ID_Pedido"]
         st.session_state["print_clicked"] = row["ID_Pedido"]
 
 def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, worksheet, headers, s3_client_param,
