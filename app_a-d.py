@@ -551,6 +551,9 @@ def extract_s3_key(url_or_key: str) -> str:
 
 def get_s3_file_download_url(s3_client_param, object_key_or_url, expires_in=604800):
     """Genera y retorna una URL prefirmada para archivos almacenados en S3."""
+    if not s3_client_param or not S3_BUCKET_NAME:
+        st.error("❌ Configuración de S3 incompleta. Verifica el cliente y el nombre del bucket.")
+        return "#"
     try:
         clean_key = extract_s3_key(object_key_or_url)
         return s3_client_param.generate_presigned_url(
@@ -1921,7 +1924,13 @@ with main_tabs[5]:
                 st.markdown("**Guía:**")
                 for g in guias:
                     nombre = os.path.basename(g)
+                    if g == "#" or not g:
+                        st.error("❌ Guía no disponible.")
+                        continue
                     url = get_s3_file_download_url(s3_client, g)
+                    if not url or url == "#":
+                        st.error(f"❌ No se pudo generar la URL para la guía {nombre}.")
+                        continue
                     st.markdown(
                         f'- <a href="{url}" target="_blank">{nombre}</a>',
                         unsafe_allow_html=True,
@@ -3040,7 +3049,13 @@ with main_tabs[7]:  # ✅ Historial Completados
                         st.markdown("**Guía:**")
                         for g in guias:
                             nombre = os.path.basename(g)
+                            if g == "#" or not g:
+                                st.error("❌ Guía no disponible.")
+                                continue
                             url = get_s3_file_download_url(s3_client, g)
+                            if not url or url == "#":
+                                st.error(f"❌ No se pudo generar la URL para la guía {nombre}.")
+                                continue
                             st.markdown(
                                 f'- <a href="{url}" target="_blank">{nombre}</a>',
                                 unsafe_allow_html=True,
