@@ -2273,11 +2273,12 @@ with main_tabs[5]:
             st.markdown("---")
 
             st.markdown("#### 📋 Documentación")
-            guia_file = st.file_uploader(
+            guia_files = st.file_uploader(
                 "📋 Subir Guía de Retorno",
                 key=f"guia_{folio}_{cliente}",
                 help="Sube la guía de mensajería para el retorno del producto (PDF/JPG/PNG)",
                 on_change=handle_generic_upload_change,
+                accept_multiple_files=True,
             )
 
             # Botón FINAL: Completar
@@ -2288,13 +2289,14 @@ with main_tabs[5]:
             ):
                 try:
                     folder = idp or f"caso_{(folio or 'sfolio')}_{(cliente or 'scliente')}".replace(" ", "_")
-                    guia_key = ""
+                    guia_keys = []
 
-                    if guia_file:
-                        key_guia = f"{folder}/guia_retorno_{datetime.now().isoformat()[:19].replace(':','')}_{guia_file.name}"
-                        success, tmp_key = upload_file_to_s3(s3_client, S3_BUCKET_NAME, guia_file, key_guia)
-                        if success and tmp_key:
-                            guia_key = tmp_key
+                    if guia_files:
+                        for guia_file in guia_files:
+                            key_guia = f"{folder}/guia_retorno_{datetime.now().isoformat()[:19].replace(':','')}_{guia_file.name}"
+                            success, tmp_key = upload_file_to_s3(s3_client, S3_BUCKET_NAME, guia_file, key_guia)
+                            if success and tmp_key:
+                                guia_keys.append(tmp_key)
 
                     # Localiza la fila en 'casos_especiales'
                     gsheet_row_idx = None
@@ -2316,11 +2318,12 @@ with main_tabs[5]:
                         st.error("❌ No se encontró el caso en 'casos_especiales'.")
                         ok = False
                     else:
-                        if guia_key:
+                        if guia_keys:
                             existing = str(row.get("Hoja_Ruta_Mensajero", "")).strip()
                             if existing.lower() in ("nan", "none", "n/a"):
                                 existing = ""
-                            guia_final = f"{existing}, {guia_key}" if existing else guia_key
+                            new_keys = ", ".join(guia_keys)
+                            guia_final = f"{existing}, {new_keys}" if existing else new_keys
                             ok &= update_gsheet_cell(
                                 worksheet_casos,
                                 headers_casos,
@@ -2790,11 +2793,12 @@ with main_tabs[6]:  # 🛠 Garantías
 
             # === Guía y completar ===
             st.markdown("#### 📋 Documentación")
-            guia_file = st.file_uploader(
+            guia_files = st.file_uploader(
                 "📋 Subir Guía de Envío/Retorno (Garantía)",
                 key=f"guia_g_{folio}_{cliente}",
                 help="Sube la guía de mensajería para envío de reposición o retorno (PDF/JPG/PNG)",
                 on_change=handle_generic_upload_change,
+                accept_multiple_files=True,
             )
 
             if st.button(
@@ -2804,13 +2808,14 @@ with main_tabs[6]:  # 🛠 Garantías
             ):
                 try:
                     folder = idp or f"garantia_{(folio or 'sfolio')}_{(cliente or 'scliente')}".replace(" ", "_")
-                    guia_key = ""
+                    guia_keys = []
 
-                    if guia_file:
-                        key_guia = f"{folder}/guia_garantia_{datetime.now().isoformat()[:19].replace(':','')}_{guia_file.name}"
-                        success, tmp_key = upload_file_to_s3(s3_client, S3_BUCKET_NAME, guia_file, key_guia)
-                        if success and tmp_key:
-                            guia_key = tmp_key
+                    if guia_files:
+                        for guia_file in guia_files:
+                            key_guia = f"{folder}/guia_garantia_{datetime.now().isoformat()[:19].replace(':','')}_{guia_file.name}"
+                            success, tmp_key = upload_file_to_s3(s3_client, S3_BUCKET_NAME, guia_file, key_guia)
+                            if success and tmp_key:
+                                guia_keys.append(tmp_key)
 
                     # Localiza la fila
                     gsheet_row_idx = None
@@ -2832,11 +2837,12 @@ with main_tabs[6]:  # 🛠 Garantías
                         st.error("❌ No se encontró el caso en 'casos_especiales'.")
                         ok = False
                     else:
-                        if guia_key:
+                        if guia_keys:
                             existing = str(row.get("Hoja_Ruta_Mensajero", "")).strip()
                             if existing.lower() in ("nan", "none", "n/a"):
                                 existing = ""
-                            guia_final = f"{existing}, {guia_key}" if existing else guia_key
+                            new_keys = ", ".join(guia_keys)
+                            guia_final = f"{existing}, {new_keys}" if existing else new_keys
                             ok &= update_gsheet_cell(
                                 worksheet_casos,
                                 headers_casos,
