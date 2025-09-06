@@ -716,6 +716,7 @@ def mostrar_pedido_detalle(
         on_click=fijar_y_preservar,
         args=(row, origen_tab, main_idx, sub_idx, date_idx),
     ):
+        st.session_state["expanded_attachments"][row["ID_Pedido"]] = True
         if row["Estado"] in ["🟡 Pendiente", "🔴 Demorado"]:
             zona_mexico = timezone("America/Mexico_City")
             now = datetime.now(zona_mexico)
@@ -942,34 +943,49 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
 
 
 
-        # This block displays attachments if they are expanded
-        if st.session_state["expanded_attachments"].get(row["ID_Pedido"], False):
-            st.markdown(f"##### Adjuntos para ID: {row['ID_Pedido']}")
-            pedido_folder_prefix = find_pedido_subfolder_prefix(s3_client_param, S3_ATTACHMENT_PREFIX, row['ID_Pedido'])
+        # This block displays attachments inside an expander
+        with st.expander(
+            "📎 Archivos (Adjuntos y Guía)",
+            expanded=st.session_state["expanded_attachments"].get(row["ID_Pedido"], False),
+        ):
+            if st.session_state["expanded_attachments"].get(row["ID_Pedido"], False):
+                st.markdown(f"##### Adjuntos para ID: {row['ID_Pedido']}")
+                pedido_folder_prefix = find_pedido_subfolder_prefix(
+                    s3_client_param, S3_ATTACHMENT_PREFIX, row['ID_Pedido']
+                )
 
-            if pedido_folder_prefix:
-                files_in_folder = get_files_in_s3_prefix(s3_client_param, pedido_folder_prefix)
-                if files_in_folder:
-                    filtered_files_to_display = [
-                        f for f in files_in_folder
-                        if "comprobante" not in f['title'].lower() and "surtido" not in f['title'].lower()
-                    ]
-                    if filtered_files_to_display:
-                        for file_info in filtered_files_to_display:
-                            file_url = get_s3_file_download_url(s3_client_param, file_info['key'])
-                            display_name = file_info['title']
-                            if row['ID_Pedido'] in display_name:
-                                display_name = display_name.replace(row['ID_Pedido'], "").replace("__", "_").replace("_-", "_").replace("-_", "_").strip('_').strip('-')
-                            st.markdown(
-                                f'- 📄 **{display_name}** (<a href="{file_url}" target="_blank">🔗 Ver/Descargar</a>)',
-                                unsafe_allow_html=True,
-                            )
+                if pedido_folder_prefix:
+                    files_in_folder = get_files_in_s3_prefix(
+                        s3_client_param, pedido_folder_prefix
+                    )
+                    if files_in_folder:
+                        filtered_files_to_display = [
+                            f for f in files_in_folder
+                            if "comprobante" not in f['title'].lower() and "surtido" not in f['title'].lower()
+                        ]
+                        if filtered_files_to_display:
+                            for file_info in filtered_files_to_display:
+                                file_url = get_s3_file_download_url(
+                                    s3_client_param, file_info['key']
+                                )
+                                display_name = file_info['title']
+                                if row['ID_Pedido'] in display_name:
+                                    display_name = (
+                                        display_name.replace(row['ID_Pedido'], "").replace("__", "_")
+                                        .replace("_-", "_").replace("-_", "_").strip('_').strip('-')
+                                    )
+                                st.markdown(
+                                    f'- 📄 **{display_name}** (<a href="{file_url}" target="_blank">🔗 Ver/Descargar</a>)',
+                                    unsafe_allow_html=True,
+                                )
+                        else:
+                            st.info("No hay adjuntos para mostrar (excluyendo comprobantes y surtidos).")
                     else:
-                        st.info("No hay adjuntos para mostrar (excluyendo comprobantes y surtidos).")
+                        st.info("No se encontraron archivos en la carpeta del pedido en S3.")
                 else:
-                    st.info("No se encontraron archivos en la carpeta del pedido en S3.")
-            else:
-                st.error(f"❌ No se encontró la carpeta (prefijo S3) del pedido '{row['ID_Pedido']}'.")
+                    st.error(
+                        f"❌ No se encontró la carpeta (prefijo S3) del pedido '{row['ID_Pedido']}'."
+                    )
 
 
         # Complete Button
