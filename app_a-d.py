@@ -432,7 +432,7 @@ def ensure_columns(worksheet, headers, required_cols):
 # --- AWS S3 Helper Functions (Copied from app_admin.py directly) ---
 def upload_file_to_s3(s3_client_param, bucket_name, file_obj, s3_key):
     try:
-        extra_args = {}
+        extra_args = {"ACL": "public-read"}
         # Si Streamlit provee el content-type, pásalo (mejor vista/descarga en navegador)
         if hasattr(file_obj, "type") and file_obj.type:
             extra_args["ContentType"] = file_obj.type
@@ -444,9 +444,10 @@ def upload_file_to_s3(s3_client_param, bucket_name, file_obj, s3_key):
             **extra_args,
         )
 
-        # Return the S3 object key so it can be stored and later used to
-        # generate a fresh presigned URL when needed.
-        return True, s3_key
+        permanent_url = f"https://{bucket_name}.s3.{AWS_REGION}.amazonaws.com/{s3_key}"
+
+        # Return the permanent URL to the uploaded object so it can be stored directly.
+        return True, permanent_url
 
     except Exception as e:
         st.error(f"❌ Error al subir archivo a S3: {e}")
