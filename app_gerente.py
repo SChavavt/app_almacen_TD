@@ -316,7 +316,10 @@ def render_caso_especial(res):
             st.markdown("**Archivos de modificación:**")
             for u in mod_urls:
                 nombre = u.split("/")[-1]
-                st.markdown(f"- [{nombre}]({u})")
+                st.markdown(
+                    f'- <a href="{u}" target="_blank">{nombre}</a>',
+                    unsafe_allow_html=True,
+                )
 
     with st.expander("📎 Archivos (Adjuntos y Guía)", expanded=False):
         adj = res.get("Adjuntos_urls", []) or []
@@ -325,10 +328,16 @@ def render_caso_especial(res):
             st.markdown("**Adjuntos:**")
             for u in adj:
                 nombre = u.split("/")[-1]
-                st.markdown(f"- [{nombre}]({u})")
+                st.markdown(
+                    f'- <a href="{u}" target="_blank">{nombre}</a>',
+                    unsafe_allow_html=True,
+                )
         if guia and guia.lower() not in ("nan","none","n/a"):
             st.markdown("**Guía:**")
-            st.markdown(f"- [Abrir guía]({guia})")
+            st.markdown(
+                f'- <a href="{guia}" target="_blank">Abrir guía</a>',
+                unsafe_allow_html=True,
+            )
         if not adj and not guia:
             st.info("Sin archivos registrados en la hoja.")
 
@@ -534,7 +543,10 @@ with tabs[0]:
                             st.markdown("**Archivos de modificación:**")
                             for u in mod_urls:
                                 nombre = u.split("/")[-1]
-                                st.markdown(f"- [{nombre}]({u})")
+                                st.markdown(
+                                    f'- <a href="{u}" target="_blank">{nombre}</a>',
+                                    unsafe_allow_html=True,
+                                )
 
                     # ♻️ Refacturación (si hay)
                     ref_t = res.get("Refacturacion_Tipo","")
@@ -551,22 +563,34 @@ with tabs[0]:
                             st.markdown("#### 🔍 Guías:")
                             for key, url in res["Coincidentes"]:
                                 nombre = key.split("/")[-1]
-                                st.markdown(f"- [🔍 {nombre}]({url})")
+                                st.markdown(
+                                    f'- <a href="{url}" target="_blank">🔍 {nombre}</a>',
+                                    unsafe_allow_html=True,
+                                )
                         if res.get("Comprobantes"):
                             st.markdown("#### 🧾 Comprobantes:")
                             for key, url in res["Comprobantes"]:
                                 nombre = key.split("/")[-1]
-                                st.markdown(f"- [📄 {nombre}]({url})")
+                                st.markdown(
+                                    f'- <a href="{url}" target="_blank">📄 {nombre}</a>',
+                                    unsafe_allow_html=True,
+                                )
                         if res.get("Facturas"):
                             st.markdown("#### 📁 Facturas:")
                             for key, url in res["Facturas"]:
                                 nombre = key.split("/")[-1]
-                                st.markdown(f"- [📄 {nombre}]({url})")
+                                st.markdown(
+                                    f'- <a href="{url}" target="_blank">📄 {nombre}</a>',
+                                    unsafe_allow_html=True,
+                                )
                         if res.get("Otros"):
                             st.markdown("#### 📂 Otros Archivos:")
                             for key, url in res["Otros"]:
                                 nombre = key.split("/")[-1]
-                                st.markdown(f"- [📌 {nombre}]({url})")
+                                st.markdown(
+                                    f'- <a href="{url}" target="_blank">📌 {nombre}</a>',
+                                    unsafe_allow_html=True,
+                                )
 
         else:
             mensaje = (
