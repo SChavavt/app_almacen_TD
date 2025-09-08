@@ -689,20 +689,23 @@ def set_active_main_tab(idx: int):
     st.query_params["tab"] = str(idx)
 
 
-def handle_generic_upload_change():
-    """Callback genérico para mantener pestañas al seleccionar archivos."""
+def handle_generic_upload_change(row_id, expander_dict_name):
+    """Mantiene expander y pestañas al seleccionar archivos.
+
+    Parameters
+    ----------
+    row_id : Any
+        Identificador de la fila asociada al pedido/caso.
+    expander_dict_name : str
+        Nombre del diccionario en ``st.session_state`` que controla la
+        expansión del elemento (por ejemplo ``"expanded_pedidos"``).
+    """
+    if expander_dict_name in st.session_state:
+        st.session_state[expander_dict_name][row_id] = True
+    st.session_state["scroll_to_pedido_id"] = row_id
     preserve_tab_state()
     # El script se vuelve a ejecutar automáticamente después de este callback,
     # así que evitamos una llamada explícita a st.rerun().
-
-
-def handle_guia_upload_change(row):
-    """Mantiene expansores y pestañas al seleccionar archivos de guía."""
-    st.session_state["expanded_pedidos"][row["ID_Pedido"]] = True
-    st.session_state["expanded_subir_guia"][row["ID_Pedido"]] = True
-    st.session_state["scroll_to_pedido_id"] = row["ID_Pedido"]
-    preserve_tab_state()
-
 
 def mostrar_pedido_detalle(
     df,
@@ -1094,8 +1097,8 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
                     type=["pdf", "jpg", "jpeg", "png"],
                     accept_multiple_files=True,
                     key=upload_key,
-                    on_change=handle_guia_upload_change,
-                    args=(row,),
+                    on_change=handle_generic_upload_change,
+                    args=(row["ID_Pedido"], "expanded_subir_guia"),
                 )
 
                 if st.button(
@@ -1317,6 +1320,7 @@ def mostrar_pedido_solo_guia(df, idx, row, orden, origen_tab, current_main_tab_l
             accept_multiple_files=True,
             key=upload_key,
             on_change=handle_generic_upload_change,
+            args=(row["ID_Pedido"], "expanded_pedidos"),
         )
 
 
@@ -2330,6 +2334,7 @@ with main_tabs[5]:
                 key=f"guia_{folio}_{cliente}",
                 help="Sube la guía de mensajería para el retorno del producto (PDF/JPG/PNG)",
                 on_change=handle_generic_upload_change,
+                args=(row_key, "expanded_devoluciones"),
                 accept_multiple_files=True,
             )
 
@@ -2881,6 +2886,7 @@ with main_tabs[6]:  # 🛠 Garantías
                 key=f"guia_g_{folio}_{cliente}",
                 help="Sube la guía de mensajería para envío de reposición o retorno (PDF/JPG/PNG)",
                 on_change=handle_generic_upload_change,
+                args=(row_key, "expanded_garantias"),
                 accept_multiple_files=True,
             )
 
