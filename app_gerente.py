@@ -681,35 +681,42 @@ with tabs[1]:
                 source_sel = coincidencias[0]["__source"]
                 row = coincidencias[0]
                 st.markdown(
-                    f"👤 {row['Cliente']} – 🔍 {row.get('Estado', row.get('Estado_Caso',''))} – 🧑‍💼 {row.get('Vendedor_Registro','')} – 🕒 {row['Hora_Registro'].strftime('%d/%m %H:%M')}"
+                    f"🧾 {row.get('Folio_Factura', row.get('Folio',''))} – 🚚 {row.get('Tipo_Envio','')} – 👤 {row['Cliente']} – 🔍 {row.get('Estado', row.get('Estado_Caso',''))} – 🧑‍💼 {row.get('Vendedor_Registro','')} – 🕒 {row['Hora_Registro'].strftime('%d/%m %H:%M')}"
                 )
 
             else:
-                opciones = [
-                    f"{r['ID_Pedido']} – 👤 {r['Cliente']} – 🔍 {r.get('Estado', r.get('Estado_Caso',''))} – 🧑‍💼 {r.get('Vendedor_Registro','')} – 🕒 {r['Hora_Registro'].strftime('%d/%m %H:%M')}"
-                    for r in coincidencias
-                ]
+                opciones = []
+                for r in coincidencias:
+                    folio = r.get('Folio_Factura', r.get('Folio',''))
+                    tipo_envio = r.get('Tipo_Envio','')
+                    display = (
+                        f"{folio} – 🚚 {tipo_envio} – 👤 {r['Cliente']} – 🔍 {r.get('Estado', r.get('Estado_Caso',''))} "
+                        f"– 🧑‍💼 {r.get('Vendedor_Registro','')} – 🕒 {r['Hora_Registro'].strftime('%d/%m %H:%M')}"
+                    )
+                    opciones.append(display)
                 seleccion = st.selectbox("👥 Se encontraron múltiples pedidos, selecciona uno:", opciones)
-                pedido_sel = seleccion.split(" – ")[0]
-                source_sel = next(
-                    r["__source"]
-                    for r in coincidencias
-                    if str(r["ID_Pedido"]) == pedido_sel
-                )
+                idx = opciones.index(seleccion)
+                pedido_sel = coincidencias[idx]["ID_Pedido"]
+                source_sel = coincidencias[idx]["__source"]
 
     else:
         ultimos_10 = df.head(10)
         st.markdown("### 🕒 Últimos 10 Pedidos Registrados")
         ultimos_10["display"] = ultimos_10.apply(
-            lambda row: f"{row['ID_Pedido']} – 👤 {row['Cliente']} – 🔍 {row.get('Estado', row.get('Estado_Caso',''))} – 🧑‍💼 {row.get('Vendedor_Registro','')} – 🕒 {row['Hora_Registro'].strftime('%d/%m %H:%M')}",
+            lambda row: (
+                f"{row.get('Folio_Factura', row.get('Folio',''))} – 🚚 {row.get('Tipo_Envio','')} – 👤 {row['Cliente']} "
+                f"– 🔍 {row.get('Estado', row.get('Estado_Caso',''))} – 🧑‍💼 {row.get('Vendedor_Registro','')} "
+                f"– 🕒 {row['Hora_Registro'].strftime('%d/%m %H:%M')}"
+            ),
             axis=1
         )
-        pedido_rapido_label = st.selectbox(
+        idx_seleccion = st.selectbox(
             "⬇️ Selecciona uno de los pedidos recientes:",
-            ultimos_10["display"].tolist()
+            ultimos_10.index,
+            format_func=lambda i: ultimos_10.loc[i, "display"]
         )
-        pedido_sel = pedido_rapido_label.split(" – ")[0]
-        source_sel = ultimos_10[ultimos_10["ID_Pedido"].astype(str) == pedido_sel]["__source"].values[0]
+        pedido_sel = ultimos_10.loc[idx_seleccion, "ID_Pedido"]
+        source_sel = ultimos_10.loc[idx_seleccion, "__source"]
 
 
     # --- Cargar datos del pedido seleccionado ---
