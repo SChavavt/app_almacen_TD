@@ -8,6 +8,7 @@ import re
 import unicodedata
 from io import BytesIO
 from oauth2client.service_account import ServiceAccountCredentials
+from urllib.parse import urlparse, unquote
 
 # --- CONFIGURACIÓN DE STREAMLIT ---
 st.set_page_config(page_title="🔍 Buscador de Guías y Descargas", layout="wide")
@@ -161,12 +162,43 @@ def extraer_texto_pdf(s3_key):
     except Exception as e:
         return f"[ERROR AL LEER PDF]: {e}"
 
-def get_s3_file_download_url(s3_client_param, object_key, expires_in=3600):
-    """Genera y retorna una URL prefirmada para archivos almacenados en S3."""
+
+# --- AWS S3 Helper Functions ---
+def upload_file_to_s3(s3_client_param, bucket_name, file_obj, s3_key):
     try:
+        put_kwargs = {
+            "Bucket": bucket_name,
+            "Key": s3_key,
+            "Body": file_obj.getvalue(),
+        }
+        if hasattr(file_obj, "type") and file_obj.type:
+            put_kwargs["ContentType"] = file_obj.type
+        s3_client_param.put_object(**put_kwargs)
+        permanent_url = f"https://{bucket_name}.s3.{AWS_REGION}.amazonaws.com/{s3_key}"
+        return True, permanent_url
+    except Exception as e:
+        st.error(f"❌ Error al subir archivo a S3: {e}")
+        return False, None
+
+
+def extract_s3_key(url_or_key: str) -> str:
+    if not isinstance(url_or_key, str):
+        return url_or_key
+    parsed = urlparse(url_or_key)
+    if parsed.scheme and parsed.netloc:
+        return unquote(parsed.path.lstrip("/"))
+    return url_or_key
+
+
+def get_s3_file_download_url(s3_client_param, object_key_or_url, expires_in=604800):
+    if not s3_client_param or not S3_BUCKET:
+        st.error("❌ Configuración de S3 incompleta. Verifica el cliente y el nombre del bucket.")
+        return "#"
+    try:
+        clean_key = extract_s3_key(object_key_or_url)
         return s3_client_param.generate_presigned_url(
             "get_object",
-            Params={"Bucket": S3_BUCKET, "Key": object_key},
+            Params={"Bucket": S3_BUCKET, "Key": clean_key},
             ExpiresIn=expires_in,
         )
     except Exception as e:
@@ -315,9 +347,10 @@ def render_caso_especial(res):
         if mod_urls:
             st.markdown("**Archivos de modificación:**")
             for u in mod_urls:
-                nombre = u.split("/")[-1]
+                nombre = extract_s3_key(u).split("/")[-1]
+                tmp = get_s3_file_download_url(s3_client, u)
                 st.markdown(
-                    f'- <a href="{u}" target="_blank">{nombre}</a>',
+                    f'- <a href="{tmp}" target="_blank">{nombre}</a>',
                     unsafe_allow_html=True,
                 )
 
@@ -327,15 +360,17 @@ def render_caso_especial(res):
         if adj:
             st.markdown("**Adjuntos:**")
             for u in adj:
-                nombre = u.split("/")[-1]
+                nombre = extract_s3_key(u).split("/")[-1]
+                tmp = get_s3_file_download_url(s3_client, u)
                 st.markdown(
-                    f'- <a href="{u}" target="_blank">{nombre}</a>',
+                    f'- <a href="{tmp}" target="_blank">{nombre}</a>',
                     unsafe_allow_html=True,
                 )
         if guia and guia.lower() not in ("nan","none","n/a"):
             st.markdown("**Guía:**")
+            tmp = get_s3_file_download_url(s3_client, guia)
             st.markdown(
-                f'- <a href="{guia}" target="_blank">Abrir guía</a>',
+                f'- <a href="{tmp}" target="_blank">Abrir guía</a>',
                 unsafe_allow_html=True,
             )
         if not adj and not guia:
@@ -542,9 +577,10 @@ with tabs[0]:
                         if mod_urls:
                             st.markdown("**Archivos de modificación:**")
                             for u in mod_urls:
-                                nombre = u.split("/")[-1]
+                                nombre = extract_s3_key(u).split("/")[-1]
+                                tmp = get_s3_file_download_url(s3_client, u)
                                 st.markdown(
-                                    f'- <a href="{u}" target="_blank">{nombre}</a>',
+                                    f'- <a href="{tmp}" target="_blank">{nombre}</a>',
                                     unsafe_allow_html=True,
                                 )
 
@@ -743,6 +779,25 @@ with tabs[1]:
     )
 
     st.markdown("### 📎 Adjuntar Archivos")
+    col_guias = "Adjuntos_Guia" if source_sel == "pedidos" else "Hoja_Ruta_Mensajero"
+    existentes_guias = partir_urls(row.get(col_guias, ""))
+    existentes_otros = partir_urls(row.get("Adjuntos", ""))
+
+    if existentes_guias or existentes_otros:
+        with st.expander("📥 Archivos existentes", expanded=False):
+            if existentes_guias:
+                st.markdown("**Guías:**")
+                for u in existentes_guias:
+                    tmp = get_s3_file_download_url(s3_client, u)
+                    nombre = extract_s3_key(u).split("/")[-1]
+                    st.markdown(f'- <a href="{tmp}" target="_blank">{nombre}</a>', unsafe_allow_html=True)
+            if existentes_otros:
+                st.markdown("**Otros:**")
+                for u in existentes_otros:
+                    tmp = get_s3_file_download_url(s3_client, u)
+                    nombre = extract_s3_key(u).split("/")[-1]
+                    st.markdown(f'- <a href="{tmp}" target="_blank">{nombre}</a>', unsafe_allow_html=True)
+
     uploaded_guias = st.file_uploader("📄 Guías", accept_multiple_files=True)
     uploaded_otros = st.file_uploader("📁 Otros", accept_multiple_files=True)
 
@@ -750,23 +805,23 @@ with tabs[1]:
         nuevas_guias_urls, nuevas_otros_urls = [], []
         for file in uploaded_guias or []:
             key = f"adjuntos_pedidos/{pedido_sel}/{file.name}"
-            s3_client.upload_fileobj(file, S3_BUCKET, key)
-            nuevas_guias_urls.append(get_s3_file_download_url(s3_client, key))
+            success, url_subida = upload_file_to_s3(s3_client, S3_BUCKET, file, key)
+            if success:
+                nuevas_guias_urls.append(url_subida)
         for file in uploaded_otros or []:
             key = f"adjuntos_pedidos/{pedido_sel}/{file.name}"
-            s3_client.upload_fileobj(file, S3_BUCKET, key)
-            nuevas_otros_urls.append(get_s3_file_download_url(s3_client, key))
+            success, url_subida = upload_file_to_s3(s3_client, S3_BUCKET, file, key)
+            if success:
+                nuevas_otros_urls.append(url_subida)
 
         if nuevas_guias_urls:
-            col = "Adjuntos_Guia" if source_sel == "pedidos" else "Hoja_Ruta_Mensajero"
-            existente = row.get(col, "")
+            existente = row.get(col_guias, "")
             nuevo_valor = combinar_urls_existentes(existente, nuevas_guias_urls)
-            hoja.update_cell(gspread_row_idx, row_df.columns.get_loc(col)+1, nuevo_valor)
+            hoja.update_cell(gspread_row_idx, row_df.columns.get_loc(col_guias)+1, nuevo_valor)
         if nuevas_otros_urls:
-            col = "Adjuntos"
-            existente = row.get(col, "")
+            existente = row.get("Adjuntos", "")
             nuevo_valor = combinar_urls_existentes(existente, nuevas_otros_urls)
-            hoja.update_cell(gspread_row_idx, row_df.columns.get_loc(col)+1, nuevo_valor)
+            hoja.update_cell(gspread_row_idx, row_df.columns.get_loc("Adjuntos")+1, nuevo_valor)
 
         st.session_state["pedido_modificado"] = pedido_sel
         st.session_state["pedido_modificado_source"] = source_sel
