@@ -830,12 +830,24 @@ with tabs[1]:
 
 
     # --- CAMPOS MODIFICABLES ---
+    if source_sel == "casos":
+        comentario_usuario = st.text_area("📝 Comentario desde almacén")
+        if st.button("Guardar comentario"):
+            existente = row.get("Comentario", "")
+            nuevo_coment = f"[Almacen] {comentario_usuario.strip()}"
+            valor_final = f"{existente} | {nuevo_coment}" if existente else nuevo_coment
+            hoja.update_cell(gspread_row_idx, row_df.columns.get_loc("Comentario") + 1, valor_final)
+            st.session_state["pedido_modificado"] = pedido_sel
+            st.session_state["pedido_modificado_source"] = source_sel
+            st.session_state["mensaje_exito"] = "📝 Comentario guardado correctamente."
+            st.rerun()
+
     vendedores = [
         "ALEJANDRO RODRIGUEZ",
         "ANA KAREN ORTEGA MAHUAD",
         "DANIELA LOPEZ RAMIREZ",
         "EDGAR ORLANDO GOMEZ VILLAGRAN",
-        "GLORIA MICHELLE GARCIA TORRES", 
+        "GLORIA MICHELLE GARCIA TORRES",
         "GRISELDA CAROLINA SANCHEZ GARCIA",
         "HECTOR DEL ANGEL AREVALO ALCALA",
         "JOSELIN TRUJILLO PATRACA",
