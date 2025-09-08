@@ -7,6 +7,7 @@ import json
 import re
 import unicodedata
 from io import BytesIO
+from urllib.parse import urlparse, unquote
 from oauth2client.service_account import ServiceAccountCredentials
 
 # --- CONFIGURACIÓN DE STREAMLIT ---
@@ -161,12 +162,26 @@ def extraer_texto_pdf(s3_key):
     except Exception as e:
         return f"[ERROR AL LEER PDF]: {e}"
 
-def get_s3_file_download_url(s3_client_param, object_key, expires_in=3600):
-    """Genera y retorna una URL prefirmada para archivos almacenados en S3."""
+def extract_s3_key(url_or_key: str) -> str:
+    """Devuelve una clave de S3 a partir de una URL o clave cruda."""
+    if not isinstance(url_or_key, str):
+        return url_or_key
+    parsed = urlparse(url_or_key)
+    if parsed.scheme and parsed.netloc:
+        return unquote(parsed.path.lstrip("/"))
+    return url_or_key
+
+
+def get_s3_file_download_url(s3_client_param, object_key_or_url, expires_in=604800):
+    """Genera una URL prefirmada (nueva) para un objeto de S3."""
+    if not s3_client_param or not S3_BUCKET:
+        st.error("❌ Configuración de S3 incompleta. Verifica el cliente y el nombre del bucket.")
+        return "#"
     try:
+        clean_key = extract_s3_key(object_key_or_url)
         return s3_client_param.generate_presigned_url(
             "get_object",
-            Params={"Bucket": S3_BUCKET, "Key": object_key},
+            Params={"Bucket": S3_BUCKET, "Key": clean_key},
             ExpiresIn=expires_in,
         )
     except Exception as e:
@@ -307,17 +322,18 @@ def render_caso_especial(res):
         st.info(seguimiento_txt.strip())
 
     mod_txt = res.get("Modificacion_Surtido", "") or ""
-    mod_urls = res.get("Adjuntos_Surtido_urls", []) or []
-    if mod_txt or mod_urls:
+    mod_keys = res.get("Adjuntos_Surtido_urls", []) or []
+    if mod_txt or mod_keys:
         st.markdown("#### 🛠 Modificación de surtido")
         if mod_txt:
             st.info(mod_txt)
-        if mod_urls:
+        if mod_keys:
             st.markdown("**Archivos de modificación:**")
-            for u in mod_urls:
-                nombre = u.split("/")[-1]
+            for k in mod_keys:
+                url = get_s3_file_download_url(s3_client, k)
+                nombre = k.split("/")[-1]
                 st.markdown(
-                    f'- <a href="{u}" target="_blank">{nombre}</a>',
+                    f'- <a href="{url}" target="_blank">{nombre}</a>',
                     unsafe_allow_html=True,
                 )
 
@@ -326,16 +342,18 @@ def render_caso_especial(res):
         guia = res.get("Guia_url", "")
         if adj:
             st.markdown("**Adjuntos:**")
-            for u in adj:
-                nombre = u.split("/")[-1]
+            for k in adj:
+                url = get_s3_file_download_url(s3_client, k)
+                nombre = k.split("/")[-1]
                 st.markdown(
-                    f'- <a href="{u}" target="_blank">{nombre}</a>',
+                    f'- <a href="{url}" target="_blank">{nombre}</a>',
                     unsafe_allow_html=True,
                 )
         if guia and guia.lower() not in ("nan","none","n/a"):
             st.markdown("**Guía:**")
+            guia_url = get_s3_file_download_url(s3_client, guia)
             st.markdown(
-                f'- <a href="{guia}" target="_blank">Abrir guía</a>',
+                f'- <a href="{guia_url}" target="_blank">Abrir guía</a>',
                 unsafe_allow_html=True,
             )
         if not adj and not guia:
@@ -534,17 +552,18 @@ with tabs[0]:
                     )
 
                     mod_txt = res.get("Modificacion_Surtido", "") or ""
-                    mod_urls = res.get("Adjuntos_Surtido_urls", []) or []
-                    if mod_txt or mod_urls:
+                    mod_keys = res.get("Adjuntos_Surtido_urls", []) or []
+                    if mod_txt or mod_keys:
                         st.markdown("#### 🛠 Modificación de surtido")
                         if mod_txt:
                             st.info(mod_txt)
-                        if mod_urls:
+                        if mod_keys:
                             st.markdown("**Archivos de modificación:**")
-                            for u in mod_urls:
-                                nombre = u.split("/")[-1]
+                            for k in mod_keys:
+                                url = get_s3_file_download_url(s3_client, k)
+                                nombre = k.split("/")[-1]
                                 st.markdown(
-                                    f'- <a href="{u}" target="_blank">{nombre}</a>',
+                                    f'- <a href="{url}" target="_blank">{nombre}</a>',
                                     unsafe_allow_html=True,
                                 )
 
@@ -747,25 +766,25 @@ with tabs[1]:
     uploaded_otros = st.file_uploader("📁 Otros", accept_multiple_files=True)
 
     if st.button("⬆️ Subir archivos"):
-        nuevas_guias_urls, nuevas_otros_urls = [], []
+        nuevas_guias_keys, nuevas_otros_keys = [], []
         for file in uploaded_guias or []:
             key = f"adjuntos_pedidos/{pedido_sel}/{file.name}"
             s3_client.upload_fileobj(file, S3_BUCKET, key)
-            nuevas_guias_urls.append(get_s3_file_download_url(s3_client, key))
+            nuevas_guias_keys.append(key)
         for file in uploaded_otros or []:
             key = f"adjuntos_pedidos/{pedido_sel}/{file.name}"
             s3_client.upload_fileobj(file, S3_BUCKET, key)
-            nuevas_otros_urls.append(get_s3_file_download_url(s3_client, key))
+            nuevas_otros_keys.append(key)
 
-        if nuevas_guias_urls:
+        if nuevas_guias_keys:
             col = "Adjuntos_Guia" if source_sel == "pedidos" else "Hoja_Ruta_Mensajero"
             existente = row.get(col, "")
-            nuevo_valor = combinar_urls_existentes(existente, nuevas_guias_urls)
+            nuevo_valor = combinar_urls_existentes(existente, nuevas_guias_keys)
             hoja.update_cell(gspread_row_idx, row_df.columns.get_loc(col)+1, nuevo_valor)
-        if nuevas_otros_urls:
+        if nuevas_otros_keys:
             col = "Adjuntos"
             existente = row.get(col, "")
-            nuevo_valor = combinar_urls_existentes(existente, nuevas_otros_urls)
+            nuevo_valor = combinar_urls_existentes(existente, nuevas_otros_keys)
             hoja.update_cell(gspread_row_idx, row_df.columns.get_loc(col)+1, nuevo_valor)
 
         st.session_state["pedido_modificado"] = pedido_sel
