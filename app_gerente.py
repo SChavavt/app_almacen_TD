@@ -919,6 +919,31 @@ with tabs[1]:
         st.session_state["mensaje_exito"] = "👁 Visibilidad en pantalla de producción actualizada."
         st.rerun()
 
+    # --- Comentarios de almacén para devoluciones o garantías en Casos Especiales ---
+    tipo_envio_val = row.get("Tipo_Envio", "")
+    tipo_envio_norm = normalizar(tipo_envio_val)
+    is_devolucion = "devolu" in tipo_envio_norm
+    is_garantia = "garant" in tipo_envio_norm
+
+    if source_sel == "casos" and (is_devolucion or is_garantia):
+        comentario_almacen = st.text_area("Comentario de almacén")
+        if st.button("💬 Guardar comentario de almacén"):
+            comentario_existente = str(row.get("Comentario", ""))
+            comentario_nuevo = f"[Almacen] {comentario_almacen.strip()}"
+            comentario_actualizado = (
+                f"{comentario_existente}\n{comentario_nuevo}".strip()
+                if comentario_existente.strip()
+                else comentario_nuevo
+            )
+            hoja.update_cell(
+                gspread_row_idx,
+                row_df.columns.get_loc("Comentario") + 1,
+                comentario_actualizado,
+            )
+            st.session_state["pedido_modificado"] = pedido_sel
+            st.session_state["pedido_modificado_source"] = source_sel
+            st.session_state["mensaje_exito"] = "💬 Comentario de almacén guardado."
+            st.rerun()
 
 with tabs[2]:
     st.header("📂 Casos Especiales")
