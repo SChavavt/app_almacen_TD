@@ -696,6 +696,14 @@ def handle_generic_upload_change():
     # así que evitamos una llamada explícita a st.rerun().
 
 
+def handle_guia_upload_change(row):
+    """Mantiene expansores y pestañas al seleccionar archivos de guía."""
+    st.session_state["expanded_pedidos"][row["ID_Pedido"]] = True
+    st.session_state["expanded_subir_guia"][row["ID_Pedido"]] = True
+    st.session_state["scroll_to_pedido_id"] = row["ID_Pedido"]
+    preserve_tab_state()
+
+
 def mostrar_pedido_detalle(
     df,
     idx,
@@ -1086,6 +1094,8 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
                     type=["pdf", "jpg", "jpeg", "png"],
                     accept_multiple_files=True,
                     key=upload_key,
+                    on_change=handle_guia_upload_change,
+                    args=(row,),
                 )
 
                 if st.button(
