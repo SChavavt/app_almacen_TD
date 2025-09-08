@@ -704,7 +704,7 @@ with tabs[1]:
         st.markdown("### 🕒 Últimos 10 Pedidos Registrados")
         ultimos_10["display"] = ultimos_10.apply(
             lambda row: (
-                f"{row.get('Folio_Factura', row.get('Folio',''))} – 🚚 {row.get('Tipo_Envio','')} – 👤 {row['Cliente']} "
+                f"{row.get('Folio_Factura', row.get('Folio',''))} – {row.get('Tipo_Envio','')} – 👤 {row['Cliente']} "
                 f"– 🔍 {row.get('Estado', row.get('Estado_Caso',''))} – 🧑‍💼 {row.get('Vendedor_Registro','')} "
                 f"– 🕒 {row['Hora_Registro'].strftime('%d/%m %H:%M')}"
             ),
@@ -855,6 +855,7 @@ with tabs[1]:
     valor_preseleccionado = "No" if valor_actual == "sí" else "Sí"
     seleccion = st.selectbox("¿Mostrar este pedido en el Panel?", list(opciones_visibilidad.keys()), index=list(opciones_visibilidad.keys()).index(valor_preseleccionado))
     nuevo_valor_completado = opciones_visibilidad[seleccion]
+
 
     if st.button("👁 Guardar visibilidad en Panel"):
         hoja.update_cell(gspread_row_idx, row_df.columns.get_loc("Completados_Limpiado")+1, nuevo_valor_completado)
