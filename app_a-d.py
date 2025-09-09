@@ -2862,13 +2862,17 @@ with main_tabs[6]:  # 🛠 Garantías
                 items = []
                 for u in adjuntos_urls:
                     if u:
-                        file_name = os.path.basename(u)
-                        items.append((file_name, u))
+                        file_name = os.path.basename(urlparse(u).path) or u
+                        file_name = unquote(file_name)
+                        presigned = get_s3_file_download_url(s3_client, u)
+                        items.append((file_name, presigned))
                 if principal_url and principal_url.lower() not in ("nan", "none", "n/a"):
                     label_p = "Dictamen de Garantía" if dictamen_url else "Nota de Crédito"
-                    items.append((label_p, principal_url))
+                    presigned = get_s3_file_download_url(s3_client, principal_url)
+                    items.append((label_p, presigned))
                 if doc_adic_url and doc_adic_url.lower() not in ("nan", "none", "n/a"):
-                    items.append(("Documento Adicional", doc_adic_url))
+                    presigned = get_s3_file_download_url(s3_client, doc_adic_url)
+                    items.append(("Documento Adicional", presigned))
 
                 if items:
                     for label, url in items:
