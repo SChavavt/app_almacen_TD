@@ -707,6 +707,13 @@ def handle_generic_upload_change(row_id, expander_dict_name):
     # El script se vuelve a ejecutar automáticamente después de este callback,
     # así que evitamos una llamada explícita a st.rerun().
 
+def expand_and_preserve(expander_dict_name, row_key, pedido_id):
+    """Preserva pestañas, expande el caso y fija el scroll."""
+    preserve_tab_state()
+    if expander_dict_name in st.session_state:
+        st.session_state[expander_dict_name][row_key] = True
+    st.session_state["scroll_to_pedido_id"] = pedido_id
+
 def mostrar_pedido_detalle(
     df,
     idx,
@@ -2342,7 +2349,8 @@ with main_tabs[5]:
             if st.button(
                 "📤 Subir Guía",
                 key=f"btn_subir_guia_{folio}_{cliente}",
-                on_click=preserve_tab_state,
+                on_click=expand_and_preserve,
+                args=("expanded_devoluciones", row_key, idp),
             ):
                 try:
                     if not guia_files:
@@ -2894,7 +2902,8 @@ with main_tabs[6]:  # 🛠 Garantías
             if st.button(
                 "📤 Subir Guía",
                 key=f"btn_subir_guia_g_{folio}_{cliente}",
-                on_click=preserve_tab_state,
+                on_click=expand_and_preserve,
+                args=("expanded_garantias", row_key, idp),
             ):
                 try:
                     if not guia_files:
