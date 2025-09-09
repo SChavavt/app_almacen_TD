@@ -3177,8 +3177,9 @@ with main_tabs[7]:  # ✅ Historial Completados
                         for u in adjuntos:
                             nombre = os.path.basename(urlparse(u).path) or u
                             nombre = unquote(nombre)
+                            url = get_s3_file_download_url(s3_client, u)
                             st.markdown(
-                                f'- <a href="{u}" target="_blank">{nombre}</a>',
+                                f'- <a href="{url}" target="_blank">{nombre}</a>',
                                 unsafe_allow_html=True,
                             )
                     if guias:
