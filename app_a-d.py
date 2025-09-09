@@ -1959,8 +1959,9 @@ with main_tabs[5]:
                 for u in adj_surtido:
                     nombre = os.path.basename(urlparse(u).path) or u
                     nombre = unquote(nombre)
+                    url = get_s3_file_download_url(s3_client, u)
                     st.markdown(
-                        f'- <a href="{u}" target="_blank">{nombre}</a>',
+                        f'- <a href="{url}" target="_blank">{nombre}</a>',
                         unsafe_allow_html=True,
                     )
 
@@ -1974,8 +1975,9 @@ with main_tabs[5]:
                 for u in adjuntos:
                     nombre = os.path.basename(urlparse(u).path) or u
                     nombre = unquote(nombre)
+                    url = get_s3_file_download_url(s3_client, u)
                     st.markdown(
-                        f'- <a href="{u}" target="_blank">{nombre}</a>',
+                        f'- <a href="{url}" target="_blank">{nombre}</a>',
                         unsafe_allow_html=True,
                     )
             if guias:
