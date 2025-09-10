@@ -480,7 +480,7 @@ with tabs[0]:
             df0["Completados_Limpiado"] = ""
         df0 = df0[
             ~(
-                df0["Estado"].isin(["🟢 Completado", "🟣 Cancelado"])
+                df0["Estado"].isin(["🟢 Completado", "🟣 Cancelado", "✅ Viajó"])
                 & (df0["Completados_Limpiado"].astype(str).str.lower() == "sí")
             )
         ]
@@ -508,7 +508,11 @@ with tabs[1]:
                 df_cdmx["Completados_Limpiado"] = ""
             df_cdmx = df_cdmx[
                 ~(
-                    df_cdmx["Estado"].isin(["🟢 Completado", "🟣 Cancelado"])
+                    df_cdmx["Estado"].isin([
+                        "🟢 Completado",
+                        "🟣 Cancelado",
+                        "✅ Viajó",
+                    ])
                     & (df_cdmx["Completados_Limpiado"].astype(str).str.lower() == "sí")
                 )
             ]
@@ -551,7 +555,11 @@ with tabs[1]:
                 df_guias["Completados_Limpiado"] = ""
             df_guias = df_guias[
                 ~(
-                    df_guias["Estado"].isin(["🟢 Completado", "🟣 Cancelado"])
+                    df_guias["Estado"].isin([
+                        "🟢 Completado",
+                        "🟣 Cancelado",
+                        "✅ Viajó",
+                    ])
                     & (df_guias["Completados_Limpiado"].astype(str).str.lower() == "sí")
                 )
             ]
@@ -833,7 +841,7 @@ with tabs[2]:
                 casos = casos[
                     ~(
                         casos["Estado"].astype(str).str.strip().isin(
-                            ["🟢 Completado", "🟣 Cancelado"]
+                            ["🟢 Completado", "🟣 Cancelado", "✅ Viajó"]
                         )
                         & (
                             casos["Completados_Limpiado"].astype(str).str.lower()
