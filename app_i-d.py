@@ -406,26 +406,30 @@ def status_counts_block(df_src):
         c.metric(label, int(val))
 
 
-def group_key_local_foraneo(row, local_flag_col="Turno"):
-    """Devuelve Turno si hay, Cursos y Eventos si aplica o Foráneo genérico."""
+def group_key_local(row, local_flag_col="Turno"):
+    """Devuelve el turno o etiquetas para cursos/eventos y locales sin turno."""
     turno = str(row.get(local_flag_col, "") or "")
     if turno:
         return turno
     tipo_envio = str(row.get("Tipo_Envio", "") or "")
     if tipo_envio == "🎓 Cursos y Eventos":
         return "🎓 Cursos y Eventos"
-    return "🌍 Foráneo"
+    return "📍 Local (sin turno)"
 
 
-def show_grouped_panel(df_source):
+def show_grouped_panel(df_source, mode: str = "local"):
+    """Muestra paneles agrupados por turno (local) o fecha (foráneo)."""
     if df_source.empty:
         st.info("No hay registros para mostrar.")
         return
     work = df_source.copy()
     work["Fecha_Entrega_Str"] = work["Fecha_Entrega"].dt.strftime("%d/%m")
-    work["Grupo_Clave"] = work.apply(
-        lambda r: f"{group_key_local_foraneo(r)} – {r['Fecha_Entrega_Str']}", axis=1
-    )
+    if mode == "foraneo":
+        work["Grupo_Clave"] = work["Fecha_Entrega_Str"]
+    else:
+        work["Grupo_Clave"] = work.apply(
+            lambda r: f"{group_key_local(r)} – {r['Fecha_Entrega_Str']}", axis=1
+        )
     grupos = []
     grouped = work.groupby(["Grupo_Clave", "Fecha_Entrega"])
     for (clave, f), df_g in sorted(
@@ -459,42 +463,56 @@ df_all = load_data_from_gsheets()
 st.caption(f"🕒 Última actualización: {datetime.now(TZ).strftime('%d/%m %H:%M:%S')}")
 
 # Tabs principales
-tabs = st.tabs(["📦 Pedidos (Local/Foráneo)", "🏙️ CDMX y Guías", "🧰 Casos Especiales"])
+tabs = st.tabs(["📍 Local", "🌍 Foráneo", "🏙️ CDMX y Guías", "🧰 Casos Especiales"])
 
 # ---------------------------
-# TAB 0: Local / Foráneo
+# TAB 0: Local
 # ---------------------------
 with tabs[0]:
     if df_all.empty:
         st.info("Sin datos en 'datos_pedidos'.")
     else:
-        # Filtra Local, Foráneo y Cursos/Eventos (excluye CDMX y Solicitudes de Guía)
-        df0 = df_all[
-            df_all["Tipo_Envio"].isin(
-                ["📍 Pedido Local", "🚚 Pedido Foráneo", "🎓 Cursos y Eventos"]
-            )
+        df_local = df_all[
+            df_all["Tipo_Envio"].isin(["📍 Pedido Local", "🎓 Cursos y Eventos"])
         ].copy()
-
-        # Excluye Completados limpiados
-        if "Completados_Limpiado" not in df0.columns:
-            df0["Completados_Limpiado"] = ""
-        df0 = df0[
+        if "Completados_Limpiado" not in df_local.columns:
+            df_local["Completados_Limpiado"] = ""
+        df_local = df_local[
             ~(
-                df0["Estado"].isin(["🟢 Completado", "🟣 Cancelado", "✅ Viajó"])
-                & (df0["Completados_Limpiado"].astype(str).str.lower() == "sí")
+                df_local["Estado"].isin(["🟢 Completado", "🟣 Cancelado", "✅ Viajó"])
+                & (df_local["Completados_Limpiado"].astype(str).str.lower() == "sí")
             )
         ]
-
-        st.markdown("#### 📊 Resumen (Local/Foráneo)")
-        status_counts_block(df0)
-
+        st.markdown("#### 📊 Resumen (Local)")
+        status_counts_block(df_local)
         st.markdown("### 📚 Grupos")
-        show_grouped_panel(df0)
+        show_grouped_panel(df_local, mode="local")
 
 # ---------------------------
-# TAB 1: CDMX y Guías
+# TAB 1: Foráneo
 # ---------------------------
 with tabs[1]:
+    if df_all.empty:
+        st.info("Sin datos en 'datos_pedidos'.")
+    else:
+        df_for = df_all[df_all["Tipo_Envio"] == "🚚 Pedido Foráneo"].copy()
+        if "Completados_Limpiado" not in df_for.columns:
+            df_for["Completados_Limpiado"] = ""
+        df_for = df_for[
+            ~(
+                df_for["Estado"].isin(["🟢 Completado", "🟣 Cancelado", "✅ Viajó"])
+                & (df_for["Completados_Limpiado"].astype(str).str.lower() == "sí")
+            )
+        ]
+        st.markdown("#### 📊 Resumen (Foráneo)")
+        status_counts_block(df_for)
+        st.markdown("### 📚 Grupos")
+        show_grouped_panel(df_for, mode="foraneo")
+
+# ---------------------------
+# TAB 2: CDMX y Guías
+# ---------------------------
+with tabs[2]:
     if df_all.empty:
         st.info("Sin datos en 'datos_pedidos'.")
     else:
@@ -744,9 +762,9 @@ if "show_grouped_panel_casos" not in globals():
 
 
 # =========================
-# TAB 2: Casos Especiales (Devoluciones + Garantías)
+# TAB 3: Casos Especiales (Devoluciones + Garantías)
 # =========================
-with tabs[2]:
+with tabs[3]:
     df_casos = load_casos_from_gsheets()
     # Normaliza columnas para detección de tipo
     if (
