@@ -379,12 +379,16 @@ def status_counts_block(df_src):
         (comps["Estado"] == "🟢 Completado")
         & (comps["Completados_Limpiado"].astype(str).str.lower() != "sí")
     ]
+    cancelados_visibles = comps[
+        (comps["Estado"] == "🟣 Cancelado")
+        & (comps["Completados_Limpiado"].astype(str).str.lower() != "sí")
+    ]
     counts = {
         "🟡 Pendiente": (comps["Estado"] == "🟡 Pendiente").sum(),
         "🔵 En Proceso": (comps["Estado"] == "🔵 En Proceso").sum(),
         "🔴 Demorado": (comps["Estado"] == "🔴 Demorado").sum(),
         "🛠 Modificación": (comps["Estado"] == "🛠 Modificación").sum(),
-        "🟣 Cancelado": (comps["Estado"] == "🟣 Cancelado").sum(),
+        "🟣 Cancelado": len(cancelados_visibles),
         "🟢 Completado": len(completados_visibles),
     }
     total = sum(counts.values())
@@ -475,10 +479,9 @@ with tabs[0]:
         if "Completados_Limpiado" not in df0.columns:
             df0["Completados_Limpiado"] = ""
         df0 = df0[
-            (df0["Estado"] != "🟢 Completado")
-            | (
-                (df0["Estado"] == "🟢 Completado")
-                & (df0["Completados_Limpiado"].astype(str).str.lower() != "sí")
+            ~(
+                df0["Estado"].isin(["🟢 Completado", "🟣 Cancelado"])
+                & (df0["Completados_Limpiado"].astype(str).str.lower() == "sí")
             )
         ]
 
@@ -504,10 +507,9 @@ with tabs[1]:
             if "Completados_Limpiado" not in df_cdmx.columns:
                 df_cdmx["Completados_Limpiado"] = ""
             df_cdmx = df_cdmx[
-                (df_cdmx["Estado"] != "🟢 Completado")
-                | (
-                    (df_cdmx["Estado"] == "🟢 Completado")
-                    & (df_cdmx["Completados_Limpiado"].astype(str).str.lower() != "sí")
+                ~(
+                    df_cdmx["Estado"].isin(["🟢 Completado", "🟣 Cancelado"])
+                    & (df_cdmx["Completados_Limpiado"].astype(str).str.lower() == "sí")
                 )
             ]
             st.markdown("##### Resumen CDMX")
@@ -548,10 +550,9 @@ with tabs[1]:
             if "Completados_Limpiado" not in df_guias.columns:
                 df_guias["Completados_Limpiado"] = ""
             df_guias = df_guias[
-                (df_guias["Estado"] != "🟢 Completado")
-                | (
-                    (df_guias["Estado"] == "🟢 Completado")
-                    & (df_guias["Completados_Limpiado"].astype(str).str.lower() != "sí")
+                ~(
+                    df_guias["Estado"].isin(["🟢 Completado", "🟣 Cancelado"])
+                    & (df_guias["Completados_Limpiado"].astype(str).str.lower() == "sí")
                 )
             ]
             st.markdown("##### Resumen Guías")
@@ -626,15 +627,25 @@ if "load_casos_from_gsheets" not in globals():
 
 def status_counts_block_casos(df: pd.DataFrame):
     estados = df.get("Estado", pd.Series(dtype=str)).astype(str)
+    if "Completados_Limpiado" not in df.columns:
+        df["Completados_Limpiado"] = ""
     total = len(df)
     pend = estados.str.contains("Pendiente", case=False, na=False).sum()
     proc = estados.str.contains("En Proceso", case=False, na=False).sum()
-    comp = estados.str.contains("Completado", case=False, na=False).sum()
-    cols = st.columns(4)
+    completados_visibles = df[
+        (df["Estado"].astype(str).str.strip() == "🟢 Completado")
+        & (df["Completados_Limpiado"].astype(str).str.lower() != "sí")
+    ]
+    cancelados_visibles = df[
+        (df["Estado"].astype(str).str.strip() == "🟣 Cancelado")
+        & (df["Completados_Limpiado"].astype(str).str.lower() != "sí")
+    ]
+    cols = st.columns(5)
     cols[0].metric("Total Pedidos", int(total))
     cols[1].metric("🟡 Pendiente", int(pend))
     cols[2].metric("🔵 En Proceso", int(proc))
-    cols[3].metric("🟢 Completado", int(comp))
+    cols[3].metric("🟢 Completado", int(len(completados_visibles)))
+    cols[4].metric("🟣 Cancelado", int(len(cancelados_visibles)))
 
 
 if "show_grouped_panel_casos" not in globals():
@@ -815,17 +826,18 @@ with tabs[2]:
         if casos.empty:
             st.info("No hay devoluciones/garantías para mostrar.")
         else:
-            # Excluir completados limpiados, mostrar el resto
+            # Excluir completados/cancelados limpiados, mostrar el resto
             if "Completados_Limpiado" not in casos.columns:
                 casos["Completados_Limpiado"] = ""
             if "Estado" in casos.columns:
                 casos = casos[
-                    (casos["Estado"].astype(str).str.strip() != "🟢 Completado")
-                    | (
-                        (casos["Estado"].astype(str).str.strip() == "🟢 Completado")
+                    ~(
+                        casos["Estado"].astype(str).str.strip().isin(
+                            ["🟢 Completado", "🟣 Cancelado"]
+                        )
                         & (
                             casos["Completados_Limpiado"].astype(str).str.lower()
-                            != "sí"
+                            == "sí"
                         )
                     )
                 ]
