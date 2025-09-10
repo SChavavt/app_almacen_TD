@@ -47,11 +47,11 @@ with col_actions:
     st.checkbox(
         "⚡ Autorefrescar", key="auto_reload", help="Rerun automático sin limpiar caché"
     )
-    st.selectbox("Intervalo (seg)", [120, 180], index=0, key="auto_reload_interval")
+    st.selectbox("Intervalo (seg)", [60, 45], index=0, key="auto_reload_interval")
 
 # ⏱️ Autorefresco (no limpia caché)
 if st.session_state.get("auto_reload"):
-    interval = int(st.session_state.get("auto_reload_interval", 120))
+    interval = int(st.session_state.get("auto_reload_interval", 60))
     # Utilizar st_autorefresh evita recargar la página y conserva la sesión
     st_autorefresh(interval=interval * 1000, key="auto_refresh_counter")
 
@@ -183,6 +183,8 @@ try:
     g_spread_client = get_gspread_client(_credentials_json_dict=GSHEETS_CREDENTIALS)
     s3_client = get_s3_client()
     spreadsheet = g_spread_client.open_by_key(GOOGLE_SHEET_ID)
+    worksheet_main = spreadsheet.worksheet(SHEET_PEDIDOS)
+    worksheet_casos = spreadsheet.worksheet(SHEET_CASOS)
 
 except gspread.exceptions.APIError as e:
     if "ACCESS_TOKEN_EXPIRED" in str(e) or "UNAUTHENTICATED" in str(e):
@@ -192,6 +194,8 @@ except gspread.exceptions.APIError as e:
         g_spread_client = get_gspread_client(_credentials_json_dict=GSHEETS_CREDENTIALS)
         s3_client = get_s3_client()
         spreadsheet = g_spread_client.open_by_key(GOOGLE_SHEET_ID)
+        worksheet_main = spreadsheet.worksheet(SHEET_PEDIDOS)
+        worksheet_casos = spreadsheet.worksheet(SHEET_CASOS)
     else:
         st.error(f"❌ Error al autenticar clientes: {e}")
         st.stop()
@@ -201,20 +205,9 @@ except Exception as e:
 
 
 # --- Carga de datos ---
-
-@st.cache_data(ttl=300)
-def fetch_sheet_values():
-    """Obtiene ambos rangos en una sola llamada a la API."""
-    data_pedidos, data_casos = g_spread_client.batch_get(
-        spreadsheet_id=GOOGLE_SHEET_ID,
-        ranges=[SHEET_PEDIDOS, SHEET_CASOS],
-    )
-    return data_pedidos, data_casos
-
-
-@st.cache_data(ttl=300)
+@st.cache_data(ttl=60)
 def load_data_from_gsheets():
-    data, _ = fetch_sheet_values()
+    data = worksheet_main.get_all_values()
     if not data:
         return pd.DataFrame()
     headers = data[0]
@@ -244,10 +237,10 @@ def load_data_from_gsheets():
     return df
 
 
-@st.cache_data(ttl=300)
+@st.cache_data(ttl=60)
 def load_casos_from_gsheets():
     """Lee 'casos_especiales' y normaliza headers/fechas."""
-    _, data = fetch_sheet_values()
+    data = worksheet_casos.get_all_values()
     if not data:
         return pd.DataFrame()
     raw_headers = data[0]
@@ -598,6 +591,46 @@ with tabs[1]:
 # =========================
 # Helpers para Casos Especiales
 # =========================
+if "load_casos_from_gsheets" not in globals():
+
+    @st.cache_data(ttl=60)
+    def load_casos_from_gsheets() -> pd.DataFrame:
+        ws = spreadsheet.worksheet("casos_especiales")
+        vals = ws.get_all_values()
+        if not vals:
+            return pd.DataFrame()
+        headers = vals[0]
+        df = pd.DataFrame(vals[1:], columns=headers)
+        df["gsheet_row_index"] = df.index + 2
+
+        # Parse fechas/horas
+        for c in [
+            "Hora_Registro",
+            "Fecha_Entrega",
+            "Fecha_Completado",
+            "Hora_Proceso",
+            "Fecha_Recepcion_Devolucion",
+        ]:
+            if c in df.columns:
+                df[c] = pd.to_datetime(df[c], errors="coerce")
+
+        # Normalizaciones mínimas
+        for c in [
+            "Cliente",
+            "Vendedor_Registro",
+            "Estado",
+            "Folio_Factura",
+            "Turno",
+            "Tipo_Envio_Original",
+            "Tipo_Envio",
+            "Tipo_Caso",
+        ]:
+            if c not in df.columns:
+                df[c] = ""
+            else:
+                df[c] = df[c].astype(str)
+
+        return df
 
 
 def status_counts_block_casos(df: pd.DataFrame):
