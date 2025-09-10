@@ -1002,43 +1002,49 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
         # Complete Button
         if col_complete_btn.button("🟢 Completar", key=f"complete_button_{row['ID_Pedido']}_{origen_tab}", disabled=disabled_if_completed):
             try:
-                updates = []
-                estado_col_idx = headers.index('Estado') + 1
-                fecha_completado_col_idx = headers.index('Fecha_Completado') + 1
-
-                zona_mexico = timezone("America/Mexico_City")
-                now = datetime.now(zona_mexico)
-                now_str = now.strftime("%Y-%m-%d %H:%M:%S")
-
-
-                updates.append({
-                    'range': gspread.utils.rowcol_to_a1(gsheet_row_index, estado_col_idx),
-                    'values': [["🟢 Completado"]]
-                })
-                updates.append({
-                    'range': gspread.utils.rowcol_to_a1(gsheet_row_index, fecha_completado_col_idx),
-                    'values': [[now_str]]
-                })
-
-                if batch_update_gsheet_cells(worksheet, updates):
-                    df.loc[idx, "Estado"] = "🟢 Completado"
-                    df.loc[idx, "Fecha_Completado"] = now
-                    st.success(f"✅ Pedido {row['ID_Pedido']} completado exitosamente.")
-
-                    # 🔁 Mantener pestaña activa
-                    st.session_state["pedido_editado"] = row['ID_Pedido']
-                    st.session_state["fecha_seleccionada"] = row.get("Fecha_Entrega", "")
-                    st.session_state["subtab_local"] = origen_tab
-
-                    st.cache_data.clear()
-
-                    set_active_main_tab(st.session_state.get("active_main_tab_index", 0))
-                    st.session_state["active_subtab_local_index"] = st.session_state.get("active_subtab_local_index", 0)
-                    st.session_state["active_date_tab_m_index"] = st.session_state.get("active_date_tab_m_index", 0)
-                    st.session_state["active_date_tab_t_index"] = st.session_state.get("active_date_tab_t_index", 0)
-                    st.rerun()
+                # Buscar el índice real de la fila en Google Sheets usando el ID_Pedido
+                cell = worksheet.find(str(row["ID_Pedido"]))
+                if not cell:
+                    st.error(f"❌ No se encontró el ID_Pedido '{row['ID_Pedido']}' en la hoja.")
                 else:
-                    st.error("❌ No se pudo completar el pedido.")
+                    gsheet_row_index = cell.row
+
+                    estado_col_idx = headers.index('Estado') + 1
+                    fecha_completado_col_idx = headers.index('Fecha_Completado') + 1
+
+                    zona_mexico = timezone("America/Mexico_City")
+                    now = datetime.now(zona_mexico)
+                    now_str = now.strftime("%Y-%m-%d %H:%M:%S")
+
+                    updates = []
+                    updates.append({
+                        'range': gspread.utils.rowcol_to_a1(gsheet_row_index, estado_col_idx),
+                        'values': [["🟢 Completado"]]
+                    })
+                    updates.append({
+                        'range': gspread.utils.rowcol_to_a1(gsheet_row_index, fecha_completado_col_idx),
+                        'values': [[now_str]]
+                    })
+
+                    if batch_update_gsheet_cells(worksheet, updates):
+                        df.loc[idx, "Estado"] = "🟢 Completado"
+                        df.loc[idx, "Fecha_Completado"] = now
+                        st.success(f"✅ Pedido {row['ID_Pedido']} completado exitosamente.")
+
+                        # 🔁 Mantener pestaña activa
+                        st.session_state["pedido_editado"] = row['ID_Pedido']
+                        st.session_state["fecha_seleccionada"] = row.get("Fecha_Entrega", "")
+                        st.session_state["subtab_local"] = origen_tab
+
+                        st.cache_data.clear()
+
+                        set_active_main_tab(st.session_state.get("active_main_tab_index", 0))
+                        st.session_state["active_subtab_local_index"] = st.session_state.get("active_subtab_local_index", 0)
+                        st.session_state["active_date_tab_m_index"] = st.session_state.get("active_date_tab_m_index", 0)
+                        st.session_state["active_date_tab_t_index"] = st.session_state.get("active_date_tab_t_index", 0)
+                        st.rerun()
+                    else:
+                        st.error("❌ No se pudo completar el pedido.")
             except Exception as e:
                 st.error(f"Error al completar el pedido: {e}")
 
