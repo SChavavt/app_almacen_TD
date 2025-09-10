@@ -591,48 +591,6 @@ with tabs[1]:
 # =========================
 # Helpers para Casos Especiales
 # =========================
-if "load_casos_from_gsheets" not in globals():
-
-    @st.cache_data(ttl=60)
-    def load_casos_from_gsheets() -> pd.DataFrame:
-        ws = spreadsheet.worksheet("casos_especiales")
-        vals = ws.get_all_values()
-        if not vals:
-            return pd.DataFrame()
-        headers = vals[0]
-        df = pd.DataFrame(vals[1:], columns=headers)
-        df["gsheet_row_index"] = df.index + 2
-
-        # Parse fechas/horas
-        for c in [
-            "Hora_Registro",
-            "Fecha_Entrega",
-            "Fecha_Completado",
-            "Hora_Proceso",
-            "Fecha_Recepcion_Devolucion",
-        ]:
-            if c in df.columns:
-                df[c] = pd.to_datetime(df[c], errors="coerce")
-
-        # Normalizaciones mínimas
-        for c in [
-            "Cliente",
-            "Vendedor_Registro",
-            "Estado",
-            "Folio_Factura",
-            "Turno",
-            "Tipo_Envio_Original",
-            "Tipo_Envio",
-            "Tipo_Caso",
-        ]:
-            if c not in df.columns:
-                df[c] = ""
-            else:
-                df[c] = df[c].astype(str)
-
-        return df
-
-
 def status_counts_block_casos(df: pd.DataFrame):
     estados = df.get("Estado", pd.Series(dtype=str)).astype(str)
     if "Completados_Limpiado" not in df.columns:
