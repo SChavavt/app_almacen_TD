@@ -475,9 +475,9 @@ with tabs[0]:
         if "Completados_Limpiado" not in df0.columns:
             df0["Completados_Limpiado"] = ""
         df0 = df0[
-            (df0["Estado"] != "🟢 Completado")
+            (~df0["Estado"].isin(["🟢 Completado", "Viajó"]))
             | (
-                (df0["Estado"] == "🟢 Completado")
+                df0["Estado"].isin(["🟢 Completado", "Viajó"])
                 & (df0["Completados_Limpiado"].astype(str).str.lower() != "sí")
             )
         ]
@@ -504,9 +504,9 @@ with tabs[1]:
             if "Completados_Limpiado" not in df_cdmx.columns:
                 df_cdmx["Completados_Limpiado"] = ""
             df_cdmx = df_cdmx[
-                (df_cdmx["Estado"] != "🟢 Completado")
+                (~df_cdmx["Estado"].isin(["🟢 Completado", "Viajó"]))
                 | (
-                    (df_cdmx["Estado"] == "🟢 Completado")
+                    df_cdmx["Estado"].isin(["🟢 Completado", "Viajó"])
                     & (df_cdmx["Completados_Limpiado"].astype(str).str.lower() != "sí")
                 )
             ]
@@ -548,9 +548,9 @@ with tabs[1]:
             if "Completados_Limpiado" not in df_guias.columns:
                 df_guias["Completados_Limpiado"] = ""
             df_guias = df_guias[
-                (df_guias["Estado"] != "🟢 Completado")
+                (~df_guias["Estado"].isin(["🟢 Completado", "Viajó"]))
                 | (
-                    (df_guias["Estado"] == "🟢 Completado")
+                    df_guias["Estado"].isin(["🟢 Completado", "Viajó"])
                     & (df_guias["Completados_Limpiado"].astype(str).str.lower() != "sí")
                 )
             ]
@@ -820,9 +820,9 @@ with tabs[2]:
                 casos["Completados_Limpiado"] = ""
             if "Estado" in casos.columns:
                 casos = casos[
-                    (casos["Estado"].astype(str).str.strip() != "🟢 Completado")
+                    (~casos["Estado"].astype(str).str.strip().isin(["🟢 Completado", "Viajó"]))
                     | (
-                        (casos["Estado"].astype(str).str.strip() == "🟢 Completado")
+                        casos["Estado"].astype(str).str.strip().isin(["🟢 Completado", "Viajó"])
                         & (
                             casos["Completados_Limpiado"].astype(str).str.lower()
                             != "sí"
