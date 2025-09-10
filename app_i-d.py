@@ -105,7 +105,7 @@ def construir_gspread_client(creds_dict):
 
 
 @st.cache_resource
-def get_gspread_client(_credentials_json_dict):
+def get_gspread_client(_credentials_json_dict, max_attempts: int = 3):
     scope = [
         "https://spreadsheets.google.com/feeds",
         "https://www.googleapis.com/auth/drive",
@@ -113,28 +113,28 @@ def get_gspread_client(_credentials_json_dict):
     _credentials_json_dict["private_key"] = (
         _credentials_json_dict["private_key"].replace("\\n", "\n").strip()
     )
-    creds = ServiceAccountCredentials.from_json_keyfile_dict(
-        _credentials_json_dict, scope
-    )
-    client = gspread.authorize(creds)
-    try:
-        _ = client.open_by_key(GOOGLE_SHEET_ID)
-    except gspread.exceptions.APIError as e:
-        if "expired" in str(e).lower() or "RESOURCE_EXHAUSTED" in str(e):
-            st.cache_resource.clear()
-            st.warning(
-                "🔁 Token expirado o cuota alcanzada. Reintentando autenticación..."
-            )
-            creds = ServiceAccountCredentials.from_json_keyfile_dict(
-                _credentials_json_dict, scope
-            )
-            client = gspread.authorize(creds)
-        # segundo intento limpio
+
+    for attempt in range(1, max_attempts + 1):
         creds = ServiceAccountCredentials.from_json_keyfile_dict(
             _credentials_json_dict, scope
         )
         client = gspread.authorize(creds)
-    return client
+        try:
+            client.open_by_key(GOOGLE_SHEET_ID)
+            return client
+        except gspread.exceptions.APIError as e:
+            if "expired" in str(e).lower() or "RESOURCE_EXHAUSTED" in str(e):
+                st.cache_resource.clear()
+            wait_time = 2 ** (attempt - 1)
+            if attempt >= max_attempts:
+                st.error(
+                    f"❌ Error al autenticar con Google Sheets después de {max_attempts} intentos: {e}"
+                )
+                st.stop()
+            st.warning(
+                f"🔁 Error de autenticación. Reintentando en {wait_time} s..."
+            )
+            time.sleep(wait_time)
 
 
 # --- AWS S3 ---
