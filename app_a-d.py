@@ -3060,7 +3060,7 @@ with main_tabs[7]:  # ✅ Historial Completados/Cancelados
                     if row.get("Estado") == "🟢 Completado":
                         updates.append({
                             'range': gspread.utils.rowcol_to_a1(g_row, estado_col_idx),
-                            'values': [["Viajó"]]
+                            'values': [["✅ Viajó"]]
                         })
             if updates and batch_update_gsheet_cells(worksheet_main, updates):
                 st.success(f"✅ {len(updates)} pedidos marcados como limpiados.")
@@ -3105,7 +3105,7 @@ with main_tabs[7]:  # ✅ Historial Completados/Cancelados
                         if row.get("Estado") == "🟢 Completado":
                             updates.append({
                                 'range': gspread.utils.rowcol_to_a1(g_row, estado_col_idx),
-                                'values': [["Viajó"]]
+                                'values': [["✅ Viajó"]]
                             })
                     if updates and batch_update_gsheet_cells(worksheet_main, updates):
                         st.success(f"✅ {len(updates)} pedidos en {grupo} marcados como limpiados.")
@@ -3135,7 +3135,7 @@ with main_tabs[7]:  # ✅ Historial Completados/Cancelados
                     if row.get("Estado") == "🟢 Completado":
                         updates.append({
                             'range': gspread.utils.rowcol_to_a1(g_row, estado_col_idx),
-                            'values': [["Viajó"]]
+                            'values': [["✅ Viajó"]]
                         })
                 if updates and batch_update_gsheet_cells(worksheet_main, updates):
                     st.success(f"✅ {len(updates)} pedidos foráneos completados/cancelados fueron marcados como limpiados.")
@@ -3239,7 +3239,7 @@ with main_tabs[7]:  # ✅ Historial Completados/Cancelados
                         if row.get("Estado") == "🟢 Completado":
                             updates.append({
                                 'range': gspread.utils.rowcol_to_a1(g_row, estado_col_idx),
-                                'values': [["Viajó"]]
+                                'values': [["✅ Viajó"]]
                             })
                     if updates and batch_update_gsheet_cells(worksheet_casos, updates):
                         st.success(f"✅ {len(updates)} devoluciones marcadas como limpiadas.")
@@ -3268,7 +3268,7 @@ with main_tabs[7]:  # ✅ Historial Completados/Cancelados
                         if row.get("Estado") == "🟢 Completado":
                             updates.append({
                                 'range': gspread.utils.rowcol_to_a1(g_row, estado_col_idx),
-                                'values': [["Viajó"]]
+                                'values': [["✅ Viajó"]]
                             })
                     if updates and batch_update_gsheet_cells(worksheet_casos, updates):
                         st.success(f"✅ {len(updates)} garantías marcadas como limpiadas.")
