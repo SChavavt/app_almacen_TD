@@ -789,7 +789,7 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
 
 
         # --- Cambiar Fecha y Turno ---
-        if row['Estado'] != "🟢 Completado" and row.get("Tipo_Envio") in ["📍 Pedido Local", "🚚 Pedido Foráneo"]:
+        if row['Estado'] not in ["🟢 Completado", "Viajó"] and row.get("Tipo_Envio") in ["📍 Pedido Local", "🚚 Pedido Foráneo"]:
             # Muestra los controles solo cuando el usuario lo solicite para evitar
             # renderizar innecesariamente muchos widgets (que pueden provocar el
             # error "Failed to fetch dynamically imported module").
@@ -910,7 +910,7 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
 
         # --- Main Order Layout ---
         # This section displays the core information of the order
-        disabled_if_completed = (row['Estado'] == "🟢 Completado")
+        disabled_if_completed = row['Estado'] in ["🟢 Completado", "Viajó"]
 
         col_order_num, col_client, col_time, col_status, col_vendedor, col_print_btn, col_complete_btn = st.columns([0.5, 2, 1.5, 1, 1.2, 1, 1])
         # --- Mostrar Comentario (si existe)
@@ -1085,7 +1085,7 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
                     st.error(f"❌ Error al procesar la modificación: {e}")
 
         # --- Adjuntar archivos de guía ---
-        if row['Estado'] != "🟢 Completado":
+        if row['Estado'] not in ["🟢 Completado", "Viajó"]:
             with st.expander(
                 "📦 Subir Archivos de Guía",
                 expanded=st.session_state["expanded_subir_guia"].get(row['ID_Pedido'], False),
@@ -1470,7 +1470,7 @@ if not df_main.empty:
     mod_surtido_df = df_main[
         (df_main['Modificacion_Surtido'].astype(str).str.strip() != '') &
         (~df_main['Modificacion_Surtido'].astype(str).str.endswith('[✔CONFIRMADO]')) &
-        (df_main['Estado'] != '🟢 Completado') &
+        (~df_main['Estado'].isin(['🟢 Completado', 'Viajó'])) &
         (df_main['Refacturacion_Tipo'].fillna("").str.strip() != "Datos Fiscales")
     ]
 
@@ -1802,11 +1802,11 @@ with main_tabs[5]:
     # 2.1 Excluir devoluciones ya completadas
     if "Estado" in devoluciones_display.columns:
         devoluciones_display = devoluciones_display[
-            devoluciones_display["Estado"].astype(str).str.strip() != "🟢 Completado"
+            ~devoluciones_display["Estado"].astype(str).str.strip().isin(["🟢 Completado", "Viajó"])
         ]
 
     if devoluciones_display.empty:
-        st.success("🎉 No hay devoluciones pendientes. (Todas están 🟢 Completado)")
+        st.success("🎉 No hay devoluciones pendientes. (Todas están 🟢 Completado o Viajó)")
 
     # 3) Orden sugerido por Fecha_Registro (desc) o por Folio/Cliente
     if "Fecha_Registro" in devoluciones_display.columns:
@@ -2499,10 +2499,12 @@ with main_tabs[6]:  # 🛠 Garantías
 
     # 2.1 Excluir garantías ya completadas
     if "Estado" in garantias_display.columns:
-        garantias_display = garantias_display[garantias_display["Estado"].astype(str).str.strip() != "🟢 Completado"]
+        garantias_display = garantias_display[
+            ~garantias_display["Estado"].astype(str).str.strip().isin(["🟢 Completado", "Viajó"])
+        ]
 
     if garantias_display.empty:
-        st.success("🎉 No hay garantías pendientes. (Todas están 🟢 Completado)")
+        st.success("🎉 No hay garantías pendientes. (Todas están 🟢 Completado o Viajó)")
 
     # 3) Orden sugerido por Hora_Registro (desc) o por ID
     if "Hora_Registro" in garantias_display.columns:
