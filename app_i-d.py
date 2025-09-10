@@ -463,35 +463,91 @@ df_all = load_data_from_gsheets()
 st.caption(f"🕒 Última actualización: {datetime.now(TZ).strftime('%d/%m %H:%M:%S')}")
 
 # Tabs principales
-tabs = st.tabs(["📍 Local", "🌍 Foráneo", "🏙️ CDMX y Guías", "🧰 Casos Especiales"])
+tabs = st.tabs([
+    "🌄 Local Mañana",
+    "🌆 Local Tarde Saltillo",
+    "📦 Pasa a Bodega",
+    "🌍 Foráneo",
+    "🏙️ CDMX y Guías",
+    "🧰 Casos Especiales",
+])
 
 # ---------------------------
-# TAB 0: Local
+# TAB 0: Local Mañana
 # ---------------------------
 with tabs[0]:
     if df_all.empty:
         st.info("Sin datos en 'datos_pedidos'.")
     else:
-        df_local = df_all[
+        df_local_ma = df_all[
             df_all["Tipo_Envio"].isin(["📍 Pedido Local", "🎓 Cursos y Eventos"])
+            & (df_all["Turno"] == "Local Mañana")
         ].copy()
-        if "Completados_Limpiado" not in df_local.columns:
-            df_local["Completados_Limpiado"] = ""
-        df_local = df_local[
+        if "Completados_Limpiado" not in df_local_ma.columns:
+            df_local_ma["Completados_Limpiado"] = ""
+        df_local_ma = df_local_ma[
             ~(
-                df_local["Estado"].isin(["🟢 Completado", "🟣 Cancelado", "✅ Viajó"])
-                & (df_local["Completados_Limpiado"].astype(str).str.lower() == "sí")
+                df_local_ma["Estado"].isin(["🟢 Completado", "🟣 Cancelado", "✅ Viajó"])
+                & (df_local_ma["Completados_Limpiado"].astype(str).str.lower() == "sí")
             )
         ]
-        st.markdown("#### 📊 Resumen (Local)")
-        status_counts_block(df_local)
+        st.markdown("#### 📊 Resumen (Local Mañana)")
+        status_counts_block(df_local_ma)
         st.markdown("### 📚 Grupos")
-        show_grouped_panel(df_local, mode="local")
+        show_grouped_panel(df_local_ma, mode="local")
 
 # ---------------------------
-# TAB 1: Foráneo
+# TAB 1: Local Tarde Saltillo
 # ---------------------------
 with tabs[1]:
+    if df_all.empty:
+        st.info("Sin datos en 'datos_pedidos'.")
+    else:
+        df_local_ts = df_all[
+            df_all["Tipo_Envio"].isin(["📍 Pedido Local", "🎓 Cursos y Eventos"])
+            & (df_all["Turno"] == "Local Tarde Saltillo")
+        ].copy()
+        if "Completados_Limpiado" not in df_local_ts.columns:
+            df_local_ts["Completados_Limpiado"] = ""
+        df_local_ts = df_local_ts[
+            ~(
+                df_local_ts["Estado"].isin(["🟢 Completado", "🟣 Cancelado", "✅ Viajó"])
+                & (df_local_ts["Completados_Limpiado"].astype(str).str.lower() == "sí")
+            )
+        ]
+        st.markdown("#### 📊 Resumen (Local Tarde Saltillo)")
+        status_counts_block(df_local_ts)
+        st.markdown("### 📚 Grupos")
+        show_grouped_panel(df_local_ts, mode="local")
+
+# ---------------------------
+# TAB 2: Pasa a Bodega
+# ---------------------------
+with tabs[2]:
+    if df_all.empty:
+        st.info("Sin datos en 'datos_pedidos'.")
+    else:
+        df_local_pb = df_all[
+            df_all["Tipo_Envio"].isin(["📍 Pedido Local", "🎓 Cursos y Eventos"])
+            & (df_all["Turno"] == "Pasa a Bodega")
+        ].copy()
+        if "Completados_Limpiado" not in df_local_pb.columns:
+            df_local_pb["Completados_Limpiado"] = ""
+        df_local_pb = df_local_pb[
+            ~(
+                df_local_pb["Estado"].isin(["🟢 Completado", "🟣 Cancelado", "✅ Viajó"])
+                & (df_local_pb["Completados_Limpiado"].astype(str).str.lower() == "sí")
+            )
+        ]
+        st.markdown("#### 📊 Resumen (Pasa a Bodega)")
+        status_counts_block(df_local_pb)
+        st.markdown("### 📚 Grupos")
+        show_grouped_panel(df_local_pb, mode="local")
+
+# ---------------------------
+# TAB 3: Foráneo
+# ---------------------------
+with tabs[3]:
     if df_all.empty:
         st.info("Sin datos en 'datos_pedidos'.")
     else:
@@ -510,9 +566,9 @@ with tabs[1]:
         show_grouped_panel(df_for, mode="foraneo")
 
 # ---------------------------
-# TAB 2: CDMX y Guías
+# TAB 4: CDMX y Guías
 # ---------------------------
-with tabs[2]:
+with tabs[4]:
     if df_all.empty:
         st.info("Sin datos en 'datos_pedidos'.")
     else:
@@ -762,9 +818,9 @@ if "show_grouped_panel_casos" not in globals():
 
 
 # =========================
-# TAB 3: Casos Especiales (Devoluciones + Garantías)
+# TAB 5: Casos Especiales (Devoluciones + Garantías)
 # =========================
-with tabs[3]:
+with tabs[5]:
     df_casos = load_casos_from_gsheets()
     # Normaliza columnas para detección de tipo
     if (
