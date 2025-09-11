@@ -687,6 +687,8 @@ with tabs[1]:
                 "Rango de tiempo",
                 ["12 horas", "24 horas", "7 días", "Todos"],
             )
+        estados_sel = st.multiselect("Estado", sorted(df["Estado"].dropna().unique()))
+        tipos_sel = st.multiselect("Tipo de envío", sorted(df["Tipo_Envio"].dropna().unique()))
 
         filtrado = df
         delta = None
@@ -701,6 +703,10 @@ with tabs[1]:
             filtrado = filtrado[filtrado["Hora_Registro"] >= datetime.now() - delta]
         if vendedores_sel:
             filtrado = filtrado[filtrado["Vendedor_Registro"].isin(vendedores_sel)]
+        if estados_sel:
+            filtrado = filtrado[filtrado["Estado"].isin(estados_sel)]
+        if tipos_sel:
+            filtrado = filtrado[filtrado["Tipo_Envio"].isin(tipos_sel)]
 
         st.markdown(f"{len(filtrado)} registros encontrados")
         st.dataframe(filtrado.head(100))
