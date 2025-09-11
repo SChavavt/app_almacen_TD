@@ -3056,13 +3056,13 @@ with main_tabs[7]:  # ✅ Historial Completados/Cancelados
     with col_btn:
         if not df_historial.empty and st.button("🧹 Limpiar Todos"):
             updates = []
-            col_idx = headers_main.index("Completados_Limpiado") + 1
+            limpiado_col_idx = headers_main.index("Completados_Limpiado") + 1
             estado_col_idx = headers_main.index("Estado") + 1
             for _, row in df_historial.iterrows():
                 g_row = row.get("_gsheet_row_index")
                 if g_row:
                     updates.append({
-                        'range': gspread.utils.rowcol_to_a1(g_row, col_idx),
+                        'range': gspread.utils.rowcol_to_a1(g_row, limpiado_col_idx),
                         'values': [["sí"]]
                     })
                     if row.get("Estado") == "🟢 Completado":
@@ -3101,13 +3101,13 @@ with main_tabs[7]:  # ✅ Historial Completados/Cancelados
                 label_btn = f"🧹 Limpiar {turno.strip()} - {fecha_str}"
                 if st.button(label_btn):
                     pedidos_a_limpiar = df_historial[df_historial["Grupo_Clave"] == grupo]
-                    col_idx = headers_main.index("Completados_Limpiado") + 1
+                    limpiado_col_idx = headers_main.index("Completados_Limpiado") + 1
                     estado_col_idx = headers_main.index("Estado") + 1
                     updates = []
                     for _, row in pedidos_a_limpiar.iterrows():
                         g_row = int(row["_gsheet_row_index"])
                         updates.append({
-                            'range': gspread.utils.rowcol_to_a1(g_row, col_idx),
+                            'range': gspread.utils.rowcol_to_a1(g_row, limpiado_col_idx),
                             'values': [["sí"]]
                         })
                         if row.get("Estado") == "🟢 Completado":
@@ -3131,13 +3131,13 @@ with main_tabs[7]:  # ✅ Historial Completados/Cancelados
         if not completados_foraneos.empty:
             st.markdown("### 🧹 Limpieza de Completados/Cancelados Foráneos")
             if st.button("🧹 Limpiar Foráneos Completados/Cancelados"):
-                col_idx = headers_main.index("Completados_Limpiado") + 1
+                limpiado_col_idx = headers_main.index("Completados_Limpiado") + 1
                 estado_col_idx = headers_main.index("Estado") + 1
                 updates = []
                 for _, row in completados_foraneos.iterrows():
                     g_row = int(row["_gsheet_row_index"])
                     updates.append({
-                        'range': gspread.utils.rowcol_to_a1(g_row, col_idx),
+                        'range': gspread.utils.rowcol_to_a1(g_row, limpiado_col_idx),
                         'values': [["sí"]]
                     })
                     if row.get("Estado") == "🟢 Completado":
@@ -3235,13 +3235,13 @@ with main_tabs[7]:  # ✅ Historial Completados/Cancelados
             if not comp_dev.empty:
                 st.markdown("### 🔁 Devoluciones Completadas/Canceladas")
                 if st.button("🧹 Limpiar Devoluciones"):
-                    col_idx = headers_casos.index("Completados_Limpiado") + 1
+                    limpiado_col_idx = headers_casos.index("Completados_Limpiado") + 1
                     estado_col_idx = headers_casos.index("Estado") + 1
                     updates = []
                     for _, row in comp_dev.iterrows():
                         g_row = int(row['_gsheet_row_index'])
                         updates.append({
-                            'range': gspread.utils.rowcol_to_a1(g_row, col_idx),
+                            'range': gspread.utils.rowcol_to_a1(g_row, limpiado_col_idx),
                             'values': [["sí"]]
                         })
                         if row.get("Estado") == "🟢 Completado":
@@ -3264,13 +3264,13 @@ with main_tabs[7]:  # ✅ Historial Completados/Cancelados
             if not comp_gar.empty:
                 st.markdown("### 🛠 Garantías Completadas/Canceladas")
                 if st.button("🧹 Limpiar Garantías"):
-                    col_idx = headers_casos.index("Completados_Limpiado") + 1
+                    limpiado_col_idx = headers_casos.index("Completados_Limpiado") + 1
                     estado_col_idx = headers_casos.index("Estado") + 1
                     updates = []
                     for _, row in comp_gar.iterrows():
                         g_row = int(row['_gsheet_row_index'])
                         updates.append({
-                            'range': gspread.utils.rowcol_to_a1(g_row, col_idx),
+                            'range': gspread.utils.rowcol_to_a1(g_row, limpiado_col_idx),
                             'values': [["sí"]]
                         })
                         if row.get("Estado") == "🟢 Completado":
