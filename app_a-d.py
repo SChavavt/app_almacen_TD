@@ -3376,17 +3376,24 @@ with main_tabs[7]:  # ✅ Historial Completados
                     })
                     
                     # Solo actualizar Estado si está en "🟢 Completado"
-                    if row.get("Estado") == "🟢 Completado":
+                    if str(row.get("Estado")).strip() == "🟢 Completado":
                         updates.append({
                             'range': gspread.utils.rowcol_to_a1(g_row, col_estado_idx),
                             'values': [["✅ Viajó"]]
                         })
                 
-                if updates and batch_update_gsheet_cells(worksheet_main, updates):
-                    st.success(f"✅ {len(completados_foraneos)} pedidos foráneos completados fueron marcados como limpiados.")
-                    st.cache_data.clear()
-                    set_active_main_tab(7)
-                    st.rerun()
+                if updates:
+                    try:
+                        success = batch_update_gsheet_cells(worksheet_main, updates)
+                        if success:
+                            st.success(f"✅ {len(completados_foraneos)} pedidos foráneos completados fueron marcados como limpiados.")
+                            st.cache_data.clear()
+                            set_active_main_tab(7)
+                            st.rerun()
+                        else:
+                            st.error("❌ Error al actualizar los pedidos foráneos.")
+                    except Exception as e:
+                        st.error(f"❌ Error foráneos: {str(e)}")
 
         df_completados_historial = df_completados_historial.sort_values(by="Fecha_Completado", ascending=False)
         for orden, (idx, row) in enumerate(df_completados_historial.iterrows(), start=1):
