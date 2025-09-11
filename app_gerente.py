@@ -683,10 +683,22 @@ with tabs[1]:
         with col1:
             vendedores_sel = st.multiselect("Filtrar por vendedor", VENDEDORES_LIST)
         with col2:
-            dias = st.number_input("Días hacia atrás", min_value=1, max_value=365, value=30)
+            rango_tiempo = st.selectbox(
+                "Rango de tiempo",
+                ["12 horas", "24 horas", "7 días", "Todos"],
+            )
 
-        fecha_limite = datetime.now() - timedelta(days=int(dias))
-        filtrado = df[df["Hora_Registro"] >= fecha_limite]
+        filtrado = df
+        delta = None
+        if rango_tiempo == "12 horas":
+            delta = timedelta(hours=12)
+        elif rango_tiempo == "24 horas":
+            delta = timedelta(hours=24)
+        elif rango_tiempo == "7 días":
+            delta = timedelta(days=7)
+
+        if delta is not None:
+            filtrado = filtrado[filtrado["Hora_Registro"] >= datetime.now() - delta]
         if vendedores_sel:
             filtrado = filtrado[filtrado["Vendedor_Registro"].isin(vendedores_sel)]
 
