@@ -3249,66 +3249,57 @@ with main_tabs[6]:  # 🛠 Garantías
                         if flag_key in st.session_state:
                             del st.session_state[flag_key]
 
-with main_tabs[7]:  # ✅ Historial Completados/Cancelados
-    df_historial = df_main[
-        df_main["Estado"].isin(["🟢 Completado", "🟣 Cancelado"]) &
+with main_tabs[7]:  # ✅ Historial Completados
+    df_completados_historial = df_main[
+        (df_main["Estado"] == "🟢 Completado") &
         (df_main.get("Completados_Limpiado", "").astype(str).str.lower() != "sí")
     ].copy()
 
-    df_historial['_gsheet_row_index'] = df_historial['_gsheet_row_index'].astype(int)
+    df_completados_historial['_gsheet_row_index'] = df_completados_historial['_gsheet_row_index'].astype(int)
 
     tipo_casos_col = None
     if 'Tipo_Caso' in df_casos.columns:
         tipo_casos_col = 'Tipo_Caso'
     elif 'Tipo_Envio' in df_casos.columns:
         tipo_casos_col = 'Tipo_Envio'
-    df_casos_historial = df_casos[
-        df_casos["Estado"].isin(["🟢 Completado", "🟣 Cancelado"]) &
+    df_casos_completados = df_casos[
+        (df_casos["Estado"] == "🟢 Completado") &
         (df_casos.get("Completados_Limpiado", "").astype(str).str.lower() != "sí")
     ].copy()
-    if not df_casos_historial.empty:
-        df_casos_historial['_gsheet_row_index'] = df_casos_historial['_gsheet_row_index'].astype(int)
+    if not df_casos_completados.empty:
+        df_casos_completados['_gsheet_row_index'] = df_casos_completados['_gsheet_row_index'].astype(int)
 
     col_titulo, col_btn = st.columns([0.75, 0.25])
     with col_titulo:
-        st.markdown("### Historial de Pedidos Completados/Cancelados")
+        st.markdown("### Historial de Pedidos Completados")
     with col_btn:
-        if not df_historial.empty and st.button("🧹 Limpiar Todos"):
-            cols = get_column_indices(worksheet_main, ["Completados_Limpiado", "Estado"])
-            limpiado_col_idx = cols.get("Completados_Limpiado")
-            estado_col_idx = cols.get("Estado")
+        if not df_completados_historial.empty and st.button("🧹 Limpiar Todos los Completados"):
             updates = []
-            for _, row in df_historial.iterrows():
+            col_idx = headers_main.index("Completados_Limpiado") + 1
+            for _, row in df_completados_historial.iterrows():
                 g_row = row.get("_gsheet_row_index")
-                if g_row and limpiado_col_idx:
-                    # SIEMPRE poner "sí" en Completados_Limpiado
+                if g_row:
                     updates.append({
-                        'range': gspread.utils.rowcol_to_a1(g_row, limpiado_col_idx),
+                        'range': gspread.utils.rowcol_to_a1(g_row, col_idx),
                         'values': [["sí"]]
                     })
-                # SOLO cambiar estado a "✅ Viajó" si el estado actual es "🟢 Completado"
-                if g_row and estado_col_idx and row.get("Estado") == "🟢 Completado":
-                    updates.append({
-                        'range': gspread.utils.rowcol_to_a1(g_row, estado_col_idx),
-                        'values': [["✅ Viajó"]]
-                    })
             if updates and batch_update_gsheet_cells(worksheet_main, updates):
-                st.success(f"✅ Pedidos marcados como limpiados correctamente.")
+                st.success(f"✅ {len(updates)} pedidos marcados como limpiados.")
                 st.cache_data.clear()
                 set_active_main_tab(7)
                 st.rerun()
-    
-    # 🧹 Limpieza específica por grupo de completados/cancelados locales
-    df_historial["Fecha_dt"] = pd.to_datetime(df_historial["Fecha_Entrega"], errors='coerce')
-    df_historial["Grupo_Clave"] = df_historial.apply(
+
+    # 🧹 Limpieza específica por grupo de completados locales
+    df_completados_historial["Fecha_dt"] = pd.to_datetime(df_completados_historial["Fecha_Entrega"], errors='coerce')
+    df_completados_historial["Grupo_Clave"] = df_completados_historial.apply(
         lambda row: f"{row['Turno']} – {row['Fecha_dt'].strftime('%d/%m')}" if row["Tipo_Envio"] == "📍 Pedido Local" else None,
         axis=1
     )
 
-    grupos_locales = df_historial[df_historial["Grupo_Clave"].notna()]["Grupo_Clave"].unique().tolist()
+    grupos_locales = df_completados_historial[df_completados_historial["Grupo_Clave"].notna()]["Grupo_Clave"].unique().tolist()
 
     if grupos_locales:
-        st.markdown("### 🧹 Limpieza Específica de Completados/Cancelados Locales")
+        st.markdown("### 🧹 Limpieza Específica de Completados Locales")
         for grupo in grupos_locales:
             turno, fecha_str = grupo.split(" – ")
             fecha_dt = pd.to_datetime(fecha_str, format="%d/%m", errors='coerce').replace(year=datetime.now().year)
@@ -3323,75 +3314,55 @@ with main_tabs[7]:  # ✅ Historial Completados/Cancelados
             if hay_incompletos.empty:
                 label_btn = f"🧹 Limpiar {turno.strip()} - {fecha_str}"
                 if st.button(label_btn):
-                    pedidos_a_limpiar = df_historial[df_historial["Grupo_Clave"] == grupo]
-                    cols = get_column_indices(worksheet_main, ["Completados_Limpiado", "Estado"])
-                    limpiado_col_idx = cols.get("Completados_Limpiado")
-                    estado_col_idx = cols.get("Estado")
-                    updates = []
-                    for _, row in pedidos_a_limpiar.iterrows():
-                        g_row = int(row["_gsheet_row_index"])
-                        if limpiado_col_idx:
-                            # SIEMPRE poner "sí" en Completados_Limpiado
-                            updates.append({
-                                'range': gspread.utils.rowcol_to_a1(g_row, limpiado_col_idx),
-                                'values': [["sí"]]
-                            })
-                        # SOLO cambiar estado a "✅ Viajó" si el estado actual es "🟢 Completado"
-                        if estado_col_idx and row.get("Estado") == "🟢 Completado":
-                            updates.append({
-                                'range': gspread.utils.rowcol_to_a1(g_row, estado_col_idx),
-                                'values': [["✅ Viajó"]]
-                            })
+                    pedidos_a_limpiar = df_completados_historial[df_completados_historial["Grupo_Clave"] == grupo]
+                    col_idx = headers_main.index("Completados_Limpiado") + 1
+                    updates = [
+                        {
+                            'range': gspread.utils.rowcol_to_a1(int(row["_gsheet_row_index"]), col_idx),
+                            'values': [["sí"]]
+                        }
+                        for _, row in pedidos_a_limpiar.iterrows()
+                    ]
                     if updates and batch_update_gsheet_cells(worksheet_main, updates):
-                        st.success(f"✅ Pedidos en {grupo} marcados como limpiados correctamente.")
+                        st.success(f"✅ {len(updates)} pedidos completados en {grupo} marcados como limpiados.")
                         st.cache_data.clear()
                         set_active_main_tab(7)
                         st.rerun()
 
-    # Mostrar pedidos completados/cancelados individuales
-    if not df_historial.empty:
-        # 🧹 Botón de limpieza específico para foráneos
-        completados_foraneos = df_historial[
-            df_historial["Tipo_Envio"] == "🚚 Pedido Foráneo"
+    # Mostrar pedidos completados individuales
+    if not df_completados_historial.empty:
+            # 🧹 Botón de limpieza específico para foráneos
+        completados_foraneos = df_completados_historial[
+            df_completados_historial["Tipo_Envio"] == "🚚 Pedido Foráneo"
         ]
 
         if not completados_foraneos.empty:
-            st.markdown("### 🧹 Limpieza de Completados/Cancelados Foráneos")
-            if st.button("🧹 Limpiar Foráneos Completados/Cancelados"):
-                cols = get_column_indices(worksheet_main, ["Completados_Limpiado", "Estado"])
-                limpiado_col_idx = cols.get("Completados_Limpiado")
-                estado_col_idx = cols.get("Estado")
-                updates = []
-                for _, row in completados_foraneos.iterrows():
-                    g_row = int(row["_gsheet_row_index"])
-                    if limpiado_col_idx:
-                        # SIEMPRE poner "sí" en Completados_Limpiado
-                        updates.append({
-                            'range': gspread.utils.rowcol_to_a1(g_row, limpiado_col_idx),
-                            'values': [["sí"]]
-                        })
-                    # SOLO cambiar estado a "✅ Viajó" si el estado actual es "🟢 Completado"
-                    if estado_col_idx and row.get("Estado") == "🟢 Completado":
-                        updates.append({
-                            'range': gspread.utils.rowcol_to_a1(g_row, estado_col_idx),
-                            'values': [["✅ Viajó"]]
-                        })
+            st.markdown("### 🧹 Limpieza de Completados Foráneos")
+            if st.button("🧹 Limpiar Foráneos Completados"):
+                col_idx = headers_main.index("Completados_Limpiado") + 1
+                updates = [
+                    {
+                        'range': gspread.utils.rowcol_to_a1(int(row["_gsheet_row_index"]), col_idx),
+                        'values': [["sí"]]
+                    }
+                    for _, row in completados_foraneos.iterrows()
+                ]
                 if updates and batch_update_gsheet_cells(worksheet_main, updates):
-                    st.success("✅ Pedidos foráneos completados/cancelados marcados como limpiados correctamente.")
+                    st.success(f"✅ {len(updates)} pedidos foráneos completados fueron marcados como limpiados.")
                     st.cache_data.clear()
                     set_active_main_tab(7)
                     st.rerun()
 
-        df_historial = df_historial.sort_values(by="Fecha_Completado", ascending=False)
-        for orden, (idx, row) in enumerate(df_historial.iterrows(), start=1):
-            mostrar_pedido(df_main, idx, row, orden, "Historial", "✅ Historial Completados/Cancelados", worksheet_main, headers_main, s3_client,
+        df_completados_historial = df_completados_historial.sort_values(by="Fecha_Completado", ascending=False)
+        for orden, (idx, row) in enumerate(df_completados_historial.iterrows(), start=1):
+            mostrar_pedido(df_main, idx, row, orden, "Historial", "✅ Historial Completados", worksheet_main, headers_main, s3_client,
                            main_idx=7, sub_idx=0, date_idx=0)
     else:
-        st.info("No hay pedidos completados o cancelados recientes o ya fueron limpiados.")
+        st.info("No hay pedidos completados recientes o ya fueron limpiados.")
 
-    # === Casos Especiales Completados/Cancelados ===
+    # === Casos Especiales Completados ===
     if tipo_casos_col:
-        if not df_casos_historial.empty:
+        if not df_casos_completados.empty:
             def render_caso_especial_garantia_hist(row):
                 st.markdown("### 🧾 Caso Especial – 🛠 Garantía")
                 folio = str(row.get("Folio_Factura", "")).strip() or "N/A"
@@ -3414,21 +3385,10 @@ with main_tabs[7]:  # ✅ Historial Completados/Cancelados
                     st.markdown("📦 Piezas afectadas:")
                     st.info(piezas)
                 monto = str(row.get("Monto_Devuelto", "")).strip()
-                seguimiento_txt = str(row.get("Seguimiento", "")).strip()
                 if monto:
                     st.markdown(f"💵 Monto estimado: {monto}")
-
-                coment_admin = str(row.get("Comentarios_Admin_Garantia", "")).strip() or str(row.get("Comentarios_Admin_Devolucion", "")).strip()
-                if coment_admin:
-                    st.markdown("**📝 Comentario Administrativo:**")
-                    st.info(coment_admin)
-
-                if seguimiento_txt:
-                    st.markdown("**📌 Seguimiento:**")
-                    st.info(seguimiento_txt)
-
                 adjuntos = _normalize_urls(row.get("Adjuntos", ""))
-                guias = _normalize_urls(row.get("Hoja_Ruta_Mensajero", ""))
+                guia = str(row.get("Hoja_Ruta_Mensajero", "")).strip()
                 with st.expander("📎 Archivos del Caso", expanded=False):
                     contenido = False
                     if adjuntos:
@@ -3437,55 +3397,32 @@ with main_tabs[7]:  # ✅ Historial Completados/Cancelados
                         for u in adjuntos:
                             nombre = os.path.basename(urlparse(u).path) or u
                             nombre = unquote(nombre)
-                            url = get_s3_file_download_url(s3_client, u)
-                            st.markdown(
-                                f'- <a href="{url}" target="_blank">{nombre}</a>',
-                                unsafe_allow_html=True,
-                            )
-                    if guias:
+                            st.markdown(f"- [{nombre}]({u})")
+                    if guia:
                         contenido = True
                         st.markdown("**Guía:**")
-                        for g in guias:
-                            nombre = os.path.basename(g)
-                            if g == "#" or not g:
-                                st.error("❌ Guía no disponible.")
-                                continue
-                            url = get_s3_file_download_url(s3_client, g)
-                            if not url or url == "#":
-                                st.error(f"❌ No se pudo generar la URL para la guía {nombre}.")
-                                continue
-                            st.markdown(
-                                f'- <a href="{url}" target="_blank">{nombre}</a>',
-                                unsafe_allow_html=True,
-                            )
+                        if guia.startswith("http"):
+                            st.markdown(f"[Abrir guía]({guia})")
+                        else:
+                            st.markdown(guia)
                     if not contenido:
                         st.info("Sin archivos registrados en la hoja.")
 
-            # Devoluciones completadas/canceladas
-            comp_dev = df_casos_historial[df_casos_historial[tipo_casos_col].astype(str).str.contains("Devoluci", case=False, na=False)]
+            # Devoluciones completadas
+            comp_dev = df_casos_completados[df_casos_completados[tipo_casos_col].astype(str).str.contains("Devoluci", case=False, na=False)]
             if not comp_dev.empty:
-                st.markdown("### 🔁 Devoluciones Completadas/Canceladas")
-                if st.button("🧹 Limpiar Devoluciones"):
-                    cols = get_column_indices(worksheet_casos, ["Completados_Limpiado", "Estado"])
-                    limpiado_col_idx = cols.get("Completados_Limpiado")
-                    estado_col_idx = cols.get("Estado")
-                    updates = []
-                    for _, row in comp_dev.iterrows():
-                        g_row = int(row['_gsheet_row_index'])
-                        if limpiado_col_idx:
-                            # SIEMPRE poner "sí" en Completados_Limpiado
-                            updates.append({
-                                'range': gspread.utils.rowcol_to_a1(g_row, limpiado_col_idx),
-                                'values': [["sí"]]
-                            })
-                        # SOLO cambiar estado a "✅ Viajó" si el estado actual es "🟢 Completado"
-                        if estado_col_idx and row.get("Estado") == "🟢 Completado":
-                            updates.append({
-                                'range': gspread.utils.rowcol_to_a1(g_row, estado_col_idx),
-                                'values': [["✅ Viajó"]]
-                            })
+                st.markdown("### 🔁 Devoluciones Completadas")
+                if st.button("🧹 Limpiar Devoluciones Completadas"):
+                    col_idx = headers_casos.index("Completados_Limpiado") + 1
+                    updates = [
+                        {
+                            'range': gspread.utils.rowcol_to_a1(int(row['_gsheet_row_index']), col_idx),
+                            'values': [["sí"]]
+                        }
+                        for _, row in comp_dev.iterrows()
+                    ]
                     if updates and batch_update_gsheet_cells(worksheet_casos, updates):
-                        st.success(f"✅ Devoluciones marcadas como limpiadas correctamente.")
+                        st.success(f"✅ {len(updates)} devoluciones marcadas como limpiadas.")
                         st.cache_data.clear()
                         set_active_main_tab(7)
                         st.rerun()
@@ -3494,31 +3431,21 @@ with main_tabs[7]:  # ✅ Historial Completados/Cancelados
                     with st.expander(f"🔁 {row.get('Folio_Factura', 'N/A')} – {row.get('Cliente', 'N/A')}"):
                         render_caso_especial_devolucion(row)
 
-            # Garantías completadas/canceladas
-            comp_gar = df_casos_historial[df_casos_historial[tipo_casos_col].astype(str).str.contains("Garant", case=False, na=False)]
+            # Garantías completadas
+            comp_gar = df_casos_completados[df_casos_completados[tipo_casos_col].astype(str).str.contains("Garant", case=False, na=False)]
             if not comp_gar.empty:
-                st.markdown("### 🛠 Garantías Completadas/Canceladas")
-                if st.button("🧹 Limpiar Garantías"):
-                    cols = get_column_indices(worksheet_casos, ["Completados_Limpiado", "Estado"])
-                    limpiado_col_idx = cols.get("Completados_Limpiado")
-                    estado_col_idx = cols.get("Estado")
-                    updates = []
-                    for _, row in comp_gar.iterrows():
-                        g_row = int(row['_gsheet_row_index'])
-                        if limpiado_col_idx:
-                            # SIEMPRE poner "sí" en Completados_Limpiado
-                            updates.append({
-                                'range': gspread.utils.rowcol_to_a1(g_row, limpiado_col_idx),
-                                'values': [["sí"]]
-                            })
-                        # SOLO cambiar estado a "✅ Viajó" si el estado actual es "🟢 Completado"
-                        if estado_col_idx and row.get("Estado") == "🟢 Completado":
-                            updates.append({
-                                'range': gspread.utils.rowcol_to_a1(g_row, estado_col_idx),
-                                'values': [["✅ Viajó"]]
-                            })
+                st.markdown("### 🛠 Garantías Completadas")
+                if st.button("🧹 Limpiar Garantías Completadas"):
+                    col_idx = headers_casos.index("Completados_Limpiado") + 1
+                    updates = [
+                        {
+                            'range': gspread.utils.rowcol_to_a1(int(row['_gsheet_row_index']), col_idx),
+                            'values': [["sí"]]
+                        }
+                        for _, row in comp_gar.iterrows()
+                    ]
                     if updates and batch_update_gsheet_cells(worksheet_casos, updates):
-                        st.success("✅ Garantías marcadas como limpiadas correctamente.")
+                        st.success(f"✅ {len(updates)} garantías marcadas como limpiadas.")
                         st.cache_data.clear()
                         set_active_main_tab(7)
                         st.rerun()
@@ -3527,4 +3454,4 @@ with main_tabs[7]:  # ✅ Historial Completados/Cancelados
                     with st.expander(f"🛠 {row.get('Folio_Factura', 'N/A')} – {row.get('Cliente', 'N/A')}"):
                         render_caso_especial_garantia_hist(row)
         else:
-            st.info("No hay casos especiales completados o cancelados o ya fueron limpiados.")
+            st.info("No hay casos especiales completados o ya fueron limpiados.")
