@@ -15,9 +15,6 @@ from pytz import timezone
 from urllib.parse import urlparse, unquote
 import streamlit.components.v1 as components
 
-from datetime import datetime
-from pytz import timezone
-
 _MX_TZ = timezone("America/Mexico_City")
 
 def mx_now():
@@ -1895,7 +1892,6 @@ with main_tabs[5]:
     import json
     import math
     import re
-    from datetime import datetime, timedelta
     try:
         from zoneinfo import ZoneInfo
         _TZ = ZoneInfo("America/Mexico_City")
@@ -2645,7 +2641,6 @@ with main_tabs[6]:  # 🛠 Garantías
 
     import os, json, math, re
     import pandas as pd
-    from datetime import datetime, timedelta
     try:
         from zoneinfo import ZoneInfo
         _TZ = ZoneInfo("America/Mexico_City")
