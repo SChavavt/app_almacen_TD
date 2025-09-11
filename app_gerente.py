@@ -668,11 +668,16 @@ with tabs[1]:
     st.header("⬇️ Descargar Datos")
 
     df_todos = cargar_todos_los_pedidos()
-    if df_todos.empty:
+    df_casos = cargar_casos_especiales()
+
+    mostrar_casos = st.checkbox("Mostrar solo casos especiales")
+    df = df_casos if mostrar_casos else df_todos
+
+    if df.empty:
         st.info("No hay datos disponibles para descargar.")
     else:
-        df_todos["Hora_Registro"] = pd.to_datetime(df_todos["Hora_Registro"], errors="coerce")
-        df_todos = df_todos.sort_values(by="Hora_Registro", ascending=False)
+        df["Hora_Registro"] = pd.to_datetime(df["Hora_Registro"], errors="coerce")
+        df = df.sort_values(by="Hora_Registro", ascending=False)
 
         col1, col2 = st.columns(2)
         with col1:
@@ -681,7 +686,7 @@ with tabs[1]:
             dias = st.number_input("Días hacia atrás", min_value=1, max_value=365, value=30)
 
         fecha_limite = datetime.now() - timedelta(days=int(dias))
-        filtrado = df_todos[df_todos["Hora_Registro"] >= fecha_limite]
+        filtrado = df[df["Hora_Registro"] >= fecha_limite]
         if vendedores_sel:
             filtrado = filtrado[filtrado["Vendedor_Registro"].isin(vendedores_sel)]
 
