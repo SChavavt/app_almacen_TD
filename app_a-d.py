@@ -246,13 +246,13 @@ except Exception as e:
 # --- Data Loading from Google Sheets (Cached) ---
 @st.cache_data(ttl=60)
 def get_raw_sheet_data(sheet_id: str, worksheet_name: str, credentials: dict) -> list[list[str]]:
+    creds = dict(credentials)
+    creds["private_key"] = creds["private_key"].replace("\\n", "\n")
     scope = ['https://spreadsheets.google.com/feeds', 'https://www.googleapis.com/auth/drive']
     delay = 1
     for attempt in range(3):
-        creds_dict = dict(credentials)
-        creds_dict["private_key"] = creds_dict["private_key"].replace("\\n", "\n")
-        creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
-        client = gspread.authorize(creds)
+        auth = ServiceAccountCredentials.from_json_keyfile_dict(creds, scope)
+        client = gspread.authorize(auth)
 
         try:
             sheet = client.open_by_key(sheet_id)
