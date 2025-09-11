@@ -417,14 +417,18 @@ def group_key_local(row, local_flag_col="Turno"):
     return "📍 Local (sin turno)"
 
 
-def show_grouped_panel(df_source, mode: str = "local"):
-    """Muestra paneles agrupados por turno (local) o fecha (foráneo)."""
+def show_grouped_panel(df_source, mode: str = "local", group_turno: bool = True):
+    """Muestra paneles agrupados por turno (local) o fecha.
+
+    Cuando ``group_turno`` es ``False`` en modo "local", agrupa únicamente
+    por ``Fecha_Entrega``.
+    """
     if df_source.empty:
         st.info("No hay registros para mostrar.")
         return
     work = df_source.copy()
     work["Fecha_Entrega_Str"] = work["Fecha_Entrega"].dt.strftime("%d/%m")
-    if mode == "foraneo":
+    if mode == "foraneo" or (mode == "local" and not group_turno):
         work["Grupo_Clave"] = work["Fecha_Entrega_Str"]
     else:
         work["Grupo_Clave"] = work.apply(
@@ -483,10 +487,19 @@ with tabs[0]:
                 & (df_local["Completados_Limpiado"].astype(str).str.lower() == "sí")
             )
         ]
-        st.markdown("#### 📊 Resumen (Local)")
-        status_counts_block(df_local)
-        st.markdown("### 📚 Grupos")
-        show_grouped_panel(df_local, mode="local")
+        if df_local.empty:
+            st.info("Sin pedidos locales.")
+        else:
+            turnos = df_local["Turno"].dropna().unique()
+            sub_tabs = st.tabs([t if t else "Sin Turno" for t in turnos])
+            for idx, turno in enumerate(turnos):
+                df_turno = df_local[df_local["Turno"] == turno]
+                with sub_tabs[idx]:
+                    label = turno if turno else "Sin Turno"
+                    st.markdown(f"#### 📊 Resumen ({label})")
+                    status_counts_block(df_turno)
+                    st.markdown("### 📚 Grupos")
+                    show_grouped_panel(df_turno, mode="local", group_turno=False)
 
 # ---------------------------
 # TAB 1: Foráneo
