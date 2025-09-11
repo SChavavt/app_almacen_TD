@@ -9,6 +9,7 @@ import unicodedata
 from io import BytesIO
 from oauth2client.service_account import ServiceAccountCredentials
 from urllib.parse import urlparse, unquote
+from datetime import datetime, timedelta
 
 # --- CONFIGURACIÓN DE STREAMLIT ---
 st.set_page_config(page_title="🔍 Buscador de Guías y Descargas", layout="wide")
@@ -37,6 +38,20 @@ try:
 except Exception as e:
     st.error(f"❌ Error al autenticar con AWS S3: {e}")
     st.stop()
+
+# Lista de vendedores permitidos para filtros en la descarga
+VENDEDORES_LIST = [
+    "Vendedor1",
+    "Vendedor2",
+    "Vendedor3",
+]
+
+
+def get_worksheet():
+    """Obtiene la hoja de cálculo principal de pedidos."""
+    return gspread_client.open_by_key(
+        "1aWkSelodaz0nWfQx7FZAysGnIYGQFJxAN7RO3YgCiZY"
+    ).worksheet("datos_pedidos")
 
 # --- FUNCIONES ---
 @st.cache_data(ttl=300)
@@ -80,6 +95,14 @@ def cargar_casos_especiales():
         if c not in df.columns:
             df[c] = ""
     return df
+
+
+@st.cache_data(ttl=300)
+def cargar_todos_los_pedidos():
+    """Carga todos los pedidos desde la hoja de cálculo principal."""
+    sheet = get_worksheet()
+    data = sheet.get_all_records()
+    return pd.DataFrame(data)
 
 
 def partir_urls(value):
@@ -379,7 +402,11 @@ def render_caso_especial(res):
     st.markdown("---")
 
 # --- INTERFAZ ---
-tabs = st.tabs(["🔍 Buscar Pedido", "✏️ Modificar Pedido"])
+tabs = st.tabs([
+    "🔍 Buscar Pedido",
+    "⬇️ Descargar Datos",
+    "✏️ Modificar Pedido",
+])
 with tabs[0]:
     modo_busqueda = st.radio("Selecciona el modo de búsqueda:", ["🔢 Por número de guía", "🧑 Por cliente"], key="modo_busqueda_radio")
 
@@ -637,10 +664,47 @@ with tabs[0]:
             st.warning(mensaje)
 
 
+with tabs[1]:
+    st.header("⬇️ Descargar Datos")
+
+    df_todos = cargar_todos_los_pedidos()
+    if df_todos.empty:
+        st.info("No hay datos disponibles para descargar.")
+    else:
+        df_todos["Hora_Registro"] = pd.to_datetime(df_todos["Hora_Registro"], errors="coerce")
+        df_todos = df_todos.sort_values(by="Hora_Registro", ascending=False)
+
+        col1, col2 = st.columns(2)
+        with col1:
+            vendedores_sel = st.multiselect("Filtrar por vendedor", VENDEDORES_LIST)
+        with col2:
+            dias = st.number_input("Días hacia atrás", min_value=1, max_value=365, value=30)
+
+        fecha_limite = datetime.now() - timedelta(days=int(dias))
+        filtrado = df_todos[df_todos["Hora_Registro"] >= fecha_limite]
+        if vendedores_sel:
+            filtrado = filtrado[filtrado["Vendedor_Registro"].isin(vendedores_sel)]
+
+        st.markdown(f"{len(filtrado)} registros encontrados")
+        st.dataframe(filtrado.head(100))
+
+        buffer = BytesIO()
+        with pd.ExcelWriter(buffer, engine="xlsxwriter") as writer:
+            filtrado.to_excel(writer, index=False, sheet_name="Pedidos")
+        buffer.seek(0)
+
+        st.download_button(
+            label="⬇️ Descargar Excel",
+            data=buffer.getvalue(),
+            file_name="pedidos_filtrados.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+
+
 CONTRASENA_ADMIN = "Ceci"  # puedes cambiar esta contraseña si lo deseas
 
 # --- PESTAÑA DE MODIFICACIÓN DE PEDIDOS CON CONTRASEÑA ---
-with tabs[1]:
+with tabs[2]:
     st.header("✏️ Modificar Pedido Existente")
 
     if "acceso_modificacion" not in st.session_state:
