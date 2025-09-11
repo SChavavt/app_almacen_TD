@@ -3281,20 +3281,23 @@ with main_tabs[7]:  # ✅ Historial Completados/Cancelados
             for _, row in df_historial.iterrows():
                 g_row = row.get("_gsheet_row_index")
                 if g_row and limpiado_col_idx:
+                    # SIEMPRE poner "sí" en Completados_Limpiado
                     updates.append({
                         'range': gspread.utils.rowcol_to_a1(g_row, limpiado_col_idx),
                         'values': [["sí"]]
                     })
+                # SOLO cambiar estado a "✅ Viajó" si el estado actual es "🟢 Completado"
                 if g_row and estado_col_idx and row.get("Estado") == "🟢 Completado":
                     updates.append({
                         'range': gspread.utils.rowcol_to_a1(g_row, estado_col_idx),
                         'values': [["✅ Viajó"]]
                     })
             if updates and batch_update_gsheet_cells(worksheet_main, updates):
-                st.success(f"✅ {len(updates)} pedidos marcados como limpiados.")
+                st.success(f"✅ Pedidos marcados como limpiados correctamente.")
                 st.cache_data.clear()
                 set_active_main_tab(7)
                 st.rerun()
+    
     # 🧹 Limpieza específica por grupo de completados/cancelados locales
     df_historial["Fecha_dt"] = pd.to_datetime(df_historial["Fecha_Entrega"], errors='coerce')
     df_historial["Grupo_Clave"] = df_historial.apply(
@@ -3328,24 +3331,26 @@ with main_tabs[7]:  # ✅ Historial Completados/Cancelados
                     for _, row in pedidos_a_limpiar.iterrows():
                         g_row = int(row["_gsheet_row_index"])
                         if limpiado_col_idx:
+                            # SIEMPRE poner "sí" en Completados_Limpiado
                             updates.append({
                                 'range': gspread.utils.rowcol_to_a1(g_row, limpiado_col_idx),
                                 'values': [["sí"]]
                             })
+                        # SOLO cambiar estado a "✅ Viajó" si el estado actual es "🟢 Completado"
                         if estado_col_idx and row.get("Estado") == "🟢 Completado":
                             updates.append({
                                 'range': gspread.utils.rowcol_to_a1(g_row, estado_col_idx),
                                 'values': [["✅ Viajó"]]
                             })
                     if updates and batch_update_gsheet_cells(worksheet_main, updates):
-                        st.success(f"✅ {len(updates)} pedidos en {grupo} marcados como limpiados.")
+                        st.success(f"✅ Pedidos en {grupo} marcados como limpiados correctamente.")
                         st.cache_data.clear()
                         set_active_main_tab(7)
                         st.rerun()
 
     # Mostrar pedidos completados/cancelados individuales
     if not df_historial.empty:
-            # 🧹 Botón de limpieza específico para foráneos
+        # 🧹 Botón de limpieza específico para foráneos
         completados_foraneos = df_historial[
             df_historial["Tipo_Envio"] == "🚚 Pedido Foráneo"
         ]
@@ -3360,17 +3365,19 @@ with main_tabs[7]:  # ✅ Historial Completados/Cancelados
                 for _, row in completados_foraneos.iterrows():
                     g_row = int(row["_gsheet_row_index"])
                     if limpiado_col_idx:
+                        # SIEMPRE poner "sí" en Completados_Limpiado
                         updates.append({
                             'range': gspread.utils.rowcol_to_a1(g_row, limpiado_col_idx),
                             'values': [["sí"]]
                         })
+                    # SOLO cambiar estado a "✅ Viajó" si el estado actual es "🟢 Completado"
                     if estado_col_idx and row.get("Estado") == "🟢 Completado":
                         updates.append({
                             'range': gspread.utils.rowcol_to_a1(g_row, estado_col_idx),
                             'values': [["✅ Viajó"]]
                         })
                 if updates and batch_update_gsheet_cells(worksheet_main, updates):
-                    st.success(f"✅ {len(updates)} pedidos foráneos completados/cancelados fueron marcados como limpiados.")
+                    st.success("✅ Pedidos foráneos completados/cancelados marcados como limpiados correctamente.")
                     st.cache_data.clear()
                     set_active_main_tab(7)
                     st.rerun()
@@ -3466,17 +3473,19 @@ with main_tabs[7]:  # ✅ Historial Completados/Cancelados
                     for _, row in comp_dev.iterrows():
                         g_row = int(row['_gsheet_row_index'])
                         if limpiado_col_idx:
+                            # SIEMPRE poner "sí" en Completados_Limpiado
                             updates.append({
                                 'range': gspread.utils.rowcol_to_a1(g_row, limpiado_col_idx),
                                 'values': [["sí"]]
                             })
+                        # SOLO cambiar estado a "✅ Viajó" si el estado actual es "🟢 Completado"
                         if estado_col_idx and row.get("Estado") == "🟢 Completado":
                             updates.append({
                                 'range': gspread.utils.rowcol_to_a1(g_row, estado_col_idx),
                                 'values': [["✅ Viajó"]]
                             })
                     if updates and batch_update_gsheet_cells(worksheet_casos, updates):
-                        st.success(f"✅ {len(updates)} devoluciones marcadas como limpiadas.")
+                        st.success(f"✅ Devoluciones marcadas como limpiadas correctamente.")
                         st.cache_data.clear()
                         set_active_main_tab(7)
                         st.rerun()
@@ -3497,17 +3506,19 @@ with main_tabs[7]:  # ✅ Historial Completados/Cancelados
                     for _, row in comp_gar.iterrows():
                         g_row = int(row['_gsheet_row_index'])
                         if limpiado_col_idx:
+                            # SIEMPRE poner "sí" en Completados_Limpiado
                             updates.append({
                                 'range': gspread.utils.rowcol_to_a1(g_row, limpiado_col_idx),
                                 'values': [["sí"]]
                             })
+                        # SOLO cambiar estado a "✅ Viajó" si el estado actual es "🟢 Completado"
                         if estado_col_idx and row.get("Estado") == "🟢 Completado":
                             updates.append({
                                 'range': gspread.utils.rowcol_to_a1(g_row, estado_col_idx),
                                 'values': [["✅ Viajó"]]
                             })
                     if updates and batch_update_gsheet_cells(worksheet_casos, updates):
-                        st.success(f"✅ {len(updates)} garantías marcadas como limpiadas.")
+                        st.success("✅ Garantías marcadas como limpiadas correctamente.")
                         st.cache_data.clear()
                         set_active_main_tab(7)
                         st.rerun()
