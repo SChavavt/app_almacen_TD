@@ -2455,10 +2455,11 @@ with main_tabs[5]:
             st.markdown("---")
 
             st.markdown("#### 📋 Documentación")
+            st.caption("La guía es opcional; puedes completar la devolución sin subirla.")
             guia_files = st.file_uploader(
-                "📋 Subir Guía de Retorno",
+                "📋 Subir Guía de Retorno (opcional)",
                 key=f"guia_{folio}_{cliente}",
-                help="Sube la guía de mensajería para el retorno del producto (PDF/JPG/PNG)",
+                help="Opcional: sube la guía de mensajería para el retorno del producto (PDF/JPG/PNG)",
                 on_change=handle_generic_upload_change,
                 args=(row_key, "expanded_devoluciones"),
                 accept_multiple_files=True,
@@ -2543,92 +2544,90 @@ with main_tabs[5]:
                     ):
                         try:
                             if not str(row.get("Hoja_Ruta_Mensajero", "")).strip():
-                                st.warning("⚠️ Sube la guía antes de completar.")
-                                del st.session_state[flag_key]
+                                st.info("Completarás la devolución sin guía.")
+                            gsheet_row_idx = None
+                            if "ID_Pedido" in df_casos.columns and idp:
+                                matches = df_casos.index[
+                                    df_casos["ID_Pedido"].astype(str).str.strip() == idp
+                                ]
+                                if len(matches) > 0:
+                                    gsheet_row_idx = int(matches[0]) + 2
+                            if gsheet_row_idx is None:
+                                filt = (
+                                    df_casos.get("Folio_Factura", pd.Series(dtype=str)).astype(str).str.strip().eq(folio)
+                                    & df_casos.get("Cliente", pd.Series(dtype=str)).astype(str).str.strip().eq(cliente)
+                                )
+                                matches = (
+                                    df_casos.index[filt] if hasattr(filt, "any") else []
+                                )
+                                if len(matches) > 0:
+                                    gsheet_row_idx = int(matches[0]) + 2
+                            ok = True
+                            if gsheet_row_idx is None:
+                                st.error(
+                                    "❌ No se encontró el caso en 'casos_especiales'."
+                                )
+                                ok = False
                             else:
-                                gsheet_row_idx = None
-                                if "ID_Pedido" in df_casos.columns and idp:
-                                    matches = df_casos.index[
-                                        df_casos["ID_Pedido"].astype(str).str.strip() == idp
-                                    ]
-                                    if len(matches) > 0:
-                                        gsheet_row_idx = int(matches[0]) + 2
-                                if gsheet_row_idx is None:
-                                    filt = (
-                                        df_casos.get("Folio_Factura", pd.Series(dtype=str)).astype(str).str.strip().eq(folio)
-                                        & df_casos.get("Cliente", pd.Series(dtype=str)).astype(str).str.strip().eq(cliente)
-                                    )
-                                    matches = (
-                                        df_casos.index[filt] if hasattr(filt, "any") else []
-                                    )
-                                    if len(matches) > 0:
-                                        gsheet_row_idx = int(matches[0]) + 2
-                                ok = True
-                                if gsheet_row_idx is None:
-                                    st.error(
-                                        "❌ No se encontró el caso en 'casos_especiales'."
-                                    )
-                                    ok = False
-                                else:
-                                    tipo_sel = st.session_state.get(
-                                        tipo_key, tipo_envio_actual
-                                    )
-                                    if "Tipo_Envio_Original" in headers_casos:
-                                        ok &= update_gsheet_cell(
-                                            worksheet_casos,
-                                            headers_casos,
-                                            gsheet_row_idx,
-                                            "Tipo_Envio_Original",
-                                            tipo_sel,
-                                        )
-                                        row["Tipo_Envio_Original"] = tipo_sel
-                                    if tipo_sel == "📍 Pedido Local":
-                                        turno_sel = st.session_state.get(
-                                            turno_key, turno_actual
-                                        )
-                                        if "Turno" in headers_casos:
-                                            ok &= update_gsheet_cell(
-                                                worksheet_casos,
-                                                headers_casos,
-                                                gsheet_row_idx,
-                                                "Turno",
-                                                turno_sel,
-                                            )
-                                            row["Turno"] = turno_sel
+                                tipo_sel = st.session_state.get(
+                                    tipo_key, tipo_envio_actual
+                                )
+                                if "Tipo_Envio_Original" in headers_casos:
                                     ok &= update_gsheet_cell(
                                         worksheet_casos,
                                         headers_casos,
                                         gsheet_row_idx,
-                                        "Estado",
-                                        "🟢 Completado",
+                                        "Tipo_Envio_Original",
+                                        tipo_sel,
                                     )
-                                    mx_now = mx_now_str()
-                                    _ = update_gsheet_cell(
-                                        worksheet_casos,
-                                        headers_casos,
-                                        gsheet_row_idx,
-                                        "Fecha_Completado",
-                                        mx_now,
+                                    row["Tipo_Envio_Original"] = tipo_sel
+                                if tipo_sel == "📍 Pedido Local":
+                                    turno_sel = st.session_state.get(
+                                        turno_key, turno_actual
                                     )
-                                    _ = update_gsheet_cell(
-                                        worksheet_casos,
-                                        headers_casos,
-                                        gsheet_row_idx,
-                                        "Fecha_Entrega",
-                                        mx_now,
-                                    )
-                                if ok:
-                                    st.session_state[
-                                        "flash_msg"
-                                    ] = "✅ Devolución completada correctamente."
-                                    set_active_main_tab(5)
-                                    st.cache_data.clear()
+                                    if "Turno" in headers_casos:
+                                        ok &= update_gsheet_cell(
+                                            worksheet_casos,
+                                            headers_casos,
+                                            gsheet_row_idx,
+                                            "Turno",
+                                            turno_sel,
+                                        )
+                                        row["Turno"] = turno_sel
+                                ok &= update_gsheet_cell(
+                                    worksheet_casos,
+                                    headers_casos,
+                                    gsheet_row_idx,
+                                    "Estado",
+                                    "🟢 Completado",
+                                )
+                                mx_now = mx_now_str()
+                                _ = update_gsheet_cell(
+                                    worksheet_casos,
+                                    headers_casos,
+                                    gsheet_row_idx,
+                                    "Fecha_Completado",
+                                    mx_now,
+                                )
+                                _ = update_gsheet_cell(
+                                    worksheet_casos,
+                                    headers_casos,
+                                    gsheet_row_idx,
+                                    "Fecha_Entrega",
+                                    mx_now,
+                                )
+                            if ok:
+                                st.session_state[
+                                    "flash_msg"
+                                ] = "✅ Devolución completada correctamente."
+                                set_active_main_tab(5)
+                                st.cache_data.clear()
+                                del st.session_state[flag_key]
+                                st.rerun()
+                            else:
+                                st.error("❌ No se pudo completar la devolución.")
+                                if flag_key in st.session_state:
                                     del st.session_state[flag_key]
-                                    st.rerun()
-                                else:
-                                    st.error("❌ No se pudo completar la devolución.")
-                                    if flag_key in st.session_state:
-                                        del st.session_state[flag_key]
                         except Exception as e:
                             st.error(f"❌ Error al completar la devolución: {e}")
                             if flag_key in st.session_state:
@@ -3066,10 +3065,11 @@ with main_tabs[6]:  # 🛠 Garantías
 
             # === Guía y completar ===
             st.markdown("#### 📋 Documentación")
+            st.caption("La guía es opcional; puedes completar la garantía sin subirla.")
             guia_files = st.file_uploader(
-                "📋 Subir Guía de Envío/Retorno (Garantía)",
+                "📋 Subir Guía de Envío/Retorno (Garantía) (opcional)",
                 key=f"guia_g_{folio}_{cliente}",
-                help="Sube la guía de mensajería para envío de reposición o retorno (PDF/JPG/PNG)",
+                help="Opcional: sube la guía de mensajería para envío de reposición o retorno (PDF/JPG/PNG)",
                 on_change=handle_generic_upload_change,
                 args=(row_key, "expanded_garantias"),
                 accept_multiple_files=True,
@@ -3154,92 +3154,90 @@ with main_tabs[6]:  # 🛠 Garantías
                     ):
                         try:
                             if not str(row.get("Hoja_Ruta_Mensajero", "")).strip():
-                                st.warning("⚠️ Sube la guía antes de completar.")
-                                del st.session_state[flag_key]
+                                st.info("Completarás la garantía sin guía.")
+                            gsheet_row_idx = None
+                            if "ID_Pedido" in df_casos.columns and idp:
+                                matches = df_casos.index[
+                                    df_casos["ID_Pedido"].astype(str).str.strip() == idp
+                                ]
+                                if len(matches) > 0:
+                                    gsheet_row_idx = int(matches[0]) + 2
+                            if gsheet_row_idx is None:
+                                filt = (
+                                    df_casos.get("Folio_Factura", pd.Series(dtype=str)).astype(str).str.strip().eq(folio)
+                                    & df_casos.get("Cliente", pd.Series(dtype=str)).astype(str).str.strip().eq(cliente)
+                                )
+                                matches = (
+                                    df_casos.index[filt] if hasattr(filt, "any") else []
+                                )
+                                if len(matches) > 0:
+                                    gsheet_row_idx = int(matches[0]) + 2
+                            ok = True
+                            if gsheet_row_idx is None:
+                                st.error(
+                                    "❌ No se encontró el caso en 'casos_especiales'."
+                                )
+                                ok = False
                             else:
-                                gsheet_row_idx = None
-                                if "ID_Pedido" in df_casos.columns and idp:
-                                    matches = df_casos.index[
-                                        df_casos["ID_Pedido"].astype(str).str.strip() == idp
-                                    ]
-                                    if len(matches) > 0:
-                                        gsheet_row_idx = int(matches[0]) + 2
-                                if gsheet_row_idx is None:
-                                    filt = (
-                                        df_casos.get("Folio_Factura", pd.Series(dtype=str)).astype(str).str.strip().eq(folio)
-                                        & df_casos.get("Cliente", pd.Series(dtype=str)).astype(str).str.strip().eq(cliente)
-                                    )
-                                    matches = (
-                                        df_casos.index[filt] if hasattr(filt, "any") else []
-                                    )
-                                    if len(matches) > 0:
-                                        gsheet_row_idx = int(matches[0]) + 2
-                                ok = True
-                                if gsheet_row_idx is None:
-                                    st.error(
-                                        "❌ No se encontró el caso en 'casos_especiales'."
-                                    )
-                                    ok = False
-                                else:
-                                    tipo_sel = st.session_state.get(
-                                        tipo_key, tipo_envio_actual
-                                    )
-                                    if "Tipo_Envio_Original" in headers_casos:
-                                        ok &= update_gsheet_cell(
-                                            worksheet_casos,
-                                            headers_casos,
-                                            gsheet_row_idx,
-                                            "Tipo_Envio_Original",
-                                            tipo_sel,
-                                        )
-                                        row["Tipo_Envio_Original"] = tipo_sel
-                                    if tipo_sel == "📍 Pedido Local":
-                                        turno_sel = st.session_state.get(
-                                            turno_key, turno_actual
-                                        )
-                                        if "Turno" in headers_casos:
-                                            ok &= update_gsheet_cell(
-                                                worksheet_casos,
-                                                headers_casos,
-                                                gsheet_row_idx,
-                                                "Turno",
-                                                turno_sel,
-                                            )
-                                            row["Turno"] = turno_sel
+                                tipo_sel = st.session_state.get(
+                                    tipo_key, tipo_envio_actual
+                                )
+                                if "Tipo_Envio_Original" in headers_casos:
                                     ok &= update_gsheet_cell(
                                         worksheet_casos,
                                         headers_casos,
                                         gsheet_row_idx,
-                                        "Estado",
-                                        "🟢 Completado",
+                                        "Tipo_Envio_Original",
+                                        tipo_sel,
                                     )
-                                    mx_now = mx_now_str()
-                                    _ = update_gsheet_cell(
-                                        worksheet_casos,
-                                        headers_casos,
-                                        gsheet_row_idx,
-                                        "Fecha_Completado",
-                                        mx_now,
+                                    row["Tipo_Envio_Original"] = tipo_sel
+                                if tipo_sel == "📍 Pedido Local":
+                                    turno_sel = st.session_state.get(
+                                        turno_key, turno_actual
                                     )
-                                    _ = update_gsheet_cell(
-                                        worksheet_casos,
-                                        headers_casos,
-                                        gsheet_row_idx,
-                                        "Fecha_Entrega",
-                                        mx_now,
-                                    )
-                                if ok:
-                                    st.session_state[
-                                        "flash_msg"
-                                    ] = "✅ Garantía completada correctamente."
-                                    set_active_main_tab(6)
-                                    st.cache_data.clear()
+                                    if "Turno" in headers_casos:
+                                        ok &= update_gsheet_cell(
+                                            worksheet_casos,
+                                            headers_casos,
+                                            gsheet_row_idx,
+                                            "Turno",
+                                            turno_sel,
+                                        )
+                                        row["Turno"] = turno_sel
+                                ok &= update_gsheet_cell(
+                                    worksheet_casos,
+                                    headers_casos,
+                                    gsheet_row_idx,
+                                    "Estado",
+                                    "🟢 Completado",
+                                )
+                                mx_now = mx_now_str()
+                                _ = update_gsheet_cell(
+                                    worksheet_casos,
+                                    headers_casos,
+                                    gsheet_row_idx,
+                                    "Fecha_Completado",
+                                    mx_now,
+                                )
+                                _ = update_gsheet_cell(
+                                    worksheet_casos,
+                                    headers_casos,
+                                    gsheet_row_idx,
+                                    "Fecha_Entrega",
+                                    mx_now,
+                                )
+                            if ok:
+                                st.session_state[
+                                    "flash_msg"
+                                ] = "✅ Garantía completada correctamente."
+                                set_active_main_tab(6)
+                                st.cache_data.clear()
+                                del st.session_state[flag_key]
+                                st.rerun()
+                            else:
+                                st.error("❌ No se pudo completar la garantía.")
+                                if flag_key in st.session_state:
                                     del st.session_state[flag_key]
-                                    st.rerun()
-                                else:
-                                    st.error("❌ No se pudo completar la garantía.")
-                                    if flag_key in st.session_state:
-                                        del st.session_state[flag_key]
                         except Exception as e:
                             st.error(f"❌ Error al completar la garantía: {e}")
                             if flag_key in st.session_state:
