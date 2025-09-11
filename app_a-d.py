@@ -999,56 +999,115 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
                     )
 
 
-        # Complete Button
-        if col_complete_btn.button("🟢 Completar", key=f"complete_button_{row['ID_Pedido']}_{origen_tab}", disabled=disabled_if_completed):
-            try:
-                # Buscar el índice real de la fila en Google Sheets usando el ID_Pedido
-                cell = worksheet.find(str(row["ID_Pedido"]))
-                if not cell:
-                    st.error(f"❌ No se encontró el ID_Pedido '{row['ID_Pedido']}' en la hoja.")
-                else:
-                    gsheet_row_index = cell.row
+        # Complete Button with confirmation
+        flag_key = f"confirm_complete_id_{row['ID_Pedido']}"
+        if col_complete_btn.button(
+            "🟢 Completar",
+            key=f"complete_button_{row['ID_Pedido']}_{origen_tab}",
+            disabled=disabled_if_completed,
+        ):
+            st.session_state[flag_key] = row["ID_Pedido"]
 
-                    estado_col_idx = headers.index('Estado') + 1
-                    fecha_completado_col_idx = headers.index('Fecha_Completado') + 1
+        if st.session_state.get(flag_key) == row["ID_Pedido"]:
+            st.warning("¿Estás seguro de completar este pedido?")
+            confirm_col, cancel_col = st.columns(2)
+            with confirm_col:
+                if st.button(
+                    "Confirmar",
+                    key=f"confirm_complete_{row['ID_Pedido']}_{origen_tab}",
+                ):
+                    try:
+                        # Buscar el índice real de la fila en Google Sheets usando el ID_Pedido
+                        cell = worksheet.find(str(row["ID_Pedido"]))
+                        if not cell:
+                            st.error(
+                                f"❌ No se encontró el ID_Pedido '{row['ID_Pedido']}' en la hoja."
+                            )
+                        else:
+                            gsheet_row_index = cell.row
 
-                    zona_mexico = timezone("America/Mexico_City")
-                    now = datetime.now(zona_mexico)
-                    now_str = now.strftime("%Y-%m-%d %H:%M:%S")
+                            estado_col_idx = headers.index("Estado") + 1
+                            fecha_completado_col_idx = (
+                                headers.index("Fecha_Completado") + 1
+                            )
 
-                    updates = []
-                    updates.append({
-                        'range': gspread.utils.rowcol_to_a1(gsheet_row_index, estado_col_idx),
-                        'values': [["🟢 Completado"]]
-                    })
-                    updates.append({
-                        'range': gspread.utils.rowcol_to_a1(gsheet_row_index, fecha_completado_col_idx),
-                        'values': [[now_str]]
-                    })
+                            zona_mexico = timezone("America/Mexico_City")
+                            now = datetime.now(zona_mexico)
+                            now_str = now.strftime("%Y-%m-%d %H:%M:%S")
 
-                    if batch_update_gsheet_cells(worksheet, updates):
-                        df.loc[idx, "Estado"] = "🟢 Completado"
-                        df.loc[idx, "Fecha_Completado"] = now
-                        st.success(f"✅ Pedido {row['ID_Pedido']} completado exitosamente.")
+                            updates = []
+                            updates.append(
+                                {
+                                    "range": gspread.utils.rowcol_to_a1(
+                                        gsheet_row_index, estado_col_idx
+                                    ),
+                                    "values": [["🟢 Completado"]],
+                                }
+                            )
+                            updates.append(
+                                {
+                                    "range": gspread.utils.rowcol_to_a1(
+                                        gsheet_row_index, fecha_completado_col_idx
+                                    ),
+                                    "values": [[now_str]],
+                                }
+                            )
 
-                        # 🔁 Mantener pestaña activa
-                        st.session_state["pedido_editado"] = row['ID_Pedido']
-                        st.session_state["fecha_seleccionada"] = row.get("Fecha_Entrega", "")
-                        st.session_state["subtab_local"] = origen_tab
-                        time.sleep(0.5)
-                        estado_actual = worksheet.cell(gsheet_row_index, estado_col_idx).value
-                        if estado_actual == "🟢 Completado":
-                            st.cache_data.clear()
+                            if batch_update_gsheet_cells(worksheet, updates):
+                                df.loc[idx, "Estado"] = "🟢 Completado"
+                                df.loc[idx, "Fecha_Completado"] = now
+                                st.success(
+                                    f"✅ Pedido {row['ID_Pedido']} completado exitosamente."
+                                )
 
-                            set_active_main_tab(st.session_state.get("active_main_tab_index", 0))
-                            st.session_state["active_subtab_local_index"] = st.session_state.get("active_subtab_local_index", 0)
-                            st.session_state["active_date_tab_m_index"] = st.session_state.get("active_date_tab_m_index", 0)
-                            st.session_state["active_date_tab_t_index"] = st.session_state.get("active_date_tab_t_index", 0)
-                            st.rerun()
-                    else:
-                        st.error("❌ No se pudo completar el pedido.")
-            except Exception as e:
-                st.error(f"Error al completar el pedido: {e}")
+                                # 🔁 Mantener pestaña activa
+                                st.session_state["pedido_editado"] = row["ID_Pedido"]
+                                st.session_state["fecha_seleccionada"] = row.get(
+                                    "Fecha_Entrega", ""
+                                )
+                                st.session_state["subtab_local"] = origen_tab
+                                time.sleep(0.5)
+                                estado_actual = worksheet.cell(
+                                    gsheet_row_index, estado_col_idx
+                                ).value
+                                if estado_actual == "🟢 Completado":
+                                    st.cache_data.clear()
+
+                                    set_active_main_tab(
+                                        st.session_state.get("active_main_tab_index", 0)
+                                    )
+                                    st.session_state["active_subtab_local_index"] = (
+                                        st.session_state.get(
+                                            "active_subtab_local_index", 0
+                                        )
+                                    )
+                                    st.session_state["active_date_tab_m_index"] = (
+                                        st.session_state.get(
+                                            "active_date_tab_m_index", 0
+                                        )
+                                    )
+                                    st.session_state["active_date_tab_t_index"] = (
+                                        st.session_state.get(
+                                            "active_date_tab_t_index", 0
+                                        )
+                                    )
+                                    del st.session_state[flag_key]
+                                    st.rerun()
+                            else:
+                                st.error("❌ No se pudo completar el pedido.")
+                                if flag_key in st.session_state:
+                                    del st.session_state[flag_key]
+                    except Exception as e:
+                        st.error(f"Error al completar el pedido: {e}")
+                        if flag_key in st.session_state:
+                            del st.session_state[flag_key]
+            with cancel_col:
+                if st.button(
+                    "Cancelar",
+                    key=f"cancel_complete_{row['ID_Pedido']}_{origen_tab}",
+                ):
+                    if flag_key in st.session_state:
+                        del st.session_state[flag_key]
 
                 
         # ✅ BOTÓN PROCESAR MODIFICACIÓN - Solo para pedidos con estado 🛠 Modificación
@@ -1372,31 +1431,67 @@ def mostrar_pedido_solo_guia(df, idx, row, orden, origen_tab, current_main_tab_l
                 else:
                     st.warning("⚠️ No se subió ningún archivo válido.")
 
+        flag_key = f"confirm_complete_id_{row['ID_Pedido']}"
         if st.button(
             "🟢 Completar",
             key=f"btn_completar_only_{row['ID_Pedido']}",
             on_click=preserve_tab_state,
         ):
-            if not str(row.get("Adjuntos_Guia", "")).strip():
-                st.warning("⚠️ Sube al menos una guía antes de completar.")
-            else:
-                updates = []
-                if "Estado" in headers:
-                    col_idx = headers.index("Estado") + 1
-                    updates.append({'range': gspread.utils.rowcol_to_a1(gsheet_row_index, col_idx), 'values': [["🟢 Completado"]]})
-                mx_now = datetime.now(timezone("America/Mexico_City")).strftime("%Y-%m-%d %H:%M:%S")
-                if "Fecha_Completado" in headers:
-                    col_idx = headers.index("Fecha_Completado") + 1
-                    updates.append({'range': gspread.utils.rowcol_to_a1(gsheet_row_index, col_idx), 'values': [[mx_now]]})
-                if updates and batch_update_gsheet_cells(worksheet, updates):
-                    df.at[idx, "Estado"] = "🟢 Completado"
-                    df.at[idx, "Fecha_Completado"] = mx_now
-                    st.success("✅ Pedido marcado como **🟢 Completado**.")
-                    set_active_main_tab(3)
-                    st.cache_data.clear()
-                    st.rerun()
-                else:
-                    st.error("❌ No se pudo actualizar Google Sheets con el estado.")
+            st.session_state[flag_key] = row["ID_Pedido"]
+
+        if st.session_state.get(flag_key) == row["ID_Pedido"]:
+            st.warning("¿Estás seguro de completar este pedido?")
+            confirm_col, cancel_col = st.columns(2)
+            with confirm_col:
+                if st.button(
+                    "Confirmar",
+                    key=f"confirm_completar_only_{row['ID_Pedido']}",
+                    on_click=preserve_tab_state,
+                ):
+                    if not str(row.get("Adjuntos_Guia", "")).strip():
+                        st.warning("⚠️ Sube al menos una guía antes de completar.")
+                        del st.session_state[flag_key]
+                    else:
+                        updates = []
+                        if "Estado" in headers:
+                            col_idx = headers.index("Estado") + 1
+                            updates.append(
+                                {
+                                    'range': gspread.utils.rowcol_to_a1(gsheet_row_index, col_idx),
+                                    'values': [["🟢 Completado"]],
+                                }
+                            )
+                        mx_now = datetime.now(timezone("America/Mexico_City")).strftime(
+                            "%Y-%m-%d %H:%M:%S"
+                        )
+                        if "Fecha_Completado" in headers:
+                            col_idx = headers.index("Fecha_Completado") + 1
+                            updates.append(
+                                {
+                                    'range': gspread.utils.rowcol_to_a1(gsheet_row_index, col_idx),
+                                    'values': [[mx_now]],
+                                }
+                            )
+                        if updates and batch_update_gsheet_cells(worksheet, updates):
+                            df.at[idx, "Estado"] = "🟢 Completado"
+                            df.at[idx, "Fecha_Completado"] = mx_now
+                            st.success("✅ Pedido marcado como **🟢 Completado**.")
+                            set_active_main_tab(3)
+                            st.cache_data.clear()
+                            del st.session_state[flag_key]
+                            st.rerun()
+                        else:
+                            st.error("❌ No se pudo actualizar Google Sheets con el estado.")
+                            if flag_key in st.session_state:
+                                del st.session_state[flag_key]
+            with cancel_col:
+                if st.button(
+                    "Cancelar",
+                    key=f"cancel_completar_only_{row['ID_Pedido']}",
+                    on_click=preserve_tab_state,
+                ):
+                    if flag_key in st.session_state:
+                        del st.session_state[flag_key]
 
 # --- Main Application Logic ---
 
@@ -2412,67 +2507,123 @@ with main_tabs[5]:
                 except Exception as e:
                     st.error(f"❌ Error al subir la guía: {e}")
 
+            flag_key = f"confirm_complete_id_{row['ID_Pedido']}"
             if st.button(
                 "🟢 Completar",
                 key=f"btn_completar_{folio}_{cliente}",
                 on_click=preserve_tab_state,
             ):
-                try:
-                    if not str(row.get("Hoja_Ruta_Mensajero", "")).strip():
-                        st.warning("⚠️ Sube la guía antes de completar.")
-                    else:
-                        gsheet_row_idx = None
-                        if "ID_Pedido" in df_casos.columns and idp:
-                            matches = df_casos.index[df_casos["ID_Pedido"].astype(str).str.strip() == idp]
-                            if len(matches) > 0:
-                                gsheet_row_idx = int(matches[0]) + 2
-                        if gsheet_row_idx is None:
-                            filt = (
-                                df_casos.get("Folio_Factura", pd.Series(dtype=str)).astype(str).str.strip().eq(folio) &
-                                df_casos.get("Cliente", pd.Series(dtype=str)).astype(str).str.strip().eq(cliente)
-                            )
-                            matches = df_casos.index[filt] if hasattr(filt, "any") else []
-                            if len(matches) > 0:
-                                gsheet_row_idx = int(matches[0]) + 2
-                        ok = True
-                        if gsheet_row_idx is None:
-                            st.error("❌ No se encontró el caso en 'casos_especiales'.")
-                            ok = False
-                        else:
-                            tipo_sel = st.session_state.get(tipo_key, tipo_envio_actual)
-                            if "Tipo_Envio_Original" in headers_casos:
-                                ok &= update_gsheet_cell(
-                                    worksheet_casos,
-                                    headers_casos,
-                                    gsheet_row_idx,
-                                    "Tipo_Envio_Original",
-                                    tipo_sel,
-                                )
-                                row["Tipo_Envio_Original"] = tipo_sel
-                            if tipo_sel == "📍 Pedido Local":
-                                turno_sel = st.session_state.get(turno_key, turno_actual)
-                                if "Turno" in headers_casos:
+                st.session_state[flag_key] = row["ID_Pedido"]
+
+            if st.session_state.get(flag_key) == row["ID_Pedido"]:
+                st.warning("¿Estás seguro de completar este pedido?")
+                confirm_col, cancel_col = st.columns(2)
+                with confirm_col:
+                    if st.button(
+                        "Confirmar",
+                        key=f"confirm_completar_{folio}_{cliente}",
+                        on_click=preserve_tab_state,
+                    ):
+                        try:
+                            if not str(row.get("Hoja_Ruta_Mensajero", "")).strip():
+                                st.warning("⚠️ Sube la guía antes de completar.")
+                                del st.session_state[flag_key]
+                            else:
+                                gsheet_row_idx = None
+                                if "ID_Pedido" in df_casos.columns and idp:
+                                    matches = df_casos.index[
+                                        df_casos["ID_Pedido"].astype(str).str.strip() == idp
+                                    ]
+                                    if len(matches) > 0:
+                                        gsheet_row_idx = int(matches[0]) + 2
+                                if gsheet_row_idx is None:
+                                    filt = (
+                                        df_casos.get("Folio_Factura", pd.Series(dtype=str)).astype(str).str.strip().eq(folio)
+                                        & df_casos.get("Cliente", pd.Series(dtype=str)).astype(str).str.strip().eq(cliente)
+                                    )
+                                    matches = (
+                                        df_casos.index[filt] if hasattr(filt, "any") else []
+                                    )
+                                    if len(matches) > 0:
+                                        gsheet_row_idx = int(matches[0]) + 2
+                                ok = True
+                                if gsheet_row_idx is None:
+                                    st.error(
+                                        "❌ No se encontró el caso en 'casos_especiales'."
+                                    )
+                                    ok = False
+                                else:
+                                    tipo_sel = st.session_state.get(
+                                        tipo_key, tipo_envio_actual
+                                    )
+                                    if "Tipo_Envio_Original" in headers_casos:
+                                        ok &= update_gsheet_cell(
+                                            worksheet_casos,
+                                            headers_casos,
+                                            gsheet_row_idx,
+                                            "Tipo_Envio_Original",
+                                            tipo_sel,
+                                        )
+                                        row["Tipo_Envio_Original"] = tipo_sel
+                                    if tipo_sel == "📍 Pedido Local":
+                                        turno_sel = st.session_state.get(
+                                            turno_key, turno_actual
+                                        )
+                                        if "Turno" in headers_casos:
+                                            ok &= update_gsheet_cell(
+                                                worksheet_casos,
+                                                headers_casos,
+                                                gsheet_row_idx,
+                                                "Turno",
+                                                turno_sel,
+                                            )
+                                            row["Turno"] = turno_sel
                                     ok &= update_gsheet_cell(
                                         worksheet_casos,
                                         headers_casos,
                                         gsheet_row_idx,
-                                        "Turno",
-                                        turno_sel,
+                                        "Estado",
+                                        "🟢 Completado",
                                     )
-                                    row["Turno"] = turno_sel
-                            ok &= update_gsheet_cell(worksheet_casos, headers_casos, gsheet_row_idx, "Estado", "🟢 Completado")
-                            mx_now = mx_now_str()
-                            _ = update_gsheet_cell(worksheet_casos, headers_casos, gsheet_row_idx, "Fecha_Completado", mx_now)
-                            _ = update_gsheet_cell(worksheet_casos, headers_casos, gsheet_row_idx, "Fecha_Entrega", mx_now)
-                        if ok:
-                            st.session_state["flash_msg"] = "✅ Devolución completada correctamente."
-                            set_active_main_tab(5)
-                            st.cache_data.clear()
-                            st.rerun()
-                        else:
-                            st.error("❌ No se pudo completar la devolución.")
-                except Exception as e:
-                    st.error(f"❌ Error al completar la devolución: {e}")
+                                    mx_now = mx_now_str()
+                                    _ = update_gsheet_cell(
+                                        worksheet_casos,
+                                        headers_casos,
+                                        gsheet_row_idx,
+                                        "Fecha_Completado",
+                                        mx_now,
+                                    )
+                                    _ = update_gsheet_cell(
+                                        worksheet_casos,
+                                        headers_casos,
+                                        gsheet_row_idx,
+                                        "Fecha_Entrega",
+                                        mx_now,
+                                    )
+                                if ok:
+                                    st.session_state[
+                                        "flash_msg"
+                                    ] = "✅ Devolución completada correctamente."
+                                    set_active_main_tab(5)
+                                    st.cache_data.clear()
+                                    del st.session_state[flag_key]
+                                    st.rerun()
+                                else:
+                                    st.error("❌ No se pudo completar la devolución.")
+                                    if flag_key in st.session_state:
+                                        del st.session_state[flag_key]
+                        except Exception as e:
+                            st.error(f"❌ Error al completar la devolución: {e}")
+                            if flag_key in st.session_state:
+                                del st.session_state[flag_key]
+                with cancel_col:
+                    if st.button(
+                        "Cancelar",
+                        key=f"cancel_completar_{folio}_{cliente}",
+                        on_click=preserve_tab_state,
+                    ):
+                        if flag_key in st.session_state:
+                            del st.session_state[flag_key]
 
 
     st.markdown("---")
@@ -2968,67 +3119,123 @@ with main_tabs[6]:  # 🛠 Garantías
                 except Exception as e:
                     st.error(f"❌ Error al subir la guía: {e}")
 
+            flag_key = f"confirm_complete_id_{row['ID_Pedido']}"
             if st.button(
                 "🟢 Completar Garantía",
                 key=f"btn_completar_g_{folio}_{cliente}",
                 on_click=preserve_tab_state,
             ):
-                try:
-                    if not str(row.get("Hoja_Ruta_Mensajero", "")).strip():
-                        st.warning("⚠️ Sube la guía antes de completar.")
-                    else:
-                        gsheet_row_idx = None
-                        if "ID_Pedido" in df_casos.columns and idp:
-                            matches = df_casos.index[df_casos["ID_Pedido"].astype(str).str.strip() == idp]
-                            if len(matches) > 0:
-                                gsheet_row_idx = int(matches[0]) + 2
-                        if gsheet_row_idx is None:
-                            filt = (
-                                df_casos.get("Folio_Factura", pd.Series(dtype=str)).astype(str).str.strip().eq(folio) &
-                                df_casos.get("Cliente", pd.Series(dtype=str)).astype(str).str.strip().eq(cliente)
-                            )
-                            matches = df_casos.index[filt] if hasattr(filt, "any") else []
-                            if len(matches) > 0:
-                                gsheet_row_idx = int(matches[0]) + 2
-                        ok = True
-                        if gsheet_row_idx is None:
-                            st.error("❌ No se encontró el caso en 'casos_especiales'.")
-                            ok = False
-                        else:
-                            tipo_sel = st.session_state.get(tipo_key, tipo_envio_actual)
-                            if "Tipo_Envio_Original" in headers_casos:
-                                ok &= update_gsheet_cell(
-                                    worksheet_casos,
-                                    headers_casos,
-                                    gsheet_row_idx,
-                                    "Tipo_Envio_Original",
-                                    tipo_sel,
-                                )
-                                row["Tipo_Envio_Original"] = tipo_sel
-                            if tipo_sel == "📍 Pedido Local":
-                                turno_sel = st.session_state.get(turno_key, turno_actual)
-                                if "Turno" in headers_casos:
+                st.session_state[flag_key] = row["ID_Pedido"]
+
+            if st.session_state.get(flag_key) == row["ID_Pedido"]:
+                st.warning("¿Estás seguro de completar este pedido?")
+                confirm_col, cancel_col = st.columns(2)
+                with confirm_col:
+                    if st.button(
+                        "Confirmar",
+                        key=f"confirm_completar_g_{folio}_{cliente}",
+                        on_click=preserve_tab_state,
+                    ):
+                        try:
+                            if not str(row.get("Hoja_Ruta_Mensajero", "")).strip():
+                                st.warning("⚠️ Sube la guía antes de completar.")
+                                del st.session_state[flag_key]
+                            else:
+                                gsheet_row_idx = None
+                                if "ID_Pedido" in df_casos.columns and idp:
+                                    matches = df_casos.index[
+                                        df_casos["ID_Pedido"].astype(str).str.strip() == idp
+                                    ]
+                                    if len(matches) > 0:
+                                        gsheet_row_idx = int(matches[0]) + 2
+                                if gsheet_row_idx is None:
+                                    filt = (
+                                        df_casos.get("Folio_Factura", pd.Series(dtype=str)).astype(str).str.strip().eq(folio)
+                                        & df_casos.get("Cliente", pd.Series(dtype=str)).astype(str).str.strip().eq(cliente)
+                                    )
+                                    matches = (
+                                        df_casos.index[filt] if hasattr(filt, "any") else []
+                                    )
+                                    if len(matches) > 0:
+                                        gsheet_row_idx = int(matches[0]) + 2
+                                ok = True
+                                if gsheet_row_idx is None:
+                                    st.error(
+                                        "❌ No se encontró el caso en 'casos_especiales'."
+                                    )
+                                    ok = False
+                                else:
+                                    tipo_sel = st.session_state.get(
+                                        tipo_key, tipo_envio_actual
+                                    )
+                                    if "Tipo_Envio_Original" in headers_casos:
+                                        ok &= update_gsheet_cell(
+                                            worksheet_casos,
+                                            headers_casos,
+                                            gsheet_row_idx,
+                                            "Tipo_Envio_Original",
+                                            tipo_sel,
+                                        )
+                                        row["Tipo_Envio_Original"] = tipo_sel
+                                    if tipo_sel == "📍 Pedido Local":
+                                        turno_sel = st.session_state.get(
+                                            turno_key, turno_actual
+                                        )
+                                        if "Turno" in headers_casos:
+                                            ok &= update_gsheet_cell(
+                                                worksheet_casos,
+                                                headers_casos,
+                                                gsheet_row_idx,
+                                                "Turno",
+                                                turno_sel,
+                                            )
+                                            row["Turno"] = turno_sel
                                     ok &= update_gsheet_cell(
                                         worksheet_casos,
                                         headers_casos,
                                         gsheet_row_idx,
-                                        "Turno",
-                                        turno_sel,
+                                        "Estado",
+                                        "🟢 Completado",
                                     )
-                                    row["Turno"] = turno_sel
-                            ok &= update_gsheet_cell(worksheet_casos, headers_casos, gsheet_row_idx, "Estado", "🟢 Completado")
-                            mx_now = mx_now_str()
-                            _ = update_gsheet_cell(worksheet_casos, headers_casos, gsheet_row_idx, "Fecha_Completado", mx_now)
-                            _ = update_gsheet_cell(worksheet_casos, headers_casos, gsheet_row_idx, "Fecha_Entrega", mx_now)
-                        if ok:
-                            st.session_state["flash_msg"] = "✅ Garantía completada correctamente."
-                            set_active_main_tab(6)
-                            st.cache_data.clear()
-                            st.rerun()
-                        else:
-                            st.error("❌ No se pudo completar la garantía.")
-                except Exception as e:
-                    st.error(f"❌ Error al completar la garantía: {e}")
+                                    mx_now = mx_now_str()
+                                    _ = update_gsheet_cell(
+                                        worksheet_casos,
+                                        headers_casos,
+                                        gsheet_row_idx,
+                                        "Fecha_Completado",
+                                        mx_now,
+                                    )
+                                    _ = update_gsheet_cell(
+                                        worksheet_casos,
+                                        headers_casos,
+                                        gsheet_row_idx,
+                                        "Fecha_Entrega",
+                                        mx_now,
+                                    )
+                                if ok:
+                                    st.session_state[
+                                        "flash_msg"
+                                    ] = "✅ Garantía completada correctamente."
+                                    set_active_main_tab(6)
+                                    st.cache_data.clear()
+                                    del st.session_state[flag_key]
+                                    st.rerun()
+                                else:
+                                    st.error("❌ No se pudo completar la garantía.")
+                                    if flag_key in st.session_state:
+                                        del st.session_state[flag_key]
+                        except Exception as e:
+                            st.error(f"❌ Error al completar la garantía: {e}")
+                            if flag_key in st.session_state:
+                                del st.session_state[flag_key]
+                with cancel_col:
+                    if st.button(
+                        "Cancelar",
+                        key=f"cancel_completar_g_{folio}_{cliente}",
+                        on_click=preserve_tab_state,
+                    ):
+                        if flag_key in st.session_state:
+                            del st.session_state[flag_key]
 
 with main_tabs[7]:  # ✅ Historial Completados/Cancelados
     df_historial = df_main[
