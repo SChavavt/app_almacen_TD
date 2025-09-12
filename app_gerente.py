@@ -740,6 +740,10 @@ with tabs[2]:
     df_pedidos = cargar_pedidos()
     df_casos = cargar_casos_especiales()
 
+    for d in (df_pedidos, df_casos):
+        d["ID_Pedido"] = pd.to_numeric(d["ID_Pedido"], errors="coerce")
+        d["Hora_Registro"] = pd.to_datetime(d["Hora_Registro"], errors="coerce")
+
     def es_devol_o_garant(row):
         for col in ("Tipo_Envio", "Tipo_Caso"):
             valor = str(row.get(col, ""))
@@ -749,14 +753,10 @@ with tabs[2]:
 
     df_casos = df_casos[df_casos.apply(es_devol_o_garant, axis=1)]
 
-    for d in (df_pedidos, df_casos):
-        d["Hora_Registro"] = pd.to_datetime(d["Hora_Registro"], errors="coerce")
-
     df_pedidos["__source"] = "pedidos"
     df_casos["__source"] = "casos"
     df = pd.concat([df_pedidos, df_casos], ignore_index=True, sort=False)
     df = df[df["ID_Pedido"].notna()]
-    df["ID_Pedido"] = pd.to_numeric(df["ID_Pedido"], errors="coerce")
     df = df.sort_values(by="ID_Pedido", ascending=True)
 
     if "pedido_modificado" in st.session_state:
@@ -817,16 +817,19 @@ with tabs[2]:
                 source_sel = coincidencias[idx]["__source"]
 
     else:
-        ultimos_10 = df.head(10)
+        ultimos_10 = df.head(10).copy()
         st.markdown("### 🕒 Últimos 10 Pedidos Registrados")
-        ultimos_10["display"] = ultimos_10.apply(
-            lambda row: (
+
+        def _format_display(row):
+            hora = row.get("Hora_Registro")
+            hora_fmt = hora.strftime("%d/%m %H:%M") if pd.notna(hora) else ""
+            return (
                 f"{row.get('Folio_Factura', row.get('Folio',''))} – {row.get('Tipo_Envio','')} – 👤 {row['Cliente']} "
                 f"– 🔍 {row.get('Estado', row.get('Estado_Caso',''))} – 🧑‍💼 {row.get('Vendedor_Registro','')} "
-                f"– 🕒 {row['Hora_Registro'].strftime('%d/%m %H:%M')}"
-            ),
-            axis=1
-        )
+                f"– 🕒 {hora_fmt}"
+            )
+
+        ultimos_10["display"] = ultimos_10.apply(_format_display, axis=1)
         idx_seleccion = st.selectbox(
             "⬇️ Selecciona uno de los pedidos recientes:",
             ultimos_10.index,
@@ -844,7 +847,7 @@ with tabs[2]:
         st.stop()
 
     row_df = df_pedidos if source_sel == "pedidos" else df_casos
-    filtro = row_df[row_df["ID_Pedido"].astype(str) == str(pedido_sel)]
+    filtro = row_df[pd.to_numeric(row_df["ID_Pedido"], errors="coerce") == float(pedido_sel)]
     if filtro.empty:
         st.warning("No se encontró un pedido con el ID seleccionado.")
         st.stop()
