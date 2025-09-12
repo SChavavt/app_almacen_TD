@@ -481,6 +481,9 @@ with tabs[0]:
 
             # 2.2) Buscar en casos_especiales (mostrar campos de la hoja + links de Adjuntos y Hoja_Ruta_Mensajero)
             df_casos = cargar_casos_especiales()
+            if df_pedidos.empty or df_casos.empty:
+                st.error("❌ No se pudieron cargar datos de pedidos o casos especiales.")
+                st.stop()
             # Ordenar por Hora_Registro si existe
             if "Hora_Registro" in df_casos.columns:
                 df_casos["Hora_Registro"] = pd.to_datetime(df_casos["Hora_Registro"], errors="coerce")
@@ -739,6 +742,9 @@ with tabs[2]:
 
     df_pedidos = cargar_pedidos()
     df_casos = cargar_casos_especiales()
+    if df_pedidos.empty or df_casos.empty:
+        st.error("❌ No se pudieron cargar datos de pedidos o casos especiales.")
+        st.stop()
 
     for d in (df_pedidos, df_casos):
         d["ID_Pedido"] = pd.to_numeric(d["ID_Pedido"], errors="coerce")
