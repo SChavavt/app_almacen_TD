@@ -695,7 +695,8 @@ with tabs[1]:
             filtrado = filtrado[filtrado["Tipo_Envio"].isin(tipos_sel)]
 
         st.markdown(f"{len(filtrado)} registros encontrados")
-        st.dataframe(filtrado.head(100))
+        # Show all rows that match the selected filters without truncating
+        st.dataframe(filtrado)
 
         buffer = BytesIO()
         with pd.ExcelWriter(buffer, engine="xlsxwriter") as writer:
