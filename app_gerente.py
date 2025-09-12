@@ -719,7 +719,6 @@ with tabs[1]:
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         )
 
-
 CONTRASENA_ADMIN = "Ceci"  # puedes cambiar esta contraseña si lo deseas
 
 # --- PESTAÑA DE MODIFICACIÓN DE PEDIDOS CON CONTRASEÑA ---
@@ -1013,29 +1012,3 @@ with tabs[1]:
         st.session_state["pedido_modificado_source"] = source_sel
         st.session_state["mensaje_exito"] = "👁 Visibilidad en pantalla de producción actualizada."
         st.rerun()
-
-
-with tabs[2]:
-    st.header("📂 Casos Especiales")
-    nombre_caso = st.text_input("👤 Ingresa el nombre del cliente a buscar en casos especiales:")
-    buscar_caso = st.button("🔎 Buscar Caso Especial")
-
-    if buscar_caso:
-        df_casos = cargar_casos_especiales()
-        cliente_norm = normalizar(nombre_caso.strip())
-        resultados = []
-        for _, row in df_casos.iterrows():
-            nombre = str(row.get("Cliente", "")).strip()
-            if not nombre:
-                continue
-            if cliente_norm not in normalizar(nombre):
-                continue
-            resultados.append(preparar_resultado_caso(row))
-
-        st.markdown("---")
-        if resultados:
-            st.success(f"✅ Se encontraron {len(resultados)} caso(s).")
-            for res in resultados:
-                render_caso_especial(res)
-        else:
-            st.warning("⚠️ No se encontraron casos especiales para ese cliente.")
