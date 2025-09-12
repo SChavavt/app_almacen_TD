@@ -30,23 +30,23 @@ def mx_today():
 
 st.set_page_config(page_title="Recepción de Pedidos TD", layout="wide")
 
-# 🧭 Leer pestaña activa desde parámetros de URL
-params = st.query_params
-if "tab" in params:
-    try:
-        tab_val = params["tab"]
-        if isinstance(tab_val, list):
-            tab_val = tab_val[0]
-        st.session_state["active_main_tab_index"] = int(tab_val)
-    except (ValueError, TypeError):
-        st.session_state["active_main_tab_index"] = 0
-
 # 🔁 Restaurar pestañas activas si venimos de una acción que modificó datos
 if "preserve_main_tab" in st.session_state:
     st.session_state["active_main_tab_index"] = st.session_state.pop("preserve_main_tab", 0)
     st.session_state["active_subtab_local_index"] = st.session_state.pop("preserve_local_tab", 0)
     st.session_state["active_date_tab_m_index"] = st.session_state.pop("preserve_date_tab_m", 0)
     st.session_state["active_date_tab_t_index"] = st.session_state.pop("preserve_date_tab_t", 0)
+else:
+    # 🧭 Leer pestaña activa desde parámetros de URL
+    params = st.query_params
+    if "tab" in params:
+        try:
+            tab_val = params["tab"]
+            if isinstance(tab_val, list):
+                tab_val = tab_val[0]
+            st.session_state["active_main_tab_index"] = int(tab_val)
+        except (ValueError, TypeError):
+            st.session_state["active_main_tab_index"] = 0
 
 st.query_params["tab"] = str(st.session_state.get("active_main_tab_index", 0))
 
@@ -683,6 +683,16 @@ def fijar_y_preservar(row, origen_tab):
     st.session_state["expanded_attachments"][row["ID_Pedido"]] = True
     # ✅ Mantener expander de subir guía (si aplica)
     st.session_state["expanded_subir_guia"][row["ID_Pedido"]] = True
+
+    # 🔄 Sincronizar la pestaña principal desde la URL antes de preservar
+    tab_val = st.query_params.get("tab")
+    if tab_val is not None:
+        if isinstance(tab_val, list):
+            tab_val = tab_val[0]
+        try:
+            st.session_state["active_main_tab_index"] = int(tab_val)
+        except (ValueError, TypeError):
+            st.session_state["active_main_tab_index"] = 0
 
     preserve_tab_state()
 
