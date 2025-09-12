@@ -836,7 +836,11 @@ with tabs[2]:
             ultimos_10.index,
             format_func=lambda i: ultimos_10.loc[i, "display"]
         )
-        pedido_sel = ultimos_10.iloc[idx_seleccion]["ID_Pedido"]
+        if idx_seleccion is None or idx_seleccion not in ultimos_10.index:
+            st.warning("⚠️ Selección inválida.")
+            st.stop()
+
+        pedido_sel = ultimos_10.loc[idx_seleccion, "ID_Pedido"]
         source_sel = ultimos_10.loc[idx_seleccion, "__source"]
 
 
