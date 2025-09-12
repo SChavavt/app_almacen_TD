@@ -587,6 +587,22 @@ def get_s3_file_download_url(s3_client_param, object_key_or_url, expires_in=6048
         return "#"
 
 
+def resolve_storage_url(s3_client_param, value):
+    """Return a usable URL for a stored value.
+
+    If ``value`` already looks like an HTTP(S) URL, it is returned as-is.
+    Otherwise it is treated as an S3 key and a presigned download link is
+    generated via :func:`get_s3_file_download_url`.
+    """
+    if not value:
+        return ""
+    val = str(value).strip()
+    scheme = urlparse(val).scheme
+    if scheme in ("http", "https"):
+        return val
+    return get_s3_file_download_url(s3_client_param, val)
+
+
 # --- Helper Functions (existing in app.py) ---
 
 def ordenar_pedidos_custom(df_pedidos_filtrados):
@@ -2127,7 +2143,7 @@ with main_tabs[5]:
                 for u in adj_surtido:
                     nombre = os.path.basename(urlparse(u).path) or u
                     nombre = unquote(nombre)
-                    url = get_s3_file_download_url(s3_client, u)
+                    url = resolve_storage_url(s3_client, u)
                     st.markdown(
                         f'- <a href="{url}" target="_blank">{nombre}</a>',
                         unsafe_allow_html=True,
@@ -2143,7 +2159,7 @@ with main_tabs[5]:
                 for u in adjuntos:
                     nombre = os.path.basename(urlparse(u).path) or u
                     nombre = unquote(nombre)
-                    url = get_s3_file_download_url(s3_client, u)
+                    url = resolve_storage_url(s3_client, u)
                     st.markdown(
                         f'- <a href="{url}" target="_blank">{nombre}</a>',
                         unsafe_allow_html=True,
@@ -2156,8 +2172,8 @@ with main_tabs[5]:
                     if g == "#" or not g:
                         st.error("❌ Guía no disponible.")
                         continue
-                    url = get_s3_file_download_url(s3_client, g)
-                    if not url or url == "#":
+                    url = resolve_storage_url(s3_client, g)
+                    if not url:
                         st.error(f"❌ No se pudo generar la URL para la guía {nombre}.")
                         continue
                     st.markdown(
@@ -2480,12 +2496,12 @@ with main_tabs[5]:
                 items = []
                 for u in adjuntos_urls:
                     file_name = os.path.basename(u)
-                    items.append((file_name, u))
+                    items.append((file_name, resolve_storage_url(s3_client, u)))
 
                 if nota_credito_url and nota_credito_url.lower() not in ("nan", "none", "n/a"):
-                    items.append(("Nota de Crédito", nota_credito_url))
+                    items.append(("Nota de Crédito", resolve_storage_url(s3_client, nota_credito_url)))
                 if documento_adic_url and documento_adic_url.lower() not in ("nan", "none", "n/a"):
-                    items.append(("Documento Adicional", documento_adic_url))
+                    items.append(("Documento Adicional", resolve_storage_url(s3_client, documento_adic_url)))
 
                 if items:
                     for label, url in items:
@@ -3086,15 +3102,12 @@ with main_tabs[6]:  # 🛠 Garantías
                     if u:
                         file_name = os.path.basename(urlparse(u).path) or u
                         file_name = unquote(file_name)
-                        presigned = get_s3_file_download_url(s3_client, u)
-                        items.append((file_name, presigned))
+                        items.append((file_name, resolve_storage_url(s3_client, u)))
                 if principal_url and principal_url.lower() not in ("nan", "none", "n/a"):
                     label_p = "Dictamen de Garantía" if dictamen_url else "Nota de Crédito"
-                    presigned = get_s3_file_download_url(s3_client, principal_url)
-                    items.append((label_p, presigned))
+                    items.append((label_p, resolve_storage_url(s3_client, principal_url)))
                 if doc_adic_url and doc_adic_url.lower() not in ("nan", "none", "n/a"):
-                    presigned = get_s3_file_download_url(s3_client, doc_adic_url)
-                    items.append(("Documento Adicional", presigned))
+                    items.append(("Documento Adicional", resolve_storage_url(s3_client, doc_adic_url)))
 
                 if items:
                     for label, url in items:
@@ -3453,14 +3466,16 @@ with main_tabs[7]:  # ✅ Historial Completados
                         for u in adjuntos:
                             nombre = os.path.basename(urlparse(u).path) or u
                             nombre = unquote(nombre)
-                            st.markdown(f"- [{nombre}]({u})")
+                            url = resolve_storage_url(s3_client, u)
+                            st.markdown(f"- [{nombre}]({url})")
                     if guia:
                         contenido = True
                         st.markdown("**Guía:**")
-                        if guia.startswith("http"):
-                            st.markdown(f"[Abrir guía]({guia})")
+                        guia_url = resolve_storage_url(s3_client, guia)
+                        if urlparse(guia_url).scheme in ("http", "https"):
+                            st.markdown(f"[Abrir guía]({guia_url})")
                         else:
-                            st.markdown(guia)
+                            st.markdown(guia_url)
                     if not contenido:
                         st.info("Sin archivos registrados en la hoja.")
 
