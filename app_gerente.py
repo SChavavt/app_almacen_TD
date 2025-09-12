@@ -775,7 +775,7 @@ with tabs[2]:
     if usar_busqueda:
         st.markdown("### 🔍 Buscar Pedido por Cliente")
         cliente_buscado = st.text_input("👤 Escribe el nombre del cliente:")
-        cliente_normalizado = normalizar(cliente_buscado)
+        cliente_normalizado = normalizar(cliente_buscado.strip())
         coincidencias = []
 
         if cliente_buscado:
