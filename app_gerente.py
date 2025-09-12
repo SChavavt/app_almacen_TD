@@ -424,7 +424,8 @@ with tabs[0]:
         df_pedidos = cargar_pedidos()
         if 'Hora_Registro' in df_pedidos.columns:
             df_pedidos['Hora_Registro'] = pd.to_datetime(df_pedidos['Hora_Registro'], errors='coerce')
-            df_pedidos = df_pedidos.sort_values(by='Hora_Registro', ascending=False).reset_index(drop=True)
+            df_pedidos["ID_Pedido"] = pd.to_numeric(df_pedidos["ID_Pedido"], errors="coerce")
+            df_pedidos = df_pedidos.sort_values(by="ID_Pedido", ascending=True).reset_index(drop=True)
 
         # ====== BÚSQUEDA POR CLIENTE: también carga y filtra casos_especiales ======
         if modo_busqueda == "🧑 Por cliente":
@@ -669,7 +670,8 @@ with tabs[1]:
         st.info("No hay datos disponibles para descargar.")
     else:
         df["Hora_Registro"] = pd.to_datetime(df["Hora_Registro"], errors="coerce")
-        df = df.sort_values(by="Hora_Registro", ascending=False)
+        df["ID_Pedido"] = pd.to_numeric(df["ID_Pedido"], errors="coerce")
+        df = df.sort_values(by="ID_Pedido", ascending=True)
 
         rango_tiempo = st.selectbox(
             "Rango de tiempo",
@@ -750,7 +752,8 @@ with tabs[2]:
     df_casos["__source"] = "casos"
     df = pd.concat([df_pedidos, df_casos], ignore_index=True, sort=False)
     df = df[df["ID_Pedido"].notna()]
-    df = df.sort_values(by="Hora_Registro", ascending=False)
+    df["ID_Pedido"] = pd.to_numeric(df["ID_Pedido"], errors="coerce")
+    df = df.sort_values(by="ID_Pedido", ascending=True)
 
     if "pedido_modificado" in st.session_state:
         pedido_sel = st.session_state["pedido_modificado"]
