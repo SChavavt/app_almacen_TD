@@ -818,6 +818,7 @@ with tabs[2]:
 
     else:
         ultimos_10 = df.head(10).copy()
+        ultimos_10 = ultimos_10.reset_index(drop=True)
         st.markdown("### 🕒 Últimos 10 Pedidos Registrados")
 
         def _format_display(row):
@@ -835,7 +836,7 @@ with tabs[2]:
             ultimos_10.index,
             format_func=lambda i: ultimos_10.loc[i, "display"]
         )
-        pedido_sel = ultimos_10.loc[idx_seleccion, "ID_Pedido"]
+        pedido_sel = ultimos_10.iloc[idx_seleccion]["ID_Pedido"]
         source_sel = ultimos_10.loc[idx_seleccion, "__source"]
 
 
