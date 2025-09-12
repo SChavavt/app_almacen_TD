@@ -844,8 +844,12 @@ with tabs[2]:
         st.stop()
 
     row_df = df_pedidos if source_sel == "pedidos" else df_casos
-    row = row_df[row_df["ID_Pedido"].astype(str) == str(pedido_sel)].iloc[0]
-    gspread_row_idx = row_df[row_df["ID_Pedido"].astype(str) == str(pedido_sel)].index[0] + 2  # índice real en hoja
+    filtro = row_df[row_df["ID_Pedido"].astype(str) == str(pedido_sel)]
+    if filtro.empty:
+        st.warning("No se encontró un pedido con el ID seleccionado.")
+        st.stop()
+    row = filtro.iloc[0]
+    gspread_row_idx = filtro.index[0] + 2
     if "mensaje_exito" in st.session_state:
         st.success(st.session_state["mensaje_exito"])
         del st.session_state["mensaje_exito"]  # ✅ eliminar para que no se repita
