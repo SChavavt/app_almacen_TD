@@ -660,7 +660,7 @@ with tabs[0]:
             st.warning(mensaje)
 
 
-with tabs[2]:
+with tabs[1]:
     st.header("⬇️ Descargar Datos")
 
     df_todos = cargar_todos_los_pedidos()
@@ -722,7 +722,7 @@ with tabs[2]:
 CONTRASENA_ADMIN = "Ceci"  # puedes cambiar esta contraseña si lo deseas
 
 # --- PESTAÑA DE MODIFICACIÓN DE PEDIDOS CON CONTRASEÑA ---
-with tabs[1]:
+with tabs[2]:
     st.header("✏️ Modificar Pedido Existente")
 
     if "acceso_modificacion" not in st.session_state:
