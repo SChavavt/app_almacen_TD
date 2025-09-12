@@ -660,7 +660,7 @@ with tabs[0]:
             st.warning(mensaje)
 
 
-with tabs[1]:
+with tabs[2]:
     st.header("⬇️ Descargar Datos")
 
     df_todos = cargar_todos_los_pedidos()
