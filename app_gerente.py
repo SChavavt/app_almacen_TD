@@ -723,7 +723,7 @@ with tabs[1]:
 CONTRASENA_ADMIN = "Ceci"  # puedes cambiar esta contraseña si lo deseas
 
 # --- PESTAÑA DE MODIFICACIÓN DE PEDIDOS CON CONTRASEÑA ---
-with tabs[2]:
+with tabs[1]:
     st.header("✏️ Modificar Pedido Existente")
 
     if "acceso_modificacion" not in st.session_state:
@@ -742,13 +742,6 @@ with tabs[2]:
 
     df_pedidos = cargar_pedidos()
     df_casos = cargar_casos_especiales()
-    if df_pedidos.empty or df_casos.empty:
-        st.error("❌ No se pudieron cargar datos de pedidos o casos especiales.")
-        st.stop()
-
-    for d in (df_pedidos, df_casos):
-        d["ID_Pedido"] = pd.to_numeric(d["ID_Pedido"], errors="coerce")
-        d["Hora_Registro"] = pd.to_datetime(d["Hora_Registro"], errors="coerce")
 
     def es_devol_o_garant(row):
         for col in ("Tipo_Envio", "Tipo_Caso"):
@@ -759,11 +752,14 @@ with tabs[2]:
 
     df_casos = df_casos[df_casos.apply(es_devol_o_garant, axis=1)]
 
+    for d in (df_pedidos, df_casos):
+        d["Hora_Registro"] = pd.to_datetime(d["Hora_Registro"], errors="coerce")
+
     df_pedidos["__source"] = "pedidos"
     df_casos["__source"] = "casos"
     df = pd.concat([df_pedidos, df_casos], ignore_index=True, sort=False)
     df = df[df["ID_Pedido"].notna()]
-    df = df.sort_values(by="ID_Pedido", ascending=True)
+    df = df.sort_values(by="Hora_Registro", ascending=False)
 
     if "pedido_modificado" in st.session_state:
         pedido_sel = st.session_state["pedido_modificado"]
@@ -781,7 +777,7 @@ with tabs[2]:
     if usar_busqueda:
         st.markdown("### 🔍 Buscar Pedido por Cliente")
         cliente_buscado = st.text_input("👤 Escribe el nombre del cliente:")
-        cliente_normalizado = normalizar(cliente_buscado.strip())
+        cliente_normalizado = normalizar(cliente_buscado)
         coincidencias = []
 
         if cliente_buscado:
@@ -823,29 +819,21 @@ with tabs[2]:
                 source_sel = coincidencias[idx]["__source"]
 
     else:
-        ultimos_10 = df.head(10).copy()
-        ultimos_10 = ultimos_10.reset_index(drop=True)
+        ultimos_10 = df.head(10)
         st.markdown("### 🕒 Últimos 10 Pedidos Registrados")
-
-        def _format_display(row):
-            hora = row.get("Hora_Registro")
-            hora_fmt = hora.strftime("%d/%m %H:%M") if pd.notna(hora) else ""
-            return (
+        ultimos_10["display"] = ultimos_10.apply(
+            lambda row: (
                 f"{row.get('Folio_Factura', row.get('Folio',''))} – {row.get('Tipo_Envio','')} – 👤 {row['Cliente']} "
                 f"– 🔍 {row.get('Estado', row.get('Estado_Caso',''))} – 🧑‍💼 {row.get('Vendedor_Registro','')} "
-                f"– 🕒 {hora_fmt}"
-            )
-
-        ultimos_10["display"] = ultimos_10.apply(_format_display, axis=1)
+                f"– 🕒 {row['Hora_Registro'].strftime('%d/%m %H:%M')}"
+            ),
+            axis=1
+        )
         idx_seleccion = st.selectbox(
             "⬇️ Selecciona uno de los pedidos recientes:",
             ultimos_10.index,
             format_func=lambda i: ultimos_10.loc[i, "display"]
         )
-        if idx_seleccion is None or idx_seleccion not in ultimos_10.index:
-            st.warning("⚠️ Selección inválida.")
-            st.stop()
-
         pedido_sel = ultimos_10.loc[idx_seleccion, "ID_Pedido"]
         source_sel = ultimos_10.loc[idx_seleccion, "__source"]
 
@@ -858,12 +846,8 @@ with tabs[2]:
         st.stop()
 
     row_df = df_pedidos if source_sel == "pedidos" else df_casos
-    filtro = row_df[row_df["ID_Pedido"].astype(str) == str(pedido_sel)]
-    if filtro.empty:
-        st.warning("No se encontró un pedido con el ID seleccionado.")
-        st.stop()
-    row = filtro.iloc[0]
-    gspread_row_idx = filtro.index[0] + 2
+    row = row_df[row_df["ID_Pedido"].astype(str) == str(pedido_sel)].iloc[0]
+    gspread_row_idx = row_df[row_df["ID_Pedido"].astype(str) == str(pedido_sel)].index[0] + 2  # índice real en hoja
     if "mensaje_exito" in st.session_state:
         st.success(st.session_state["mensaje_exito"])
         del st.session_state["mensaje_exito"]  # ✅ eliminar para que no se repita
@@ -1031,3 +1015,27 @@ with tabs[2]:
         st.rerun()
 
 
+with tabs[2]:
+    st.header("📂 Casos Especiales")
+    nombre_caso = st.text_input("👤 Ingresa el nombre del cliente a buscar en casos especiales:")
+    buscar_caso = st.button("🔎 Buscar Caso Especial")
+
+    if buscar_caso:
+        df_casos = cargar_casos_especiales()
+        cliente_norm = normalizar(nombre_caso.strip())
+        resultados = []
+        for _, row in df_casos.iterrows():
+            nombre = str(row.get("Cliente", "")).strip()
+            if not nombre:
+                continue
+            if cliente_norm not in normalizar(nombre):
+                continue
+            resultados.append(preparar_resultado_caso(row))
+
+        st.markdown("---")
+        if resultados:
+            st.success(f"✅ Se encontraron {len(resultados)} caso(s).")
+            for res in resultados:
+                render_caso_especial(res)
+        else:
+            st.warning("⚠️ No se encontraron casos especiales para ese cliente.")
