@@ -39,14 +39,6 @@ except Exception as e:
     st.error(f"❌ Error al autenticar con AWS S3: {e}")
     st.stop()
 
-# Lista de vendedores permitidos para filtros en la descarga
-VENDEDORES_LIST = [
-    "Vendedor1",
-    "Vendedor2",
-    "Vendedor3",
-]
-
-
 def get_worksheet():
     """Obtiene la hoja de cálculo principal de pedidos."""
     return gspread_client.open_by_key(
@@ -679,14 +671,10 @@ with tabs[1]:
         df["Hora_Registro"] = pd.to_datetime(df["Hora_Registro"], errors="coerce")
         df = df.sort_values(by="Hora_Registro", ascending=False)
 
-        col1, col2 = st.columns(2)
-        with col1:
-            vendedores_sel = st.multiselect("Filtrar por vendedor", VENDEDORES_LIST)
-        with col2:
-            rango_tiempo = st.selectbox(
-                "Rango de tiempo",
-                ["12 horas", "24 horas", "7 días", "Todos"],
-            )
+        rango_tiempo = st.selectbox(
+            "Rango de tiempo",
+            ["12 horas", "24 horas", "7 días", "Todos"],
+        )
         estados_sel = st.multiselect("Estado", sorted(df["Estado"].dropna().unique()))
         tipos_sel = st.multiselect("Tipo de envío", sorted(df["Tipo_Envio"].dropna().unique()))
 
@@ -701,8 +689,6 @@ with tabs[1]:
 
         if delta is not None:
             filtrado = filtrado[filtrado["Hora_Registro"] >= datetime.now() - delta]
-        if vendedores_sel:
-            filtrado = filtrado[filtrado["Vendedor_Registro"].isin(vendedores_sel)]
         if estados_sel:
             filtrado = filtrado[filtrado["Estado"].isin(estados_sel)]
         if tipos_sel:
