@@ -817,16 +817,19 @@ with tabs[2]:
                 source_sel = coincidencias[idx]["__source"]
 
     else:
-        ultimos_10 = df.head(10)
+        ultimos_10 = df.head(10).copy()
         st.markdown("### 🕒 Últimos 10 Pedidos Registrados")
-        ultimos_10["display"] = ultimos_10.apply(
-            lambda row: (
+
+        def _format_display(row):
+            hora = row.get("Hora_Registro")
+            hora_fmt = hora.strftime("%d/%m %H:%M") if pd.notna(hora) else ""
+            return (
                 f"{row.get('Folio_Factura', row.get('Folio',''))} – {row.get('Tipo_Envio','')} – 👤 {row['Cliente']} "
                 f"– 🔍 {row.get('Estado', row.get('Estado_Caso',''))} – 🧑‍💼 {row.get('Vendedor_Registro','')} "
-                f"– 🕒 {row['Hora_Registro'].strftime('%d/%m %H:%M')}"
-            ),
-            axis=1
-        )
+                f"– 🕒 {hora_fmt}"
+            )
+
+        ultimos_10["display"] = ultimos_10.apply(_format_display, axis=1)
         idx_seleccion = st.selectbox(
             "⬇️ Selecciona uno de los pedidos recientes:",
             ultimos_10.index,
