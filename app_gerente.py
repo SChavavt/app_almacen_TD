@@ -696,6 +696,10 @@ with tabs[1]:
         if tipos_sel:
             filtrado = filtrado[filtrado["Tipo_Envio"].isin(tipos_sel)]
 
+        filtrado = filtrado.drop(columns=["ID_Pedido"], errors="ignore")
+        filtrado = filtrado.reset_index(drop=True)
+        filtrado.index = filtrado.index + 1
+
         st.markdown(f"{len(filtrado)} registros encontrados")
         # Show all rows that match the selected filters without truncating
         st.dataframe(filtrado)
