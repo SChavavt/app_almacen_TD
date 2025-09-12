@@ -858,7 +858,7 @@ with tabs[2]:
         st.stop()
 
     row_df = df_pedidos if source_sel == "pedidos" else df_casos
-    filtro = row_df[pd.to_numeric(row_df["ID_Pedido"], errors="coerce") == float(pedido_sel)]
+    filtro = row_df[row_df["ID_Pedido"].astype(str) == str(pedido_sel)]
     if filtro.empty:
         st.warning("No se encontró un pedido con el ID seleccionado.")
         st.stop()
