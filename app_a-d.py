@@ -384,6 +384,29 @@ def batch_update_gsheet_cells(worksheet, updates_list):
         st.error(f"❌ Error al realizar la actualización por lotes en Google Sheets: {e}")
         return False
 
+def safe_update_estado(worksheet, gsheet_row_index, estado_col_idx, expected, new_value):
+    """
+    Actualiza la celda de ``Estado`` únicamente si su valor actual está en ``expected``.
+    """
+    try:
+        current = worksheet.cell(gsheet_row_index, estado_col_idx).value
+    except Exception as e:
+        st.error(f"❌ Error al leer el estado actual: {e}")
+        return False
+
+    if current not in expected:
+        st.warning(f"⚠️ Estado actual '{current}' no permite actualizar a '{new_value}'.")
+        return False
+
+    try:
+        worksheet.update_cells(
+            [gspread.Cell(row=gsheet_row_index, col=estado_col_idx, value=new_value)]
+        )
+        return True
+    except Exception as e:
+        st.error(f"❌ Error al actualizar el estado: {e}")
+        return False
+
 def get_column_indices(worksheet, column_names):
     """Obtain fresh column indices for the specified headers."""
     indices = {}
@@ -746,7 +769,7 @@ def mostrar_pedido_detalle(
         on_click=fijar_y_preservar,
         args=(row, origen_tab),
     ):
-        if row["Estado"] in ["🟡 Pendiente", "🔴 Demorado"]:
+        if row["Estado"] in ["🟡 Pendiente", "🔴 Demorado", "🛠 Modificación"]:
             zona_mexico = timezone("America/Mexico_City")
             now = datetime.now(zona_mexico)
             now_str = now.strftime("%Y-%m-%d %H:%M:%S")
@@ -754,27 +777,24 @@ def mostrar_pedido_detalle(
             estado_col_idx = headers.index("Estado") + 1
             hora_proc_col_idx = headers.index("Hora_Proceso") + 1
 
-            updates = [
-                {
-                    "range": gspread.utils.rowcol_to_a1(
-                        gsheet_row_index, estado_col_idx
-                    ),
-                    "values": [["🔵 En Proceso"]],
-                },
-                {
-                    "range": gspread.utils.rowcol_to_a1(
-                        gsheet_row_index, hora_proc_col_idx
-                    ),
-                    "values": [[now_str]],
-                },
-            ]
-            if batch_update_gsheet_cells(worksheet, updates):
+            if safe_update_estado(
+                worksheet,
+                gsheet_row_index,
+                estado_col_idx,
+                ["🟡 Pendiente", "🔴 Demorado", "🛠 Modificación"],
+                "🔵 En Proceso",
+            ):
+                try:
+                    worksheet.update_cells([
+                        gspread.Cell(row=gsheet_row_index, col=hora_proc_col_idx, value=now_str)
+                    ])
+                except Exception as e:
+                    st.error(f"❌ Error al actualizar 'Hora_Proceso': {e}")
+
                 df.at[idx, "Estado"] = "🔵 En Proceso"
                 df.at[idx, "Hora_Proceso"] = now_str
                 row["Estado"] = "🔵 En Proceso"
                 st.toast("📄 Estado actualizado a 'En Proceso'", icon="📌")
-            else:
-                st.error("❌ Falló la actualización del estado a 'En Proceso'.")
 
         st.session_state["scroll_to_pedido_id"] = row["ID_Pedido"]
         st.session_state["print_clicked"] = row["ID_Pedido"]
@@ -1138,29 +1158,29 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
                     # ✅ Expandir el pedido
                     st.session_state["expanded_pedidos"][row['ID_Pedido']] = True
                     
-                    # 🔄 Actualizar solo el estado a "En Proceso"
+                    # 🔄 Actualizar solo el estado a "En Proceso" si coincide con lo esperado
                     estado_col_idx = headers.index("Estado") + 1
-                    updates = [
-                        {'range': gspread.utils.rowcol_to_a1(gsheet_row_index, estado_col_idx), 'values': [["🔵 En Proceso"]]}
-                    ]
-                    
-                    if batch_update_gsheet_cells(worksheet, updates):
+                    if safe_update_estado(
+                        worksheet,
+                        gsheet_row_index,
+                        estado_col_idx,
+                        ["🟡 Pendiente", "🔴 Demorado", "🛠 Modificación"],
+                        "🔵 En Proceso",
+                    ):
                         # ✅ Actualizar el DataFrame y la fila localmente
                         df.at[idx, "Estado"] = "🔵 En Proceso"
                         row["Estado"] = "🔵 En Proceso"  # Refleja el cambio en pantalla
-                        
+
                         st.toast("🔧 Modificación procesada - Estado actualizado a 'En Proceso'", icon="✅")
-                        
+
                         # 🔁 Mantener pestañas activas
                         set_active_main_tab(st.session_state.get("active_main_tab_index", 0))
                         st.session_state["active_subtab_local_index"] = st.session_state.get("active_subtab_local_index", 0)
                         st.session_state["active_date_tab_m_index"] = st.session_state.get("active_date_tab_m_index", 0)
                         st.session_state["active_date_tab_t_index"] = st.session_state.get("active_date_tab_t_index", 0)
-                        
+
                         st.cache_data.clear()
                         st.rerun()
-                    else:
-                        st.error("❌ Falló la actualización del estado a 'En Proceso'.")
                         
                 except Exception as e:
                     st.error(f"❌ Error al procesar la modificación: {e}")
