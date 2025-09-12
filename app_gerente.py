@@ -740,6 +740,10 @@ with tabs[2]:
     df_pedidos = cargar_pedidos()
     df_casos = cargar_casos_especiales()
 
+    for d in (df_pedidos, df_casos):
+        d["ID_Pedido"] = pd.to_numeric(d["ID_Pedido"], errors="coerce")
+        d["Hora_Registro"] = pd.to_datetime(d["Hora_Registro"], errors="coerce")
+
     def es_devol_o_garant(row):
         for col in ("Tipo_Envio", "Tipo_Caso"):
             valor = str(row.get(col, ""))
@@ -749,14 +753,10 @@ with tabs[2]:
 
     df_casos = df_casos[df_casos.apply(es_devol_o_garant, axis=1)]
 
-    for d in (df_pedidos, df_casos):
-        d["Hora_Registro"] = pd.to_datetime(d["Hora_Registro"], errors="coerce")
-
     df_pedidos["__source"] = "pedidos"
     df_casos["__source"] = "casos"
     df = pd.concat([df_pedidos, df_casos], ignore_index=True, sort=False)
     df = df[df["ID_Pedido"].notna()]
-    df["ID_Pedido"] = pd.to_numeric(df["ID_Pedido"], errors="coerce")
     df = df.sort_values(by="ID_Pedido", ascending=True)
 
     if "pedido_modificado" in st.session_state:
@@ -844,7 +844,7 @@ with tabs[2]:
         st.stop()
 
     row_df = df_pedidos if source_sel == "pedidos" else df_casos
-    filtro = row_df[row_df["ID_Pedido"].astype(str) == str(pedido_sel)]
+    filtro = row_df[pd.to_numeric(row_df["ID_Pedido"], errors="coerce") == float(pedido_sel)]
     if filtro.empty:
         st.warning("No se encontró un pedido con el ID seleccionado.")
         st.stop()
