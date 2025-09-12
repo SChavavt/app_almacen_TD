@@ -424,8 +424,7 @@ with tabs[0]:
         df_pedidos = cargar_pedidos()
         if 'Hora_Registro' in df_pedidos.columns:
             df_pedidos['Hora_Registro'] = pd.to_datetime(df_pedidos['Hora_Registro'], errors='coerce')
-            df_pedidos["ID_Pedido"] = pd.to_numeric(df_pedidos["ID_Pedido"], errors="coerce")
-            df_pedidos = df_pedidos.sort_values(by="ID_Pedido", ascending=True).reset_index(drop=True)
+            df_pedidos = df_pedidos.sort_values(by='Hora_Registro', ascending=False).reset_index(drop=True)
 
         # ====== BÚSQUEDA POR CLIENTE: también carga y filtra casos_especiales ======
         if modo_busqueda == "🧑 Por cliente":
@@ -481,9 +480,6 @@ with tabs[0]:
 
             # 2.2) Buscar en casos_especiales (mostrar campos de la hoja + links de Adjuntos y Hoja_Ruta_Mensajero)
             df_casos = cargar_casos_especiales()
-            if df_pedidos.empty or df_casos.empty:
-                st.error("❌ No se pudieron cargar datos de pedidos o casos especiales.")
-                st.stop()
             # Ordenar por Hora_Registro si existe
             if "Hora_Registro" in df_casos.columns:
                 df_casos["Hora_Registro"] = pd.to_datetime(df_casos["Hora_Registro"], errors="coerce")
@@ -658,7 +654,6 @@ with tabs[0]:
                 else "⚠️ No se encontraron pedidos o casos para el cliente ingresado."
             )
             st.warning(mensaje)
-
 
 with tabs[1]:
     st.header("⬇️ Descargar Datos")
