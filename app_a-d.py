@@ -906,8 +906,17 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
     pedido_folder_prefix = None  # ✅ Garantiza que esté definido aunque no se haya expandido adjuntos
 
     gsheet_row_index = row.get('_gsheet_row_index')
-    if gsheet_row_index is None:
-        st.error(f"❌ Error interno: No se pudo obtener el índice de fila de Google Sheets para el pedido '{row['ID_Pedido']}'.")
+    if gsheet_row_index is None or str(gsheet_row_index).strip() == "":
+        st.error(
+            f"❌ No se puede operar el pedido '{row['ID_Pedido']}' porque no se encontró su fila en Google Sheets."
+        )
+        return
+    try:
+        gsheet_row_index = int(gsheet_row_index)
+    except (TypeError, ValueError):
+        st.error(
+            f"❌ No se puede operar el pedido '{row['ID_Pedido']}' porque su índice de fila es inválido: {gsheet_row_index}."
+        )
         return
     if st.session_state.get("print_clicked") == row["ID_Pedido"]:
         st.session_state["expanded_pedidos"][row["ID_Pedido"]] = True
@@ -1148,15 +1157,13 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
                     key=f"confirm_complete_{row['ID_Pedido']}_{origen_tab}",
                 ):
                     try:
-                        # Buscar el índice real de la fila en Google Sheets usando el ID_Pedido
-                        cell = worksheet.find(str(row["ID_Pedido"]))
-                        if not cell:
+                        if gsheet_row_index <= 0:
                             st.error(
-                                f"❌ No se encontró el ID_Pedido '{row['ID_Pedido']}' en la hoja."
+                                f"❌ No se puede completar el pedido '{row['ID_Pedido']}' porque su fila en Google Sheets no es válida."
                             )
+                            if flag_key in st.session_state:
+                                del st.session_state[flag_key]
                         else:
-                            gsheet_row_index = cell.row
-
                             estado_col_idx = headers.index("Estado") + 1
                             fecha_completado_col_idx = (
                                 headers.index("Fecha_Completado") + 1
@@ -1166,23 +1173,20 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
                             now = datetime.now(zona_mexico)
                             now_str = now.strftime("%Y-%m-%d %H:%M:%S")
 
-                            updates = []
-                            updates.append(
+                            updates = [
                                 {
                                     "range": gspread.utils.rowcol_to_a1(
                                         gsheet_row_index, estado_col_idx
                                     ),
                                     "values": [["🟢 Completado"]],
-                                }
-                            )
-                            updates.append(
+                                },
                                 {
                                     "range": gspread.utils.rowcol_to_a1(
                                         gsheet_row_index, fecha_completado_col_idx
                                     ),
                                     "values": [[now_str]],
-                                }
-                            )
+                                },
+                            ]
 
                             if batch_update_gsheet_cells(worksheet, updates):
                                 df.loc[idx, "Estado"] = "🟢 Completado"
