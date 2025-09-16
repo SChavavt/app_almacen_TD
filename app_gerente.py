@@ -908,6 +908,42 @@ with tabs[2]:
 
     # --- CAMPOS MODIFICABLES ---
     if source_sel == "casos":
+        tipo_envio_val = str(row.get("Tipo_Envio", "") or "")
+        tipo_caso_val = str(row.get("Tipo_Caso", "") or "")
+        es_garantia = any("garant" in valor.lower() for valor in (tipo_envio_val, tipo_caso_val))
+
+        if es_garantia:
+            opciones_seguimiento = [
+                "llegó el material",
+                "en prueba",
+                "aprobada",
+                "rechazada",
+            ]
+            seguimiento_actual = str(row.get("Seguimiento", "") or "").strip()
+            try:
+                index_preseleccion = next(
+                    i for i, opcion in enumerate(opciones_seguimiento) if opcion.lower() == seguimiento_actual.lower()
+                )
+            except StopIteration:
+                index_preseleccion = 0
+
+            seguimiento_sel = st.selectbox(
+                "Seguimiento de garantía",
+                opciones_seguimiento,
+                index=index_preseleccion,
+            )
+
+            if st.button("Guardar seguimiento"):
+                hoja.update_cell(
+                    gspread_row_idx,
+                    row_df.columns.get_loc("Seguimiento") + 1,
+                    seguimiento_sel,
+                )
+                st.session_state["pedido_modificado"] = pedido_sel
+                st.session_state["pedido_modificado_source"] = source_sel
+                st.session_state["mensaje_exito"] = "🔄 Seguimiento de garantía guardado correctamente."
+                st.rerun()
+
         comentario_usuario = st.text_area("📝 Comentario desde almacén")
         if st.button("Guardar comentario"):
             existente = row.get("Comentario", "")
