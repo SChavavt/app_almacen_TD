@@ -2910,7 +2910,7 @@ with main_tabs[6]:  # 🛠 Garantías
                 )
 
             # Guardar cambios de envío/fecha
-            if st.button("✅ Aplicar cambios de envío/fecha (Garantía)", key=f"btn_aplicar_envio_fecha_g_{row_key}", on_click=preserve_tab_state):
+            if st.button("✅ Aplicar cambios de envío/fecha (Garantía)", key=f"btn_aplicar_envio_fecha_g_{unique_suffix}", on_click=preserve_tab_state):
                 try:
                     # Resolver fila en gsheet
                     gsheet_row_idx = None
@@ -2973,7 +2973,7 @@ with main_tabs[6]:  # 🛠 Garantías
             colA, colB = st.columns(2)
 
             # ⚙️ Procesar
-            if colA.button("⚙️ Procesar", key=f"procesar_g_{idp or folio or cliente}"):
+            if colA.button("⚙️ Procesar", key=f"procesar_g_{unique_suffix}"):
                 try:
                     gsheet_row_idx = None
                     if "ID_Pedido" in df_casos.columns and idp:
@@ -3013,7 +3013,7 @@ with main_tabs[6]:  # 🛠 Garantías
 
             # 🔧 Procesar Modificación
             if estado == "🛠 Modificación":
-                if colB.button("🔧 Procesar Modificación", key=f"proc_mod_g_{idp or folio or cliente}"):
+                if colB.button("🔧 Procesar Modificación", key=f"proc_mod_g_{unique_suffix}"):
                     try:
                         gsheet_row_idx = None
                         if "ID_Pedido" in df_casos.columns and idp:
@@ -3056,7 +3056,7 @@ with main_tabs[6]:  # 🛠 Garantías
                         st.info(mod_texto)
                     else:
                         st.warning(mod_texto)
-                        if st.button("✅ Confirmar Cambios de Surtido (Garantía)", key=f"confirm_mod_g_{idp or folio or cliente}"):
+                        if st.button("✅ Confirmar Cambios de Surtido (Garantía)", key=f"confirm_mod_g_{unique_suffix}"):
                             try:
                                 gsheet_row_idx = None
                                 if "ID_Pedido" in df_casos.columns and idp:
@@ -3199,10 +3199,10 @@ with main_tabs[6]:  # 🛠 Garantías
                 except Exception as e:
                     st.error(f"❌ Error al subir la guía: {e}")
 
-            flag_key = f"confirm_complete_id_{row['ID_Pedido']}"
+            flag_key = f"confirm_complete_{unique_suffix}"
             if st.button(
                 "🟢 Completar Garantía",
-                key=f"btn_completar_g_{folio}_{cliente}",
+                key=f"btn_completar_g_{unique_suffix}",
                 on_click=preserve_tab_state,
             ):
                 st.session_state[flag_key] = row["ID_Pedido"]
@@ -3213,7 +3213,7 @@ with main_tabs[6]:  # 🛠 Garantías
                 with confirm_col:
                     if st.button(
                         "Confirmar",
-                        key=f"confirm_completar_g_{folio}_{cliente}",
+                        key=f"confirm_completar_g_{unique_suffix}",
                         on_click=preserve_tab_state,
                     ):
                         try:
@@ -3309,7 +3309,7 @@ with main_tabs[6]:  # 🛠 Garantías
                 with cancel_col:
                     if st.button(
                         "Cancelar",
-                        key=f"cancel_completar_g_{folio}_{cliente}",
+                        key=f"cancel_completar_g_{unique_suffix}",
                         on_click=preserve_tab_state,
                     ):
                         if flag_key in st.session_state:
