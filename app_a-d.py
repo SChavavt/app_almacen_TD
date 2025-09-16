@@ -1812,7 +1812,43 @@ if not df_main.empty:
     for col, (nombre_estado, cantidad) in zip(cols, estados_a_mostrar):
         col.metric(nombre_estado, int(cantidad))
 
+    # 🔔 Aviso de devoluciones/garantías con seguimiento pendiente
+    tipo_casos_col = "Tipo_Caso" if "Tipo_Caso" in df_casos.columns else (
+        "Tipo_Envio" if "Tipo_Envio" in df_casos.columns else None
+    )
 
+    devoluciones_activas = pd.DataFrame(columns=df_casos.columns)
+    garantias_activas = pd.DataFrame(columns=df_casos.columns)
+
+    if tipo_casos_col and "Estado" in df_casos.columns:
+        estados_activos = ["🟡 Pendiente", "🔵 En Proceso"]
+        estados_series = df_casos["Estado"].astype(str).str.strip()
+        tipo_series = df_casos[tipo_casos_col].astype(str)
+        base_mask = estados_series.isin(estados_activos)
+        devoluciones_activas = df_casos[
+            base_mask & tipo_series.str.contains("Devoluci", case=False, na=False)
+        ]
+        garantias_activas = df_casos[
+            base_mask & tipo_series.str.contains("Garant", case=False, na=False)
+        ]
+
+    devoluciones_count = len(devoluciones_activas)
+    garantias_count = len(garantias_activas)
+
+    if devoluciones_count or garantias_count:
+        partes_mensaje = []
+        if devoluciones_count:
+            partes_mensaje.append(
+                f"{devoluciones_count} devolución{'es' if devoluciones_count != 1 else ''}"
+            )
+        if garantias_count:
+            partes_mensaje.append(
+                f"{garantias_count} garantía{'s' if garantias_count != 1 else ''}"
+            )
+        lista_casos = " y ".join(partes_mensaje)
+        st.warning(
+            f"⚠️ Hay {lista_casos} con estado pendiente o en proceso en Casos Especiales."
+        )
 
 
     # --- Implementación de Pestañas con st.tabs ---
