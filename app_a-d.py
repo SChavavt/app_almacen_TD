@@ -15,6 +15,7 @@ import uuid
 from pytz import timezone
 from urllib.parse import urlparse, unquote
 import streamlit.components.v1 as components
+from typing import Optional
 
 _MX_TZ = timezone("America/Mexico_City")
 
@@ -250,19 +251,21 @@ except Exception as e:
 
 
 # --- Data Loading from Google Sheets (Cached) ---
-@st.cache_data(ttl=60)
-def get_raw_sheet_data(sheet_id: str, worksheet_name: str, credentials: dict) -> list[list[str]]:
-    creds = dict(credentials)
-    creds["private_key"] = creds["private_key"].replace("\\n", "\n")
-    scope = ['https://spreadsheets.google.com/feeds', 'https://www.googleapis.com/auth/drive']
+@st.cache_data(ttl=60, hash_funcs={gspread.client.Client: lambda _: None})
+def get_raw_sheet_data(
+    sheet_id: str,
+    worksheet_name: str,
+    client: Optional[gspread.client.Client] = None,
+) -> list[list[str]]:
+    gspread_client = client or g_spread_client
+    if gspread_client is None:
+        raise ValueError("No se proporcionó un cliente de gspread para obtener los datos.")
     max_attempts = 3
     base_delay = 1
     for attempt in range(max_attempts):
         wait_seconds = base_delay * (2 ** attempt)
         try:
-            auth = ServiceAccountCredentials.from_json_keyfile_dict(creds, scope)
-            client = gspread.authorize(auth)
-            sheet = client.open_by_key(sheet_id)
+            sheet = gspread_client.open_by_key(sheet_id)
             worksheet = sheet.worksheet(worksheet_name)
             return worksheet.get_all_values()
         except gspread.exceptions.APIError as api_error:
@@ -1568,7 +1571,7 @@ def _load_pedidos():
     raw = get_raw_sheet_data(
         sheet_id=GOOGLE_SHEET_ID,
         worksheet_name=GOOGLE_SHEET_WORKSHEET_NAME,
-        credentials=GSHEETS_CREDENTIALS,
+        client=g_spread_client,
     )
     return process_sheet_data(raw)
 
@@ -1576,7 +1579,7 @@ def _load_casos():
     raw = get_raw_sheet_data(
         sheet_id=GOOGLE_SHEET_ID,
         worksheet_name="casos_especiales",
-        credentials=GSHEETS_CREDENTIALS,
+        client=g_spread_client,
     )
     return process_sheet_data(raw)
 
