@@ -269,7 +269,8 @@ def get_raw_sheet_data(
             worksheet = sheet.worksheet(worksheet_name)
             return worksheet.get_all_values()
         except gspread.exceptions.APIError as api_error:
-            st.cache_data.clear()
+            # ℹ️ Solo limpiamos la caché de esta función para no reiniciar otros estados de la app.
+            get_raw_sheet_data.clear()
             if _is_recoverable_auth_error(api_error) and attempt < max_attempts - 1:
                 st.warning(
                     f"🔁 Error de autenticación con Google Sheets (intento {attempt + 1}/{max_attempts}). "
@@ -292,7 +293,7 @@ def get_raw_sheet_data(
                 st.error(f"❌ Error de la API de Google Sheets: {api_error}")
             raise
         except RequestException as net_err:
-            st.cache_data.clear()
+            get_raw_sheet_data.clear()
             if attempt < max_attempts - 1:
                 st.warning(
                     f"⚠️ Error de red al conectar con Google Sheets (intento {attempt + 1}/{max_attempts}). "
@@ -304,7 +305,7 @@ def get_raw_sheet_data(
             handle_auth_error(net_err)
             raise
         except Exception as e:
-            st.cache_data.clear()  # 🔁 Limpiar la caché en caso de error de token/API
+            get_raw_sheet_data.clear()  # 🔁 Limpiar solo la caché de esta función en caso de error de token/API
             if attempt < max_attempts - 1:
                 st.warning(
                     f"⚠️ Error inesperado al conectar con Google Sheets (intento {attempt + 1}/{max_attempts}). "
