@@ -406,28 +406,84 @@ def batch_update_gsheet_cells(worksheet, updates_list):
     updates_list: Lista de diccionarios, cada uno con las claves 'range' y 'values'.
                   Ej: [{'range': 'A1', 'values': [['nuevo_valor']]}, ...]
     """
-    try:
-        if not updates_list:
-            return False
+    if not updates_list:
+        return False
 
-        cell_list = []
-        for update_item in updates_list:
-            range_str = update_item['range']
-            value = update_item['values'][0][0] # Asumiendo un único valor como [['valor']]
+    cell_list = []
+    for update_item in updates_list:
+        range_str = update_item['range']
+        value = update_item['values'][0][0] # Asumiendo un único valor como [['valor']]
 
-            # Convertir la notación A1 (ej. 'A1') a índice de fila y columna (base 1)
-            row, col = gspread.utils.a1_to_rowcol(range_str)
-            # Crear un objeto Cell y añadirlo a la lista
-            cell_list.append(gspread.Cell(row=row, col=col, value=value))
+        # Convertir la notación A1 (ej. 'A1') a índice de fila y columna (base 1)
+        row, col = gspread.utils.a1_to_rowcol(range_str)
+        # Crear un objeto Cell y añadirlo a la lista
+        cell_list.append(gspread.Cell(row=row, col=col, value=value))
 
-        if cell_list:
-            worksheet.update_cells(cell_list) # Este es el método correcto para batch update en el worksheet
+    if not cell_list:
+        return False
+
+    max_attempts = 3
+    base_delay = 1
+
+    for attempt in range(max_attempts):
+        wait_seconds = base_delay * (2 ** attempt)
+        try:
+            worksheet.update_cells(cell_list)  # Este es el método correcto para batch update en el worksheet
             # st.cache_data.clear() # Limpiar solo si hay un cambio que justifique una recarga completa
             return True
-        return False
-    except Exception as e:
-        st.error(f"❌ Error al realizar la actualización por lotes en Google Sheets: {e}")
-        return False
+        except gspread.exceptions.APIError as api_error:
+            is_recoverable = _is_recoverable_auth_error(api_error)
+            if attempt < max_attempts - 1:
+                if is_recoverable:
+                    st.warning(
+                        f"🔁 Error de autenticación/cuota al actualizar Google Sheets "
+                        f"(intento {attempt + 1}/{max_attempts}). Reintentando en {wait_seconds}s..."
+                    )
+                else:
+                    st.warning(
+                        f"⚠️ Error de la API de Google Sheets al actualizar celdas "
+                        f"(intento {attempt + 1}/{max_attempts}). Reintentando en {wait_seconds}s..."
+                    )
+                time.sleep(wait_seconds)
+                continue
+
+            if is_recoverable:
+                st.error(
+                    "❌ No se pudo completar la actualización en Google Sheets por un error de autenticación/cuota "
+                    "después de varios intentos."
+                )
+                handle_auth_error(api_error)
+            else:
+                st.error(f"❌ Error definitivo de la API de Google Sheets: {api_error}")
+            break
+        except RequestException as net_err:
+            if attempt < max_attempts - 1:
+                st.warning(
+                    f"⚠️ Error de red al actualizar Google Sheets (intento {attempt + 1}/{max_attempts}). "
+                    f"Reintentando en {wait_seconds}s..."
+                )
+                time.sleep(wait_seconds)
+                continue
+
+            st.error(
+                "❌ No se pudo conectar con Google Sheets para actualizar los datos después de varios intentos. "
+                "Verifica tu conexión o credenciales."
+            )
+            handle_auth_error(net_err)
+            break
+        except Exception as exc:
+            if attempt < max_attempts - 1:
+                st.warning(
+                    f"⚠️ Error inesperado al actualizar Google Sheets (intento {attempt + 1}/{max_attempts}). "
+                    f"Reintentando en {wait_seconds}s..."
+                )
+                time.sleep(wait_seconds)
+                continue
+
+            st.error(f"❌ Error inesperado al actualizar Google Sheets: {exc}")
+            break
+
+    return False
 
 def get_column_indices(worksheet, column_names):
     """Obtain fresh column indices for the specified headers."""
