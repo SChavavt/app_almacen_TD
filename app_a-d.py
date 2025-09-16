@@ -5,6 +5,7 @@ import pandas as pd
 from datetime import datetime, timedelta
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
+from requests.exceptions import RequestException
 import boto3
 import re
 import gspread.utils
@@ -16,6 +17,20 @@ from urllib.parse import urlparse, unquote
 import streamlit.components.v1 as components
 
 _MX_TZ = timezone("America/Mexico_City")
+
+_RECOVERABLE_AUTH_PATTERNS = (
+    "401",
+    "UNAUTHENTICATED",
+    "ACCESS_TOKEN_EXPIRED",
+    "RESOURCE_EXHAUSTED",
+    "RATE_LIMIT",
+    "429",
+)
+
+
+def _is_recoverable_auth_error(exc: Exception) -> bool:
+    err_text = str(exc)
+    return any(code in err_text for code in _RECOVERABLE_AUTH_PATTERNS)
 
 def mx_now():
     return datetime.now(_MX_TZ)           # objeto datetime tz-aware
@@ -182,16 +197,7 @@ def _reconnect_and_rerun():
 
 def handle_auth_error(exc: Exception):
     """Intenta reparar la conexión ante errores comunes de autenticación o cuota."""
-    err_text = str(exc)
-    recoverable = [
-        "401",
-        "UNAUTHENTICATED",
-        "ACCESS_TOKEN_EXPIRED",
-        "RESOURCE_EXHAUSTED",
-        "RATE_LIMIT",
-        "429",
-    ]
-    if any(code in err_text for code in recoverable):
+    if _is_recoverable_auth_error(exc):
         st.warning("🔁 Error de autenticación o cuota. Reintentando conexión...")
         _reconnect_and_rerun()
     else:
@@ -249,30 +255,66 @@ def get_raw_sheet_data(sheet_id: str, worksheet_name: str, credentials: dict) ->
     creds = dict(credentials)
     creds["private_key"] = creds["private_key"].replace("\\n", "\n")
     scope = ['https://spreadsheets.google.com/feeds', 'https://www.googleapis.com/auth/drive']
-    delay = 1
-    for attempt in range(3):
-        auth = ServiceAccountCredentials.from_json_keyfile_dict(creds, scope)
-        client = gspread.authorize(auth)
-
+    max_attempts = 3
+    base_delay = 1
+    for attempt in range(max_attempts):
+        wait_seconds = base_delay * (2 ** attempt)
         try:
+            auth = ServiceAccountCredentials.from_json_keyfile_dict(creds, scope)
+            client = gspread.authorize(auth)
             sheet = client.open_by_key(sheet_id)
             worksheet = sheet.worksheet(worksheet_name)
             return worksheet.get_all_values()
+        except gspread.exceptions.APIError as api_error:
+            st.cache_data.clear()
+            if _is_recoverable_auth_error(api_error) and attempt < max_attempts - 1:
+                st.warning(
+                    f"🔁 Error de autenticación con Google Sheets (intento {attempt + 1}/{max_attempts}). "
+                    f"Reintentando en {wait_seconds}s..."
+                )
+                time.sleep(wait_seconds)
+                continue
+
+            if attempt < max_attempts - 1:
+                st.warning(
+                    f"⚠️ Error de la API de Google Sheets (intento {attempt + 1}/{max_attempts}). "
+                    f"Reintentando en {wait_seconds}s..."
+                )
+                time.sleep(wait_seconds)
+                continue
+
+            if _is_recoverable_auth_error(api_error):
+                handle_auth_error(api_error)
+            else:
+                st.error(f"❌ Error de la API de Google Sheets: {api_error}")
+            raise
+        except RequestException as net_err:
+            st.cache_data.clear()
+            if attempt < max_attempts - 1:
+                st.warning(
+                    f"⚠️ Error de red al conectar con Google Sheets (intento {attempt + 1}/{max_attempts}). "
+                    f"Reintentando en {wait_seconds}s..."
+                )
+                time.sleep(wait_seconds)
+                continue
+
+            handle_auth_error(net_err)
+            raise
         except Exception as e:
             st.cache_data.clear()  # 🔁 Limpiar la caché en caso de error de token/API
-            if attempt < 2:
+            if attempt < max_attempts - 1:
                 st.warning(
-                    f"🔁 Error de conexión o token (intento {attempt + 1}/3). "
-                    f"Reintentando en {delay}s..."
+                    f"⚠️ Error inesperado al conectar con Google Sheets (intento {attempt + 1}/{max_attempts}). "
+                    f"Reintentando en {wait_seconds}s..."
                 )
-                time.sleep(delay)
-                delay *= 2
-            else:
-                st.error(
-                    "❌ No se pudo conectar con Google Sheets después de varios intentos. "
-                    "Verifica tu conectividad o tus credenciales de servicio."
-                )
-                raise e
+                time.sleep(wait_seconds)
+                continue
+
+            st.error(
+                "❌ No se pudo conectar con Google Sheets después de varios intentos. "
+                "Verifica tu conectividad o tus credenciales de servicio."
+            )
+            raise
 
 
 def process_sheet_data(all_data: list[list[str]]) -> tuple[pd.DataFrame, list[str]]:
