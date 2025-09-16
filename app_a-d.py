@@ -2798,6 +2798,13 @@ with main_tabs[6]:  # 🛠 Garantías
         fecha_compra = str(row.get("Fecha_Compra", "")).strip()
         row_key     = (idp or f"{folio}_{cliente}").replace(" ", "_")
 
+        raw_suffix = row.get("_gsheet_row_index")
+        if pd.notna(raw_suffix) and str(raw_suffix).strip():
+            unique_suffix = f"{row_key}_{str(raw_suffix).strip()}"
+        else:
+            unique_suffix = f"{row_key}_{row.name}"
+        unique_suffix = re.sub(r"[^0-9A-Za-z_-]", "_", str(unique_suffix))
+
         # Título del expander
         expander_title = f"🛠 {folio or 's/folio'} – {cliente or 's/cliente'} | Estado: {estado} | Estado_Recepcion: {estado_rec}"
         with st.expander(expander_title, expanded=st.session_state["expanded_garantias"].get(row_key, False)):
@@ -3125,7 +3132,7 @@ with main_tabs[6]:  # 🛠 Garantías
             st.caption("La guía es opcional; puedes completar la garantía sin subirla.")
             guia_files = st.file_uploader(
                 "📋 Subir Guía de Envío/Retorno (Garantía) (opcional)",
-                key=f"guia_g_{folio}_{cliente}",
+                key=f"guia_g_{unique_suffix}",
                 help="Opcional: sube la guía de mensajería para envío de reposición o retorno (PDF/JPG/PNG)",
                 on_change=handle_generic_upload_change,
                 args=(row_key, "expanded_garantias"),
@@ -3135,7 +3142,7 @@ with main_tabs[6]:  # 🛠 Garantías
 
             if st.button(
                 "📤 Subir Guía",
-                key=f"btn_subir_guia_g_{folio}_{cliente}",
+                key=f"btn_subir_guia_g_{unique_suffix}",
                 on_click=preserve_tab_state,
             ):
                 try:
