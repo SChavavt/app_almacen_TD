@@ -529,29 +529,54 @@ with tabs[2]:
     if df_all.empty:
         st.info("Sin datos en 'datos_pedidos'.")
     else:
+        # ----- Prepara CDMX -----
+        df_cdmx = df_all[df_all["Tipo_Envio"] == "🏙️ Pedido CDMX"].copy()
+        if "Completados_Limpiado" not in df_cdmx.columns:
+            df_cdmx["Completados_Limpiado"] = ""
+        df_cdmx_filtrado = df_cdmx[
+            ~(
+                df_cdmx["Estado"].isin([
+                    "🟢 Completado",
+                    "🟣 Cancelado",
+                    "✅ Viajó",
+                ])
+                & (df_cdmx["Completados_Limpiado"].astype(str).str.lower() == "sí")
+            )
+        ].copy()
+
+        # ----- Prepara Guías -----
+        df_guias = df_all[df_all["Tipo_Envio"] == "📋 Solicitudes de Guía"].copy()
+        if "Completados_Limpiado" not in df_guias.columns:
+            df_guias["Completados_Limpiado"] = ""
+        df_guias_filtrado = df_guias[
+            ~(
+                df_guias["Estado"].isin([
+                    "🟢 Completado",
+                    "🟣 Cancelado",
+                    "✅ Viajó",
+                ])
+                & (df_guias["Completados_Limpiado"].astype(str).str.lower() == "sí")
+            )
+        ].copy()
+
+        # ----- Resumen combinado -----
+        df_cdmx_guias = pd.concat(
+            [df_cdmx_filtrado, df_guias_filtrado], ignore_index=True
+        )
+        if df_cdmx_guias.empty:
+            st.info("No hay pedidos CDMX ni solicitudes de guía visibles para resumir.")
+        else:
+            st.markdown("##### Resumen CDMX + Guías")
+            status_counts_block(df_cdmx_guias)
+
         # ----- 1) CDMX -----
         st.subheader("🏙️ Pedidos CDMX")
-        df_cdmx = df_all[df_all["Tipo_Envio"] == "🏙️ Pedido CDMX"].copy()
-        if df_cdmx.empty:
+        if df_cdmx_filtrado.empty:
             st.info("No hay pedidos CDMX.")
         else:
-            if "Completados_Limpiado" not in df_cdmx.columns:
-                df_cdmx["Completados_Limpiado"] = ""
-            df_cdmx = df_cdmx[
-                ~(
-                    df_cdmx["Estado"].isin([
-                        "🟢 Completado",
-                        "🟣 Cancelado",
-                        "✅ Viajó",
-                    ])
-                    & (df_cdmx["Completados_Limpiado"].astype(str).str.lower() == "sí")
-                )
-            ]
-            st.markdown("##### Resumen CDMX")
-            status_counts_block(df_cdmx)
             st.markdown("##### Grupos CDMX (por fecha)")
             # Para CDMX vamos a agrupar solo por fecha (clave "CDMX – dd/mm")
-            work = df_cdmx.copy()
+            work = df_cdmx_filtrado.copy()
             work["Fecha_Entrega_Str"] = work["Fecha_Entrega"].dt.strftime("%d/%m")
             work["Grupo_Clave"] = work.apply(
                 lambda r: f"🏙️ CDMX – {r['Fecha_Entrega_Str']}", axis=1
@@ -578,26 +603,11 @@ with tabs[2]:
 
         # ----- 2) Solicitudes de Guía -----
         st.subheader("📋 Solicitudes de Guía")
-        df_guias = df_all[df_all["Tipo_Envio"] == "📋 Solicitudes de Guía"].copy()
-        if df_guias.empty:
+        if df_guias_filtrado.empty:
             st.info("No hay solicitudes de guía.")
         else:
-            if "Completados_Limpiado" not in df_guias.columns:
-                df_guias["Completados_Limpiado"] = ""
-            df_guias = df_guias[
-                ~(
-                    df_guias["Estado"].isin([
-                        "🟢 Completado",
-                        "🟣 Cancelado",
-                        "✅ Viajó",
-                    ])
-                    & (df_guias["Completados_Limpiado"].astype(str).str.lower() == "sí")
-                )
-            ]
-            st.markdown("##### Resumen Guías")
-            status_counts_block(df_guias)
             st.markdown("##### Grupos Guías (por fecha)")
-            work = df_guias.copy()
+            work = df_guias_filtrado.copy()
             work["Fecha_Entrega_Str"] = work["Fecha_Entrega"].dt.strftime("%d/%m")
             work["Grupo_Clave"] = work.apply(
                 lambda r: f"📋 Guías – {r['Fecha_Entrega_Str']}", axis=1
