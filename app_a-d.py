@@ -43,6 +43,45 @@ def mx_today():
     return mx_now().date()
 
 
+_TAB_LABELS_BY_TIPO = {
+    "📍 Pedido Local": "📍 Pedidos Locales",
+    "🚚 Pedido Foráneo": "🚚 Pedidos Foráneos",
+    "🏙️ Pedido CDMX": "🏙️ Pedidos CDMX",
+    "📋 Solicitudes de Guía": "📋 Solicitudes de Guía",
+    "🎓 Cursos y Eventos": "🎓 Cursos y Eventos",
+    "🔁 Devolución": "🔁 Devoluciones",
+    "🛠 Garantía": "🛠 Garantías",
+}
+
+_LOCAL_TURNO_TO_SUBTAB = {
+    "☀️ Local Mañana": "🌅 Mañana",
+    "🌙 Local Tarde": "🌇 Tarde",
+    "🌵 Saltillo": "⛰️ Saltillo",
+    "📦 Pasa a Bodega": "📦 En Bodega",
+}
+
+_UNKNOWN_TAB_LABEL = "Sin pestaña identificada"
+
+
+def derive_tab_label(tipo_envio: Optional[str], turno: Optional[str]) -> str:
+    """Return the UI tab/subtab label for a given shipment type and shift."""
+
+    tipo_envio = (tipo_envio or "").strip()
+    turno = (turno or "").strip()
+
+    base_label = _TAB_LABELS_BY_TIPO.get(tipo_envio)
+
+    if tipo_envio == "📍 Pedido Local":
+        subtab = _LOCAL_TURNO_TO_SUBTAB.get(turno)
+        if base_label and subtab:
+            return f"{base_label} • {subtab}"
+
+    if base_label:
+        return base_label
+
+    return tipo_envio
+
+
 
 st.set_page_config(page_title="Recepción de Pedidos TD", layout="wide")
 
@@ -1714,34 +1753,33 @@ if not df_main.empty:
     mod_surtido_count = len(mod_surtido_df)
 
     if mod_surtido_count > 0:
-        ubicaciones = []
+        ubicaciones = set()
         for _, row in mod_surtido_df.iterrows():
-            tipo = row.get("Tipo_Envio", "")
-            turno = row.get("Turno", "")
-            if tipo == "📍 Pedido Local":
-                if "Mañana" in turno:
-                    ubicaciones.append("📍 Local / Mañana")
-                elif "Tarde" in turno:
-                    ubicaciones.append("📍 Local / Tarde")
-                elif "Saltillo" in turno:
-                    ubicaciones.append("📍 Local / Saltillo")
-                elif "Bodega" in turno:
-                    ubicaciones.append("📍 Local / Bodega")
-                else:
-                    ubicaciones.append("📍 Local")
-            elif tipo == "🚚 Pedido Foráneo":
-                ubicaciones.append("🚚 Foráneo")
-            elif tipo == "🔁 Devolución":
-                ubicaciones.append("🔁 Devolución")
-            elif tipo == "🛠 Garantía":
-                ubicaciones.append("🛠 Garantía")
+            ubicacion = derive_tab_label(row.get("Tipo_Envio"), row.get("Turno"))
+            ubicaciones.add(ubicacion or _UNKNOWN_TAB_LABEL)
 
-        ubicaciones = sorted(set(ubicaciones))
-        ubicaciones_str = ", ".join(ubicaciones)
+        ubicaciones_str = ", ".join(sorted(ubicaciones))
 
-        st.warning(f"⚠️ Hay {mod_surtido_count} pedido(s) con **Modificación de Surtido** ➤ {ubicaciones_str}")
+        st.warning(
+            f"⚠️ Hay {mod_surtido_count} pedido(s) con **Modificación de Surtido** ➤ {ubicaciones_str}"
+        )
 
     df_pendientes_proceso_demorado = df_main[df_main["Estado"].isin(["🟡 Pendiente", "🔵 En Proceso", "🔴 Demorado", "🛠 Modificación"])].copy()
+
+    df_demorados_activos = df_pendientes_proceso_demorado[
+        df_pendientes_proceso_demorado["Estado"] == "🔴 Demorado"
+    ].copy()
+
+    if not df_demorados_activos.empty:
+        ubicaciones_demorados = {
+            derive_tab_label(row.get("Tipo_Envio"), row.get("Turno")) or _UNKNOWN_TAB_LABEL
+            for _, row in df_demorados_activos.iterrows()
+        }
+        ubicaciones_text = ", ".join(sorted(ubicaciones_demorados))
+        total_demorados = len(df_demorados_activos)
+        st.warning(
+            f"⏱️ Hay {total_demorados} pedido{'s' if total_demorados != 1 else ''} en estado 🔴 Demorado ubicados en: {ubicaciones_text}"
+        )
 
     # === CASOS ESPECIALES (Devoluciones/Garantías) ===
     try:
