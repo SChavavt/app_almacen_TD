@@ -3458,9 +3458,9 @@ with main_tabs[6]:  # 🛠 Garantías
                             del st.session_state[flag_key]
                             
 
-with main_tabs[7]:  # ✅ Historial Completados
+with main_tabs[7]:  # ✅ Historial Completados/Cancelados
     df_completados_historial = df_main[
-        (df_main["Estado"] == "🟢 Completado") &
+        (df_main["Estado"].isin(["🟢 Completado", "🟣 Cancelado"])) &
         (df_main.get("Completados_Limpiado", "").astype(str).str.lower() != "sí")
     ].copy()
 
@@ -3472,7 +3472,7 @@ with main_tabs[7]:  # ✅ Historial Completados
     elif 'Tipo_Envio' in df_casos.columns:
         tipo_casos_col = 'Tipo_Envio'
     df_casos_completados = df_casos[
-        (df_casos["Estado"] == "🟢 Completado") &
+        (df_casos["Estado"].isin(["🟢 Completado", "🟣 Cancelado"])) &
         (df_casos.get("Completados_Limpiado", "").astype(str).str.lower() != "sí")
     ].copy()
     if not df_casos_completados.empty:
@@ -3480,9 +3480,9 @@ with main_tabs[7]:  # ✅ Historial Completados
 
     col_titulo, col_btn = st.columns([0.75, 0.25])
     with col_titulo:
-        st.markdown("### Historial de Pedidos Completados")
+        st.markdown("### Historial de Pedidos Completados/Cancelados")
     with col_btn:
-        if not df_completados_historial.empty and st.button("🧹 Limpiar Todos los Completados"):
+        if not df_completados_historial.empty and st.button("🧹 Limpiar Todos los Completados/Cancelados"):
             updates = []
             col_idx = headers_main.index("Completados_Limpiado") + 1
             for _, row in df_completados_historial.iterrows():
@@ -3498,7 +3498,7 @@ with main_tabs[7]:  # ✅ Historial Completados
                 set_active_main_tab(7)
                 st.rerun()
 
-    # 🧹 Limpieza específica por grupo de completados locales
+    # 🧹 Limpieza específica por grupo de completados/cancelados locales
     df_completados_historial["Fecha_dt"] = pd.to_datetime(df_completados_historial["Fecha_Entrega"], errors='coerce')
     df_completados_historial["Grupo_Clave"] = df_completados_historial.apply(
         lambda row: f"{row['Turno']} – {row['Fecha_dt'].strftime('%d/%m')}" if row["Tipo_Envio"] == "📍 Pedido Local" else None,
@@ -3508,7 +3508,7 @@ with main_tabs[7]:  # ✅ Historial Completados
     grupos_locales = df_completados_historial[df_completados_historial["Grupo_Clave"].notna()]["Grupo_Clave"].unique().tolist()
 
     if grupos_locales:
-        st.markdown("### 🧹 Limpieza Específica de Completados Locales")
+        st.markdown("### 🧹 Limpieza Específica de Completados/Cancelados Locales")
         for grupo in grupos_locales:
             turno, fecha_str = grupo.split(" – ")
             fecha_dt = pd.to_datetime(fecha_str, format="%d/%m", errors='coerce').replace(year=datetime.now().year)
@@ -3533,7 +3533,7 @@ with main_tabs[7]:  # ✅ Historial Completados
                         for _, row in pedidos_a_limpiar.iterrows()
                     ]
                     if updates and batch_update_gsheet_cells(worksheet_main, updates):
-                        st.success(f"✅ {len(updates)} pedidos completados en {grupo} marcados como limpiados.")
+                        st.success(f"✅ {len(updates)} pedidos completados/cancelados en {grupo} marcados como limpiados.")
                         st.cache_data.clear()
                         set_active_main_tab(7)
                         st.rerun()
@@ -3546,8 +3546,8 @@ with main_tabs[7]:  # ✅ Historial Completados
         ]
 
         if not completados_foraneos.empty:
-            st.markdown("### 🧹 Limpieza de Completados Foráneos")
-            if st.button("🧹 Limpiar Foráneos Completados"):
+            st.markdown("### 🧹 Limpieza de Completados/Cancelados Foráneos")
+            if st.button("🧹 Limpiar Foráneos Completados/Cancelados"):
                 col_idx = headers_main.index("Completados_Limpiado") + 1
                 updates = [
                     {
@@ -3557,7 +3557,7 @@ with main_tabs[7]:  # ✅ Historial Completados
                     for _, row in completados_foraneos.iterrows()
                 ]
                 if updates and batch_update_gsheet_cells(worksheet_main, updates):
-                    st.success(f"✅ {len(updates)} pedidos foráneos completados fueron marcados como limpiados.")
+                    st.success(f"✅ {len(updates)} pedidos foráneos completados/cancelados fueron marcados como limpiados.")
                     st.cache_data.clear()
                     set_active_main_tab(7)
                     st.rerun()
@@ -3570,15 +3570,15 @@ with main_tabs[7]:  # ✅ Historial Completados
                 row,
                 orden,
                 "Historial",
-                "✅ Historial Completados",
+                "✅ Historial Completados/Cancelados",
                 worksheet_main,
                 headers_main,
                 s3_client,
             )
     else:
-        st.info("No hay pedidos completados recientes o ya fueron limpiados.")
+        st.info("No hay pedidos completados/cancelados recientes o ya fueron limpiados.")
 
-    # === Casos Especiales Completados ===
+    # === Casos Especiales Completados/Cancelados ===
     if tipo_casos_col:
         if not df_casos_completados.empty:
             def render_caso_especial_garantia_hist(row):
@@ -3628,11 +3628,11 @@ with main_tabs[7]:  # ✅ Historial Completados
                     if not contenido:
                         st.info("Sin archivos registrados en la hoja.")
 
-            # Devoluciones completadas
+            # Devoluciones completadas/canceladas
             comp_dev = df_casos_completados[df_casos_completados[tipo_casos_col].astype(str).str.contains("Devoluci", case=False, na=False)]
             if not comp_dev.empty:
-                st.markdown("### 🔁 Devoluciones Completadas")
-                if st.button("🧹 Limpiar Devoluciones Completadas"):
+                st.markdown("### 🔁 Devoluciones Completadas/Canceladas")
+                if st.button("🧹 Limpiar Devoluciones Completadas/Canceladas"):
                     col_idx = headers_casos.index("Completados_Limpiado") + 1
                     updates = [
                         {
@@ -3651,11 +3651,11 @@ with main_tabs[7]:  # ✅ Historial Completados
                     with st.expander(f"🔁 {row.get('Folio_Factura', 'N/A')} – {row.get('Cliente', 'N/A')}"):
                         render_caso_especial_devolucion(row)
 
-            # Garantías completadas
+            # Garantías completadas/canceladas
             comp_gar = df_casos_completados[df_casos_completados[tipo_casos_col].astype(str).str.contains("Garant", case=False, na=False)]
             if not comp_gar.empty:
-                st.markdown("### 🛠 Garantías Completadas")
-                if st.button("🧹 Limpiar Garantías Completadas"):
+                st.markdown("### 🛠 Garantías Completadas/Canceladas")
+                if st.button("🧹 Limpiar Garantías Completadas/Canceladas"):
                     col_idx = headers_casos.index("Completados_Limpiado") + 1
                     updates = [
                         {
@@ -3674,4 +3674,4 @@ with main_tabs[7]:  # ✅ Historial Completados
                     with st.expander(f"🛠 {row.get('Folio_Factura', 'N/A')} – {row.get('Cliente', 'N/A')}"):
                         render_caso_especial_garantia_hist(row)
         else:
-            st.info("No hay casos especiales completados o ya fueron limpiados.")
+            st.info("No hay casos especiales completados/cancelados o ya fueron limpiados.")
