@@ -1822,7 +1822,7 @@ if not df_main.empty:
     garantias_activas = pd.DataFrame(columns=df_casos.columns)
 
     if tipo_casos_col and "Estado" in df_casos.columns:
-        estados_activos = ["🟡 Pendiente", "🔵 En Proceso"]
+        estados_activos = ["🟡 Pendiente"]
         estados_series = df_casos["Estado"].astype(str).str.strip()
         tipo_series = df_casos[tipo_casos_col].astype(str)
         base_mask = estados_series.isin(estados_activos)
@@ -1848,7 +1848,7 @@ if not df_main.empty:
             )
         lista_casos = " y ".join(partes_mensaje)
         st.warning(
-            f"⚠️ Hay {lista_casos} con estado pendiente o en proceso en Casos Especiales."
+            f"⚠️ Hay {lista_casos} en estado pendiente en Casos Especiales."
         )
 
 
