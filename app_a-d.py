@@ -15,7 +15,7 @@ import uuid
 from pytz import timezone
 from urllib.parse import urlparse, unquote
 import streamlit.components.v1 as components
-from typing import Optional
+from typing import Any, Optional
 
 _MX_TZ = timezone("America/Mexico_City")
 
@@ -45,12 +45,20 @@ def mx_today():
 
 _TAB_LABELS_BY_TIPO = {
     "📍 Pedido Local": "📍 Pedidos Locales",
+    "📍 Pedidos Locales": "📍 Pedidos Locales",
     "🚚 Pedido Foráneo": "🚚 Pedidos Foráneos",
+    "🚚 Pedidos Foráneos": "🚚 Pedidos Foráneos",
     "🏙️ Pedido CDMX": "🏙️ Pedidos CDMX",
+    "🏙️ Pedidos CDMX": "🏙️ Pedidos CDMX",
     "📋 Solicitudes de Guía": "📋 Solicitudes de Guía",
+    "📋 Solicitud de Guía": "📋 Solicitudes de Guía",
+    "📋 Solicitudes de Guia": "📋 Solicitudes de Guía",
     "🎓 Cursos y Eventos": "🎓 Cursos y Eventos",
+    "🎓 Curso y Evento": "🎓 Cursos y Eventos",
     "🔁 Devolución": "🔁 Devoluciones",
+    "🔁 Devoluciones": "🔁 Devoluciones",
     "🛠 Garantía": "🛠 Garantías",
+    "🛠 Garantías": "🛠 Garantías",
 }
 
 _LOCAL_TURNO_TO_SUBTAB = {
@@ -63,11 +71,24 @@ _LOCAL_TURNO_TO_SUBTAB = {
 _UNKNOWN_TAB_LABEL = "Sin pestaña identificada"
 
 
+def _normalize_tab_field(value: Optional[Any]) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, str):
+        return value.strip()
+    try:
+        if pd.isna(value):
+            return ""
+    except TypeError:
+        pass
+    return str(value).strip()
+
+
 def derive_tab_label(tipo_envio: Optional[str], turno: Optional[str]) -> str:
     """Return the UI tab/subtab label for a given shipment type and shift."""
 
-    tipo_envio = (tipo_envio or "").strip()
-    turno = (turno or "").strip()
+    tipo_envio = _normalize_tab_field(tipo_envio)
+    turno = _normalize_tab_field(turno)
 
     base_label = _TAB_LABELS_BY_TIPO.get(tipo_envio)
 
@@ -79,7 +100,36 @@ def derive_tab_label(tipo_envio: Optional[str], turno: Optional[str]) -> str:
     if base_label:
         return base_label
 
-    return tipo_envio
+    if tipo_envio:
+        return tipo_envio
+
+    if turno:
+        return turno
+
+    return _UNKNOWN_TAB_LABEL
+
+
+def collect_tab_locations(
+    df: pd.DataFrame,
+    tipo_col: str = "Tipo_Envio",
+    turno_col: str = "Turno",
+) -> list[str]:
+    if df is None or df.empty:
+        return []
+
+    tipo_values = df.get(tipo_col)
+    turno_values = df.get(turno_col)
+
+    total_rows = len(df)
+    resolved = []
+
+    for idx in range(total_rows):
+        tipo_val = tipo_values.iat[idx] if tipo_values is not None else None
+        turno_val = turno_values.iat[idx] if turno_values is not None else None
+        label = derive_tab_label(tipo_val, turno_val)
+        resolved.append(label if label else _UNKNOWN_TAB_LABEL)
+
+    return sorted(set(resolved))
 
 
 
@@ -1753,12 +1803,8 @@ if not df_main.empty:
     mod_surtido_count = len(mod_surtido_df)
 
     if mod_surtido_count > 0:
-        ubicaciones = set()
-        for _, row in mod_surtido_df.iterrows():
-            ubicacion = derive_tab_label(row.get("Tipo_Envio"), row.get("Turno"))
-            ubicaciones.add(ubicacion or _UNKNOWN_TAB_LABEL)
-
-        ubicaciones_str = ", ".join(sorted(ubicaciones))
+        ubicaciones = collect_tab_locations(mod_surtido_df)
+        ubicaciones_str = ", ".join(ubicaciones)
 
         st.warning(
             f"⚠️ Hay {mod_surtido_count} pedido(s) con **Modificación de Surtido** ➤ {ubicaciones_str}"
@@ -1771,11 +1817,8 @@ if not df_main.empty:
     ].copy()
 
     if not df_demorados_activos.empty:
-        ubicaciones_demorados = {
-            derive_tab_label(row.get("Tipo_Envio"), row.get("Turno")) or _UNKNOWN_TAB_LABEL
-            for _, row in df_demorados_activos.iterrows()
-        }
-        ubicaciones_text = ", ".join(sorted(ubicaciones_demorados))
+        ubicaciones_demorados = collect_tab_locations(df_demorados_activos)
+        ubicaciones_text = ", ".join(ubicaciones_demorados)
         total_demorados = len(df_demorados_activos)
         st.warning(
             f"⏱️ Hay {total_demorados} pedido{'s' if total_demorados != 1 else ''} en estado 🔴 Demorado ubicados en: {ubicaciones_text}"
