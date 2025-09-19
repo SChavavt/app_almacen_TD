@@ -579,7 +579,7 @@ with tabs[2]:
             work = df_cdmx_filtrado.copy()
             work["Fecha_Entrega_Str"] = work["Fecha_Entrega"].dt.strftime("%d/%m")
             work["Grupo_Clave"] = work.apply(
-                lambda r: f"🏙️ CDMX – {r['Fecha_Entrega_Str']}", axis=1
+                lambda r: f"CDMX – {r['Fecha_Entrega_Str']}", axis=1
             )
             grouped = work.groupby(["Grupo_Clave", "Fecha_Entrega"])
             grupos = []
@@ -588,7 +588,7 @@ with tabs[2]:
                 key=lambda x: x[0][1] if pd.notna(x[0][1]) else pd.Timestamp.max,
             ):
                 if not df_g.empty:
-                    grupos.append((f"{clave} ({len(df_g)})", df_g))
+                    grupos.append((f"🏙️ {clave} ({len(df_g)})", df_g))
             if not grupos:
                 st.info("No hay grupos para mostrar.")
             else:
@@ -610,7 +610,7 @@ with tabs[2]:
             work = df_guias_filtrado.copy()
             work["Fecha_Entrega_Str"] = work["Fecha_Entrega"].dt.strftime("%d/%m")
             work["Grupo_Clave"] = work.apply(
-                lambda r: f"📋 Guías – {r['Fecha_Entrega_Str']}", axis=1
+                lambda r: f"Guías – {r['Fecha_Entrega_Str']}", axis=1
             )
             grouped = work.groupby(["Grupo_Clave", "Fecha_Entrega"])
             grupos = []
@@ -619,7 +619,7 @@ with tabs[2]:
                 key=lambda x: x[0][1] if pd.notna(x[0][1]) else pd.Timestamp.max,
             ):
                 if not df_g.empty:
-                    grupos.append((f"{clave} ({len(df_g)})", df_g))
+                    grupos.append((f"📋 {clave} ({len(df_g)})", df_g))
             if not grupos:
                 st.info("No hay grupos para mostrar.")
             else:
