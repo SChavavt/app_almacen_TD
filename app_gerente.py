@@ -235,6 +235,15 @@ def normalizar(texto):
     return unicodedata.normalize('NFKD', texto).encode('ASCII', 'ignore').decode('utf-8').lower()
 
 
+def normalizar_folio(texto):
+    """Normaliza folios ignorando acentos, mayúsculas y espacios."""
+    if texto is None:
+        return ""
+    limpio = normalizar(str(texto).strip())
+    limpio_sin_espacios = re.sub(r"\s+", "", limpio)
+    return limpio_sin_espacios.upper()
+
+
 def preparar_resultado_caso(row):
     """Convierte una fila de la hoja `casos_especiales` en un diccionario uniforme."""
     return {
@@ -407,10 +416,11 @@ with tabs[0]:
         buscar_btn = st.button("🔎 Buscar")
 
     elif modo_busqueda == "🧑 Por cliente":
-        keyword = st.text_input("🧑 Ingresa el nombre del cliente a buscar (sin importar mayúsculas ni acentos):")
+        keyword = st.text_input(
+            "🧑 Ingresa el nombre del cliente o folio de factura a buscar:",
+            help="Puedes escribir el nombre del cliente o el folio de factura; la búsqueda ignora mayúsculas, acentos y espacios en el folio.",
+        )
         buscar_btn = st.button("🔍 Buscar Pedido del Cliente")
-
-        cliente_normalizado = normalizar(keyword.strip()) if keyword else ""
 
 
     # --- EJECUCIÓN DE LA BÚSQUEDA ---
@@ -432,14 +442,21 @@ with tabs[0]:
                 st.warning("⚠️ Ingresa un nombre de cliente.")
                 st.stop()
 
-            cliente_normalizado = normalizar(keyword.strip())
+            keyword_cliente_normalizado = normalizar(keyword.strip())
+            keyword_folio_normalizado = normalizar_folio(keyword.strip())
 
             # 2.1) Buscar en datos_pedidos (S3 + todos los archivos del pedido)
             for _, row in df_pedidos.iterrows():
                 nombre = str(row.get("Cliente", "")).strip()
-                if not nombre:
-                    continue
-                if cliente_normalizado not in normalizar(nombre):
+                folio = str(row.get("Folio_Factura", "")).strip()
+
+                nombre_normalizado = normalizar(nombre) if nombre else ""
+                folio_normalizado = normalizar_folio(folio)
+
+                coincide_cliente = bool(nombre) and keyword_cliente_normalizado in nombre_normalizado
+                coincide_folio = bool(folio_normalizado) and keyword_folio_normalizado == folio_normalizado
+
+                if not coincide_cliente and not coincide_folio:
                     continue
 
                 pedido_id = str(row.get("ID_Pedido", "")).strip()
@@ -486,9 +503,15 @@ with tabs[0]:
 
             for _, row in df_casos.iterrows():
                 nombre = str(row.get("Cliente", "")).strip()
-                if not nombre:
-                    continue
-                if cliente_normalizado not in normalizar(nombre):
+                folio = str(row.get("Folio_Factura", "")).strip()
+
+                nombre_normalizado = normalizar(nombre) if nombre else ""
+                folio_normalizado = normalizar_folio(folio)
+
+                coincide_cliente = bool(nombre) and keyword_cliente_normalizado in nombre_normalizado
+                coincide_folio = bool(folio_normalizado) and keyword_folio_normalizado == folio_normalizado
+
+                if not coincide_cliente and not coincide_folio:
                     continue
                 resultados.append(preparar_resultado_caso(row))
 
