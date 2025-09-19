@@ -409,13 +409,13 @@ tabs = st.tabs([
     "✏️ Modificar Pedido",
 ])
 with tabs[0]:
-    modo_busqueda = st.radio("Selecciona el modo de búsqueda:", ["🔢 Por número de guía", "🧑 Por cliente"], key="modo_busqueda_radio")
+    modo_busqueda = st.radio("Selecciona el modo de búsqueda:", ["🔢 Por número de guía", "🧑 Por cliente/factura"], key="modo_busqueda_radio")
 
     if modo_busqueda == "🔢 Por número de guía":
         keyword = st.text_input("📦 Ingresa una palabra clave, número de guía, fragmento o código a buscar:")
         buscar_btn = st.button("🔎 Buscar")
 
-    elif modo_busqueda == "🧑 Por cliente":
+    elif modo_busqueda == "🧑 Por cliente/factura":
         keyword = st.text_input(
             "🧑 Ingresa el nombre del cliente o folio de factura a buscar:",
             help="Puedes escribir el nombre del cliente o el folio de factura; la búsqueda ignora mayúsculas, acentos y espacios en el folio.",
@@ -437,7 +437,7 @@ with tabs[0]:
             df_pedidos = df_pedidos.sort_values(by='Hora_Registro', ascending=False).reset_index(drop=True)
 
         # ====== BÚSQUEDA POR CLIENTE: también carga y filtra casos_especiales ======
-        if modo_busqueda == "🧑 Por cliente":
+        if modo_busqueda == "🧑 Por cliente/factura":
             if not keyword.strip():
                 st.warning("⚠️ Ingresa un nombre de cliente.")
                 st.stop()
