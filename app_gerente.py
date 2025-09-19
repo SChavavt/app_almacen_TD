@@ -9,7 +9,7 @@ import unicodedata
 from io import BytesIO
 from oauth2client.service_account import ServiceAccountCredentials
 from urllib.parse import urlparse, unquote
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, date
 
 # --- CONFIGURACIÓN DE STREAMLIT ---
 st.set_page_config(page_title="🔍 Buscador de Guías y Descargas", layout="wide")
@@ -411,9 +411,53 @@ tabs = st.tabs([
 with tabs[0]:
     modo_busqueda = st.radio("Selecciona el modo de búsqueda:", ["🔢 Por número de guía", "🧑 Por cliente/factura"], key="modo_busqueda_radio")
 
+    orden_seleccionado = "Más recientes primero"
+    recientes_primero = True
+    filtrar_por_rango = False
+    rango_fechas_input = ()
+    fecha_inicio_dt = None
+    fecha_fin_dt = None
+    fecha_inicio_date = None
+    fecha_fin_date = None
+
     if modo_busqueda == "🔢 Por número de guía":
         keyword = st.text_input("📦 Ingresa una palabra clave, número de guía, fragmento o código a buscar:")
         buscar_btn = st.button("🔎 Buscar")
+
+        orden_seleccionado = st.selectbox(
+            "Orden de los resultados",
+            ["Más recientes primero", "Más antiguos primero"],
+            index=0,
+            key="orden_resultados_guia",
+        )
+        recientes_primero = orden_seleccionado == "Más recientes primero"
+
+        filtrar_por_rango = st.checkbox("Filtrar por rango de fechas", value=False, key="filtrar_rango_guia")
+        hoy = date.today()
+        inicio_default = hoy - timedelta(days=30)
+        rango_fechas_input = st.date_input(
+            "Rango de fechas (opcional)",
+            value=(inicio_default, hoy),
+            format="YYYY-MM-DD",
+            disabled=not filtrar_por_rango,
+            help="Selecciona una fecha inicial y final para limitar los resultados mostrados.",
+            key="rango_fechas_guia",
+        )
+
+        if filtrar_por_rango:
+            if isinstance(rango_fechas_input, (list, tuple)):
+                if len(rango_fechas_input) == 2:
+                    fecha_inicio_date, fecha_fin_date = rango_fechas_input
+                elif len(rango_fechas_input) == 1:
+                    fecha_inicio_date = fecha_fin_date = rango_fechas_input[0]
+            else:
+                fecha_inicio_date = fecha_fin_date = rango_fechas_input
+
+            if fecha_inicio_date and fecha_fin_date:
+                if fecha_inicio_date > fecha_fin_date:
+                    fecha_inicio_date, fecha_fin_date = fecha_fin_date, fecha_inicio_date
+                fecha_inicio_dt = datetime.combine(fecha_inicio_date, datetime.min.time())
+                fecha_fin_dt = datetime.combine(fecha_fin_date, datetime.max.time())
 
     elif modo_busqueda == "🧑 Por cliente/factura":
         keyword = st.text_input(
@@ -422,6 +466,43 @@ with tabs[0]:
         )
         buscar_btn = st.button("🔍 Buscar Pedido del Cliente")
 
+        orden_seleccionado = st.selectbox(
+            "Orden de los resultados",
+            ["Más recientes primero", "Más antiguos primero"],
+            index=0,
+            key="orden_resultados_cliente",
+        )
+        recientes_primero = orden_seleccionado == "Más recientes primero"
+
+        filtrar_por_rango = st.checkbox("Filtrar por rango de fechas", value=False, key="filtrar_rango_cliente")
+        hoy = date.today()
+        inicio_default = hoy - timedelta(days=30)
+        rango_fechas_input = st.date_input(
+            "Rango de fechas (opcional)",
+            value=(inicio_default, hoy),
+            format="YYYY-MM-DD",
+            disabled=not filtrar_por_rango,
+            help="Selecciona una fecha inicial y final para limitar los resultados mostrados.",
+            key="rango_fechas_cliente",
+        )
+
+        if filtrar_por_rango:
+            if isinstance(rango_fechas_input, (list, tuple)):
+                if len(rango_fechas_input) == 2:
+                    fecha_inicio_date, fecha_fin_date = rango_fechas_input
+                elif len(rango_fechas_input) == 1:
+                    fecha_inicio_date = fecha_fin_date = rango_fechas_input[0]
+            else:
+                fecha_inicio_date = fecha_fin_date = rango_fechas_input
+
+            if fecha_inicio_date and fecha_fin_date:
+                if fecha_inicio_date > fecha_fin_date:
+                    fecha_inicio_date, fecha_fin_date = fecha_fin_date, fecha_inicio_date
+                fecha_inicio_dt = datetime.combine(fecha_inicio_date, datetime.min.time())
+                fecha_fin_dt = datetime.combine(fecha_fin_date, datetime.max.time())
+
+
+    filtro_fechas_activo = bool(filtrar_por_rango and fecha_inicio_dt and fecha_fin_dt)
 
     # --- EJECUCIÓN DE LA BÚSQUEDA ---
     if buscar_btn:
@@ -434,7 +515,11 @@ with tabs[0]:
         df_pedidos = cargar_pedidos()
         if 'Hora_Registro' in df_pedidos.columns:
             df_pedidos['Hora_Registro'] = pd.to_datetime(df_pedidos['Hora_Registro'], errors='coerce')
-            df_pedidos = df_pedidos.sort_values(by='Hora_Registro', ascending=False).reset_index(drop=True)
+            df_pedidos = df_pedidos.sort_values(by='Hora_Registro', ascending=not recientes_primero)
+            if filtro_fechas_activo:
+                mask_validas = df_pedidos['Hora_Registro'].notna()
+                df_pedidos = df_pedidos[mask_validas & df_pedidos['Hora_Registro'].between(fecha_inicio_dt, fecha_fin_dt)]
+            df_pedidos = df_pedidos.reset_index(drop=True)
 
         # ====== BÚSQUEDA POR CLIENTE: también carga y filtra casos_especiales ======
         if modo_busqueda == "🧑 Por cliente/factura":
@@ -500,6 +585,11 @@ with tabs[0]:
             # Ordenar por Hora_Registro si existe
             if "Hora_Registro" in df_casos.columns:
                 df_casos["Hora_Registro"] = pd.to_datetime(df_casos["Hora_Registro"], errors="coerce")
+                df_casos = df_casos.sort_values(by="Hora_Registro", ascending=not recientes_primero)
+                if filtro_fechas_activo:
+                    mask_validas_casos = df_casos["Hora_Registro"].notna()
+                    df_casos = df_casos[mask_validas_casos & df_casos["Hora_Registro"].between(fecha_inicio_dt, fecha_fin_dt)]
+                df_casos = df_casos.reset_index(drop=True)
 
             for _, row in df_casos.iterrows():
                 nombre = str(row.get("Cliente", "")).strip()
@@ -590,15 +680,30 @@ with tabs[0]:
         # ====== RENDER DE RESULTADOS ======
         st.markdown("---")
         if resultados:
-            st.success(f"✅ Se encontraron coincidencias en {len(resultados)} registro(s).")
+            mensaje_exito = f"✅ Se encontraron coincidencias en {len(resultados)} registro(s)."
+            if filtro_fechas_activo:
+                mensaje_exito += " (Filtro temporal aplicado)"
+            st.success(mensaje_exito)
 
-            # Ordena por Hora_Registro descendente cuando exista
+            detalles_filtros = [f"Orden: {orden_seleccionado}"]
+            if filtro_fechas_activo and fecha_inicio_date and fecha_fin_date:
+                detalles_filtros.append(
+                    f"Rango: {fecha_inicio_date.strftime('%Y-%m-%d')} → {fecha_fin_date.strftime('%Y-%m-%d')}"
+                )
+            if detalles_filtros:
+                st.caption(" | ".join(detalles_filtros))
+
+            # Ordena por Hora_Registro según la selección cuando exista
             def _parse_dt(v):
                 try:
                     return pd.to_datetime(v)
                 except Exception:
                     return pd.NaT
-            resultados = sorted(resultados, key=lambda r: _parse_dt(r.get("Hora_Registro")), reverse=True)
+            resultados = sorted(
+                resultados,
+                key=lambda r: _parse_dt(r.get("Hora_Registro")),
+                reverse=recientes_primero,
+            )
 
             for res in resultados:
                 if res.get("__source") == "casos":
@@ -676,6 +781,8 @@ with tabs[0]:
                 if modo_busqueda == "🔢 Por número de guía"
                 else "⚠️ No se encontraron pedidos o casos para el cliente ingresado."
             )
+            if filtro_fechas_activo:
+                mensaje += " Revisa el rango de fechas seleccionado."
             st.warning(mensaje)
 
 with tabs[1]:
