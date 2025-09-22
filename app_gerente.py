@@ -494,41 +494,6 @@ with tabs[0]:
         )
         buscar_btn = st.button("🔍 Buscar Pedido del Cliente")
 
-        orden_seleccionado = st.selectbox(
-            "Orden de los resultados",
-            ["Más recientes primero", "Más antiguos primero"],
-            index=0,
-            key="orden_resultados_cliente",
-        )
-        recientes_primero = orden_seleccionado == "Más recientes primero"
-
-        filtrar_por_rango = st.checkbox("Filtrar por rango de fechas", value=False, key="filtrar_rango_cliente")
-        hoy = date.today()
-        inicio_default = hoy - timedelta(days=30)
-        rango_fechas_input = st.date_input(
-            "Rango de fechas (opcional)",
-            value=(inicio_default, hoy),
-            format="YYYY-MM-DD",
-            disabled=not filtrar_por_rango,
-            help="Selecciona una fecha inicial y final para limitar los resultados mostrados.",
-            key="rango_fechas_cliente",
-        )
-
-        if filtrar_por_rango:
-            if isinstance(rango_fechas_input, (list, tuple)):
-                if len(rango_fechas_input) == 2:
-                    fecha_inicio_date, fecha_fin_date = rango_fechas_input
-                elif len(rango_fechas_input) == 1:
-                    fecha_inicio_date = fecha_fin_date = rango_fechas_input[0]
-            else:
-                fecha_inicio_date = fecha_fin_date = rango_fechas_input
-
-            if fecha_inicio_date and fecha_fin_date:
-                if fecha_inicio_date > fecha_fin_date:
-                    fecha_inicio_date, fecha_fin_date = fecha_fin_date, fecha_inicio_date
-                fecha_inicio_dt = datetime.combine(fecha_inicio_date, datetime.min.time())
-                fecha_fin_dt = datetime.combine(fecha_fin_date, datetime.max.time())
-
 
     filtro_fechas_activo = bool(filtrar_por_rango and fecha_inicio_dt and fecha_fin_dt)
 
