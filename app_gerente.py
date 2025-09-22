@@ -220,6 +220,28 @@ def get_s3_file_download_url(s3_client_param, object_key_or_url, expires_in=6048
         st.error(f"❌ Error al generar URL prefirmada: {e}")
         return "#"
 
+
+def resolver_nombre_y_enlace(valor, etiqueta_fallback):
+    """Genera un nombre legible y una URL de descarga para cualquier valor almacenado en la hoja."""
+    valor = str(valor).strip()
+    if not valor:
+        return None, None
+
+    parsed = urlparse(valor)
+    nombre_crudo = extract_s3_key(valor)
+    nombre = nombre_crudo.split("/")[-1] if nombre_crudo else ""
+    if not nombre:
+        nombre = etiqueta_fallback
+
+    if parsed.scheme and parsed.netloc:
+        enlace = valor
+    else:
+        enlace = get_s3_file_download_url(s3_client, valor)
+        if not enlace or enlace == "#":
+            enlace = valor
+
+    return nombre, enlace
+
 def combinar_urls_existentes(existente, nuevas):
     """Combina listas de URLs respetando el formato previo (JSON o separado por comas/semicolons)."""
     existentes = partir_urls(existente)
@@ -569,6 +591,9 @@ with tabs[0]:
                     # 🛠 Modificación de surtido
                     "Modificacion_Surtido": str(row.get("Modificacion_Surtido", "")).strip(),
                     "Adjuntos_Surtido_urls": partir_urls(row.get("Adjuntos_Surtido", "")),
+                    # Archivos registrados en la hoja
+                    "Adjuntos_Guia_urls": partir_urls(row.get("Adjuntos_Guia", "")),
+                    "Adjuntos_urls": partir_urls(row.get("Adjuntos", "")),
                     # ♻️ Refacturación
                     "Refacturacion_Tipo": str(row.get("Refacturacion_Tipo","")).strip(),
                     "Refacturacion_Subtipo": str(row.get("Refacturacion_Subtipo","")).strip(),
@@ -661,6 +686,9 @@ with tabs[0]:
                             # 🛠 Modificación de surtido
                             "Modificacion_Surtido": str(row.get("Modificacion_Surtido", "")).strip(),
                             "Adjuntos_Surtido_urls": partir_urls(row.get("Adjuntos_Surtido", "")),
+                            # Archivos registrados en la hoja
+                            "Adjuntos_Guia_urls": partir_urls(row.get("Adjuntos_Guia", "")),
+                            "Adjuntos_urls": partir_urls(row.get("Adjuntos", "")),
                             # ♻️ Refacturación
                             "Refacturacion_Tipo": str(row.get("Refacturacion_Tipo","")).strip(),
                             "Refacturacion_Subtipo": str(row.get("Refacturacion_Subtipo","")).strip(),
@@ -742,8 +770,32 @@ with tabs[0]:
                             st.markdown(f"- **Folio refacturado:** {ref_f or 'N/A'}")
 
                     with st.expander("📁 Archivos del Pedido", expanded=True):
+                        guia_hoja = res.get("Adjuntos_Guia_urls") or []
+                        if guia_hoja:
+                            st.markdown("#### 🧾 Guías registradas en la hoja:")
+                            for idx, raw_url in enumerate(guia_hoja, start=1):
+                                nombre, enlace = resolver_nombre_y_enlace(raw_url, f"Guía hoja #{idx}")
+                                if not enlace:
+                                    continue
+                                st.markdown(
+                                    f'- <a href="{enlace}" target="_blank">🧾 {nombre} (hoja)</a>',
+                                    unsafe_allow_html=True,
+                                )
+
+                        adjuntos_hoja = res.get("Adjuntos_urls") or []
+                        if adjuntos_hoja:
+                            st.markdown("#### 📎 Adjuntos registrados en la hoja:")
+                            for idx, raw_url in enumerate(adjuntos_hoja, start=1):
+                                nombre, enlace = resolver_nombre_y_enlace(raw_url, f"Adjunto hoja #{idx}")
+                                if not enlace:
+                                    continue
+                                st.markdown(
+                                    f'- <a href="{enlace}" target="_blank">📎 {nombre}</a>',
+                                    unsafe_allow_html=True,
+                                )
+
                         if res.get("Coincidentes"):
-                            st.markdown("#### 🔍 Guías:")
+                            st.markdown("#### 🔍 Guías detectadas en S3:")
                             for key, url in res["Coincidentes"]:
                                 nombre = key.split("/")[-1]
                                 st.markdown(
