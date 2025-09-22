@@ -788,18 +788,6 @@ with tabs[0]:
                                     unsafe_allow_html=True,
                                 )
 
-                        adjuntos_hoja = res.get("Adjuntos_urls") or []
-                        if adjuntos_hoja:
-                            st.markdown("#### 📎 Adjuntos registrados en la hoja:")
-                            for idx, raw_url in enumerate(adjuntos_hoja, start=1):
-                                nombre, enlace = resolver_nombre_y_enlace(raw_url, f"Adjunto hoja #{idx}")
-                                if not enlace:
-                                    continue
-                                st.markdown(
-                                    f'- <a href="{enlace}" target="_blank">📎 {nombre}</a>',
-                                    unsafe_allow_html=True,
-                                )
-
                         if res.get("Coincidentes"):
                             st.markdown("#### 🔍 Guías detectadas en S3:")
                             for key, url in res["Coincidentes"]:
@@ -824,12 +812,44 @@ with tabs[0]:
                                     f'- <a href="{url}" target="_blank">📄 {nombre}</a>',
                                     unsafe_allow_html=True,
                                 )
-                        if res.get("Otros"):
+                        adjuntos_hoja = res.get("Adjuntos_urls") or []
+                        otros_s3 = res.get("Otros") or []
+                        otros_items = []
+                        claves_vistas = set()
+
+                        def _normalizar_clave(valor):
+                            if not valor:
+                                return None
+                            valor_str = str(valor).strip()
+                            if not valor_str:
+                                return None
+                            return valor_str.lower()
+
+                        for key, url in otros_s3:
+                            nombre = key.split("/")[-1] if key else "Archivo"
+                            otros_items.append((nombre, url))
+                            clave = extract_s3_key(key) or key or url
+                            clave_norm = _normalizar_clave(clave)
+                            if clave_norm:
+                                claves_vistas.add(clave_norm)
+
+                        for idx, raw_url in enumerate(adjuntos_hoja, start=1):
+                            nombre, enlace = resolver_nombre_y_enlace(raw_url, f"Adjunto hoja #{idx}")
+                            if not enlace:
+                                continue
+                            clave = extract_s3_key(raw_url) or enlace
+                            clave_norm = _normalizar_clave(clave)
+                            if clave_norm and clave_norm in claves_vistas:
+                                continue
+                            if clave_norm:
+                                claves_vistas.add(clave_norm)
+                            otros_items.append((nombre or f"Adjunto hoja #{idx}", enlace))
+
+                        if otros_items:
                             st.markdown("#### 📂 Otros Archivos:")
-                            for key, url in res["Otros"]:
-                                nombre = key.split("/")[-1]
+                            for nombre, enlace in otros_items:
                                 st.markdown(
-                                    f'- <a href="{url}" target="_blank">📌 {nombre}</a>',
+                                    f'- <a href="{enlace}" target="_blank">📌 {nombre}</a>',
                                     unsafe_allow_html=True,
                                 )
 
