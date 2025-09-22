@@ -307,7 +307,7 @@ def preparar_resultado_caso(row):
         "Folio_Factura_Refacturada": str(row.get("Folio_Factura_Refacturada", "")).strip(),
         # Archivos del caso
         "Adjuntos_urls": partir_urls(row.get("Adjuntos", "")),
-        "Guia_url": str(row.get("Hoja_Ruta_Mensajero", "")).strip(),
+        "Guias_urls": partir_urls(row.get("Hoja_Ruta_Mensajero", "")),
     }
 
 
@@ -402,7 +402,7 @@ def render_caso_especial(res):
 
     with st.expander("📎 Archivos (Adjuntos y Guía)", expanded=False):
         adj = res.get("Adjuntos_urls", []) or []
-        guia = res.get("Guia_url", "")
+        guias = res.get("Guias_urls", []) or []
         if adj:
             st.markdown("**Adjuntos:**")
             for u in adj:
@@ -412,14 +412,20 @@ def render_caso_especial(res):
                     f'- <a href="{tmp}" target="_blank">{nombre}</a>',
                     unsafe_allow_html=True,
                 )
-        if guia and guia.lower() not in ("nan","none","n/a"):
-            st.markdown("**Guía:**")
-            tmp = get_s3_file_download_url(s3_client, guia)
-            st.markdown(
-                f'- <a href="{tmp}" target="_blank">Abrir guía</a>',
-                unsafe_allow_html=True,
-            )
-        if not adj and not guia:
+        if guias:
+            st.markdown("**Guías:**")
+            for idx, u in enumerate(guias, start=1):
+                if not str(u).strip():
+                    continue
+                nombre = extract_s3_key(u).split("/")[-1]
+                if not nombre:
+                    nombre = f"Guía #{idx}"
+                tmp = get_s3_file_download_url(s3_client, u)
+                st.markdown(
+                    f'- <a href="{tmp}" target="_blank">{nombre}</a>',
+                    unsafe_allow_html=True,
+                )
+        if not adj and not guias:
             st.info("Sin archivos registrados en la hoja.")
 
     st.markdown("---")
