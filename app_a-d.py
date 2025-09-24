@@ -1839,6 +1839,7 @@ if not df_main.empty:
         "Estado", "Fecha_Completado", "Hora_Proceso",
         "Modificacion_Surtido", "Adjuntos_Surtido", "Adjuntos",
         "Hoja_Ruta_Mensajero",  # para guía en devoluciones
+        "Direccion_Guia_Retorno", "Direccion_Envio",
         # (estas ayudan al render/orden; no pasa nada si ya existen)
         "Folio_Factura", "Cliente", "Vendedor_Registro",
         "Tipo_Envio", "Fecha_Entrega", "Comentario",
@@ -1849,9 +1850,18 @@ if not df_main.empty:
         "Completados_Limpiado",
     ]
     headers_casos = ensure_columns(worksheet_casos, headers_casos, required_cols_casos)
-    for c in ["Numero_Serie", "Fecha_Compra", "Completados_Limpiado"]:
+    fill_empty_cols = [
+        "Numero_Serie",
+        "Fecha_Compra",
+        "Completados_Limpiado",
+        "Direccion_Guia_Retorno",
+        "Direccion_Envio",
+    ]
+    for c in fill_empty_cols:
         if c not in df_casos.columns:
             df_casos[c] = ""
+        else:
+            df_casos[c] = df_casos[c].fillna("")
 
     # 📊 Resumen de Estados combinando datos_pedidos y casos_especiales
     st.markdown("### 📊 Resumen de Estados")
@@ -2306,6 +2316,14 @@ with main_tabs[5]:
         if material:
             st.markdown("📦 Piezas / Material:")
             st.info(material)
+
+        direccion_retorno = str(row.get("Direccion_Guia_Retorno", "")).strip()
+        st.markdown("📍 Dirección para guía de retorno:")
+        st.info(direccion_retorno or "Sin dirección registrada.")
+
+        direccion_envio = str(row.get("Direccion_Envio", "")).strip()
+        st.markdown("🏠 Dirección de envío:")
+        st.info(direccion_envio or "Sin dirección registrada.")
 
         monto = str(row.get("Monto_Devuelto", "")).strip()
         if monto:
@@ -3053,6 +3071,12 @@ with main_tabs[6]:  # 🛠 Garantías
             st.markdown("**🧰 Piezas afectadas:**")
             st.info(str(row.get("Material_Devuelto", "")).strip() or "N/A")
 
+            st.markdown("**📍 Dirección para guía de retorno:**")
+            st.info(str(row.get("Direccion_Guia_Retorno", "")).strip() or "Sin dirección registrada.")
+
+            st.markdown("**🏠 Dirección de envío:**")
+            st.info(str(row.get("Direccion_Envio", "")).strip() or "Sin dirección registrada.")
+
             monto_txt = str(row.get("Monto_Devuelto", "")).strip()
             seguimiento_txt = str(row.get("Seguimiento", "")).strip()
             if monto_txt:
@@ -3683,6 +3707,12 @@ with main_tabs[7]:  # ✅ Historial Completados/Cancelados
                 if piezas:
                     st.markdown("📦 Piezas afectadas:")
                     st.info(piezas)
+                direccion_retorno = str(row.get("Direccion_Guia_Retorno", "")).strip()
+                st.markdown("📍 Dirección para guía de retorno:")
+                st.info(direccion_retorno or "Sin dirección registrada.")
+                direccion_envio = str(row.get("Direccion_Envio", "")).strip()
+                st.markdown("🏠 Dirección de envío:")
+                st.info(direccion_envio or "Sin dirección registrada.")
                 monto = str(row.get("Monto_Devuelto", "")).strip()
                 if monto:
                     st.markdown(f"💵 Monto estimado: {monto}")
