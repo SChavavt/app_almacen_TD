@@ -487,6 +487,13 @@ with tabs[0]:
                 & (df_local["Completados_Limpiado"].astype(str).str.lower() == "sí")
             )
         ]
+        if "Turno" not in df_local.columns:
+            df_local["Turno"] = ""
+        df_local["Turno"] = df_local["Turno"].fillna("").astype(str)
+        df_local.loc[df_local["Turno"].str.lower() == "nan", "Turno"] = ""
+        mask_curso_evento = df_local["Tipo_Envio"] == "🎓 Cursos y Eventos"
+        mask_turno_vacio = df_local["Turno"].str.strip() == ""
+        df_local.loc[mask_curso_evento & mask_turno_vacio, "Turno"] = "🎓 Cursos y Eventos"
         if df_local.empty:
             st.info("Sin pedidos locales.")
         else:
