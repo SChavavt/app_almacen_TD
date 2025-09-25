@@ -458,17 +458,74 @@ def update_gsheet_cell(worksheet, headers, row_index, col_name, value):
     col_name es el nombre de la columna.
     headers es la lista de encabezados obtenida previamente.
     """
-    try:
-        if col_name not in headers:
-            st.error(f"❌ Error: La columna '{col_name}' no se encontró en Google Sheets para la actualización. Verifica los encabezados.")
-            return False
-        col_index = headers.index(col_name) + 1 # Convertir a índice base 1 de gspread
-        worksheet.update_cell(row_index, col_index, value)
-        # st.cache_data.clear() # Limpiar solo si hay un cambio que justifique una recarga completa
-        return True
-    except Exception as e:
-        st.error(f"❌ Error al actualizar la celda ({row_index}, {col_name}) en Google Sheets: {e}")
+    if col_name not in headers:
+        st.error(f"❌ Error: La columna '{col_name}' no se encontró en Google Sheets para la actualización. Verifica los encabezados.")
         return False
+
+    col_index = headers.index(col_name) + 1  # Convertir a índice base 1 de gspread
+
+    max_attempts = 3
+    base_delay = 1
+
+    for attempt in range(max_attempts):
+        wait_seconds = base_delay * (2 ** attempt)
+        try:
+            worksheet.update_cell(row_index, col_index, value)
+            # st.cache_data.clear() # Limpiar solo si hay un cambio que justifique una recarga completa
+            return True
+        except gspread.exceptions.APIError as api_error:
+            is_recoverable = _is_recoverable_auth_error(api_error)
+            if attempt < max_attempts - 1:
+                if is_recoverable:
+                    st.warning(
+                        f"🔁 Error de autenticación/cuota al actualizar Google Sheets "
+                        f"(intento {attempt + 1}/{max_attempts}). Reintentando en {wait_seconds}s..."
+                    )
+                else:
+                    st.warning(
+                        f"⚠️ Error de la API de Google Sheets al actualizar celdas "
+                        f"(intento {attempt + 1}/{max_attempts}). Reintentando en {wait_seconds}s..."
+                    )
+                time.sleep(wait_seconds)
+                continue
+
+            if is_recoverable:
+                st.error(
+                    "❌ No se pudo completar la actualización en Google Sheets por un error de autenticación/cuota "
+                    "después de varios intentos."
+                )
+                handle_auth_error(api_error)
+            else:
+                st.error(f"❌ Error definitivo de la API de Google Sheets: {api_error}")
+            break
+        except RequestException as net_err:
+            if attempt < max_attempts - 1:
+                st.warning(
+                    f"⚠️ Error de red al actualizar Google Sheets (intento {attempt + 1}/{max_attempts}). "
+                    f"Reintentando en {wait_seconds}s..."
+                )
+                time.sleep(wait_seconds)
+                continue
+
+            st.error(
+                "❌ No se pudo conectar con Google Sheets para actualizar los datos después de varios intentos. "
+                "Verifica tu conexión o credenciales."
+            )
+            handle_auth_error(net_err)
+            break
+        except Exception as exc:
+            if attempt < max_attempts - 1:
+                st.warning(
+                    f"⚠️ Error inesperado al actualizar Google Sheets (intento {attempt + 1}/{max_attempts}). "
+                    f"Reintentando en {wait_seconds}s..."
+                )
+                time.sleep(wait_seconds)
+                continue
+
+            st.error(f"❌ Error inesperado al actualizar Google Sheets: {exc}")
+            break
+
+    return False
     
 def cargar_pedidos_desde_google_sheet(sheet_id, worksheet_name):
     """
