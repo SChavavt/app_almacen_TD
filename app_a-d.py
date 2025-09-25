@@ -1291,33 +1291,48 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
                                     "Fecha_Entrega", ""
                                 )
                                 st.session_state["subtab_local"] = origen_tab
-                                time.sleep(0.5)
-                                estado_actual = worksheet.cell(
-                                    gsheet_row_index, estado_col_idx
-                                ).value
-                                if estado_actual == "🟢 Completado":
-                                    st.cache_data.clear()
 
-                                    set_active_main_tab(
-                                        st.session_state.get("active_main_tab_index", 0)
-                                    )
-                                    st.session_state["active_subtab_local_index"] = (
-                                        st.session_state.get(
-                                            "active_subtab_local_index", 0
+                                st.cache_data.clear()
+
+                                try:
+                                    time.sleep(0.5)
+                                    estado_actual = worksheet.cell(
+                                        gsheet_row_index, estado_col_idx
+                                    ).value
+                                    if estado_actual != "🟢 Completado":
+                                        st.warning(
+                                            "⚠️ El pedido se marcó como completado, pero aún no "
+                                            "se refleja en Google Sheets. La vista se actualizará "
+                                            "de todos modos."
                                         )
+                                except Exception as refresh_error:
+                                    st.warning(
+                                        f"⚠️ No se pudo verificar la actualización en Google Sheets: {refresh_error}"
                                     )
-                                    st.session_state["active_date_tab_m_index"] = (
-                                        st.session_state.get(
-                                            "active_date_tab_m_index", 0
-                                        )
+
+                                set_active_main_tab(
+                                    st.session_state.get("active_main_tab_index", 0)
+                                )
+                                st.session_state["active_subtab_local_index"] = (
+                                    st.session_state.get(
+                                        "active_subtab_local_index", 0
                                     )
-                                    st.session_state["active_date_tab_t_index"] = (
-                                        st.session_state.get(
-                                            "active_date_tab_t_index", 0
-                                        )
+                                )
+                                st.session_state["active_date_tab_m_index"] = (
+                                    st.session_state.get(
+                                        "active_date_tab_m_index", 0
                                     )
+                                )
+                                st.session_state["active_date_tab_t_index"] = (
+                                    st.session_state.get(
+                                        "active_date_tab_t_index", 0
+                                    )
+                                )
+
+                                if flag_key in st.session_state:
                                     del st.session_state[flag_key]
-                                    st.rerun()
+
+                                st.rerun()
                             else:
                                 st.error("❌ No se pudo completar el pedido.")
                                 if flag_key in st.session_state:
