@@ -136,7 +136,10 @@ def collect_tab_locations(
 st.set_page_config(page_title="Recepción de Pedidos TD", layout="wide")
 
 # 🔁 Restaurar pestañas activas si venimos de una acción que modificó datos
+restoring_tabs = st.session_state.pop("restore_tabs_after_print", False)
+
 if "preserve_main_tab" in st.session_state:
+    restoring_tabs = True
     st.session_state["active_main_tab_index"] = st.session_state.pop("preserve_main_tab", 0)
     st.session_state["active_subtab_local_index"] = st.session_state.pop("preserve_local_tab", 0)
     st.session_state["active_date_tab_m_index"] = st.session_state.pop("preserve_date_tab_m", 0)
@@ -153,7 +156,10 @@ else:
         except (ValueError, TypeError):
             st.session_state["active_main_tab_index"] = 0
 
-st.query_params["tab"] = str(st.session_state.get("active_main_tab_index", 0))
+if restoring_tabs and "active_main_tab_index" in st.session_state:
+    st.query_params["tab"] = str(st.session_state["active_main_tab_index"])
+else:
+    st.query_params["tab"] = str(st.session_state.get("active_main_tab_index", 0))
 
 st.title("📬 Bandeja de Pedidos TD")
 
@@ -959,6 +965,10 @@ def fijar_y_preservar(row, origen_tab):
             st.session_state["active_main_tab_index"] = 0
 
     preserve_tab_state()
+
+    # 🔁 Forzar un segundo rerun con las pestañas ya preservadas
+    st.session_state["restore_tabs_after_print"] = True
+    st.rerun()
 
 
 def preserve_tab_state():
