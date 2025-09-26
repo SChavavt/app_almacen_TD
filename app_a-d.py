@@ -1513,6 +1513,9 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
                                 st.success(
                                     f"📦 Se subieron correctamente {len(uploaded_keys)} archivo(s) de guía."
                                 )
+                                st.cache_data.clear()
+                                st.cache_resource.clear()
+                                st.rerun()
                             else:
                                 st.error(
                                     "❌ No se pudo actualizar el Google Sheet con los archivos de guía."
