@@ -10,6 +10,7 @@ import time
 import unicodedata
 from zoneinfo import ZoneInfo
 from streamlit_autorefresh import st_autorefresh
+from textwrap import dedent
 
 TZ = ZoneInfo("America/Mexico_City")
 
@@ -320,21 +321,23 @@ def render_auto_cards(entries, layout: str = "small"):
         )
 
         cards_html.append(
-            f"""
-            <div class='{card_class}'>
-                <div class='auto-card-header'>
-                    <div>
-                        <span class='card-number'>#{entry.get('numero', '?')}</span>
-                        <span class='card-category'>{entry.get('categoria', '')}</span>
+            dedent(
+                f"""
+                <div class='{card_class}'>
+                    <div class='auto-card-header'>
+                        <div>
+                            <span class='card-number'>#{entry.get('numero', '?')}</span>
+                            <span class='card-category'>{entry.get('categoria', '')}</span>
+                        </div>
+                        <div class='auto-card-status'>{entry.get('estado', '')}</div>
                     </div>
-                    <div class='auto-card-status'>{entry.get('estado', '')}</div>
+                    <div class='auto-card-client'>{entry.get('cliente', '—')}</div>
+                    {badges_html}
+                    {meta_html}
+                    {detail_html}
                 </div>
-                <div class='auto-card-client'>{entry.get('cliente', '—')}</div>
-                {badges_html}
-                {meta_html}
-                {detail_html}
-            </div>
-            """
+                """
+            ).strip()
         )
 
     st.markdown(
