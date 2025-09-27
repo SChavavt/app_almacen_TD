@@ -1011,6 +1011,161 @@ def show_grouped_panel(df_source, mode: str = "local", group_turno: bool = True)
                 display_dataframe_with_formatting(df_g)
 
 
+# =========================
+# Helpers para Casos Especiales
+# =========================
+def status_counts_block_casos(df: pd.DataFrame):
+    estados = df.get("Estado", pd.Series(dtype=str)).astype(str)
+    if "Completados_Limpiado" not in df.columns:
+        df["Completados_Limpiado"] = ""
+    total = len(df)
+    pend = estados.str.contains("Pendiente", case=False, na=False).sum()
+    proc = estados.str.contains("En Proceso", case=False, na=False).sum()
+    completados_visibles = df[
+        (df["Estado"].astype(str).str.strip() == "🟢 Completado")
+        & (df["Completados_Limpiado"].astype(str).str.lower() != "sí")
+    ]
+    cancelados_visibles = df[
+        (df["Estado"].astype(str).str.strip() == "🟣 Cancelado")
+        & (df["Completados_Limpiado"].astype(str).str.lower() != "sí")
+    ]
+    cols = st.columns(5)
+    cols[0].metric("Total Pedidos", int(total))
+    cols[1].metric("🟡 Pendiente", int(pend))
+    cols[2].metric("🔵 En Proceso", int(proc))
+    cols[3].metric("🟢 Completado", int(len(completados_visibles)))
+    cols[4].metric("🟣 Cancelado", int(len(cancelados_visibles)))
+
+
+if "show_grouped_panel_casos" not in globals():
+
+    def show_grouped_panel_casos(df: pd.DataFrame):
+        """Agrupa por Turno (Local) o Foráneo genérico y fecha; muestra tablas."""
+        df_local = df.copy()
+
+        # Asegura columnas base
+        for base in [
+            "Fecha_Entrega",
+            "Cliente",
+            "Vendedor_Registro",
+            "Estado",
+            "Folio_Factura",
+            "Turno",
+            "Tipo_Envio_Original",
+        ]:
+            if base not in df_local.columns:
+                df_local[base] = ""
+
+        # Fecha string para el título
+        df_local["Fecha_Entrega_Str"] = (
+            df_local["Fecha_Entrega"].dt.strftime("%d/%m").fillna("Sin Fecha")
+            if "Fecha_Entrega" in df_local.columns
+            else "Sin Fecha"
+        )
+
+        # Determinar etiqueta de grupo
+        if "Turno" not in df_local.columns:
+            df_local["Turno"] = ""
+
+        # Si no hay turno pero viene marcado como Local → etiqueta genérica
+        if "Tipo_Envio_Original" in df_local.columns:
+            mask_local_sin_turno = (df_local["Turno"].astype(str).str.strip() == "") & (
+                df_local["Tipo_Envio_Original"]
+                .astype(str)
+                .str.contains("Local", case=False, na=False)
+            )
+            df_local.loc[mask_local_sin_turno, "Turno"] = "📍 Local (sin turno)"
+
+        # Cuando no sea local, foráneo genérico
+        es_local = (
+            df_local["Turno"]
+            .astype(str)
+            .str.contains("Local|Saltillo|Bodega|Mañana|Tarde", case=False, na=False)
+        )
+        df_local.loc[~es_local, "Turno"] = "🌍 Foráneo"
+
+        # Clave de grupo
+        df_local["Grupo_Clave"] = df_local.apply(
+            lambda r: f"{r['Turno']} – {r['Fecha_Entrega_Str']}", axis=1
+        )
+
+        # Orden por fecha real (NaT al final)
+        if "Fecha_Entrega" in df_local.columns:
+            df_local["_fecha_sort"] = df_local["Fecha_Entrega"].fillna(pd.Timestamp.max)
+        else:
+            df_local["_fecha_sort"] = pd.Timestamp.max
+
+        grupos = []
+        for (clave, _), sub in sorted(
+            df_local.groupby(["Grupo_Clave", "Fecha_Entrega"], dropna=False),
+            key=lambda x: x[0][1],
+        ):
+            if "Hora_Registro" in sub.columns:
+                sub = sub.sort_values(by="Hora_Registro", ascending=False)
+            grupos.append(
+                (
+                    f"{clave} ({len(sub)})",
+                    sub.drop(columns=["_fecha_sort"], errors="ignore"),
+                )
+            )
+
+        if not grupos:
+            st.info("Sin grupos para mostrar.")
+            return
+
+        num_cols_per_row = 3
+        for i in range(0, len(grupos), num_cols_per_row):
+            fila = grupos[i : i + num_cols_per_row]
+            cols = st.columns(len(fila))
+            for j, (titulo, df_grupo) in enumerate(fila):
+                with cols[j]:
+                    st.markdown(f"### {titulo}")
+                    # Vista enriquecida con tipo de caso, envío y turno
+                    base_cols = [
+                        "Tipo",
+                        "Tipo_Envio_Original",
+                        "Turno",
+                        "Fecha_Entrega",
+                        "Cliente",
+                        "Vendedor_Registro",
+                        "Estado",
+                        "Folio_Factura",
+                    ]
+                    for c in base_cols:
+                        if c not in df_grupo.columns:
+                            df_grupo[c] = ""
+                    vista = df_grupo[base_cols].copy()
+                    vista.rename(
+                        columns={
+                            "Tipo_Envio_Original": "Tipo Envío",
+                            "Fecha_Entrega": "Fecha Entrega",
+                            "Vendedor_Registro": "Vendedor",
+                        },
+                        inplace=True,
+                    )
+                    vista["Fecha Entrega"] = vista["Fecha Entrega"].apply(
+                        lambda x: x.strftime("%d/%m") if pd.notna(x) else ""
+                    )
+                    vista["Cliente"] = vista.apply(
+                        lambda r: f"📄 <b>{r['Folio_Factura']}</b> 🤝 {r['Cliente']}",
+                        axis=1,
+                    )
+                    st.markdown(
+                        vista[
+                            [
+                                "Tipo",
+                                "Tipo Envío",
+                                "Turno",
+                                "Fecha Entrega",
+                                "Cliente",
+                                "Vendedor",
+                                "Estado",
+                            ]
+                        ].to_html(escape=False, index=False),
+                        unsafe_allow_html=True,
+                    )
+
+
 # ===========================
 #        MAIN RENDER
 # ===========================
@@ -1199,159 +1354,3 @@ with tabs[5]:
         status_counts_block_casos(casos)
         st.markdown("### 📚 Grupos (Local por Turno / Foráneo genérico)")
         show_grouped_panel_casos(casos)
-
-# =========================
-# Helpers para Casos Especiales
-# =========================
-def status_counts_block_casos(df: pd.DataFrame):
-    estados = df.get("Estado", pd.Series(dtype=str)).astype(str)
-    if "Completados_Limpiado" not in df.columns:
-        df["Completados_Limpiado"] = ""
-    total = len(df)
-    pend = estados.str.contains("Pendiente", case=False, na=False).sum()
-    proc = estados.str.contains("En Proceso", case=False, na=False).sum()
-    completados_visibles = df[
-        (df["Estado"].astype(str).str.strip() == "🟢 Completado")
-        & (df["Completados_Limpiado"].astype(str).str.lower() != "sí")
-    ]
-    cancelados_visibles = df[
-        (df["Estado"].astype(str).str.strip() == "🟣 Cancelado")
-        & (df["Completados_Limpiado"].astype(str).str.lower() != "sí")
-    ]
-    cols = st.columns(5)
-    cols[0].metric("Total Pedidos", int(total))
-    cols[1].metric("🟡 Pendiente", int(pend))
-    cols[2].metric("🔵 En Proceso", int(proc))
-    cols[3].metric("🟢 Completado", int(len(completados_visibles)))
-    cols[4].metric("🟣 Cancelado", int(len(cancelados_visibles)))
-
-
-if "show_grouped_panel_casos" not in globals():
-
-    def show_grouped_panel_casos(df: pd.DataFrame):
-        """Agrupa por Turno (Local) o Foráneo genérico y fecha; muestra tablas."""
-        df_local = df.copy()
-
-        # Asegura columnas base
-        for base in [
-            "Fecha_Entrega",
-            "Cliente",
-            "Vendedor_Registro",
-            "Estado",
-            "Folio_Factura",
-            "Turno",
-            "Tipo_Envio_Original",
-        ]:
-            if base not in df_local.columns:
-                df_local[base] = ""
-
-        # Fecha string para el título
-        df_local["Fecha_Entrega_Str"] = (
-            df_local["Fecha_Entrega"].dt.strftime("%d/%m").fillna("Sin Fecha")
-            if "Fecha_Entrega" in df_local.columns
-            else "Sin Fecha"
-        )
-
-        # Determinar etiqueta de grupo
-        if "Turno" not in df_local.columns:
-            df_local["Turno"] = ""
-
-        # Si no hay turno pero viene marcado como Local → etiqueta genérica
-        if "Tipo_Envio_Original" in df_local.columns:
-            mask_local_sin_turno = (df_local["Turno"].astype(str).str.strip() == "") & (
-                df_local["Tipo_Envio_Original"]
-                .astype(str)
-                .str.contains("Local", case=False, na=False)
-            )
-            df_local.loc[mask_local_sin_turno, "Turno"] = "📍 Local (sin turno)"
-
-        # Cuando no sea local, foráneo genérico
-        es_local = (
-            df_local["Turno"]
-            .astype(str)
-            .str.contains("Local|Saltillo|Bodega|Mañana|Tarde", case=False, na=False)
-        )
-        df_local.loc[~es_local, "Turno"] = "🌍 Foráneo"
-
-        # Clave de grupo
-        df_local["Grupo_Clave"] = df_local.apply(
-            lambda r: f"{r['Turno']} – {r['Fecha_Entrega_Str']}", axis=1
-        )
-
-        # Orden por fecha real (NaT al final)
-        if "Fecha_Entrega" in df_local.columns:
-            df_local["_fecha_sort"] = df_local["Fecha_Entrega"].fillna(pd.Timestamp.max)
-        else:
-            df_local["_fecha_sort"] = pd.Timestamp.max
-
-        grupos = []
-        for (clave, _), sub in sorted(
-            df_local.groupby(["Grupo_Clave", "Fecha_Entrega"], dropna=False),
-            key=lambda x: x[0][1],
-        ):
-            if "Hora_Registro" in sub.columns:
-                sub = sub.sort_values(by="Hora_Registro", ascending=False)
-            grupos.append(
-                (
-                    f"{clave} ({len(sub)})",
-                    sub.drop(columns=["_fecha_sort"], errors="ignore"),
-                )
-            )
-
-        if not grupos:
-            st.info("Sin grupos para mostrar.")
-            return
-
-        num_cols_per_row = 3
-        for i in range(0, len(grupos), num_cols_per_row):
-            fila = grupos[i : i + num_cols_per_row]
-            cols = st.columns(len(fila))
-            for j, (titulo, df_grupo) in enumerate(fila):
-                with cols[j]:
-                    st.markdown(f"### {titulo}")
-                    # Vista enriquecida con tipo de caso, envío y turno
-                    base_cols = [
-                        "Tipo",
-                        "Tipo_Envio_Original",
-                        "Turno",
-                        "Fecha_Entrega",
-                        "Cliente",
-                        "Vendedor_Registro",
-                        "Estado",
-                        "Folio_Factura",
-                    ]
-                    for c in base_cols:
-                        if c not in df_grupo.columns:
-                            df_grupo[c] = ""
-                    vista = df_grupo[base_cols].copy()
-                    vista.rename(
-                        columns={
-                            "Tipo_Envio_Original": "Tipo Envío",
-                            "Fecha_Entrega": "Fecha Entrega",
-                            "Vendedor_Registro": "Vendedor",
-                        },
-                        inplace=True,
-                    )
-                    vista["Fecha Entrega"] = vista["Fecha Entrega"].apply(
-                        lambda x: x.strftime("%d/%m") if pd.notna(x) else ""
-                    )
-                    vista["Cliente"] = vista.apply(
-                        lambda r: f"📄 <b>{r['Folio_Factura']}</b> 🤝 {r['Cliente']}",
-                        axis=1,
-                    )
-                    st.markdown(
-                        vista[
-                            [
-                                "Tipo",
-                                "Tipo Envío",
-                                "Turno",
-                                "Fecha Entrega",
-                                "Cliente",
-                                "Vendedor",
-                                "Estado",
-                            ]
-                        ].to_html(escape=False, index=False),
-                        unsafe_allow_html=True,
-                    )
-
-
