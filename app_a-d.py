@@ -1219,6 +1219,15 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
             st.markdown("##### 📝 Comentario del Pedido")
             st.info(comentario)
 
+        direccion_retorno = str(row.get("Direccion_Guia_Retorno", "")).strip()
+
+        if (
+            (row.get("Tipo_Envio") == "🚚 Pedido Foráneo" or origen_tab == "Foráneo")
+            and direccion_retorno
+        ):
+            st.markdown("📍 Dirección para guía de retorno:")
+            st.info(direccion_retorno)
+
 
         col_order_num.write(f"**{orden}**")
         folio_factura = row.get("Folio_Factura", "").strip()
