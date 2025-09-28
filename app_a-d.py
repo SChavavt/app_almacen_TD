@@ -942,17 +942,32 @@ def check_and_update_demorados(df_to_check, worksheet, headers):
     return df_to_check, False
 
 
+def marcar_contexto_pedido(row_id, origen_tab=None):
+    """Prepara el estado de sesión para mantener el contexto de un pedido tras un rerun."""
+
+    if origen_tab is not None:
+        st.session_state["subtab_local"] = origen_tab
+
+    expanded_pedidos = st.session_state.setdefault("expanded_pedidos", {})
+    expanded_pedidos[row_id] = True
+
+    expanded_subir_guia = st.session_state.setdefault("expanded_subir_guia", {})
+    expanded_subir_guia[row_id] = True
+
+    expanded_attachments = st.session_state.get("expanded_attachments")
+    if isinstance(expanded_attachments, dict):
+        expanded_attachments[row_id] = True
+
+    st.session_state["scroll_to_pedido_id"] = row_id
+    preserve_tab_state()
+    st.session_state["restore_tabs_after_print"] = True
+
+
 def fijar_y_preservar(row, origen_tab):
     """Preserva pestañas y expansores antes del rerun."""
     st.session_state["pedido_editado"] = row["ID_Pedido"]
     st.session_state["fecha_seleccionada"] = row.get("Fecha_Entrega", "")
     st.session_state["subtab_local"] = origen_tab
-
-    # ✅ Mantener expander de pedido y adjuntos abierto
-    st.session_state["expanded_pedidos"][row["ID_Pedido"]] = True
-    st.session_state["expanded_attachments"][row["ID_Pedido"]] = True
-    # ✅ Mantener expander de subir guía (si aplica)
-    st.session_state["expanded_subir_guia"][row["ID_Pedido"]] = True
 
     # 🔄 Sincronizar la pestaña principal desde la URL antes de preservar
     tab_val = st.query_params.get("tab")
@@ -964,10 +979,9 @@ def fijar_y_preservar(row, origen_tab):
         except (ValueError, TypeError):
             st.session_state["active_main_tab_index"] = 0
 
-    preserve_tab_state()
+    marcar_contexto_pedido(row["ID_Pedido"], origen_tab)
 
     # 🔁 Forzar un segundo rerun con las pestañas ya preservadas
-    st.session_state["restore_tabs_after_print"] = True
     st.rerun()
 
 
@@ -1408,6 +1422,7 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
                                 if flag_key in st.session_state:
                                     del st.session_state[flag_key]
 
+                                marcar_contexto_pedido(row["ID_Pedido"], origen_tab)
                                 st.rerun()
                             else:
                                 st.error("❌ No se pudo completar el pedido.")
@@ -1460,6 +1475,7 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
                         st.session_state["active_date_tab_t_index"] = st.session_state.get("active_date_tab_t_index", 0)
                         
                         st.cache_data.clear()
+                        marcar_contexto_pedido(row["ID_Pedido"], origen_tab)
                         st.rerun()
                     else:
                         st.error("❌ Falló la actualización del estado a 'En Proceso'.")
@@ -1534,6 +1550,7 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
                                 )
                                 st.cache_data.clear()
                                 st.cache_resource.clear()
+                                marcar_contexto_pedido(row["ID_Pedido"], origen_tab)
                                 st.rerun()
                             else:
                                 st.error(
@@ -1557,10 +1574,13 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
                         st.session_state["expanded_pedidos"][row['ID_Pedido']] = True
                         st.session_state["scroll_to_pedido_id"] = row["ID_Pedido"]
                         nuevo_texto = mod_texto + " [✔CONFIRMADO]"
-                        success = update_gsheet_cell(worksheet, headers, gsheet_row_index, "Modificacion_Surtido", nuevo_texto)
+                        success = update_gsheet_cell(
+                            worksheet, headers, gsheet_row_index, "Modificacion_Surtido", nuevo_texto
+                        )
                         if success:
                             st.success("✅ Cambios de surtido confirmados.")
                             st.cache_data.clear()
+                            marcar_contexto_pedido(row["ID_Pedido"], origen_tab)
                             st.rerun()
                         else:
                             st.error("❌ No se pudo confirmar la modificación.")
@@ -1741,6 +1761,7 @@ def mostrar_pedido_solo_guia(df, idx, row, orden, origen_tab, current_main_tab_l
                         )
                         set_active_main_tab(3)
                         st.cache_data.clear()
+                        marcar_contexto_pedido(row["ID_Pedido"], origen_tab)
                         st.rerun()
                     else:
                         st.error("❌ No se pudo actualizar Google Sheets con la guía.")
@@ -1795,6 +1816,7 @@ def mostrar_pedido_solo_guia(df, idx, row, orden, origen_tab, current_main_tab_l
                             set_active_main_tab(3)
                             st.cache_data.clear()
                             del st.session_state[flag_key]
+                            marcar_contexto_pedido(row["ID_Pedido"], origen_tab)
                             st.rerun()
                         else:
                             st.error("❌ No se pudo actualizar Google Sheets con el estado.")
