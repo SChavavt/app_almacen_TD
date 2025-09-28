@@ -8,6 +8,7 @@ import boto3
 import gspread.utils
 import time
 import unicodedata
+from itertools import count
 from zoneinfo import ZoneInfo
 from streamlit_autorefresh import st_autorefresh
 from textwrap import dedent
@@ -151,6 +152,12 @@ def compute_sort_key(row) -> pd.Timestamp:
     except Exception:
         pass
     return pd.Timestamp.max
+
+
+def assign_numbers(entries, counter):
+    for entry in entries:
+        entry["numero"] = next(counter)
+        entry.pop("sort_key", None)
 
 
 def format_cliente_line(row) -> str:
@@ -1183,6 +1190,9 @@ tab_labels = [
 ]
 tabs = st.tabs(tab_labels)
 
+# Contador compartido para numeración en vistas automáticas
+auto_card_counter = count(1)
+
 # ---------------------------
 # TAB 0: Local + Casos (Automática)
 # ---------------------------
@@ -1197,9 +1207,7 @@ with tabs[0]:
     if not df_casos_auto.empty:
         combined_entries.extend(build_entries_casos(df_casos_auto))
     combined_entries.sort(key=lambda e: e.get("sort_key", pd.Timestamp.max))
-    for idx, entry in enumerate(combined_entries, start=1):
-        entry["numero"] = idx
-        entry.pop("sort_key", None)
+    assign_numbers(combined_entries, auto_card_counter)
     render_auto_cards(combined_entries, layout="small")
 
 # ---------------------------
@@ -1219,9 +1227,7 @@ with tabs[1]:
     if not df_guias_auto.empty:
         combined_entries.extend(build_entries_guias(df_guias_auto))
     combined_entries.sort(key=lambda e: e.get("sort_key", pd.Timestamp.max))
-    for idx, entry in enumerate(combined_entries, start=1):
-        entry["numero"] = idx
-        entry.pop("sort_key", None)
+    assign_numbers(combined_entries, auto_card_counter)
     render_auto_cards(combined_entries, layout="large")
 
 # ---------------------------
