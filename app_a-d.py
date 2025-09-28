@@ -219,6 +219,7 @@ if "expanded_pedidos" not in st.session_state:
     st.session_state["expanded_pedidos"] = {}
     st.session_state["expanded_attachments"] = {}
     st.session_state["expanded_subir_guia"] = {}
+st.session_state.setdefault("guia_upload_success", {})
 if "expanded_devoluciones" not in st.session_state:
     st.session_state["expanded_devoluciones"] = {}
 if "expanded_garantias" not in st.session_state:
@@ -1489,6 +1490,27 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
                 "📦 Subir Archivos de Guía",
                 expanded=st.session_state["expanded_subir_guia"].get(row['ID_Pedido'], False),
             ):
+                guia_success_map = st.session_state.setdefault("guia_upload_success", {})
+                success_info = guia_success_map.get(row["ID_Pedido"])
+                if success_info:
+                    count = success_info.get("count", 0)
+                    destino_col = success_info.get("column")
+                    destino_label = (
+                        "Hoja de Ruta del Mensajero"
+                        if destino_col == "Hoja_Ruta_Mensajero"
+                        else "Adjuntos de Guía"
+                    )
+                    plural = "archivo" if count == 1 else "archivos"
+                    st.success(
+                        f"📦 Se subieron correctamente {count} {plural} en {destino_label}."
+                    )
+                    if st.button(
+                        "Aceptar",
+                        key=f"ack_guia_{row['ID_Pedido']}",
+                    ):
+                        guia_success_map.pop(row["ID_Pedido"], None)
+                        marcar_contexto_pedido(row["ID_Pedido"], origen_tab)
+                        st.rerun()
 
                 upload_key = f"file_guia_{row['ID_Pedido']}"
                 archivos_guia = st.file_uploader(
@@ -1545,12 +1567,14 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
                                     f"📤 {len(uploaded_keys)} guía(s) subida(s) con éxito.",
                                     icon="📦",
                                 )
-                                st.success(
-                                    f"📦 Se subieron correctamente {len(uploaded_keys)} archivo(s) de guía."
-                                )
+                                guia_success_map[row["ID_Pedido"]] = {
+                                    "count": len(uploaded_keys),
+                                    "column": target_col_for_guide,
+                                }
                                 st.cache_data.clear()
                                 st.cache_resource.clear()
                                 marcar_contexto_pedido(row["ID_Pedido"], origen_tab)
+                                preserve_tab_state()
                                 st.rerun()
                             else:
                                 st.error(
@@ -1715,6 +1739,25 @@ def mostrar_pedido_solo_guia(df, idx, row, orden, origen_tab, current_main_tab_l
         st.markdown("---")
         st.markdown("### 📦 Subir Archivos de Guía")
 
+        guia_success_map = st.session_state.setdefault("guia_upload_success", {})
+        success_info = guia_success_map.get(row["ID_Pedido"])
+        if success_info:
+            count = success_info.get("count", 0)
+            destino_col = success_info.get("column")
+            destino_label = (
+                "Hoja de Ruta del Mensajero"
+                if destino_col == "Hoja_Ruta_Mensajero"
+                else "Adjuntos de Guía"
+            )
+            plural = "archivo" if count == 1 else "archivos"
+            st.success(
+                f"📦 Se subieron correctamente {count} {plural} en {destino_label}."
+            )
+            if st.button("Aceptar", key=f"ack_guia_{row['ID_Pedido']}"):
+                guia_success_map.pop(row["ID_Pedido"], None)
+                marcar_contexto_pedido(row["ID_Pedido"], origen_tab)
+                st.rerun()
+
         # Uploader siempre visible (sin expander)
         upload_key = f"file_guia_only_{row['ID_Pedido']}"
         archivos_guia = st.file_uploader(
@@ -1756,12 +1799,14 @@ def mostrar_pedido_solo_guia(df, idx, row, orden, origen_tab, current_main_tab_l
                             f"📤 {len(uploaded_keys)} guía(s) subida(s) con éxito.",
                             icon="📦",
                         )
-                        st.success(
-                            f"📦 Se subieron correctamente {len(uploaded_keys)} archivo(s) de guía."
-                        )
+                        guia_success_map[row["ID_Pedido"]] = {
+                            "count": len(uploaded_keys),
+                            "column": "Adjuntos_Guia",
+                        }
                         set_active_main_tab(3)
                         st.cache_data.clear()
                         marcar_contexto_pedido(row["ID_Pedido"], origen_tab)
+                        preserve_tab_state()
                         st.rerun()
                     else:
                         st.error("❌ No se pudo actualizar Google Sheets con la guía.")
