@@ -1181,12 +1181,12 @@ st.caption(f"🕒 Última actualización: {datetime.now(TZ).strftime('%d/%m %H:%
 
 # Tabs principales
 tab_labels = [
-    "📍 Local + 🧰 Casos (Automática)",
-    "🌍 Foráneo + 🏙️ CDMX (Automática)",
     "📍 Local",
     "🌍 Foráneo",
     "🏙️ CDMX y Guías",
     "🧰 Casos Especiales",
+    "📍 Local + 🧰 Casos (Automática)",
+    "🌍 Foráneo + 🏙️ CDMX (Automática)",
 ]
 tabs = st.tabs(tab_labels)
 
@@ -1194,46 +1194,9 @@ tabs = st.tabs(tab_labels)
 auto_card_counter = count(1)
 
 # ---------------------------
-# TAB 0: Local + Casos (Automática)
+# TAB 0: Local
 # ---------------------------
 with tabs[0]:
-    st_autorefresh(interval=60000, key="auto_refresh_local_casos")
-    st.caption("♻️ Vista consolidada (Local + Casos) actualizada automáticamente cada 60 s.")
-    df_local_auto = get_local_orders(df_all)
-    df_casos_auto = get_casos_orders(df_all)
-    combined_entries = []
-    if not df_local_auto.empty:
-        combined_entries.extend(build_entries_local(df_local_auto))
-    if not df_casos_auto.empty:
-        combined_entries.extend(build_entries_casos(df_casos_auto))
-    combined_entries.sort(key=lambda e: e.get("sort_key", pd.Timestamp.max))
-    assign_numbers(combined_entries, auto_card_counter)
-    render_auto_cards(combined_entries, layout="small")
-
-# ---------------------------
-# TAB 1: Foráneo + CDMX (Automática)
-# ---------------------------
-with tabs[1]:
-    st_autorefresh(interval=60000, key="auto_refresh_foraneo_cdmx")
-    st.caption("♻️ Panel ampliado (Foráneo + CDMX) con actualización automática cada 60 s.")
-    df_for_auto = get_foraneo_orders(df_all)
-    df_cdmx_auto = get_cdmx_orders(df_all)
-    df_guias_auto = get_guias_orders(df_all)
-    combined_entries = []
-    if not df_for_auto.empty:
-        combined_entries.extend(build_entries_foraneo(df_for_auto))
-    if not df_cdmx_auto.empty:
-        combined_entries.extend(build_entries_cdmx(df_cdmx_auto))
-    if not df_guias_auto.empty:
-        combined_entries.extend(build_entries_guias(df_guias_auto))
-    combined_entries.sort(key=lambda e: e.get("sort_key", pd.Timestamp.max))
-    assign_numbers(combined_entries, auto_card_counter)
-    render_auto_cards(combined_entries, layout="large")
-
-# ---------------------------
-# TAB 2: Local
-# ---------------------------
-with tabs[2]:
     if df_all.empty:
         st.info("Sin datos en 'datos_pedidos'.")
     else:
@@ -1256,9 +1219,9 @@ with tabs[2]:
                         show_grouped_panel(df_turno, mode="local", group_turno=False)
 
 # ---------------------------
-# TAB 3: Foráneo
+# TAB 1: Foráneo
 # ---------------------------
-with tabs[3]:
+with tabs[1]:
     if df_all.empty:
         st.info("Sin datos en 'datos_pedidos'.")
     else:
@@ -1272,9 +1235,9 @@ with tabs[3]:
             show_grouped_panel(df_for, mode="foraneo")
 
 # ---------------------------
-# TAB 4: CDMX y Guías
+# TAB 2: CDMX y Guías
 # ---------------------------
-with tabs[4]:
+with tabs[2]:
     if df_all.empty:
         st.info("Sin datos en 'datos_pedidos'.")
     else:
@@ -1349,9 +1312,9 @@ with tabs[4]:
                     display_dataframe_with_formatting(df_g)
 
 # ---------------------------
-# TAB 5: Casos Especiales (Devoluciones + Garantías)
+# TAB 3: Casos Especiales (Devoluciones + Garantías)
 # ---------------------------
-with tabs[5]:
+with tabs[3]:
     casos = get_casos_orders(df_all)
     if casos.empty:
         st.info("Sin datos de devoluciones o garantías.")
@@ -1360,3 +1323,40 @@ with tabs[5]:
         status_counts_block_casos(casos)
         st.markdown("### 📚 Grupos (Local por Turno / Foráneo genérico)")
         show_grouped_panel_casos(casos)
+
+# ---------------------------
+# TAB 4: Local + Casos (Automática)
+# ---------------------------
+with tabs[4]:
+    st_autorefresh(interval=60000, key="auto_refresh_local_casos")
+    st.caption("♻️ Vista consolidada (Local + Casos) actualizada automáticamente cada 60 s.")
+    df_local_auto = get_local_orders(df_all)
+    df_casos_auto = get_casos_orders(df_all)
+    combined_entries = []
+    if not df_local_auto.empty:
+        combined_entries.extend(build_entries_local(df_local_auto))
+    if not df_casos_auto.empty:
+        combined_entries.extend(build_entries_casos(df_casos_auto))
+    combined_entries.sort(key=lambda e: e.get("sort_key", pd.Timestamp.max))
+    assign_numbers(combined_entries, auto_card_counter)
+    render_auto_cards(combined_entries, layout="small")
+
+# ---------------------------
+# TAB 5: Foráneo + CDMX (Automática)
+# ---------------------------
+with tabs[5]:
+    st_autorefresh(interval=60000, key="auto_refresh_foraneo_cdmx")
+    st.caption("♻️ Panel ampliado (Foráneo + CDMX) con actualización automática cada 60 s.")
+    df_for_auto = get_foraneo_orders(df_all)
+    df_cdmx_auto = get_cdmx_orders(df_all)
+    df_guias_auto = get_guias_orders(df_all)
+    combined_entries = []
+    if not df_for_auto.empty:
+        combined_entries.extend(build_entries_foraneo(df_for_auto))
+    if not df_cdmx_auto.empty:
+        combined_entries.extend(build_entries_cdmx(df_cdmx_auto))
+    if not df_guias_auto.empty:
+        combined_entries.extend(build_entries_guias(df_guias_auto))
+    combined_entries.sort(key=lambda e: e.get("sort_key", pd.Timestamp.max))
+    assign_numbers(combined_entries, auto_card_counter)
+    render_auto_cards(combined_entries, layout="large")
