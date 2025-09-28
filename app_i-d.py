@@ -211,9 +211,9 @@ def build_entries_local(df_local: pd.DataFrame):
         badges = unique_preserve([entry["turno"], entry["tipo_envio"]])
         details = []
         if entry["id_pedido"]:
-            details.append(f"🆔 {entry['id_pedido']}")
+            details.append(f"ID pedido: {entry['id_pedido']}")
         if entry["vendedor"]:
-            details.append(f"👤 {entry['vendedor']}")
+            details.append(f"Vendedor: {entry['vendedor']}")
         entry["badges"] = badges
         entry["details"] = unique_preserve(details)
         entries.append(entry)
@@ -227,11 +227,11 @@ def build_entries_casos(df_casos: pd.DataFrame):
         badges = unique_preserve([entry["tipo"], entry["turno"], entry["tipo_envio_original"]])
         details = []
         if entry["id_pedido"]:
-            details.append(f"🆔 {entry['id_pedido']}")
+            details.append(f"ID pedido: {entry['id_pedido']}")
         if entry["tipo_envio"] and entry["tipo_envio"] not in badges:
-            details.append(f"🚚 {entry['tipo_envio']}")
+            details.append(f"Tipo envío: {entry['tipo_envio']}")
         if entry["vendedor"]:
-            details.append(f"👤 {entry['vendedor']}")
+            details.append(f"Vendedor: {entry['vendedor']}")
         entry["badges"] = badges
         entry["details"] = unique_preserve(details)
         entries.append(entry)
@@ -245,11 +245,11 @@ def build_entries_foraneo(df_for: pd.DataFrame):
         badges = unique_preserve([entry["tipo_envio"], entry["turno"]])
         details = []
         if entry["id_pedido"]:
-            details.append(f"🆔 {entry['id_pedido']}")
+            details.append(f"ID pedido: {entry['id_pedido']}")
         if entry["tipo_envio_original"] and entry["tipo_envio_original"] not in badges:
-            details.append(f"📦 {entry['tipo_envio_original']}")
+            details.append(f"Tipo envío original: {entry['tipo_envio_original']}")
         if entry["vendedor"]:
-            details.append(f"👤 {entry['vendedor']}")
+            details.append(f"Vendedor: {entry['vendedor']}")
         entry["badges"] = badges
         entry["details"] = unique_preserve(details)
         entries.append(entry)
@@ -263,9 +263,9 @@ def build_entries_cdmx(df_cdmx: pd.DataFrame):
         badges = unique_preserve(["🏙️ Pedido CDMX", entry["tipo_envio"]])
         details = []
         if entry["id_pedido"]:
-            details.append(f"🆔 {entry['id_pedido']}")
+            details.append(f"ID pedido: {entry['id_pedido']}")
         if entry["vendedor"]:
-            details.append(f"👤 {entry['vendedor']}")
+            details.append(f"Vendedor: {entry['vendedor']}")
         entry["badges"] = badges
         entry["details"] = unique_preserve(details)
         entries.append(entry)
@@ -279,9 +279,9 @@ def build_entries_guias(df_guias: pd.DataFrame):
         badges = unique_preserve(["📋 Solicitud de Guía", entry["tipo_envio"]])
         details = []
         if entry["id_pedido"]:
-            details.append(f"🆔 {entry['id_pedido']}")
+            details.append(f"ID pedido: {entry['id_pedido']}")
         if entry["vendedor"]:
-            details.append(f"👤 {entry['vendedor']}")
+            details.append(f"Vendedor: {entry['vendedor']}")
         entry["badges"] = badges
         entry["details"] = unique_preserve(details)
         entries.append(entry)
@@ -305,15 +305,11 @@ def render_auto_cards(entries, layout: str = "small"):
                 f"<span class='auto-card-badge'>{badge}</span>" for badge in badges
             ) + "</div>"
 
-        meta_parts = []
+        meta_text = ""
         if entry.get("fecha"):
-            meta_parts.append(f"📅 {entry['fecha']}")
-        if entry.get("hora"):
-            meta_parts.append(f"⏰ {entry['hora']}")
+            meta_text = f"Fecha entrega: {entry['fecha']}"
         meta_html = (
-            "<div class='auto-card-meta'>" + " · ".join(meta_parts) + "</div>"
-            if meta_parts
-            else ""
+            f"<div class='auto-card-meta'>{meta_text}</div>" if meta_text else ""
         )
 
         detail_parts = []
