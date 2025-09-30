@@ -1384,17 +1384,13 @@ with tabs[4]:
 # ---------------------------
 with tabs[5]:
     st_autorefresh(interval=60000, key="auto_refresh_foraneo_cdmx")
-    st.caption("Foráneo con casos asignados • actualización automática cada 60 s.")
+    st.caption(
+        "Foráneo automático • solo pedidos foráneos y casos con envío foráneo asignado."
+    )
     df_for_auto = get_foraneo_orders(df_all)
-    df_cdmx_auto = get_cdmx_orders(df_all)
-    df_guias_auto = get_guias_orders(df_all)
     combined_entries = []
     if not df_for_auto.empty:
         combined_entries.extend(build_entries_foraneo(df_for_auto))
-    if not df_cdmx_auto.empty:
-        combined_entries.extend(build_entries_cdmx(df_cdmx_auto))
-    if not df_guias_auto.empty:
-        combined_entries.extend(build_entries_guias(df_guias_auto))
     combined_entries.sort(key=lambda e: e.get("sort_key", pd.Timestamp.max))
     assign_numbers(combined_entries, auto_card_counter)
     render_auto_cards(combined_entries, layout="large")
