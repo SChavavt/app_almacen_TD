@@ -9,6 +9,7 @@ import gspread.utils
 import time
 import unicodedata
 from itertools import count
+from typing import Optional, Tuple
 from zoneinfo import ZoneInfo
 from streamlit_autorefresh import st_autorefresh
 from textwrap import dedent
@@ -329,45 +330,64 @@ def render_auto_cards(entries, layout: str = "small"):
 
 
 def get_local_orders(df_all: pd.DataFrame) -> pd.DataFrame:
-    if df_all.empty or "Tipo_Envio" not in df_all.columns:
+    base_local = pd.DataFrame()
+    if not df_all.empty and "Tipo_Envio" in df_all.columns:
+        base_local = df_all[
+            df_all["Tipo_Envio"].isin(["📍 Pedido Local", "🎓 Cursos y Eventos"])
+        ].copy()
+
+    casos_local, _ = get_case_envio_assignments(df_all)
+    frames = [df for df in [base_local, casos_local] if not df.empty]
+    if not frames:
         return pd.DataFrame()
-    df_local = df_all[
-        df_all["Tipo_Envio"].isin(["📍 Pedido Local", "🎓 Cursos y Eventos"])
-    ].copy()
-    if df_local.empty:
-        return df_local
+
+    df_local = pd.concat(frames, ignore_index=True, sort=False)
+
     if "Completados_Limpiado" not in df_local.columns:
         df_local["Completados_Limpiado"] = ""
+
     df_local = df_local[
         ~(
             df_local["Estado"].isin(["🟢 Completado", "🟣 Cancelado", "✅ Viajó"])
             & (df_local["Completados_Limpiado"].astype(str).str.lower() == "sí")
         )
-    ]
+    ].copy()
+
     if "Turno" not in df_local.columns:
         df_local["Turno"] = ""
+
     df_local["Turno"] = df_local["Turno"].fillna("").astype(str)
     df_local.loc[df_local["Turno"].str.lower() == "nan", "Turno"] = ""
+
     mask_curso_evento = df_local["Tipo_Envio"] == "🎓 Cursos y Eventos"
     mask_turno_vacio = df_local["Turno"].str.strip() == ""
     df_local.loc[mask_curso_evento & mask_turno_vacio, "Turno"] = "🎓 Cursos y Eventos"
+
     return df_local
 
 
 def get_foraneo_orders(df_all: pd.DataFrame) -> pd.DataFrame:
-    if df_all.empty or "Tipo_Envio" not in df_all.columns:
+    base_foraneo = pd.DataFrame()
+    if not df_all.empty and "Tipo_Envio" in df_all.columns:
+        base_foraneo = df_all[df_all["Tipo_Envio"] == "🚚 Pedido Foráneo"].copy()
+
+    _, casos_foraneo = get_case_envio_assignments(df_all)
+    frames = [df for df in [base_foraneo, casos_foraneo] if not df.empty]
+    if not frames:
         return pd.DataFrame()
-    df_for = df_all[df_all["Tipo_Envio"] == "🚚 Pedido Foráneo"].copy()
-    if df_for.empty:
-        return df_for
+
+    df_for = pd.concat(frames, ignore_index=True, sort=False)
+
     if "Completados_Limpiado" not in df_for.columns:
         df_for["Completados_Limpiado"] = ""
+
     df_for = df_for[
         ~(
             df_for["Estado"].isin(["🟢 Completado", "🟣 Cancelado", "✅ Viajó"])
             & (df_for["Completados_Limpiado"].astype(str).str.lower() == "sí")
         )
-    ]
+    ].copy()
+
     return df_for
 
 
@@ -511,6 +531,49 @@ def get_casos_orders(df_all: pd.DataFrame) -> pd.DataFrame:
 
     casos["Tipo"] = casos["Tipo_Caso"].apply(_etiqueta_tipo_caso)
     return casos
+
+
+def _normalize_envio_original(value: str) -> str:
+    """Remove emojis/accents and return a lowercased representation."""
+    cleaned = sanitize_text(value)
+    if not cleaned:
+        return ""
+    normalized = unicodedata.normalize("NFKD", cleaned)
+    ascii_only = normalized.encode("ascii", "ignore").decode("ascii")
+    filtered = "".join(ch if (ch.isalnum() or ch.isspace()) else " " for ch in ascii_only)
+    return " ".join(filtered.lower().split())
+
+
+def get_case_envio_assignments(
+    df_all: pd.DataFrame, df_casos: Optional[pd.DataFrame] = None
+) -> Tuple[pd.DataFrame, pd.DataFrame]:
+    """Return local/foráneo assignments detected from special cases."""
+
+    if df_casos is None:
+        df_casos = get_casos_orders(df_all)
+
+    if df_casos.empty:
+        return pd.DataFrame(), pd.DataFrame()
+
+    working = df_casos.copy()
+    if "Turno" not in working.columns:
+        working["Turno"] = ""
+
+    normalized = working["Tipo_Envio_Original"].apply(_normalize_envio_original)
+    turno_clean = working["Turno"].astype(str).fillna("").str.strip()
+
+    mask_local = normalized.str.contains("local", na=False) & (turno_clean != "")
+    mask_foraneo = normalized.str.contains("foraneo", na=False)
+
+    df_local = working[mask_local].copy()
+    if not df_local.empty:
+        df_local["Tipo_Envio"] = "📍 Pedido Local"
+
+    df_foraneo = working[mask_foraneo].copy()
+    if not df_foraneo.empty:
+        df_foraneo["Tipo_Envio"] = "🚚 Pedido Foráneo"
+
+    return df_local, df_foraneo
 # Estilos para paneles automáticos
 st.markdown(
     """
