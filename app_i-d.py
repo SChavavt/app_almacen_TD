@@ -1369,12 +1369,13 @@ with tabs[4]:
     st_autorefresh(interval=60000, key="auto_refresh_local_casos")
     st.caption("Local con casos asignados • actualización automática cada 60 s.")
     df_local_auto = get_local_orders(df_all)
-    df_casos_auto = get_casos_orders(df_all)
+    casos_local_auto, _ = get_case_envio_assignments(df_all)
     combined_entries = []
     if not df_local_auto.empty:
         combined_entries.extend(build_entries_local(df_local_auto))
-    if not df_casos_auto.empty:
-        combined_entries.extend(build_entries_casos(df_casos_auto))
+    if not casos_local_auto.empty:
+        casos_local_entries = build_entries_casos(casos_local_auto)
+        combined_entries.extend(casos_local_entries)
     combined_entries.sort(key=lambda e: e.get("sort_key", pd.Timestamp.max))
     assign_numbers(combined_entries, auto_card_counter)
     render_auto_cards(combined_entries, layout="small")
