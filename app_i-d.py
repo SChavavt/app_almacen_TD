@@ -1024,6 +1024,9 @@ def show_grouped_panel(df_source, mode: str = "local", group_turno: bool = True)
         return
     work = df_source.copy()
     work["Fecha_Entrega_Str"] = work["Fecha_Entrega"].dt.strftime("%d/%m")
+    work["Fecha_Entrega_Str"] = work["Fecha_Entrega_Str"].fillna("Sin fecha")
+    mask_fecha_vacia = work["Fecha_Entrega_Str"].astype(str).str.strip() == ""
+    work.loc[mask_fecha_vacia, "Fecha_Entrega_Str"] = "Sin fecha"
     if mode == "foraneo" or (mode == "local" and not group_turno):
         work["Grupo_Clave"] = work["Fecha_Entrega_Str"]
     else:
@@ -1031,9 +1034,13 @@ def show_grouped_panel(df_source, mode: str = "local", group_turno: bool = True)
             lambda r: f"{group_key_local(r)} – {r['Fecha_Entrega_Str']}", axis=1
         )
     grupos = []
-    grouped = work.groupby(["Grupo_Clave", "Fecha_Entrega"])
+    grouped = work.groupby(["Grupo_Clave", "Fecha_Entrega"], dropna=False)
     for (clave, f), df_g in sorted(
-        grouped, key=lambda x: x[0][1] if pd.notna(x[0][1]) else pd.Timestamp.max
+        grouped,
+        key=lambda x: (
+            pd.isna(x[0][1]),
+            x[0][1] if pd.notna(x[0][1]) else pd.Timestamp.max,
+        ),
     ):
         if not df_g.empty:
             grupos.append((f"{clave} ({len(df_g)})", df_g))
