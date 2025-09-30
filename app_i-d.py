@@ -1223,8 +1223,8 @@ tab_labels = [
     "🌍 Foráneo",
     "🏙️ CDMX y Guías",
     "🧰 Casos Especiales",
-    "📍 Local + 🧰 Casos (Automática)",
-    "🌍 Foráneo + 🏙️ CDMX (Automática)",
+    "⚙️ Auto Local",
+    "🚚 Auto Foráneo",
 ]
 tabs = st.tabs(tab_labels)
 
@@ -1363,11 +1363,11 @@ with tabs[3]:
         show_grouped_panel_casos(casos)
 
 # ---------------------------
-# TAB 4: Local + Casos (Automática)
+# TAB 4: Auto Local (Casos asignados)
 # ---------------------------
 with tabs[4]:
     st_autorefresh(interval=60000, key="auto_refresh_local_casos")
-    st.caption("♻️ Vista consolidada (Local + Casos) actualizada automáticamente cada 60 s.")
+    st.caption("Local con casos asignados • actualización automática cada 60 s.")
     df_local_auto = get_local_orders(df_all)
     df_casos_auto = get_casos_orders(df_all)
     combined_entries = []
@@ -1380,11 +1380,11 @@ with tabs[4]:
     render_auto_cards(combined_entries, layout="small")
 
 # ---------------------------
-# TAB 5: Foráneo + CDMX (Automática)
+# TAB 5: Auto Foráneo (Casos asignados)
 # ---------------------------
 with tabs[5]:
     st_autorefresh(interval=60000, key="auto_refresh_foraneo_cdmx")
-    st.caption("♻️ Panel ampliado (Foráneo + CDMX) con actualización automática cada 60 s.")
+    st.caption("Foráneo con casos asignados • actualización automática cada 60 s.")
     df_for_auto = get_foraneo_orders(df_all)
     df_cdmx_auto = get_cdmx_orders(df_all)
     df_guias_auto = get_guias_orders(df_all)
