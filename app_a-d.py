@@ -1953,40 +1953,9 @@ if not df_main.empty:
         st.rerun()
 
     # --- 🔔 Alerta de Modificación de Surtido ---  
-    def has_real_attachment(value):
-        if isinstance(value, (list, tuple, set)):
-            return any(has_real_attachment(item) for item in value)
-
-        if value is None:
-            return False
-
-        if isinstance(value, float) and pd.isna(value):
-            return False
-
-        if isinstance(value, str):
-            cleaned_value = value.strip()
-            if cleaned_value.lower() in ("", "[]", "null", "none"):
-                return False
-
-            try:
-                parsed_value = json.loads(cleaned_value)
-            except (json.JSONDecodeError, TypeError, ValueError):
-                return True
-
-            return has_real_attachment(parsed_value)
-
-        return True
-
-    mod_surtido_text_mask = (
-        df_main['Modificacion_Surtido'].astype(str).str.strip() != ''
-    ) & (
-        ~df_main['Modificacion_Surtido'].astype(str).str.endswith('[✔CONFIRMADO]')
-    )
-
-    mod_surtido_attachment_mask = df_main['Adjuntos_Surtido'].apply(has_real_attachment)
-
     mod_surtido_df = df_main[
-        (mod_surtido_text_mask | mod_surtido_attachment_mask) &
+        (df_main['Modificacion_Surtido'].astype(str).str.strip() != '') &
+        (~df_main['Modificacion_Surtido'].astype(str).str.endswith('[✔CONFIRMADO]')) &
         (~df_main['Estado'].isin(['🟢 Completado', '✅ Viajó'])) &
         (df_main['Refacturacion_Tipo'].fillna("").str.strip() != "Datos Fiscales")
     ]
