@@ -858,6 +858,66 @@ def resolve_storage_url(s3_client_param, value):
     return get_s3_file_download_url(s3_client_param, val)
 
 
+def _normalize_urls(value):
+    """Return a list of URL-like strings parsed from ``value``.
+
+    The helper accepts raw strings, JSON-encoded arrays/dicts, or iterables and
+    returns a list without empty entries or duplicates.
+    """
+
+    if value is None:
+        return []
+
+    if isinstance(value, (list, tuple, set)):
+        candidates = list(value)
+    else:
+        try:
+            if pd.isna(value):  # type: ignore[arg-type]
+                return []
+        except Exception:
+            pass
+
+        raw = str(value).strip()
+        if not raw or raw.lower() in {"nan", "none", "n/a"}:
+            return []
+
+        candidates = []
+        try:
+            parsed = json.loads(raw)
+        except Exception:
+            parsed = None
+
+        if isinstance(parsed, (list, tuple)):
+            candidates.extend(parsed)
+        elif isinstance(parsed, dict):
+            for key in ("url", "URL", "link", "href"):
+                if parsed.get(key):
+                    candidates.append(parsed[key])
+        else:
+            candidates.extend(p for p in re.split(r"[,\n;]+", raw) if p)
+
+    normalized = []
+    seen = set()
+    for candidate in candidates:
+        if isinstance(candidate, dict):
+            for key in ("url", "URL", "link", "href"):
+                val = candidate.get(key)
+                if val and isinstance(val, str):
+                    trimmed = val.strip()
+                    if trimmed and trimmed not in seen:
+                        seen.add(trimmed)
+                        normalized.append(trimmed)
+        else:
+            if candidate is None:
+                continue
+            candidate_str = str(candidate).strip()
+            if candidate_str and candidate_str not in seen:
+                seen.add(candidate_str)
+                normalized.append(candidate_str)
+
+    return normalized
+
+
 # --- Helper Functions (existing in app.py) ---
 
 def ordenar_pedidos_custom(df_pedidos_filtrados):
@@ -1651,6 +1711,11 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
                     if "surtido" in f['title'].lower()
                 ]
 
+            adjuntos_surtido_urls = _normalize_urls(row.get("Adjuntos_Surtido", ""))
+            hay_adjuntos_texto = bool(mod_surtido_archivos_mencionados_raw)
+            hay_adjuntos_s3 = bool(surtido_files_in_s3)
+            hay_adjuntos_campo = bool(adjuntos_surtido_urls)
+
             all_surtido_related_files = []
             for f_name in mod_surtido_archivos_mencionados_raw:
                 cleaned_f_name = f_name.split('/')[-1]
@@ -1663,29 +1728,51 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
                 if not any(s_file['title'] == existing_f['title'] for existing_f in all_surtido_related_files):
                     all_surtido_related_files.append(s_file)
 
+            for raw_url in adjuntos_surtido_urls:
+                resolved_url = resolve_storage_url(s3_client_param, raw_url)
+                if not resolved_url:
+                    continue
+
+                original_path = urlparse(raw_url).path
+                resolved_path = urlparse(resolved_url).path
+                base_name = os.path.basename(original_path) or os.path.basename(resolved_path) or raw_url
+                base_name = unquote(base_name)
+
+                all_surtido_related_files.append({
+                    'title': base_name,
+                    'url': resolved_url,
+                })
+
             if all_surtido_related_files:
                 st.markdown("Adjuntos de Modificación (Surtido/Relacionados):")
                 archivos_ya_mostrados_para_mod = set()
 
                 for file_info in all_surtido_related_files:
-                    file_name_to_display = file_info['title']
-                    object_key_to_download = file_info['key']
+                    file_name_to_display = file_info.get('title')
+                    if not file_name_to_display:
+                        continue
 
                     if file_name_to_display in archivos_ya_mostrados_para_mod:
                         continue
 
+                    object_key_to_download = file_info.get('key', '')
+                    final_url = file_info.get('url')
+
                     try:
-                        if not object_key_to_download.startswith(S3_ATTACHMENT_PREFIX) and pedido_folder_prefix:
-                            object_key_to_download = f"{pedido_folder_prefix}{file_name_to_display}"
+                        if not final_url:
+                            if object_key_to_download and not object_key_to_download.startswith(S3_ATTACHMENT_PREFIX) and pedido_folder_prefix:
+                                object_key_to_download = f"{pedido_folder_prefix}{file_name_to_display}"
 
-                        if not pedido_folder_prefix and not object_key_to_download.startswith(S3_BUCKET_NAME):
-                            st.warning(f"⚠️ No se pudo determinar la ruta S3 para: {file_name_to_display}")
-                            continue
+                            if object_key_to_download:
+                                if not pedido_folder_prefix and not object_key_to_download.startswith(S3_ATTACHMENT_PREFIX) and not object_key_to_download.startswith(S3_BUCKET_NAME):
+                                    st.warning(f"⚠️ No se pudo determinar la ruta S3 para: {file_name_to_display}")
+                                    continue
 
-                        presigned_url = get_s3_file_download_url(s3_client_param, object_key_to_download)
-                        if presigned_url and presigned_url != "#":
+                                final_url = get_s3_file_download_url(s3_client_param, object_key_to_download)
+
+                        if final_url and final_url != "#":
                             st.markdown(
-                                f'- 📄 <a href="{presigned_url}" target="_blank">{file_name_to_display}</a>',
+                                f'- 📄 <a href="{final_url}" target="_blank">{file_name_to_display}</a>',
                                 unsafe_allow_html=True,
                             )
                         else:
@@ -1695,7 +1782,8 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
 
                     archivos_ya_mostrados_para_mod.add(file_name_to_display)
             else:
-                st.info("No hay adjuntos específicos para esta modificación de surtido mencionados en el texto.")
+                if not (hay_adjuntos_texto or hay_adjuntos_s3 or hay_adjuntos_campo):
+                    st.info("No hay adjuntos específicos para esta modificación de surtido mencionados en el texto.")
 
 
     # --- Scroll automático al pedido impreso (si corresponde) ---
