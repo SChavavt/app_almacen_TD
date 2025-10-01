@@ -1525,8 +1525,7 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
                 if st.button(
                     "📤 Subir Guía",
                     key=f"btn_subir_guia_{row['ID_Pedido']}",
-                    on_click=fijar_y_preservar,
-                    args=(row, origen_tab),
+                    on_click=preserve_tab_state,
                 ):
 
                     if archivos_guia:
@@ -1573,6 +1572,19 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
                                 }
                                 st.cache_data.clear()
                                 st.cache_resource.clear()
+                                st.session_state["pedido_editado"] = row["ID_Pedido"]
+                                st.session_state["fecha_seleccionada"] = row.get(
+                                    "Fecha_Entrega", ""
+                                )
+                                st.session_state["subtab_local"] = origen_tab
+                                tab_val = st.query_params.get("tab")
+                                if tab_val is not None:
+                                    if isinstance(tab_val, list):
+                                        tab_val = tab_val[0]
+                                    try:
+                                        st.session_state["active_main_tab_index"] = int(tab_val)
+                                    except (ValueError, TypeError):
+                                        st.session_state["active_main_tab_index"] = 0
                                 marcar_contexto_pedido(row["ID_Pedido"], origen_tab)
                                 preserve_tab_state()
                                 st.rerun()
