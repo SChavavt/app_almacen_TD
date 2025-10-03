@@ -1117,12 +1117,20 @@ with tabs[2]:
                 st.session_state["mensaje_exito"] = "🔄 Seguimiento de garantía guardado correctamente."
                 st.rerun()
 
-        comentario_usuario = st.text_area("📝 Comentario desde almacén")
-        if st.button("Guardar comentario"):
-            existente = row.get("Comentario", "")
-            nuevo_coment = f"[Almacen] {comentario_usuario.strip()}"
-            valor_final = f"{existente} | {nuevo_coment}" if existente else nuevo_coment
+    comentario_usuario = st.text_area("📝 Comentario desde almacén", key="comentario_almacen")
+    if st.button("Guardar comentario"):
+        comentario_limpio = comentario_usuario.strip()
+        if not comentario_limpio:
+            st.warning("⚠️ Debes ingresar un comentario antes de guardarlo.")
+        else:
+            existente = str(row.get("Comentario", "") or "")
+            nuevo_comentario = f"[ALMACÉN 🏷️] {comentario_limpio}"
+            if existente.strip():
+                valor_final = f"{existente.rstrip()}\n{nuevo_comentario}"
+            else:
+                valor_final = nuevo_comentario
             hoja.update_cell(gspread_row_idx, row_df.columns.get_loc("Comentario") + 1, valor_final)
+            st.session_state["comentario_almacen"] = ""
             st.session_state["pedido_modificado"] = pedido_sel
             st.session_state["pedido_modificado_source"] = source_sel
             st.session_state["mensaje_exito"] = "📝 Comentario guardado correctamente."
