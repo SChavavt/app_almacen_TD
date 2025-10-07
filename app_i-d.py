@@ -801,9 +801,52 @@ except Exception as e:
 
 
 # --- Carga de datos ---
+def _fetch_with_retry(worksheet, cache_key: str, max_attempts: int = 4):
+    """Lee datos de una worksheet con reintentos y respaldo local.
+
+    Cuando Google Sheets responde con un 429 (límite de cuota) se realizan
+    reintentos exponenciales. Si todos los intentos fallan pero se cuenta con
+    datos almacenados en la sesión, se devuelven como último recurso para evitar
+    detener la aplicación.
+    """
+
+    def _is_rate_limit_error(error: Exception) -> bool:
+        text = str(error).lower()
+        return "rate_limit" in text or "quota" in text or "429" in text
+
+    last_success = st.session_state.get(cache_key)
+    last_error: Optional[Exception] = None
+    for attempt in range(1, max_attempts + 1):
+        try:
+            data = worksheet.get_all_values()
+            st.session_state[cache_key] = data
+            return data
+        except gspread.exceptions.APIError as e:
+            last_error = e
+            if not _is_rate_limit_error(e):
+                raise
+
+            wait_time = min(30, 2 ** attempt)
+            st.warning(
+                f"⚠️ Límite de lectura de Google Sheets alcanzado. "
+                f"Reintentando en {wait_time} s (intento {attempt}/{max_attempts})."
+            )
+            time.sleep(wait_time)
+
+    if last_success is not None:
+        st.info(
+            "ℹ️ Usando datos en caché debido al límite de cuota de Google Sheets."
+        )
+        return last_success
+
+    if last_error is not None:
+        raise last_error
+    raise RuntimeError("No se pudieron obtener datos de Google Sheets")
+
+
 @st.cache_data(ttl=60)
 def load_data_from_gsheets():
-    data = worksheet_main.get_all_values()
+    data = _fetch_with_retry(worksheet_main, "_cache_datos_pedidos")
     if not data:
         return pd.DataFrame()
     headers = data[0]
@@ -836,7 +879,7 @@ def load_data_from_gsheets():
 @st.cache_data(ttl=60)
 def load_casos_from_gsheets():
     """Lee 'casos_especiales' y normaliza headers/fechas."""
-    data = worksheet_casos.get_all_values()
+    data = _fetch_with_retry(worksheet_casos, "_cache_casos_especiales")
     if not data:
         return pd.DataFrame()
     raw_headers = data[0]
