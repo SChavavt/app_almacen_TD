@@ -639,6 +639,43 @@ def batch_update_gsheet_cells(worksheet, updates_list):
 
     return False
 
+
+def mirror_guide_value(
+    worksheet,
+    headers,
+    gsheet_row_index,
+    df,
+    df_idx,
+    row,
+    source_column,
+    value,
+):
+    """Replica el valor de guía en la columna complementaria cuando está vacía."""
+
+    if not value:
+        return headers
+
+    secondary_col = (
+        "Hoja_Ruta_Mensajero" if source_column == "Adjuntos_Guia" else "Adjuntos_Guia"
+    )
+
+    existing_secondary = str(row.get(secondary_col, "")).strip()
+    if existing_secondary:
+        return headers
+
+    if secondary_col not in headers:
+        headers = ensure_columns(worksheet, headers, [secondary_col])
+
+    if update_gsheet_cell(worksheet, headers, gsheet_row_index, secondary_col, value):
+        df.at[df_idx, secondary_col] = value
+        row[secondary_col] = value
+        st.toast(
+            "🔁 También se actualizó la columna complementaria de guías para mantener la compatibilidad.",
+            icon="ℹ️",
+        )
+
+    return headers
+
 def get_column_indices(worksheet, column_names):
     """Obtain fresh column indices for the specified headers."""
     indices = {}
@@ -1025,7 +1062,8 @@ def marcar_contexto_pedido(row_id, origen_tab=None):
 
 
 def fijar_y_preservar(row, origen_tab):
-    """Preserva pestañas y expansores antes del rerun."""
+    """Preserva pestañas y expansores antes de un posible rerun."""
+
     st.session_state["pedido_editado"] = row["ID_Pedido"]
     st.session_state["fecha_seleccionada"] = row.get("Fecha_Entrega", "")
     st.session_state["subtab_local"] = origen_tab
@@ -1041,9 +1079,6 @@ def fijar_y_preservar(row, origen_tab):
             st.session_state["active_main_tab_index"] = 0
 
     marcar_contexto_pedido(row["ID_Pedido"], origen_tab)
-
-    # 🔁 Forzar un segundo rerun con las pestañas ya preservadas
-    st.rerun()
 
 
 def preserve_tab_state():
@@ -1092,41 +1127,51 @@ def mostrar_pedido_detalle(
     if col_print_btn.button(
         "🖨 Imprimir",
         key=f"print_{row['ID_Pedido']}_{origen_tab}",
-        on_click=fijar_y_preservar,
-        args=(row, origen_tab),
     ):
+        fijar_y_preservar(row, origen_tab)
+        should_rerun = True
+
         if row["Estado"] in ["🟡 Pendiente", "🔴 Demorado"]:
             zona_mexico = timezone("America/Mexico_City")
             now = datetime.now(zona_mexico)
             now_str = now.strftime("%Y-%m-%d %H:%M:%S")
 
-            estado_col_idx = headers.index("Estado") + 1
-            hora_proc_col_idx = headers.index("Hora_Proceso") + 1
-
-            updates = [
-                {
-                    "range": gspread.utils.rowcol_to_a1(
-                        gsheet_row_index, estado_col_idx
-                    ),
-                    "values": [["🔵 En Proceso"]],
-                },
-                {
-                    "range": gspread.utils.rowcol_to_a1(
-                        gsheet_row_index, hora_proc_col_idx
-                    ),
-                    "values": [[now_str]],
-                },
-            ]
-            if batch_update_gsheet_cells(worksheet, updates):
-                df.at[idx, "Estado"] = "🔵 En Proceso"
-                df.at[idx, "Hora_Proceso"] = now_str
-                row["Estado"] = "🔵 En Proceso"
-                st.toast("📄 Estado actualizado a 'En Proceso'", icon="📌")
+            try:
+                estado_col_idx = headers.index("Estado") + 1
+                hora_proc_col_idx = headers.index("Hora_Proceso") + 1
+            except ValueError:
+                st.error(
+                    "❌ No se encontraron las columnas 'Estado' y/o 'Hora_Proceso' en Google Sheets."
+                )
+                should_rerun = False
             else:
-                st.error("❌ Falló la actualización del estado a 'En Proceso'.")
+                updates = [
+                    {
+                        "range": gspread.utils.rowcol_to_a1(
+                            gsheet_row_index, estado_col_idx
+                        ),
+                        "values": [["🔵 En Proceso"]],
+                    },
+                    {
+                        "range": gspread.utils.rowcol_to_a1(
+                            gsheet_row_index, hora_proc_col_idx
+                        ),
+                        "values": [[now_str]],
+                    },
+                ]
+                if batch_update_gsheet_cells(worksheet, updates):
+                    df.at[idx, "Estado"] = "🔵 En Proceso"
+                    df.at[idx, "Hora_Proceso"] = now_str
+                    row["Estado"] = "🔵 En Proceso"
+                    st.toast("📄 Estado actualizado a 'En Proceso'", icon="📌")
+                else:
+                    st.error("❌ Falló la actualización del estado a 'En Proceso'.")
+                    should_rerun = False
 
-        st.session_state["scroll_to_pedido_id"] = row["ID_Pedido"]
-        st.session_state["print_clicked"] = row["ID_Pedido"]
+        if should_rerun:
+            st.session_state["scroll_to_pedido_id"] = row["ID_Pedido"]
+            st.session_state["print_clicked"] = row["ID_Pedido"]
+            st.rerun()
 
 def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, worksheet, headers, s3_client_param):
     """
@@ -1622,6 +1667,17 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
                                 else:
                                     df.at[idx, "Adjuntos_Guia"] = nueva_lista
                                     row["Adjuntos_Guia"] = nueva_lista
+
+                                headers = mirror_guide_value(
+                                    worksheet,
+                                    headers,
+                                    gsheet_row_index,
+                                    df,
+                                    idx,
+                                    row,
+                                    target_col_for_guide,
+                                    nueva_lista,
+                                )
                                 st.toast(
                                     f"📤 {len(uploaded_keys)} guía(s) subida(s) con éxito.",
                                     icon="📦",
@@ -1895,6 +1951,16 @@ def mostrar_pedido_solo_guia(df, idx, row, orden, origen_tab, current_main_tab_l
                     if success:
                         df.at[idx, "Adjuntos_Guia"] = nueva_lista
                         row["Adjuntos_Guia"] = nueva_lista
+                        headers = mirror_guide_value(
+                            worksheet,
+                            headers,
+                            gsheet_row_index,
+                            df,
+                            idx,
+                            row,
+                            "Adjuntos_Guia",
+                            nueva_lista,
+                        )
                         st.toast(
                             f"📤 {len(uploaded_keys)} guía(s) subida(s) con éxito.",
                             icon="📦",
