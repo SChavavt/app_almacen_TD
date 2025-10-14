@@ -133,6 +133,15 @@ def collect_tab_locations(
 
 
 
+def es_pedido_local_no_entregado(row: Any) -> bool:
+    """Determina si el pedido local aún no ha sido entregado."""
+
+    tipo = str(row.get("Tipo_Envio", "")).strip()
+    estado_entrega = str(row.get("Estado_Entrega", "")).strip()
+    return tipo == "📍 Pedido Local" and estado_entrega == "⏳ No Entregado"
+
+
+
 st.set_page_config(page_title="Recepción de Pedidos TD", layout="wide")
 
 # 🔁 Restaurar pestañas activas si venimos de una acción que modificó datos
@@ -433,7 +442,8 @@ def process_sheet_data(all_data: list[list[str]]) -> tuple[pd.DataFrame, list[st
         'ID_Pedido', 'Folio_Factura', 'Hora_Registro', 'Vendedor_Registro', 'Cliente',
         'Tipo_Envio', 'Fecha_Entrega', 'Comentario', 'Modificacion_Surtido',
         'Adjuntos', 'Adjuntos_Surtido', 'Adjuntos_Guia',
-        'Estado', 'Estado_Pago', 'Fecha_Completado', 'Hora_Proceso', 'Turno'
+        'Estado', 'Estado_Pago', 'Fecha_Completado', 'Hora_Proceso', 'Turno',
+        'Estado_Entrega'
     ]
 
 
@@ -454,6 +464,8 @@ def process_sheet_data(all_data: list[list[str]]) -> tuple[pd.DataFrame, list[st
     df['Tipo_Envio'] = df['Tipo_Envio'].astype(str).str.strip()
     df['Turno'] = df['Turno'].astype(str).str.strip()
     df['Estado'] = df['Estado'].astype(str).str.strip()
+    if 'Estado_Entrega' in df.columns:
+        df['Estado_Entrega'] = df['Estado_Entrega'].astype(str).str.strip()
 
     return df, headers
 
@@ -1207,16 +1219,29 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
         mod_texto = str(row.get("Modificacion_Surtido", "")).strip()
         hay_modificacion = mod_texto != ""
 
+        es_local_no_entregado = es_pedido_local_no_entregado(row)
+        tipo_envio_actual = row.get("Tipo_Envio")
 
         # --- Cambiar Fecha y Turno ---
-        if row['Estado'] not in ["🟢 Completado", "✅ Viajó"] and row.get("Tipo_Envio") in ["📍 Pedido Local", "🚚 Pedido Foráneo"]:
-            # Muestra los controles solo cuando el usuario lo solicite para evitar
-            # renderizar innecesariamente muchos widgets (que pueden provocar el
-            # error "Failed to fetch dynamically imported module").
-            mostrar_cambio = st.checkbox(
-                "📅 Cambiar Fecha y Turno",
-                key=f"chk_fecha_{row['ID_Pedido']}",
+        puede_cambiar_fecha = (
+            tipo_envio_actual in ["📍 Pedido Local", "🚚 Pedido Foráneo"]
+            and (
+                row['Estado'] not in ["🟢 Completado", "✅ Viajó"]
+                or es_local_no_entregado
             )
+        )
+
+        if puede_cambiar_fecha:
+            # Muestra los controles solo cuando el usuario lo solicite, excepto
+            # para pedidos locales completados sin entrega, donde deben estar
+            # siempre visibles.
+            if es_local_no_entregado:
+                mostrar_cambio = True
+            else:
+                mostrar_cambio = st.checkbox(
+                    "📅 Cambiar Fecha y Turno",
+                    key=f"chk_fecha_{row['ID_Pedido']}",
+                )
 
             if mostrar_cambio:
                 col_current_info_date, col_current_info_turno, _ = st.columns([1, 1, 2])
@@ -1233,7 +1258,7 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
                 col_current_info_date.info(f"**Fecha actual:** {fecha_mostrar}")
 
                 current_turno = row.get("Turno", "")
-                if row.get("Tipo_Envio") == "📍 Pedido Local":
+                if tipo_envio_actual == "📍 Pedido Local":
                     col_current_info_turno.info(f"**Turno actual:** {current_turno}")
                 else:
                     col_current_info_turno.empty()
@@ -1262,7 +1287,7 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
                     key=fecha_key,
                 )
 
-                if row.get("Tipo_Envio") == "📍 Pedido Local" and origen_tab in ["Mañana", "Tarde"]:
+                if tipo_envio_actual == "📍 Pedido Local" and origen_tab in ["Mañana", "Tarde"]:
                     turno_options = ["", "☀️ Local Mañana", "🌙 Local Tarde"]
                     if st.session_state[turno_key] not in turno_options:
                         st.session_state[turno_key] = turno_options[0]
@@ -1292,7 +1317,7 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
                             }
                         )
 
-                    if row.get("Tipo_Envio") == "📍 Pedido Local" and origen_tab in ["Mañana", "Tarde"]:
+                    if tipo_envio_actual == "📍 Pedido Local" and origen_tab in ["Mañana", "Tarde"]:
                         nuevo_turno = st.session_state[turno_key]
                         if nuevo_turno != current_turno:
                             col_idx = headers.index("Turno") + 1
@@ -1311,7 +1336,7 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
                                 df.at[idx, "Fecha_Entrega"] = nueva_fecha_str
                             if (
                                 "Turno" in headers
-                                and row.get("Tipo_Envio") == "📍 Pedido Local"
+                                and tipo_envio_actual == "📍 Pedido Local"
                             ):
                                 df.at[idx, "Turno"] = st.session_state[turno_key]
 
@@ -1367,16 +1392,19 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
 
 
 
-        mostrar_pedido_detalle(
-            df,
-            idx,
-            row,
-            origen_tab,
-            worksheet,
-            headers,
-            gsheet_row_index,
-            col_print_btn,
-        )
+        if not es_local_no_entregado:
+            mostrar_pedido_detalle(
+                df,
+                idx,
+                row,
+                origen_tab,
+                worksheet,
+                headers,
+                gsheet_row_index,
+                col_print_btn,
+            )
+        else:
+            col_print_btn.write("")
 
 
 
@@ -1426,125 +1454,128 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
 
 
         # Complete Button with confirmation
-        flag_key = f"confirm_complete_id_{row['ID_Pedido']}"
-        if col_complete_btn.button(
-            "🟢 Completar",
-            key=f"complete_button_{row['ID_Pedido']}_{origen_tab}",
-            disabled=disabled_if_completed,
-        ):
-            st.session_state[flag_key] = row["ID_Pedido"]
+        if not es_local_no_entregado:
+            flag_key = f"confirm_complete_id_{row['ID_Pedido']}"
+            if col_complete_btn.button(
+                "🟢 Completar",
+                key=f"complete_button_{row['ID_Pedido']}_{origen_tab}",
+                disabled=disabled_if_completed,
+            ):
+                st.session_state[flag_key] = row["ID_Pedido"]
 
-        if st.session_state.get(flag_key) == row["ID_Pedido"]:
-            st.warning("¿Estás seguro de completar este pedido?")
-            confirm_col, cancel_col = st.columns(2)
-            with confirm_col:
-                if st.button(
-                    "Confirmar",
-                    key=f"confirm_complete_{row['ID_Pedido']}_{origen_tab}",
-                ):
-                    try:
-                        if gsheet_row_index <= 0:
-                            st.error(
-                                f"❌ No se puede completar el pedido '{row['ID_Pedido']}' porque su fila en Google Sheets no es válida."
-                            )
+            if st.session_state.get(flag_key) == row["ID_Pedido"]:
+                st.warning("¿Estás seguro de completar este pedido?")
+                confirm_col, cancel_col = st.columns(2)
+                with confirm_col:
+                    if st.button(
+                        "Confirmar",
+                        key=f"confirm_complete_{row['ID_Pedido']}_{origen_tab}",
+                    ):
+                        try:
+                            if gsheet_row_index <= 0:
+                                st.error(
+                                    f"❌ No se puede completar el pedido '{row['ID_Pedido']}' porque su fila en Google Sheets no es válida."
+                                )
+                                if flag_key in st.session_state:
+                                    del st.session_state[flag_key]
+                            else:
+                                estado_col_idx = headers.index("Estado") + 1
+                                fecha_completado_col_idx = (
+                                    headers.index("Fecha_Completado") + 1
+                                )
+
+                                zona_mexico = timezone("America/Mexico_City")
+                                now = datetime.now(zona_mexico)
+                                now_str = now.strftime("%Y-%m-%d %H:%M:%S")
+
+                                updates = [
+                                    {
+                                        "range": gspread.utils.rowcol_to_a1(
+                                            gsheet_row_index, estado_col_idx
+                                        ),
+                                        "values": [["🟢 Completado"]],
+                                    },
+                                    {
+                                        "range": gspread.utils.rowcol_to_a1(
+                                            gsheet_row_index, fecha_completado_col_idx
+                                        ),
+                                        "values": [[now_str]],
+                                    },
+                                ]
+
+                                if batch_update_gsheet_cells(worksheet, updates):
+                                    df.loc[idx, "Estado"] = "🟢 Completado"
+                                    df.loc[idx, "Fecha_Completado"] = now
+                                    st.success(
+                                        f"✅ Pedido {row['ID_Pedido']} completado exitosamente."
+                                    )
+
+                                    # 🔁 Mantener pestaña activa
+                                    st.session_state["pedido_editado"] = row["ID_Pedido"]
+                                    st.session_state["fecha_seleccionada"] = row.get(
+                                        "Fecha_Entrega", ""
+                                    )
+                                    st.session_state["subtab_local"] = origen_tab
+
+                                    st.cache_data.clear()
+
+                                    try:
+                                        time.sleep(0.5)
+                                        estado_actual = worksheet.cell(
+                                            gsheet_row_index, estado_col_idx
+                                        ).value
+                                        if estado_actual != "🟢 Completado":
+                                            st.warning(
+                                                "⚠️ El pedido se marcó como completado, pero aún no "
+                                                "se refleja en Google Sheets. La vista se actualizará "
+                                                "de todos modos."
+                                            )
+                                    except Exception as refresh_error:
+                                        st.warning(
+                                            f"⚠️ No se pudo verificar la actualización en Google Sheets: {refresh_error}"
+                                        )
+
+                                    set_active_main_tab(
+                                        st.session_state.get("active_main_tab_index", 0)
+                                    )
+                                    st.session_state["active_subtab_local_index"] = (
+                                        st.session_state.get(
+                                            "active_subtab_local_index", 0
+                                        )
+                                    )
+                                    st.session_state["active_date_tab_m_index"] = (
+                                        st.session_state.get(
+                                            "active_date_tab_m_index", 0
+                                        )
+                                    )
+                                    st.session_state["active_date_tab_t_index"] = (
+                                        st.session_state.get(
+                                            "active_date_tab_t_index", 0
+                                        )
+                                    )
+
+                                    if flag_key in st.session_state:
+                                        del st.session_state[flag_key]
+
+                                    marcar_contexto_pedido(row["ID_Pedido"], origen_tab)
+                                    st.rerun()
+                                else:
+                                    st.error("❌ No se pudo completar el pedido.")
+                                    if flag_key in st.session_state:
+                                        del st.session_state[flag_key]
+                        except Exception as e:
+                            st.error(f"Error al completar el pedido: {e}")
                             if flag_key in st.session_state:
                                 del st.session_state[flag_key]
-                        else:
-                            estado_col_idx = headers.index("Estado") + 1
-                            fecha_completado_col_idx = (
-                                headers.index("Fecha_Completado") + 1
-                            )
-
-                            zona_mexico = timezone("America/Mexico_City")
-                            now = datetime.now(zona_mexico)
-                            now_str = now.strftime("%Y-%m-%d %H:%M:%S")
-
-                            updates = [
-                                {
-                                    "range": gspread.utils.rowcol_to_a1(
-                                        gsheet_row_index, estado_col_idx
-                                    ),
-                                    "values": [["🟢 Completado"]],
-                                },
-                                {
-                                    "range": gspread.utils.rowcol_to_a1(
-                                        gsheet_row_index, fecha_completado_col_idx
-                                    ),
-                                    "values": [[now_str]],
-                                },
-                            ]
-
-                            if batch_update_gsheet_cells(worksheet, updates):
-                                df.loc[idx, "Estado"] = "🟢 Completado"
-                                df.loc[idx, "Fecha_Completado"] = now
-                                st.success(
-                                    f"✅ Pedido {row['ID_Pedido']} completado exitosamente."
-                                )
-
-                                # 🔁 Mantener pestaña activa
-                                st.session_state["pedido_editado"] = row["ID_Pedido"]
-                                st.session_state["fecha_seleccionada"] = row.get(
-                                    "Fecha_Entrega", ""
-                                )
-                                st.session_state["subtab_local"] = origen_tab
-
-                                st.cache_data.clear()
-
-                                try:
-                                    time.sleep(0.5)
-                                    estado_actual = worksheet.cell(
-                                        gsheet_row_index, estado_col_idx
-                                    ).value
-                                    if estado_actual != "🟢 Completado":
-                                        st.warning(
-                                            "⚠️ El pedido se marcó como completado, pero aún no "
-                                            "se refleja en Google Sheets. La vista se actualizará "
-                                            "de todos modos."
-                                        )
-                                except Exception as refresh_error:
-                                    st.warning(
-                                        f"⚠️ No se pudo verificar la actualización en Google Sheets: {refresh_error}"
-                                    )
-
-                                set_active_main_tab(
-                                    st.session_state.get("active_main_tab_index", 0)
-                                )
-                                st.session_state["active_subtab_local_index"] = (
-                                    st.session_state.get(
-                                        "active_subtab_local_index", 0
-                                    )
-                                )
-                                st.session_state["active_date_tab_m_index"] = (
-                                    st.session_state.get(
-                                        "active_date_tab_m_index", 0
-                                    )
-                                )
-                                st.session_state["active_date_tab_t_index"] = (
-                                    st.session_state.get(
-                                        "active_date_tab_t_index", 0
-                                    )
-                                )
-
-                                if flag_key in st.session_state:
-                                    del st.session_state[flag_key]
-
-                                marcar_contexto_pedido(row["ID_Pedido"], origen_tab)
-                                st.rerun()
-                            else:
-                                st.error("❌ No se pudo completar el pedido.")
-                                if flag_key in st.session_state:
-                                    del st.session_state[flag_key]
-                    except Exception as e:
-                        st.error(f"Error al completar el pedido: {e}")
+                with cancel_col:
+                    if st.button(
+                        "Cancelar",
+                        key=f"cancel_complete_{row['ID_Pedido']}_{origen_tab}",
+                    ):
                         if flag_key in st.session_state:
                             del st.session_state[flag_key]
-            with cancel_col:
-                if st.button(
-                    "Cancelar",
-                    key=f"cancel_complete_{row['ID_Pedido']}_{origen_tab}",
-                ):
-                    if flag_key in st.session_state:
-                        del st.session_state[flag_key]
+        else:
+            col_complete_btn.write("")
 
                 
         # ✅ BOTÓN PROCESAR MODIFICACIÓN - Solo para pedidos con estado 🛠 Modificación
@@ -2096,7 +2127,7 @@ required_cols_main = [
     "Estado", "Fecha_Completado", "Hora_Proceso",
     "Adjuntos_Guia", "Hoja_Ruta_Mensajero",
     "Completados_Limpiado",
-    "Turno", "Fecha_Entrega", "Modificacion_Surtido"
+    "Turno", "Fecha_Entrega", "Modificacion_Surtido", "Estado_Entrega"
 ]
 headers_main = ensure_columns(worksheet_main, headers_main, required_cols_main)
 
@@ -2137,7 +2168,19 @@ if not df_main.empty:
             f"⚠️ Hay {mod_surtido_count} pedido(s) con **Modificación de Surtido** ➤ {ubicaciones_str}"
         )
 
-    df_pendientes_proceso_demorado = df_main[df_main["Estado"].isin(["🟡 Pendiente", "🔵 En Proceso", "🔴 Demorado", "🛠 Modificación"])].copy()
+    estados_visibles = ["🟡 Pendiente", "🔵 En Proceso", "🔴 Demorado", "🛠 Modificación"]
+    mask_estados_activos = df_main["Estado"].isin(estados_visibles)
+    estado_entrega_series = df_main.get("Estado_Entrega")
+    if estado_entrega_series is not None:
+        estado_entrega_normalizado = estado_entrega_series.astype(str).str.strip()
+    else:
+        estado_entrega_normalizado = pd.Series([""] * len(df_main))
+    mask_local_no_entregado = (
+        (df_main["Estado"] == "🟢 Completado")
+        & (df_main["Tipo_Envio"] == "📍 Pedido Local")
+        & (estado_entrega_normalizado == "⏳ No Entregado")
+    )
+    df_pendientes_proceso_demorado = df_main[mask_estados_activos | mask_local_no_entregado].copy()
 
     df_demorados_activos = df_pendientes_proceso_demorado[
         df_pendientes_proceso_demorado["Estado"] == "🔴 Demorado"
