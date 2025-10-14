@@ -211,6 +211,9 @@ def build_entries_local(df_local: pd.DataFrame):
         entry = build_base_entry(row, "📍 Local")
         badges = unique_preserve([entry["turno"], entry["tipo_envio"]])
         details = []
+        estado_entrega = sanitize_text(row.get("Estado_Entrega", ""))
+        if estado_entrega == "⏳ No Entregado":
+            details.append("⏳ Entrega: No Entregado")
         entry["badges"] = badges
         entry["details"] = unique_preserve(details)
         entries.append(entry)
@@ -346,12 +349,16 @@ def get_local_orders(df_all: pd.DataFrame) -> pd.DataFrame:
     if "Completados_Limpiado" not in df_local.columns:
         df_local["Completados_Limpiado"] = ""
 
-    df_local = df_local[
-        ~(
-            df_local["Estado"].isin(["🟢 Completado", "🟣 Cancelado", "✅ Viajó"])
-            & (df_local["Completados_Limpiado"].astype(str).str.lower() == "sí")
-        )
-    ].copy()
+    if "Estado_Entrega" in df_local.columns:
+        estado_entrega_col = df_local["Estado_Entrega"].astype(str).str.strip()
+        mask_no_entregado = estado_entrega_col == "⏳ No Entregado"
+    else:
+        mask_no_entregado = pd.Series(False, index=df_local.index, dtype=bool)
+
+    filtro_completados = df_local["Estado"].isin(["🟢 Completado", "🟣 Cancelado", "✅ Viajó"])
+    filtro_limpiado = df_local["Completados_Limpiado"].astype(str).str.lower() == "sí"
+
+    df_local = df_local[~(filtro_completados & filtro_limpiado & ~mask_no_entregado)].copy()
 
     if "Turno" not in df_local.columns:
         df_local["Turno"] = ""
@@ -999,11 +1006,23 @@ def display_dataframe_with_formatting(df_to_display):
             lambda x: x.strftime("%d/%m") if pd.notna(x) else ""
         )
 
-    mostrar_cols = [
-        c
-        for c in ["Fecha Entrega", "Tipo Envío", "Cliente", "Vendedor", "Estado"]
-        if c in df_vista.columns
-    ]
+    if "Estado_Entrega" in df_to_display.columns:
+        estado_entrega_series = df_to_display["Estado_Entrega"].astype(str).str.strip()
+        mask_no_entregado = estado_entrega_series == "⏳ No Entregado"
+        if mask_no_entregado.any():
+            df_vista["Estado Entrega"] = estado_entrega_series.where(
+                mask_no_entregado, ""
+            )
+
+    columnas_base = ["Fecha Entrega", "Tipo Envío", "Cliente", "Vendedor", "Estado"]
+    if "Estado Entrega" in df_vista.columns:
+        if "Estado" in columnas_base:
+            idx_estado = columnas_base.index("Estado")
+        else:
+            idx_estado = len(columnas_base)
+        columnas_base.insert(idx_estado, "Estado Entrega")
+
+    mostrar_cols = [c for c in columnas_base if c in df_vista.columns]
     df_vista = df_vista[mostrar_cols]
 
     st.markdown(df_vista.to_html(escape=False, index=False), unsafe_allow_html=True)
