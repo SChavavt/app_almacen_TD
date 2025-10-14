@@ -1244,7 +1244,18 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
                 )
 
             if mostrar_cambio:
-                col_current_info_date, col_current_info_turno, _ = st.columns([1, 1, 2])
+                if es_local_no_entregado:
+                    (
+                        col_current_info_date,
+                        col_current_info_turno,
+                        col_estado_entrega,
+                        _,
+                    ) = st.columns([1, 1, 1.3, 1.7])
+                else:
+                    col_current_info_date, col_current_info_turno, _ = st.columns(
+                        [1, 1, 2]
+                    )
+                    col_estado_entrega = None
 
                 fecha_actual_str = row.get("Fecha_Entrega", "")
                 fecha_actual_dt = (
@@ -1262,6 +1273,13 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
                     col_current_info_turno.info(f"**Turno actual:** {current_turno}")
                 else:
                     col_current_info_turno.empty()
+
+                if es_local_no_entregado and col_estado_entrega is not None:
+                    estado_entrega_valor = str(row.get("Estado_Entrega", "")).strip()
+                    if estado_entrega_valor:
+                        col_estado_entrega.info(
+                            f"**Estado de entrega:** {estado_entrega_valor}"
+                        )
 
                 today = datetime.now().date()
                 default_fecha = (
