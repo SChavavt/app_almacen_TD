@@ -1364,6 +1364,15 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
             st.markdown("##### 📝 Comentario del Pedido")
             st.info(comentario)
 
+        if es_local_no_entregado:
+            estado_entrega_valor = str(row.get("Estado_Entrega", "")).strip()
+            if estado_entrega_valor:
+                st.markdown("##### 🚚 Estado de Entrega")
+                st.info(
+                    "Este pedido se reabrió porque está marcado como "
+                    f"**{estado_entrega_valor}** en la bitácora de entrega."
+                )
+
         direccion_retorno = str(row.get("Direccion_Guia_Retorno", "")).strip()
 
         if (
