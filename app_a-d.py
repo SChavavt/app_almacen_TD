@@ -1667,6 +1667,29 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
                     st.success(
                         f"📦 Se subieron correctamente {count} {plural} en {destino_label}."
                     )
+                    files_info = success_info.get("files") or []
+                    if files_info:
+                        st.markdown("**Archivos guardados recientemente:**")
+                        for file_entry in files_info:
+                            raw_source = file_entry.get("key") or file_entry.get("url")
+                            display_name = file_entry.get("name") or os.path.basename(
+                                str(raw_source or "").strip()
+                            )
+                            download_url = resolve_storage_url(s3_client_param, raw_source)
+                            if download_url:
+                                st.markdown(
+                                    f"- <a href=\"{download_url}\" target=\"_blank\">{display_name}</a>",
+                                    unsafe_allow_html=True,
+                                )
+                            else:
+                                st.markdown(f"- {display_name}")
+                    ts_info = success_info.get("timestamp")
+                    caption_parts = [
+                        "Las guías quedan guardadas inmediatamente; el botón 'Aceptar' solo cierra este aviso."
+                    ]
+                    if ts_info:
+                        caption_parts.append(f"Registro: {ts_info} (hora CDMX).")
+                    st.caption(" ".join(caption_parts))
                     if st.button(
                         "Aceptar",
                         key=f"ack_guia_{row['ID_Pedido']}",
@@ -1703,6 +1726,10 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
                                 uploaded_keys.append(uploaded_key)
 
                         if uploaded_keys:
+                            uploaded_entries = [
+                                {"key": key, "name": os.path.basename(key)}
+                                for key in uploaded_keys
+                            ]
                             tipo_envio_str = str(row.get("Tipo_Envio", "")).lower()
                             use_hoja_ruta = ("devol" in tipo_envio_str) or ("garant" in tipo_envio_str)
                             target_col_for_guide = (
@@ -1743,6 +1770,8 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
                                 guia_success_map[row["ID_Pedido"]] = {
                                     "count": len(uploaded_keys),
                                     "column": target_col_for_guide,
+                                    "files": uploaded_entries,
+                                    "timestamp": mx_now_str(),
                                 }
                                 st.cache_data.clear()
                                 st.cache_resource.clear()
@@ -1967,6 +1996,29 @@ def mostrar_pedido_solo_guia(df, idx, row, orden, origen_tab, current_main_tab_l
             st.success(
                 f"📦 Se subieron correctamente {count} {plural} en {destino_label}."
             )
+            files_info = success_info.get("files") or []
+            if files_info:
+                st.markdown("**Archivos guardados recientemente:**")
+                for file_entry in files_info:
+                    raw_source = file_entry.get("key") or file_entry.get("url")
+                    display_name = file_entry.get("name") or os.path.basename(
+                        str(raw_source or "").strip()
+                    )
+                    download_url = resolve_storage_url(s3_client_param, raw_source)
+                    if download_url:
+                        st.markdown(
+                            f"- <a href=\"{download_url}\" target=\"_blank\">{display_name}</a>",
+                            unsafe_allow_html=True,
+                        )
+                    else:
+                        st.markdown(f"- {display_name}")
+            ts_info = success_info.get("timestamp")
+            caption_parts = [
+                "Las guías quedan guardadas inmediatamente; el botón 'Aceptar' solo cierra este aviso."
+            ]
+            if ts_info:
+                caption_parts.append(f"Registro: {ts_info} (hora CDMX).")
+            st.caption(" ".join(caption_parts))
             if st.button("Aceptar", key=f"ack_guia_{row['ID_Pedido']}"):
                 guia_success_map.pop(row["ID_Pedido"], None)
                 marcar_contexto_pedido(row["ID_Pedido"], origen_tab)
@@ -2001,6 +2053,10 @@ def mostrar_pedido_solo_guia(df, idx, row, orden, origen_tab, current_main_tab_l
                         uploaded_keys.append(uploaded_key)
 
                 if uploaded_keys:
+                    uploaded_entries = [
+                        {"key": key, "name": os.path.basename(key)}
+                        for key in uploaded_keys
+                    ]
                     nueva_lista = str(row.get("Adjuntos_Guia", "")).strip()
                     nueva_lista = (nueva_lista + ", " if nueva_lista else "") + ", ".join(uploaded_keys)
                     success = update_gsheet_cell(
@@ -2026,6 +2082,8 @@ def mostrar_pedido_solo_guia(df, idx, row, orden, origen_tab, current_main_tab_l
                         guia_success_map[row["ID_Pedido"]] = {
                             "count": len(uploaded_keys),
                             "column": "Adjuntos_Guia",
+                            "files": uploaded_entries,
+                            "timestamp": mx_now_str(),
                         }
                         set_active_main_tab(3)
                         st.cache_data.clear()
