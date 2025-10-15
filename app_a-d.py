@@ -778,58 +778,6 @@ def upload_file_to_s3(s3_client_param, bucket_name, file_obj, s3_key):
         return False, None
 
 
-def _clear_uploader_state(upload_key: Optional[str]) -> None:
-    """Elimina el estado de un ``file_uploader`` para evitar recargas extra."""
-
-    if not upload_key:
-        return
-
-    try:
-        st.session_state.pop(upload_key, None)
-    except Exception:
-        # Algunos backends pueden impedir la mutación directa; en ese caso lo ignoramos.
-        pass
-
-
-def _register_guide_upload(
-    order_id: str,
-    destino_col: str,
-    uploaded_entries: list[dict[str, str]],
-    origen_tab: Optional[str],
-    upload_key: Optional[str],
-    *,
-    extra_state: Optional[dict[str, Any]] = None,
-    clear_resource_cache: bool = False,
-    set_tab_index: Optional[int] = 3,
-):
-    """Centraliza tareas posteriores a una carga exitosa de guía."""
-
-    guia_success_map = st.session_state.setdefault("guia_upload_success", {})
-    guia_success_map[order_id] = {
-        "count": len(uploaded_entries),
-        "column": destino_col,
-        "files": uploaded_entries,
-        "timestamp": mx_now_str(),
-    }
-
-    if extra_state:
-        st.session_state.update(extra_state)
-
-    _clear_uploader_state(upload_key)
-
-    if set_tab_index is not None:
-        set_active_main_tab(set_tab_index)
-
-    st.cache_data.clear()
-    if clear_resource_cache and hasattr(st, "cache_resource"):
-        try:
-            st.cache_resource.clear()
-        except Exception:
-            pass
-
-    marcar_contexto_pedido(order_id, origen_tab)
-    preserve_tab_state()
-
 
 # --- AWS S3 Helper Functions (Copied from app_admin.py directly) ---
 
@@ -1706,7 +1654,6 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
                 expanded=st.session_state["expanded_subir_guia"].get(row['ID_Pedido'], False),
             ):
                 guia_success_map = st.session_state.setdefault("guia_upload_success", {})
-                upload_key = f"file_guia_{row['ID_Pedido']}"
                 success_info = guia_success_map.get(row["ID_Pedido"])
                 if success_info:
                     count = success_info.get("count", 0)
@@ -1749,9 +1696,9 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
                     ):
                         guia_success_map.pop(row["ID_Pedido"], None)
                         marcar_contexto_pedido(row["ID_Pedido"], origen_tab)
-                        _clear_uploader_state(upload_key)
-                        preserve_tab_state()
+                        st.rerun()
 
+                upload_key = f"file_guia_{row['ID_Pedido']}"
                 archivos_guia = st.file_uploader(
                     "📎 Subir guía(s) del pedido",
                     type=["pdf", "jpg", "jpeg", "png"],
@@ -1767,24 +1714,21 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
                     on_click=preserve_tab_state,
                 ):
 
-                    if not archivos_guia:
-                        st.warning("⚠️ Primero sube al menos un archivo de guía.")
-                    else:
-                        uploaded_urls = []
-                        with st.spinner("Subiendo guía(s) al almacén..."):
-                            for archivo in archivos_guia:
-                                ext = os.path.splitext(archivo.name)[1]
-                                s3_key = f"{row['ID_Pedido']}/guia_{uuid.uuid4().hex[:6]}{ext}"
-                                success, uploaded_key = upload_file_to_s3(
-                                    s3_client_param, S3_BUCKET_NAME, archivo, s3_key
-                                )
-                                if success and uploaded_key:
-                                    uploaded_urls.append(uploaded_key)
+                    if archivos_guia:
+                        uploaded_keys = []
+                        for archivo in archivos_guia:
+                            ext = os.path.splitext(archivo.name)[1]
+                            s3_key = f"{row['ID_Pedido']}/guia_{uuid.uuid4().hex[:6]}{ext}"
+                            success, uploaded_key = upload_file_to_s3(
+                                s3_client_param, S3_BUCKET_NAME, archivo, s3_key
+                            )
+                            if success and uploaded_key:
+                                uploaded_keys.append(uploaded_key)
 
-                        if uploaded_urls:
+                        if uploaded_keys:
                             uploaded_entries = [
-                                {"key": url, "name": os.path.basename(url)}
-                                for url in uploaded_urls
+                                {"key": key, "name": os.path.basename(key)}
+                                for key in uploaded_keys
                             ]
                             tipo_envio_str = str(row.get("Tipo_Envio", "")).lower()
                             use_hoja_ruta = ("devol" in tipo_envio_str) or ("garant" in tipo_envio_str)
@@ -1796,7 +1740,7 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
                             anterior = str(row.get(target_col_for_guide, "")).strip()
                             nueva_lista = (
                                 (anterior + ", " if anterior else "")
-                                + ", ".join(uploaded_urls)
+                                + ", ".join(uploaded_keys)
                             )
                             success = update_gsheet_cell(
                                 worksheet, headers, gsheet_row_index, target_col_for_guide, nueva_lista
@@ -1820,30 +1764,41 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
                                     nueva_lista,
                                 )
                                 st.toast(
-                                    f"📤 {len(uploaded_urls)} guía(s) subida(s) con éxito.",
+                                    f"📤 {len(uploaded_keys)} guía(s) subida(s) con éxito.",
                                     icon="📦",
                                 )
-                                extra_state = {
-                                    "pedido_editado": row["ID_Pedido"],
-                                    "fecha_seleccionada": row.get("Fecha_Entrega", ""),
-                                    "subtab_local": origen_tab,
+                                guia_success_map[row["ID_Pedido"]] = {
+                                    "count": len(uploaded_keys),
+                                    "column": target_col_for_guide,
+                                    "files": uploaded_entries,
+                                    "timestamp": mx_now_str(),
                                 }
-                                _register_guide_upload(
-                                    row["ID_Pedido"],
-                                    target_col_for_guide,
-                                    uploaded_entries,
-                                    origen_tab,
-                                    upload_key,
-                                    extra_state=extra_state,
-                                    clear_resource_cache=True,
-                                    set_tab_index=None,
+                                st.cache_data.clear()
+                                st.cache_resource.clear()
+                                st.session_state["pedido_editado"] = row["ID_Pedido"]
+                                st.session_state["fecha_seleccionada"] = row.get(
+                                    "Fecha_Entrega", ""
                                 )
+                                st.session_state["subtab_local"] = origen_tab
+                                tab_val = st.query_params.get("tab")
+                                if tab_val is not None:
+                                    if isinstance(tab_val, list):
+                                        tab_val = tab_val[0]
+                                    try:
+                                        st.session_state["active_main_tab_index"] = int(tab_val)
+                                    except (ValueError, TypeError):
+                                        st.session_state["active_main_tab_index"] = 0
+                                marcar_contexto_pedido(row["ID_Pedido"], origen_tab)
+                                preserve_tab_state()
+                                st.rerun()
                             else:
                                 st.error(
                                     "❌ No se pudo actualizar el Google Sheet con los archivos de guía."
                                 )
                         else:
                             st.warning("⚠️ No se subió ningún archivo válido.")
+                    else:
+                        st.warning("⚠️ No seleccionaste archivos de guía.")
         refact_tipo = str(row.get("Refacturacion_Tipo", "")).strip()
         refact_subtipo = str(row.get("Refacturacion_Subtipo", "")).strip()
 
@@ -2064,11 +2019,10 @@ def mostrar_pedido_solo_guia(df, idx, row, orden, origen_tab, current_main_tab_l
             if ts_info:
                 caption_parts.append(f"Registro: {ts_info} (hora CDMX).")
             st.caption(" ".join(caption_parts))
-        if st.button("Aceptar", key=f"ack_guia_{row['ID_Pedido']}"):
-            guia_success_map.pop(row["ID_Pedido"], None)
-            marcar_contexto_pedido(row["ID_Pedido"], origen_tab)
-            _clear_uploader_state(upload_key)
-            preserve_tab_state()
+            if st.button("Aceptar", key=f"ack_guia_{row['ID_Pedido']}"):
+                guia_success_map.pop(row["ID_Pedido"], None)
+                marcar_contexto_pedido(row["ID_Pedido"], origen_tab)
+                st.rerun()
 
         # Uploader siempre visible (sin expander)
         upload_key = f"file_guia_only_{row['ID_Pedido']}"
@@ -2090,24 +2044,21 @@ def mostrar_pedido_solo_guia(df, idx, row, orden, origen_tab, current_main_tab_l
             if not archivos_guia:
                 st.warning("⚠️ Primero sube al menos un archivo de guía.")
             else:
-                uploaded_urls = []
-                with st.spinner("Subiendo guía(s) al almacén..."):
-                    for archivo in archivos_guia:
-                        ext = os.path.splitext(archivo.name)[1]
-                        s3_key = f"{row['ID_Pedido']}/guia_{uuid.uuid4().hex[:6]}{ext}"
-                        success, uploaded_key = upload_file_to_s3(
-                            s3_client_param, S3_BUCKET_NAME, archivo, s3_key
-                        )
-                        if success and uploaded_key:
-                            uploaded_urls.append(uploaded_key)
+                uploaded_keys = []
+                for archivo in archivos_guia:
+                    ext = os.path.splitext(archivo.name)[1]
+                    s3_key = f"{row['ID_Pedido']}/guia_{uuid.uuid4().hex[:6]}{ext}"
+                    success, uploaded_key = upload_file_to_s3(s3_client_param, S3_BUCKET_NAME, archivo, s3_key)
+                    if success and uploaded_key:
+                        uploaded_keys.append(uploaded_key)
 
-                if uploaded_urls:
+                if uploaded_keys:
                     uploaded_entries = [
-                        {"key": url, "name": os.path.basename(url)}
-                        for url in uploaded_urls
+                        {"key": key, "name": os.path.basename(key)}
+                        for key in uploaded_keys
                     ]
                     nueva_lista = str(row.get("Adjuntos_Guia", "")).strip()
-                    nueva_lista = (nueva_lista + ", " if nueva_lista else "") + ", ".join(uploaded_urls)
+                    nueva_lista = (nueva_lista + ", " if nueva_lista else "") + ", ".join(uploaded_keys)
                     success = update_gsheet_cell(
                         worksheet, headers, gsheet_row_index, "Adjuntos_Guia", nueva_lista
                     )
@@ -2125,16 +2076,20 @@ def mostrar_pedido_solo_guia(df, idx, row, orden, origen_tab, current_main_tab_l
                             nueva_lista,
                         )
                         st.toast(
-                            f"📤 {len(uploaded_urls)} guía(s) subida(s) con éxito.",
+                            f"📤 {len(uploaded_keys)} guía(s) subida(s) con éxito.",
                             icon="📦",
                         )
-                        _register_guide_upload(
-                            row["ID_Pedido"],
-                            "Adjuntos_Guia",
-                            uploaded_entries,
-                            origen_tab,
-                            upload_key,
-                        )
+                        guia_success_map[row["ID_Pedido"]] = {
+                            "count": len(uploaded_keys),
+                            "column": "Adjuntos_Guia",
+                            "files": uploaded_entries,
+                            "timestamp": mx_now_str(),
+                        }
+                        set_active_main_tab(3)
+                        st.cache_data.clear()
+                        marcar_contexto_pedido(row["ID_Pedido"], origen_tab)
+                        preserve_tab_state()
+                        st.rerun()
                     else:
                         st.error("❌ No se pudo actualizar Google Sheets con la guía.")
                 else:
@@ -3257,10 +3212,9 @@ with main_tabs[5]:
 
             st.markdown("#### 📋 Documentación")
             st.caption("La guía es opcional; puedes completar la devolución sin subirla.")
-            guia_upload_key = f"guia_{folio}_{cliente}"
             guia_files = st.file_uploader(
                 "📋 Subir Guía de Retorno (opcional)",
-                key=guia_upload_key,
+                key=f"guia_{folio}_{cliente}",
                 help="Opcional: sube la guía de mensajería para el retorno del producto (PDF/JPG/PNG)",
                 on_change=handle_generic_upload_change,
                 args=(row_key, "expanded_devoluciones"),
@@ -3278,14 +3232,13 @@ with main_tabs[5]:
                         st.warning("⚠️ Primero selecciona al menos un archivo de guía.")
                     else:
                         folder = idp or f"caso_{(folio or 'sfolio')}_{(cliente or 'scliente')}".replace(" ", "_")
-                        uploaded_urls = []
-                        with st.spinner("Subiendo guía(s) al almacén..."):
-                            for guia_file in guia_files:
-                                key_guia = f"{folder}/guia_retorno_{datetime.now().isoformat()[:19].replace(':','')}_{guia_file.name}"
-                                success, tmp_key = upload_file_to_s3(s3_client, S3_BUCKET_NAME, guia_file, key_guia)
-                                if success and tmp_key:
-                                    uploaded_urls.append(tmp_key)
-                        if uploaded_urls:
+                        guia_keys = []
+                        for guia_file in guia_files:
+                            key_guia = f"{folder}/guia_retorno_{datetime.now().isoformat()[:19].replace(':','')}_{guia_file.name}"
+                            success, tmp_key = upload_file_to_s3(s3_client, S3_BUCKET_NAME, guia_file, key_guia)
+                            if success and tmp_key:
+                                guia_keys.append(tmp_key)
+                        if guia_keys:
                             gsheet_row_idx = None
                             if "ID_Pedido" in df_casos.columns and idp:
                                 matches = df_casos.index[df_casos["ID_Pedido"].astype(str).str.strip() == idp]
@@ -3305,7 +3258,7 @@ with main_tabs[5]:
                                 existing = str(row.get("Hoja_Ruta_Mensajero", "")).strip()
                                 if existing.lower() in ("nan", "none", "n/a"):
                                     existing = ""
-                                new_keys = ", ".join(uploaded_urls)
+                                new_keys = ", ".join(guia_keys)
                                 guia_final = f"{existing}, {new_keys}" if existing else new_keys
                                 ok = update_gsheet_cell(
                                     worksheet_casos,
@@ -3316,16 +3269,11 @@ with main_tabs[5]:
                                 )
                                 if ok:
                                     row["Hoja_Ruta_Mensajero"] = guia_final
-                                    st.toast(
-                                        f"📤 {len(uploaded_urls)} guía(s) subida(s) con éxito.",
-                                        icon="📦",
-                                    )
-                                    st.success(
-                                        f"📦 Se subieron correctamente {len(uploaded_urls)} archivo(s) de guía."
-                                    )
-                                    _clear_uploader_state(guia_upload_key)
+                                    st.toast(f"📤 {len(guia_keys)} guía(s) subida(s) con éxito.", icon="📦")
+                                    st.success(f"📦 Se subieron correctamente {len(guia_keys)} archivo(s) de guía.")
                                     set_active_main_tab(5)
                                     st.cache_data.clear()
+                                    st.rerun()
                                 else:
                                     st.error("❌ No se pudo actualizar la guía en Google Sheets.")
                         else:
@@ -3884,10 +3832,9 @@ with main_tabs[6]:  # 🛠 Garantías
             # === Guía y completar ===
             st.markdown("#### 📋 Documentación")
             st.caption("La guía es opcional; puedes completar la garantía sin subirla.")
-            guia_upload_key = f"guia_g_{unique_suffix}"
             guia_files = st.file_uploader(
                 "📋 Subir Guía de Envío/Retorno (Garantía) (opcional)",
-                key=guia_upload_key,
+                key=f"guia_g_{unique_suffix}",
                 help="Opcional: sube la guía de mensajería para envío de reposición o retorno (PDF/JPG/PNG)",
                 on_change=handle_generic_upload_change,
                 args=(row_key, "expanded_garantias"),
@@ -3905,14 +3852,13 @@ with main_tabs[6]:  # 🛠 Garantías
                         st.warning("⚠️ Primero selecciona al menos un archivo de guía.")
                     else:
                         folder = idp or f"garantia_{(folio or 'sfolio')}_{(cliente or 'scliente')}".replace(" ", "_")
-                        uploaded_urls = []
-                        with st.spinner("Subiendo guía(s) al almacén..."):
-                            for guia_file in guia_files:
-                                key_guia = f"{folder}/guia_garantia_{datetime.now().isoformat()[:19].replace(':','')}_{guia_file.name}"
-                                success, tmp_key = upload_file_to_s3(s3_client, S3_BUCKET_NAME, guia_file, key_guia)
-                                if success and tmp_key:
-                                    uploaded_urls.append(tmp_key)
-                        if uploaded_urls:
+                        guia_keys = []
+                        for guia_file in guia_files:
+                            key_guia = f"{folder}/guia_garantia_{datetime.now().isoformat()[:19].replace(':','')}_{guia_file.name}"
+                            success, tmp_key = upload_file_to_s3(s3_client, S3_BUCKET_NAME, guia_file, key_guia)
+                            if success and tmp_key:
+                                guia_keys.append(tmp_key)
+                        if guia_keys:
                             gsheet_row_idx = None
                             if "ID_Pedido" in df_casos.columns and idp:
                                 matches = df_casos.index[df_casos["ID_Pedido"].astype(str).str.strip() == idp]
@@ -3932,7 +3878,7 @@ with main_tabs[6]:  # 🛠 Garantías
                                 existing = str(row.get("Hoja_Ruta_Mensajero", "")).strip()
                                 if existing.lower() in ("nan", "none", "n/a"):
                                     existing = ""
-                                new_keys = ", ".join(uploaded_urls)
+                                new_keys = ", ".join(guia_keys)
                                 guia_final = f"{existing}, {new_keys}" if existing else new_keys
                                 ok = update_gsheet_cell(
                                     worksheet_casos,
@@ -3943,16 +3889,11 @@ with main_tabs[6]:  # 🛠 Garantías
                                 )
                                 if ok:
                                     row["Hoja_Ruta_Mensajero"] = guia_final
-                                    st.toast(
-                                        f"📤 {len(uploaded_urls)} guía(s) subida(s) con éxito.",
-                                        icon="📦",
-                                    )
-                                    st.success(
-                                        f"📦 Se subieron correctamente {len(uploaded_urls)} archivo(s) de guía."
-                                    )
-                                    _clear_uploader_state(guia_upload_key)
+                                    st.toast(f"📤 {len(guia_keys)} guía(s) subida(s) con éxito.", icon="📦")
+                                    st.success(f"📦 Se subieron correctamente {len(guia_keys)} archivo(s) de guía.")
                                     set_active_main_tab(6)
                                     st.cache_data.clear()
+                                    st.rerun()
                                 else:
                                     st.error("❌ No se pudo actualizar la guía en Google Sheets.")
                         else:
