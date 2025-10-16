@@ -1381,8 +1381,10 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
                     else today
                 )
 
-                fecha_key = f"new_fecha_{row['ID_Pedido']}"
-                turno_key = f"new_turno_{row['ID_Pedido']}"
+                widget_suffix = f"{row['ID_Pedido']}_{idx}_{origen_tab}"
+
+                fecha_key = f"new_fecha_{widget_suffix}"
+                turno_key = f"new_turno_{widget_suffix}"
 
                 if fecha_key not in st.session_state:
                     st.session_state[fecha_key] = default_fecha
@@ -1411,7 +1413,7 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
 
                 if st.button(
                     "✅ Aplicar Cambios de Fecha/Turno",
-                    key=f"btn_apply_{row['ID_Pedido']}",
+                    key=f"btn_apply_{widget_suffix}",
                 ):
                     st.session_state["expanded_pedidos"][row['ID_Pedido']] = True
                     cambios = []
