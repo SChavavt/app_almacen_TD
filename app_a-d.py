@@ -1125,6 +1125,72 @@ def handle_generic_upload_change(row_id, expander_dict_name):
     # El script se vuelve a ejecutar automáticamente después de este callback,
     # así que evitamos una llamada explícita a st.rerun().
 
+
+def render_guia_upload_feedback(
+    placeholder,
+    row_id,
+    origen_tab,
+    s3_client_param,
+    *,
+    ack_key: Optional[str] = None,
+):
+    """Muestra (y actualiza) el aviso de guías subidas sin forzar un rerun."""
+
+    guia_success_map = st.session_state.setdefault("guia_upload_success", {})
+    success_info = guia_success_map.get(row_id)
+
+    placeholder.empty()
+
+    if not success_info:
+        return
+
+    count = int(success_info.get("count") or 0)
+    destino_col = success_info.get("column")
+    destino_label = (
+        "Hoja de Ruta del Mensajero"
+        if destino_col == "Hoja_Ruta_Mensajero"
+        else "Adjuntos de Guía"
+    )
+    plural = "archivo" if count == 1 else "archivos"
+    files_info = success_info.get("files") or []
+    timestamp = success_info.get("timestamp")
+
+    with placeholder.container():
+        st.success(
+            f"📦 Se subieron correctamente {count} {plural} en {destino_label}."
+        )
+        if files_info:
+            st.markdown("**Archivos guardados recientemente:**")
+            for file_entry in files_info:
+                raw_source = file_entry.get("key") or file_entry.get("url")
+                display_name = file_entry.get("name") or os.path.basename(
+                    str(raw_source or "").strip()
+                )
+                download_url = resolve_storage_url(s3_client_param, raw_source)
+                if download_url:
+                    st.markdown(
+                        f"- <a href=\"{download_url}\" target=\"_blank\">{display_name}</a>",
+                        unsafe_allow_html=True,
+                    )
+                else:
+                    st.markdown(f"- {display_name}")
+
+        caption_parts = [
+            "Las guías quedan guardadas inmediatamente; el botón 'Aceptar' solo cierra este aviso."
+        ]
+        if timestamp:
+            caption_parts.append(f"Registro: {timestamp} (hora CDMX).")
+        st.caption(" ".join(caption_parts))
+
+        acknowledge_pressed = st.button(
+            "Aceptar",
+            key=ack_key or f"ack_guia_{row_id}",
+        )
+        if acknowledge_pressed:
+            guia_success_map.pop(row_id, None)
+            marcar_contexto_pedido(row_id, origen_tab)
+            placeholder.empty()
+
 def mostrar_pedido_detalle(
     df,
     idx,
@@ -1653,50 +1719,13 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
                 "📦 Subir Archivos de Guía",
                 expanded=st.session_state["expanded_subir_guia"].get(row['ID_Pedido'], False),
             ):
-                guia_success_map = st.session_state.setdefault("guia_upload_success", {})
-                success_info = guia_success_map.get(row["ID_Pedido"])
-                if success_info:
-                    count = success_info.get("count", 0)
-                    destino_col = success_info.get("column")
-                    destino_label = (
-                        "Hoja de Ruta del Mensajero"
-                        if destino_col == "Hoja_Ruta_Mensajero"
-                        else "Adjuntos de Guía"
-                    )
-                    plural = "archivo" if count == 1 else "archivos"
-                    st.success(
-                        f"📦 Se subieron correctamente {count} {plural} en {destino_label}."
-                    )
-                    files_info = success_info.get("files") or []
-                    if files_info:
-                        st.markdown("**Archivos guardados recientemente:**")
-                        for file_entry in files_info:
-                            raw_source = file_entry.get("key") or file_entry.get("url")
-                            display_name = file_entry.get("name") or os.path.basename(
-                                str(raw_source or "").strip()
-                            )
-                            download_url = resolve_storage_url(s3_client_param, raw_source)
-                            if download_url:
-                                st.markdown(
-                                    f"- <a href=\"{download_url}\" target=\"_blank\">{display_name}</a>",
-                                    unsafe_allow_html=True,
-                                )
-                            else:
-                                st.markdown(f"- {display_name}")
-                    ts_info = success_info.get("timestamp")
-                    caption_parts = [
-                        "Las guías quedan guardadas inmediatamente; el botón 'Aceptar' solo cierra este aviso."
-                    ]
-                    if ts_info:
-                        caption_parts.append(f"Registro: {ts_info} (hora CDMX).")
-                    st.caption(" ".join(caption_parts))
-                    if st.button(
-                        "Aceptar",
-                        key=f"ack_guia_{row['ID_Pedido']}",
-                    ):
-                        guia_success_map.pop(row["ID_Pedido"], None)
-                        marcar_contexto_pedido(row["ID_Pedido"], origen_tab)
-                        st.rerun()
+                success_placeholder = st.empty()
+                render_guia_upload_feedback(
+                    success_placeholder,
+                    row["ID_Pedido"],
+                    origen_tab,
+                    s3_client_param,
+                )
 
                 upload_key = f"file_guia_{row['ID_Pedido']}"
                 archivos_guia = st.file_uploader(
@@ -1767,6 +1796,9 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
                                     f"📤 {len(uploaded_keys)} guía(s) subida(s) con éxito.",
                                     icon="📦",
                                 )
+                                guia_success_map = st.session_state.setdefault(
+                                    "guia_upload_success", {}
+                                )
                                 guia_success_map[row["ID_Pedido"]] = {
                                     "count": len(uploaded_keys),
                                     "column": target_col_for_guide,
@@ -1790,7 +1822,12 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
                                         st.session_state["active_main_tab_index"] = 0
                                 marcar_contexto_pedido(row["ID_Pedido"], origen_tab)
                                 preserve_tab_state()
-                                st.rerun()
+                                render_guia_upload_feedback(
+                                    success_placeholder,
+                                    row["ID_Pedido"],
+                                    origen_tab,
+                                    s3_client_param,
+                                )
                             else:
                                 st.error(
                                     "❌ No se pudo actualizar el Google Sheet con los archivos de guía."
@@ -1982,47 +2019,14 @@ def mostrar_pedido_solo_guia(df, idx, row, orden, origen_tab, current_main_tab_l
         st.markdown("---")
         st.markdown("### 📦 Subir Archivos de Guía")
 
-        guia_success_map = st.session_state.setdefault("guia_upload_success", {})
-        success_info = guia_success_map.get(row["ID_Pedido"])
-        if success_info:
-            count = success_info.get("count", 0)
-            destino_col = success_info.get("column")
-            destino_label = (
-                "Hoja de Ruta del Mensajero"
-                if destino_col == "Hoja_Ruta_Mensajero"
-                else "Adjuntos de Guía"
-            )
-            plural = "archivo" if count == 1 else "archivos"
-            st.success(
-                f"📦 Se subieron correctamente {count} {plural} en {destino_label}."
-            )
-            files_info = success_info.get("files") or []
-            if files_info:
-                st.markdown("**Archivos guardados recientemente:**")
-                for file_entry in files_info:
-                    raw_source = file_entry.get("key") or file_entry.get("url")
-                    display_name = file_entry.get("name") or os.path.basename(
-                        str(raw_source or "").strip()
-                    )
-                    download_url = resolve_storage_url(s3_client_param, raw_source)
-                    if download_url:
-                        st.markdown(
-                            f"- <a href=\"{download_url}\" target=\"_blank\">{display_name}</a>",
-                            unsafe_allow_html=True,
-                        )
-                    else:
-                        st.markdown(f"- {display_name}")
-            ts_info = success_info.get("timestamp")
-            caption_parts = [
-                "Las guías quedan guardadas inmediatamente; el botón 'Aceptar' solo cierra este aviso."
-            ]
-            if ts_info:
-                caption_parts.append(f"Registro: {ts_info} (hora CDMX).")
-            st.caption(" ".join(caption_parts))
-            if st.button("Aceptar", key=f"ack_guia_{row['ID_Pedido']}"):
-                guia_success_map.pop(row["ID_Pedido"], None)
-                marcar_contexto_pedido(row["ID_Pedido"], origen_tab)
-                st.rerun()
+        success_placeholder = st.empty()
+        render_guia_upload_feedback(
+            success_placeholder,
+            row["ID_Pedido"],
+            origen_tab,
+            s3_client_param,
+            ack_key=f"ack_guia_only_{row['ID_Pedido']}",
+        )
 
         # Uploader siempre visible (sin expander)
         upload_key = f"file_guia_only_{row['ID_Pedido']}"
@@ -2079,6 +2083,9 @@ def mostrar_pedido_solo_guia(df, idx, row, orden, origen_tab, current_main_tab_l
                             f"📤 {len(uploaded_keys)} guía(s) subida(s) con éxito.",
                             icon="📦",
                         )
+                        guia_success_map = st.session_state.setdefault(
+                            "guia_upload_success", {}
+                        )
                         guia_success_map[row["ID_Pedido"]] = {
                             "count": len(uploaded_keys),
                             "column": "Adjuntos_Guia",
@@ -2089,7 +2096,13 @@ def mostrar_pedido_solo_guia(df, idx, row, orden, origen_tab, current_main_tab_l
                         st.cache_data.clear()
                         marcar_contexto_pedido(row["ID_Pedido"], origen_tab)
                         preserve_tab_state()
-                        st.rerun()
+                        render_guia_upload_feedback(
+                            success_placeholder,
+                            row["ID_Pedido"],
+                            origen_tab,
+                            s3_client_param,
+                            ack_key=f"ack_guia_only_{row['ID_Pedido']}",
+                        )
                     else:
                         st.error("❌ No se pudo actualizar Google Sheets con la guía.")
                 else:
