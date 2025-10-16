@@ -15,7 +15,7 @@ import uuid
 from pytz import timezone
 from urllib.parse import urlparse, unquote
 import streamlit.components.v1 as components
-from typing import Any, Optional
+from typing import Any, Optional, Sequence
 
 _MX_TZ = timezone("America/Mexico_City")
 
@@ -1107,19 +1107,46 @@ def set_active_main_tab(idx: int):
     st.query_params["tab"] = str(idx)
 
 
-def handle_generic_upload_change(row_id, expander_dict_name):
+def ensure_expanders_open(row_id: Any, *dict_names: str) -> None:
+    """Marca los expanders indicados como abiertos en ``st.session_state``.
+
+    Parameters
+    ----------
+    row_id : Any
+        Identificador asociado al bloque que debe permanecer expandido.
+    *dict_names : str
+        Uno o más nombres de diccionarios en ``st.session_state`` que controlan
+        el estado de expansión.
+    """
+
+    for dict_name in dict_names:
+        if not dict_name:
+            continue
+        current_state = st.session_state.setdefault(dict_name, {})
+        if isinstance(current_state, dict):
+            current_state[row_id] = True
+        else:
+            st.session_state[dict_name] = {row_id: True}
+
+
+def handle_generic_upload_change(row_id: Any, expander_dict_names: Sequence[str] | str | None):
     """Mantiene expander y pestañas al seleccionar archivos.
 
     Parameters
     ----------
     row_id : Any
         Identificador de la fila asociada al pedido/caso.
-    expander_dict_name : str
-        Nombre del diccionario en ``st.session_state`` que controla la
-        expansión del elemento (por ejemplo ``"expanded_pedidos"``).
+    expander_dict_names : Sequence[str] | str | None
+        Uno o varios nombres de diccionarios en ``st.session_state`` que
+        controlan la expansión del elemento (por ejemplo ``"expanded_pedidos"``).
     """
-    if expander_dict_name in st.session_state:
-        st.session_state[expander_dict_name][row_id] = True
+
+    if isinstance(expander_dict_names, str) or expander_dict_names is None:
+        names_to_update = [expander_dict_names] if expander_dict_names else []
+    else:
+        names_to_update = [name for name in expander_dict_names if name]
+
+    ensure_expanders_open(row_id, *names_to_update)
     st.session_state["scroll_to_pedido_id"] = row_id
     preserve_tab_state()
     # El script se vuelve a ejecutar automáticamente después de este callback,
@@ -1734,7 +1761,7 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
                     accept_multiple_files=True,
                     key=upload_key,
                     on_change=handle_generic_upload_change,
-                    args=(row["ID_Pedido"], "expanded_subir_guia"),
+                    args=(row["ID_Pedido"], ("expanded_pedidos", "expanded_subir_guia")),
                 )
 
                 if st.button(
@@ -1795,6 +1822,11 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
                                 st.toast(
                                     f"📤 {len(uploaded_keys)} guía(s) subida(s) con éxito.",
                                     icon="📦",
+                                )
+                                ensure_expanders_open(
+                                    row["ID_Pedido"],
+                                    "expanded_pedidos",
+                                    "expanded_subir_guia",
                                 )
                                 guia_success_map = st.session_state.setdefault(
                                     "guia_upload_success", {}
@@ -2036,7 +2068,7 @@ def mostrar_pedido_solo_guia(df, idx, row, orden, origen_tab, current_main_tab_l
             accept_multiple_files=True,
             key=upload_key,
             on_change=handle_generic_upload_change,
-            args=(row["ID_Pedido"], "expanded_pedidos"),
+            args=(row["ID_Pedido"], ("expanded_pedidos",)),
         )
 
 
@@ -2082,6 +2114,10 @@ def mostrar_pedido_solo_guia(df, idx, row, orden, origen_tab, current_main_tab_l
                         st.toast(
                             f"📤 {len(uploaded_keys)} guía(s) subida(s) con éxito.",
                             icon="📦",
+                        )
+                        ensure_expanders_open(
+                            row["ID_Pedido"],
+                            "expanded_pedidos",
                         )
                         guia_success_map = st.session_state.setdefault(
                             "guia_upload_success", {}
@@ -3230,7 +3266,7 @@ with main_tabs[5]:
                 key=f"guia_{folio}_{cliente}",
                 help="Opcional: sube la guía de mensajería para el retorno del producto (PDF/JPG/PNG)",
                 on_change=handle_generic_upload_change,
-                args=(row_key, "expanded_devoluciones"),
+                args=(row_key, ("expanded_devoluciones",)),
                 accept_multiple_files=True,
             )
 
@@ -3284,6 +3320,10 @@ with main_tabs[5]:
                                     row["Hoja_Ruta_Mensajero"] = guia_final
                                     st.toast(f"📤 {len(guia_keys)} guía(s) subida(s) con éxito.", icon="📦")
                                     st.success(f"📦 Se subieron correctamente {len(guia_keys)} archivo(s) de guía.")
+                                    ensure_expanders_open(
+                                        row_key,
+                                        "expanded_devoluciones",
+                                    )
                                     set_active_main_tab(5)
                                     st.cache_data.clear()
                                     st.rerun()
@@ -3850,7 +3890,7 @@ with main_tabs[6]:  # 🛠 Garantías
                 key=f"guia_g_{unique_suffix}",
                 help="Opcional: sube la guía de mensajería para envío de reposición o retorno (PDF/JPG/PNG)",
                 on_change=handle_generic_upload_change,
-                args=(row_key, "expanded_garantias"),
+                args=(row_key, ("expanded_garantias",)),
                 accept_multiple_files=True,
             )
 
@@ -3904,6 +3944,10 @@ with main_tabs[6]:  # 🛠 Garantías
                                     row["Hoja_Ruta_Mensajero"] = guia_final
                                     st.toast(f"📤 {len(guia_keys)} guía(s) subida(s) con éxito.", icon="📦")
                                     st.success(f"📦 Se subieron correctamente {len(guia_keys)} archivo(s) de guía.")
+                                    ensure_expanders_open(
+                                        row_key,
+                                        "expanded_garantias",
+                                    )
                                     set_active_main_tab(6)
                                     st.cache_data.clear()
                                     st.rerun()
