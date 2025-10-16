@@ -2470,7 +2470,10 @@ if not df_main.empty:
         tab.addEventListener('click', () => {{
             const params = new URLSearchParams(window.parent.location.search);
             params.set('tab', idx);
-            window.parent.history.replaceState(null, '', window.parent.location.pathname + '?' + params.toString());
+            const query = params.toString();
+            const base = window.parent.location.origin + window.parent.location.pathname;
+            const newUrl = query ? `${{base}}?${{query}}` : base;
+            window.parent.history.replaceState(null, '', newUrl);
         }});
     }});
     </script>
