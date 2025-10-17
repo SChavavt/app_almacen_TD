@@ -1234,7 +1234,15 @@ def mostrar_pedido_detalle(
         key=f"print_{row['ID_Pedido']}_{origen_tab}",
     ):
         fijar_y_preservar(row, origen_tab)
-        should_rerun = True
+        st.session_state["scroll_to_pedido_id"] = row["ID_Pedido"]
+
+        # Mantener abiertos los expanders relevantes sin forzar recarga manual.
+        ensure_expanders_open(
+            row["ID_Pedido"],
+            "expanded_pedidos",
+            "expanded_attachments",
+            "expanded_subir_guia",
+        )
 
         if row["Estado"] in ["🟡 Pendiente", "🔴 Demorado"]:
             zona_mexico = timezone("America/Mexico_City")
@@ -1248,7 +1256,6 @@ def mostrar_pedido_detalle(
                 st.error(
                     "❌ No se encontraron las columnas 'Estado' y/o 'Hora_Proceso' en Google Sheets."
                 )
-                should_rerun = False
             else:
                 updates = [
                     {
@@ -1271,12 +1278,6 @@ def mostrar_pedido_detalle(
                     st.toast("📄 Estado actualizado a 'En Proceso'", icon="📌")
                 else:
                     st.error("❌ Falló la actualización del estado a 'En Proceso'.")
-                    should_rerun = False
-
-        if should_rerun:
-            st.session_state["scroll_to_pedido_id"] = row["ID_Pedido"]
-            st.session_state["print_clicked"] = row["ID_Pedido"]
-            st.rerun()
 
 def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, worksheet, headers, s3_client_param):
     """
@@ -1300,11 +1301,6 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
             f"❌ No se puede operar el pedido '{row['ID_Pedido']}' porque su índice de fila es inválido: {gsheet_row_index}."
         )
         return
-    if st.session_state.get("print_clicked") == row["ID_Pedido"]:
-        st.session_state["expanded_pedidos"][row["ID_Pedido"]] = True
-        st.session_state["expanded_attachments"][row["ID_Pedido"]] = True
-        st.session_state.pop("print_clicked", None)
-
     folio = row.get("Folio_Factura", "").strip() or row['ID_Pedido']
     st.markdown(f'<a name="pedido_{row["ID_Pedido"]}"></a>', unsafe_allow_html=True)
     with st.expander(f"{row['Estado']} - {folio} - {row['Cliente']}", expanded=st.session_state["expanded_pedidos"].get(row['ID_Pedido'], False)):
