@@ -1943,19 +1943,46 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
                     all_surtido_related_files.append(s_file)
 
             for raw_url in adjuntos_surtido_urls:
-                resolved_url = resolve_storage_url(s3_client_param, raw_url)
-                if not resolved_url:
+                if not raw_url:
                     continue
 
-                original_path = urlparse(raw_url).path
-                resolved_path = urlparse(resolved_url).path
-                base_name = os.path.basename(original_path) or os.path.basename(resolved_path) or raw_url
+                resolved_url = resolve_storage_url(s3_client_param, raw_url)
+                final_url = resolved_url
+                object_key = ""
+
+                if not final_url or final_url == "#":
+                    candidate_key = str(raw_url).strip()
+                    parsed_candidate = urlparse(candidate_key)
+                    if not parsed_candidate.scheme and not parsed_candidate.netloc:
+                        object_key = candidate_key
+                        if pedido_folder_prefix and not object_key.startswith(pedido_folder_prefix):
+                            if not object_key.startswith(S3_ATTACHMENT_PREFIX):
+                                object_key = f"{pedido_folder_prefix}{object_key}"
+                        if object_key:
+                            regenerated_url = get_s3_file_download_url(s3_client_param, object_key)
+                            if regenerated_url and regenerated_url != "#":
+                                final_url = regenerated_url
+                    if (not final_url or final_url == "#") and candidate_key:
+                        final_url = candidate_key
+
+                original_path = urlparse(str(raw_url)).path
+                resolved_path = urlparse(str(final_url)).path if final_url else ""
+                base_name = (
+                    os.path.basename(original_path)
+                    or os.path.basename(resolved_path)
+                    or str(raw_url)
+                )
                 base_name = unquote(base_name)
 
-                all_surtido_related_files.append({
+                entry = {
                     'title': base_name,
-                    'url': resolved_url,
-                })
+                }
+                if final_url:
+                    entry['url'] = final_url
+                if object_key:
+                    entry['key'] = object_key
+
+                all_surtido_related_files.append(entry)
 
             if all_surtido_related_files:
                 st.markdown("Adjuntos de Modificación (Surtido/Relacionados):")
@@ -1984,13 +2011,20 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
 
                                 final_url = get_s3_file_download_url(s3_client_param, object_key_to_download)
 
+                        is_http_link = False
                         if final_url and final_url != "#":
+                            parsed_final = urlparse(str(final_url))
+                            is_http_link = parsed_final.scheme in ("http", "https")
+
+                        if final_url and is_http_link:
                             st.markdown(
                                 f'- 📄 <a href="{final_url}" target="_blank">{file_name_to_display}</a>',
                                 unsafe_allow_html=True,
                             )
+                        elif final_url and final_url != "#":
+                            st.markdown(f"- 📄 {file_name_to_display} _(ruta: {final_url})_")
                         else:
-                            st.warning(f"⚠️ No se pudo generar el enlace para: {file_name_to_display}")
+                            st.markdown(f"- 📄 {file_name_to_display}")
                     except Exception as e:
                         st.warning(f"⚠️ Error al procesar adjunto de modificación '{file_name_to_display}': {e}")
 
