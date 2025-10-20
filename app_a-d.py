@@ -1169,6 +1169,7 @@ def render_guia_upload_feedback(
     s3_client_param,
     *,
     ack_key: Optional[str] = None,
+    expander_dict_names: Sequence[str] | str | None = None,
 ):
     """Muestra (y actualiza) el aviso de guías subidas sin forzar un rerun."""
 
@@ -1223,6 +1224,11 @@ def render_guia_upload_feedback(
             key=ack_key or f"ack_guia_{row_id}",
         )
         if acknowledge_pressed:
+            handle_generic_upload_change(
+                row_id,
+                expander_dict_names,
+                scroll_to_row=False,
+            )
             guia_success_map.pop(row_id, None)
             marcar_contexto_pedido(row_id, origen_tab)
             placeholder.empty()
@@ -1790,6 +1796,10 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
                     row["ID_Pedido"],
                     origen_tab,
                     s3_client_param,
+                    expander_dict_names=(
+                        "expanded_pedidos",
+                        "expanded_subir_guia",
+                    ),
                 )
 
                 upload_key = f"file_guia_{row['ID_Pedido']}"
@@ -1903,6 +1913,10 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
                                     row["ID_Pedido"],
                                     origen_tab,
                                     s3_client_param,
+                                    expander_dict_names=(
+                                        "expanded_pedidos",
+                                        "expanded_subir_guia",
+                                    ),
                                 )
                             else:
                                 st.error(
@@ -2102,6 +2116,7 @@ def mostrar_pedido_solo_guia(df, idx, row, orden, origen_tab, current_main_tab_l
             origen_tab,
             s3_client_param,
             ack_key=f"ack_guia_only_{row['ID_Pedido']}",
+            expander_dict_names=("expanded_pedidos",),
         )
 
         # Uploader siempre visible (sin expander)
@@ -2185,6 +2200,7 @@ def mostrar_pedido_solo_guia(df, idx, row, orden, origen_tab, current_main_tab_l
                             origen_tab,
                             s3_client_param,
                             ack_key=f"ack_guia_only_{row['ID_Pedido']}",
+                            expander_dict_names=("expanded_pedidos",),
                         )
                     else:
                         st.error("❌ No se pudo actualizar Google Sheets con la guía.")
