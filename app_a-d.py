@@ -1052,8 +1052,19 @@ def check_and_update_demorados(df_to_check, worksheet, headers):
     return df_to_check, False
 
 
-def marcar_contexto_pedido(row_id, origen_tab=None):
-    """Prepara el estado de sesión para mantener el contexto de un pedido tras un rerun."""
+def marcar_contexto_pedido(row_id, origen_tab=None, *, scroll=True):
+    """Prepara el estado de sesión para mantener el contexto de un pedido tras un rerun.
+
+    Parameters
+    ----------
+    row_id : Any
+        Identificador del pedido o caso cuyo contexto debe preservarse.
+    origen_tab : str | None, optional
+        Nombre de la pestaña secundaria para mantener la misma sección activa.
+    scroll : bool, default True
+        Si es ``True``, fija ``scroll_to_pedido_id`` para reposicionar la vista en la
+        siguiente ejecución. Útil para callbacks que requieren reenfocar el pedido.
+    """
 
     if origen_tab is not None:
         st.session_state["subtab_local"] = origen_tab
@@ -1068,7 +1079,8 @@ def marcar_contexto_pedido(row_id, origen_tab=None):
     if isinstance(expanded_attachments, dict):
         expanded_attachments[row_id] = True
 
-    st.session_state["scroll_to_pedido_id"] = row_id
+    if scroll:
+        st.session_state["scroll_to_pedido_id"] = row_id
     preserve_tab_state()
     st.session_state["restore_tabs_after_print"] = True
 
@@ -1224,7 +1236,7 @@ def render_guia_upload_feedback(
         )
         if acknowledge_pressed:
             guia_success_map.pop(row_id, None)
-            marcar_contexto_pedido(row_id, origen_tab)
+            marcar_contexto_pedido(row_id, origen_tab, scroll=False)
             placeholder.empty()
 
 def mostrar_pedido_detalle(
