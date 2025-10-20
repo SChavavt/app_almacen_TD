@@ -1216,6 +1216,13 @@ def render_guia_upload_feedback(
         if acknowledge_pressed:
             guia_success_map.pop(row_id, None)
             marcar_contexto_pedido(row_id, origen_tab)
+            preserve_tab_state()
+            ensure_expanders_open(
+                row_id,
+                "expanded_pedidos",
+                "expanded_subir_guia",
+            )
+            st.session_state["scroll_to_pedido_id"] = row_id
             placeholder.empty()
 
 def mostrar_pedido_detalle(
