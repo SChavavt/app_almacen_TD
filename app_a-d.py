@@ -1107,6 +1107,13 @@ def set_active_main_tab(idx: int):
     st.query_params["tab"] = str(idx)
 
 
+def keep_current_main_tab():
+    """Reafirma la pestaña principal actual sin forzar cambios de índice."""
+
+    current_idx = st.session_state.get("active_main_tab_index", 0)
+    st.query_params["tab"] = str(current_idx)
+
+
 def ensure_expanders_open(row_id: Any, *dict_names: str) -> None:
     """Marca los expanders indicados como abiertos en ``st.session_state``.
 
@@ -1214,6 +1221,10 @@ def render_guia_upload_feedback(
             key=ack_key or f"ack_guia_{row_id}",
         )
         if acknowledge_pressed:
+            ensure_expanders_open(row_id, "expanded_pedidos", "expanded_subir_guia")
+            st.session_state["scroll_to_pedido_id"] = row_id
+            preserve_tab_state()
+            keep_current_main_tab()
             guia_success_map.pop(row_id, None)
             marcar_contexto_pedido(row_id, origen_tab)
             placeholder.empty()
@@ -2162,7 +2173,7 @@ def mostrar_pedido_solo_guia(df, idx, row, orden, origen_tab, current_main_tab_l
                             "files": uploaded_entries,
                             "timestamp": mx_now_str(),
                         }
-                        set_active_main_tab(3)
+                        keep_current_main_tab()
                         st.cache_data.clear()
                         marcar_contexto_pedido(row["ID_Pedido"], origen_tab)
                         preserve_tab_state()
@@ -2223,7 +2234,7 @@ def mostrar_pedido_solo_guia(df, idx, row, orden, origen_tab, current_main_tab_l
                             df.at[idx, "Estado"] = "🟢 Completado"
                             df.at[idx, "Fecha_Completado"] = mx_now
                             st.success("✅ Pedido marcado como **🟢 Completado**.")
-                            set_active_main_tab(3)
+                            keep_current_main_tab()
                             st.cache_data.clear()
                             del st.session_state[flag_key]
                             marcar_contexto_pedido(row["ID_Pedido"], origen_tab)
