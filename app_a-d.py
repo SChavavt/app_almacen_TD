@@ -1784,20 +1784,32 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
                 )
 
                 upload_key = f"file_guia_{row['ID_Pedido']}"
-                archivos_guia = st.file_uploader(
-                    "📎 Subir guía(s) del pedido",
-                    type=["pdf", "jpg", "jpeg", "png"],
-                    accept_multiple_files=True,
-                    key=upload_key,
-                    on_change=handle_generic_upload_change,
-                    args=(row["ID_Pedido"], ("expanded_pedidos", "expanded_subir_guia")),
-                )
+                form_key = f"form_guia_{row['ID_Pedido']}"
+                with st.form(key=form_key):
+                    archivos_guia = st.file_uploader(
+                        "📎 Subir guía(s) del pedido",
+                        type=["pdf", "jpg", "jpeg", "png"],
+                        accept_multiple_files=True,
+                        key=upload_key,
+                        on_change=handle_generic_upload_change,
+                        kwargs={
+                            "row_id": row["ID_Pedido"],
+                            "expander_dict_names": (
+                                "expanded_pedidos",
+                                "expanded_subir_guia",
+                            ),
+                        },
+                    )
 
-                if st.button(
-                    "📤 Subir Guía",
-                    key=f"btn_subir_guia_{row['ID_Pedido']}",
-                    on_click=preserve_tab_state,
-                ):
+                    submitted_upload = st.form_submit_button(
+                        "📤 Subir Guía",
+                        on_click=preserve_tab_state,
+                    )
+
+                if submitted_upload:
+                    handle_generic_upload_change(
+                        row["ID_Pedido"], ("expanded_pedidos", "expanded_subir_guia")
+                    )
 
                     if archivos_guia:
                         uploaded_keys = []
@@ -2091,21 +2103,27 @@ def mostrar_pedido_solo_guia(df, idx, row, orden, origen_tab, current_main_tab_l
 
         # Uploader siempre visible (sin expander)
         upload_key = f"file_guia_only_{row['ID_Pedido']}"
-        archivos_guia = st.file_uploader(
-            "📎 Subir guía(s) del pedido",
-            type=["pdf", "jpg", "jpeg", "png"],
-            accept_multiple_files=True,
-            key=upload_key,
-            on_change=handle_generic_upload_change,
-            args=(row["ID_Pedido"], ("expanded_pedidos",)),
-        )
+        form_key = f"form_guia_only_{row['ID_Pedido']}"
+        with st.form(key=form_key):
+            archivos_guia = st.file_uploader(
+                "📎 Subir guía(s) del pedido",
+                type=["pdf", "jpg", "jpeg", "png"],
+                accept_multiple_files=True,
+                key=upload_key,
+                on_change=handle_generic_upload_change,
+                kwargs={
+                    "row_id": row["ID_Pedido"],
+                    "expander_dict_names": ("expanded_pedidos",),
+                },
+            )
 
+            submitted_upload = st.form_submit_button(
+                "📤 Subir Guía",
+                on_click=preserve_tab_state,
+            )
 
-        if st.button(
-            "📤 Subir Guía",
-            key=f"btn_subir_guia_only_{row['ID_Pedido']}",
-            on_click=preserve_tab_state,
-        ):
+        if submitted_upload:
+            handle_generic_upload_change(row["ID_Pedido"], ("expanded_pedidos",))
             if not archivos_guia:
                 st.warning("⚠️ Primero sube al menos un archivo de guía.")
             else:
@@ -2157,7 +2175,6 @@ def mostrar_pedido_solo_guia(df, idx, row, orden, origen_tab, current_main_tab_l
                             "files": uploaded_entries,
                             "timestamp": mx_now_str(),
                         }
-                        set_active_main_tab(3)
                         st.cache_data.clear()
                         marcar_contexto_pedido(row["ID_Pedido"], origen_tab)
                         preserve_tab_state()
@@ -3293,21 +3310,28 @@ with main_tabs[5]:
 
             st.markdown("#### 📋 Documentación")
             st.caption("La guía es opcional; puedes completar la devolución sin subirla.")
-            guia_files = st.file_uploader(
-                "📋 Subir Guía de Retorno (opcional)",
-                key=f"guia_{folio}_{cliente}",
-                help="Opcional: sube la guía de mensajería para el retorno del producto (PDF/JPG/PNG)",
-                on_change=handle_generic_upload_change,
-                args=(row_key, ("expanded_devoluciones",)),
-                accept_multiple_files=True,
-            )
+            form_key = f"form_guia_{folio}_{cliente}"
+            with st.form(key=form_key):
+                guia_files = st.file_uploader(
+                    "📋 Subir Guía de Retorno (opcional)",
+                    key=f"guia_{folio}_{cliente}",
+                    help="Opcional: sube la guía de mensajería para el retorno del producto (PDF/JPG/PNG)",
+                    accept_multiple_files=True,
+                    on_change=handle_generic_upload_change,
+                    kwargs={
+                        "row_id": row_key,
+                        "expander_dict_names": ("expanded_devoluciones",),
+                    },
+                )
+
+                submitted_upload = st.form_submit_button(
+                    "📤 Subir Guía",
+                    on_click=preserve_tab_state,
+                )
 
 
-            if st.button(
-                "📤 Subir Guía",
-                key=f"btn_subir_guia_{folio}_{cliente}",
-                on_click=preserve_tab_state,
-            ):
+            if submitted_upload:
+                handle_generic_upload_change(row_key, ("expanded_devoluciones",))
                 try:
                     if not guia_files:
                         st.warning("⚠️ Primero selecciona al menos un archivo de guía.")
@@ -3356,9 +3380,8 @@ with main_tabs[5]:
                                         row_key,
                                         "expanded_devoluciones",
                                     )
-                                    set_active_main_tab(5)
                                     st.cache_data.clear()
-                                    st.rerun()
+                                    preserve_tab_state()
                                 else:
                                     st.error("❌ No se pudo actualizar la guía en Google Sheets.")
                         else:
@@ -3917,21 +3940,28 @@ with main_tabs[6]:  # 🛠 Garantías
             # === Guía y completar ===
             st.markdown("#### 📋 Documentación")
             st.caption("La guía es opcional; puedes completar la garantía sin subirla.")
-            guia_files = st.file_uploader(
-                "📋 Subir Guía de Envío/Retorno (Garantía) (opcional)",
-                key=f"guia_g_{unique_suffix}",
-                help="Opcional: sube la guía de mensajería para envío de reposición o retorno (PDF/JPG/PNG)",
-                on_change=handle_generic_upload_change,
-                args=(row_key, ("expanded_garantias",)),
-                accept_multiple_files=True,
-            )
+            form_key = f"form_guia_g_{unique_suffix}"
+            with st.form(key=form_key):
+                guia_files = st.file_uploader(
+                    "📋 Subir Guía de Envío/Retorno (Garantía) (opcional)",
+                    key=f"guia_g_{unique_suffix}",
+                    help="Opcional: sube la guía de mensajería para envío de reposición o retorno (PDF/JPG/PNG)",
+                    accept_multiple_files=True,
+                    on_change=handle_generic_upload_change,
+                    kwargs={
+                        "row_id": row_key,
+                        "expander_dict_names": ("expanded_garantias",),
+                    },
+                )
+
+                submitted_upload = st.form_submit_button(
+                    "📤 Subir Guía",
+                    on_click=preserve_tab_state,
+                )
 
 
-            if st.button(
-                "📤 Subir Guía",
-                key=f"btn_subir_guia_g_{unique_suffix}",
-                on_click=preserve_tab_state,
-            ):
+            if submitted_upload:
+                handle_generic_upload_change(row_key, ("expanded_garantias",))
                 try:
                     if not guia_files:
                         st.warning("⚠️ Primero selecciona al menos un archivo de guía.")
@@ -3980,9 +4010,8 @@ with main_tabs[6]:  # 🛠 Garantías
                                         row_key,
                                         "expanded_garantias",
                                     )
-                                    set_active_main_tab(6)
                                     st.cache_data.clear()
-                                    st.rerun()
+                                    preserve_tab_state()
                                 else:
                                     st.error("❌ No se pudo actualizar la guía en Google Sheets.")
                         else:
