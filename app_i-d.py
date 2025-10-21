@@ -161,6 +161,31 @@ def assign_numbers(entries, counter):
         entry.pop("sort_key", None)
 
 
+_TURNOS_CANONICAL = {
+    "☀ local manana": "☀️ Local Mañana",
+    "local manana": "☀️ Local Mañana",
+    "🌙 local tarde": "🌙 Local Tarde",
+    "local tarde": "🌙 Local Tarde",
+    "🌵 saltillo": "🌵 Saltillo",
+    "saltillo": "🌵 Saltillo",
+    "📦 pasa a bodega": "📦 Pasa a Bodega",
+    "pasa a bodega": "📦 Pasa a Bodega",
+}
+
+
+def normalize_turno_label(value: str) -> str:
+    base = sanitize_text(value)
+    if not base:
+        return ""
+
+    without_variation = base.replace("\ufe0f", "")
+    normalized = unicodedata.normalize("NFKD", without_variation)
+    ascii_clean = "".join(ch for ch in normalized if not unicodedata.combining(ch))
+    key = " ".join(ascii_clean.lower().split())
+
+    return _TURNOS_CANONICAL.get(key, base.strip())
+
+
 def format_cliente_line(row) -> str:
     folio = sanitize_text(row.get("Folio_Factura", ""))
     cliente = sanitize_text(row.get("Cliente", ""))
@@ -363,8 +388,9 @@ def get_local_orders(df_all: pd.DataFrame) -> pd.DataFrame:
     if "Turno" not in df_local.columns:
         df_local["Turno"] = ""
 
-    df_local["Turno"] = df_local["Turno"].fillna("").astype(str)
+    df_local["Turno"] = df_local["Turno"].fillna("").astype(str).str.strip()
     df_local.loc[df_local["Turno"].str.lower() == "nan", "Turno"] = ""
+    df_local["Turno"] = df_local["Turno"].apply(normalize_turno_label)
 
     mask_curso_evento = df_local["Tipo_Envio"] == "🎓 Cursos y Eventos"
     mask_turno_vacio = df_local["Turno"].str.strip() == ""
@@ -489,6 +515,9 @@ def get_casos_orders(df_all: pd.DataFrame) -> pd.DataFrame:
                 df_casos[base] = ""
             else:
                 df_casos[base] = df_casos[base].astype(str).fillna("").str.strip()
+
+        if "Turno" in df_casos.columns:
+            df_casos["Turno"] = df_casos["Turno"].apply(normalize_turno_label)
 
         if "Tipo_Caso" not in df_casos.columns and "Tipo_Envio" in df_casos.columns:
             df_casos["Tipo_Caso"] = df_casos["Tipo_Envio"]
@@ -876,7 +905,7 @@ def load_data_from_gsheets():
             df[c] = pd.to_datetime(df[c], errors="coerce")
 
     if "Turno" in df.columns:
-        df["Turno"] = df["Turno"].astype(str).replace({"nan": "", "": None}).fillna("")
+        df["Turno"] = df["Turno"].apply(normalize_turno_label)
     else:
         df["Turno"] = ""
 
@@ -933,7 +962,9 @@ def load_casos_from_gsheets():
     ]:
         if base in df.columns:
             df[base] = df[base].astype(str).fillna("").str.strip()
-    if "Turno" not in df.columns:
+    if "Turno" in df.columns:
+        df["Turno"] = df["Turno"].apply(normalize_turno_label)
+    else:
         df["Turno"] = ""
     return df
 
@@ -1066,7 +1097,7 @@ def status_counts_block(df_src):
 
 def group_key_local(row, local_flag_col="Turno"):
     """Devuelve el turno o etiquetas para cursos/eventos y locales sin turno."""
-    turno = str(row.get(local_flag_col, "") or "")
+    turno = normalize_turno_label(row.get(local_flag_col, ""))
     if turno:
         return turno
     tipo_envio = str(row.get("Tipo_Envio", "") or "")
