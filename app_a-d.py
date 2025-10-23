@@ -3323,6 +3323,13 @@ with main_tabs[5]:
 
             st.markdown("#### 📋 Documentación")
             st.caption("La guía es opcional; puedes completar la devolución sin subirla.")
+            success_placeholder = st.empty()
+            render_guia_upload_feedback(
+                success_placeholder,
+                row_key,
+                "🔁 Devoluciones",
+                s3_client,
+            )
             form_key = f"form_guia_{folio}_{cliente}"
             with st.form(key=form_key):
                 guia_files = st.file_uploader(
@@ -3381,16 +3388,38 @@ with main_tabs[5]:
                                     guia_final,
                                 )
                                 if ok:
+                                    uploaded_entries = [
+                                        {"key": key, "name": os.path.basename(key)}
+                                        for key in guia_keys
+                                    ]
+                                    devoluciones_display.at[
+                                        row.name, "Hoja_Ruta_Mensajero"
+                                    ] = guia_final
                                     row["Hoja_Ruta_Mensajero"] = guia_final
                                     st.toast(f"📤 {len(guia_keys)} guía(s) subida(s) con éxito.", icon="📦")
-                                    st.success(f"📦 Se subieron correctamente {len(guia_keys)} archivo(s) de guía.")
                                     ensure_expanders_open(
                                         row_key,
                                         "expanded_devoluciones",
                                     )
                                     set_active_main_tab(5)
+                                    guia_success_map = st.session_state.setdefault(
+                                        "guia_upload_success", {}
+                                    )
+                                    guia_success_map[row_key] = {
+                                        "count": len(guia_keys),
+                                        "column": "Hoja_Ruta_Mensajero",
+                                        "files": uploaded_entries,
+                                        "timestamp": mx_now_str(),
+                                    }
                                     st.cache_data.clear()
-                                    st.rerun()
+                                    st.cache_resource.clear()
+                                    marcar_contexto_pedido(row_key, "🔁 Devoluciones")
+                                    render_guia_upload_feedback(
+                                        success_placeholder,
+                                        row_key,
+                                        "🔁 Devoluciones",
+                                        s3_client,
+                                    )
                                 else:
                                     st.error("❌ No se pudo actualizar la guía en Google Sheets.")
                         else:
@@ -3949,6 +3978,13 @@ with main_tabs[6]:  # 🛠 Garantías
             # === Guía y completar ===
             st.markdown("#### 📋 Documentación")
             st.caption("La guía es opcional; puedes completar la garantía sin subirla.")
+            success_placeholder = st.empty()
+            render_guia_upload_feedback(
+                success_placeholder,
+                row_key,
+                "🛠 Garantías",
+                s3_client,
+            )
             form_key = f"form_guia_g_{unique_suffix}"
             with st.form(key=form_key):
                 guia_files = st.file_uploader(
@@ -4007,16 +4043,38 @@ with main_tabs[6]:  # 🛠 Garantías
                                     guia_final,
                                 )
                                 if ok:
+                                    uploaded_entries = [
+                                        {"key": key, "name": os.path.basename(key)}
+                                        for key in guia_keys
+                                    ]
+                                    garantias_display.at[
+                                        row.name, "Hoja_Ruta_Mensajero"
+                                    ] = guia_final
                                     row["Hoja_Ruta_Mensajero"] = guia_final
                                     st.toast(f"📤 {len(guia_keys)} guía(s) subida(s) con éxito.", icon="📦")
-                                    st.success(f"📦 Se subieron correctamente {len(guia_keys)} archivo(s) de guía.")
                                     ensure_expanders_open(
                                         row_key,
                                         "expanded_garantias",
                                     )
                                     set_active_main_tab(6)
+                                    guia_success_map = st.session_state.setdefault(
+                                        "guia_upload_success", {}
+                                    )
+                                    guia_success_map[row_key] = {
+                                        "count": len(guia_keys),
+                                        "column": "Hoja_Ruta_Mensajero",
+                                        "files": uploaded_entries,
+                                        "timestamp": mx_now_str(),
+                                    }
                                     st.cache_data.clear()
-                                    st.rerun()
+                                    st.cache_resource.clear()
+                                    marcar_contexto_pedido(row_key, "🛠 Garantías")
+                                    render_guia_upload_feedback(
+                                        success_placeholder,
+                                        row_key,
+                                        "🛠 Garantías",
+                                        s3_client,
+                                    )
                                 else:
                                     st.error("❌ No se pudo actualizar la guía en Google Sheets.")
                         else:
