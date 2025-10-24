@@ -2342,16 +2342,63 @@ if not df_main.empty:
 
         st.rerun()
 
-    # --- 🔔 Alerta de Modificación de Surtido ---  
-    mod_surtido_df = df_main[
-        (df_main['Modificacion_Surtido'].astype(str).str.strip() != '') &
-        (~df_main['Modificacion_Surtido'].astype(str).str.endswith('[✔CONFIRMADO]')) &
-        (~df_main['Estado'].isin(['🟢 Completado', '✅ Viajó'])) &
-        (df_main['Refacturacion_Tipo'].fillna("").str.strip() != "Datos Fiscales")
-    ]
+    # --- 🔔 Alerta de Modificación de Surtido ---
+    mod_surtido_frames = []
+    mod_surtido_count = 0
 
+    if "Modificacion_Surtido" in df_main.columns:
+        main_mod_col = df_main["Modificacion_Surtido"].astype(str)
+        mask_mod_main = main_mod_col.str.strip() != ""
+        mask_mod_main &= ~main_mod_col.str.endswith("[✔CONFIRMADO]")
+        if "Estado" in df_main.columns:
+            mask_mod_main &= ~df_main["Estado"].isin(["🟢 Completado", "✅ Viajó"])
+        if "Refacturacion_Tipo" in df_main.columns:
+            mask_mod_main &= (
+                df_main["Refacturacion_Tipo"].fillna("").str.strip() != "Datos Fiscales"
+            )
+        mod_surtido_main_df = df_main[mask_mod_main].copy()
+        if not mod_surtido_main_df.empty:
+            mod_surtido_frames.append(mod_surtido_main_df)
 
-    mod_surtido_count = len(mod_surtido_df)
+    if "Modificacion_Surtido" in df_casos.columns and not df_casos.empty:
+        casos_mod_col = df_casos["Modificacion_Surtido"].astype(str)
+        mask_mod_casos = casos_mod_col.str.strip() != ""
+        mask_mod_casos &= ~casos_mod_col.str.endswith("[✔CONFIRMADO]")
+        if "Estado" in df_casos.columns:
+            mask_mod_casos &= ~df_casos["Estado"].isin(["🟢 Completado", "✅ Viajó"])
+
+        tipo_casos_col = "Tipo_Caso" if "Tipo_Caso" in df_casos.columns else (
+            "Tipo_Envio" if "Tipo_Envio" in df_casos.columns else None
+        )
+        if tipo_casos_col:
+            tipo_series = df_casos[tipo_casos_col].astype(str)
+            mask_tipo = (
+                tipo_series.str.contains("Devoluci", case=False, na=False)
+                | tipo_series.str.contains("Garant", case=False, na=False)
+            )
+            mask_mod_casos &= mask_tipo
+
+        if "Refacturacion_Tipo" in df_casos.columns:
+            mask_mod_casos &= (
+                df_casos["Refacturacion_Tipo"].fillna("").str.strip() != "Datos Fiscales"
+            )
+
+        mod_surtido_casos_df = df_casos[mask_mod_casos].copy()
+        if not mod_surtido_casos_df.empty:
+            if "Tipo_Envio" not in mod_surtido_casos_df.columns and "Tipo_Caso" in mod_surtido_casos_df.columns:
+                mod_surtido_casos_df["Tipo_Envio"] = mod_surtido_casos_df["Tipo_Caso"]
+            elif "Tipo_Envio" in mod_surtido_casos_df.columns and "Tipo_Caso" in mod_surtido_casos_df.columns:
+                tipo_envio_series = mod_surtido_casos_df["Tipo_Envio"].astype(str).str.strip()
+                faltantes = tipo_envio_series == ""
+                if faltantes.any():
+                    mod_surtido_casos_df.loc[faltantes, "Tipo_Envio"] = (
+                        mod_surtido_casos_df.loc[faltantes, "Tipo_Caso"].astype(str)
+                    )
+            mod_surtido_frames.append(mod_surtido_casos_df)
+
+    if mod_surtido_frames:
+        mod_surtido_df = pd.concat(mod_surtido_frames, ignore_index=False)
+        mod_surtido_count = len(mod_surtido_df)
 
     if mod_surtido_count > 0:
         ubicaciones = collect_tab_locations(mod_surtido_df)
