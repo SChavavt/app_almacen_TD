@@ -16,6 +16,7 @@ from pytz import timezone
 from urllib.parse import urlparse, unquote
 import streamlit.components.v1 as components
 from typing import Any, Optional, Sequence
+import unicodedata
 
 _MX_TZ = timezone("America/Mexico_City")
 
@@ -131,6 +132,143 @@ def collect_tab_locations(
 
     return sorted(set(resolved))
 
+
+
+def _normalize_text_for_matching(text: str) -> str:
+    if not text:
+        return ""
+    normalized = unicodedata.normalize("NFKD", text)
+    without_accents = "".join(
+        ch for ch in normalized if not unicodedata.combining(ch)
+    )
+    return without_accents.lower()
+
+
+_GUIDE_REQUEST_PHRASES = (
+    "solicito la guia",
+    "solicitamos la guia",
+    "solicitar la guia",
+    "solicitud de guia",
+    "favor de enviar la guia",
+    "favor de proporcionar la guia",
+    "favor de adjuntar guia",
+    "favor de compartir la guia",
+    "apoyar con la guia",
+    "apoyarnos con la guia",
+    "mandar la guia",
+    "enviar la guia",
+    "requiero la guia",
+    "requiere la guia",
+    "necesito la guia",
+    "necesitamos la guia",
+    "compartir guia",
+    "proporcionar guia",
+)
+
+_GUIDE_REQUEST_KEYWORDS = (
+    "solicito",
+    "solicitamos",
+    "solicitar",
+    "solicitud",
+    "favor de",
+    "apoyar",
+    "apoyarnos",
+    "apoyeme",
+    "apoyenme",
+    "mandar",
+    "manda",
+    "manden",
+    "enviar",
+    "envia",
+    "enviame",
+    "envien",
+    "requiere",
+    "requiero",
+    "requerimos",
+    "necesita",
+    "necesito",
+    "necesitamos",
+    "compartir",
+    "proporcionar",
+)
+
+_GUIDE_TERMS = (
+    "guia",
+    "guia de envio",
+    "guia de envío",
+    "guia de entrega",
+    "hoja de ruta",
+    "hoja ruta",
+    "hoja_ruta",
+)
+
+_ADDRESS_TERMS = (
+    "calle",
+    "col ",
+    "col.",
+    "colonia",
+    "c.p",
+    "cp.",
+    "cp ",
+    "cp:",
+    "direccion",
+    "dir.",
+    "dir:",
+    "av.",
+    "avenida",
+    "numero",
+    "número",
+    "no.",
+    "num.",
+    "entre",
+    "esq",
+    "esquina",
+    "municipio",
+    "delegacion",
+    "delegación",
+    "estado",
+    "ciudad",
+    "manzana",
+    "lote",
+    "fraccionamiento",
+    "edificio",
+)
+
+
+def comentario_requiere_guia(comentario: Any) -> bool:
+    text = str(comentario or "").strip()
+    if not text:
+        return False
+
+    normalized = _normalize_text_for_matching(text)
+
+    if not normalized:
+        return False
+
+    has_address_indicator = any(term in normalized for term in _ADDRESS_TERMS)
+    if not has_address_indicator:
+        return False
+
+    has_specific_phrase = any(phrase in normalized for phrase in _GUIDE_REQUEST_PHRASES)
+
+    if not has_specific_phrase:
+        has_request_keyword = any(keyword in normalized for keyword in _GUIDE_REQUEST_KEYWORDS)
+        has_guide_term = any(term in normalized for term in _GUIDE_TERMS)
+        has_specific_phrase = has_request_keyword and has_guide_term
+
+    if not has_specific_phrase:
+        return False
+
+    if (
+        "sin guia" in normalized
+        or "sin hoja de ruta" in normalized
+        or "no requiere guia" in normalized
+        or "no requerimos guia" in normalized
+        or "no necesitamos guia" in normalized
+    ):
+        return False
+
+    return True
 
 
 def es_pedido_local_no_entregado(row: Any) -> bool:
@@ -452,6 +590,10 @@ def process_sheet_data(all_data: list[list[str]]) -> tuple[pd.DataFrame, list[st
         if col not in df.columns:
             df[col] = ''
 
+    df['Comentario'] = df['Comentario'].astype(str)
+    df['Comentario'] = df['Comentario'].apply(
+        lambda x: "" if str(x).strip().lower() in {"nan", "none"} else str(x).strip()
+    )
     df['Fecha_Entrega'] = df['Fecha_Entrega'].apply(
         lambda x: str(x) if pd.notna(x) and str(x).strip() != '' else ''
     )
@@ -466,6 +608,8 @@ def process_sheet_data(all_data: list[list[str]]) -> tuple[pd.DataFrame, list[st
     df['Estado'] = df['Estado'].astype(str).str.strip()
     if 'Estado_Entrega' in df.columns:
         df['Estado_Entrega'] = df['Estado_Entrega'].astype(str).str.strip()
+
+    df['requiere_guia'] = df['Comentario'].apply(comentario_requiere_guia)
 
     return df, headers
 
@@ -1642,7 +1786,16 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
                         key=f"confirm_complete_{row['ID_Pedido']}_{origen_tab}",
                     ):
                         try:
-                            if gsheet_row_index <= 0:
+                            requiere_guia = bool(row.get("requiere_guia"))
+                            adjuntos_guia_val = str(row.get("Adjuntos_Guia", "")).strip()
+
+                            if requiere_guia and not adjuntos_guia_val:
+                                st.error(
+                                    "❌ No se puede completar el pedido: se detectó solicitud de guía / hoja de ruta con dirección, pero no se adjuntó el archivo de guía correspondiente."
+                                )
+                                if flag_key in st.session_state:
+                                    del st.session_state[flag_key]
+                            elif gsheet_row_index <= 0:
                                 st.error(
                                     f"❌ No se puede completar el pedido '{row['ID_Pedido']}' porque su fila en Google Sheets no es válida."
                                 )
@@ -2220,7 +2373,14 @@ def mostrar_pedido_solo_guia(df, idx, row, orden, origen_tab, current_main_tab_l
                     key=f"confirm_completar_only_{row['ID_Pedido']}",
                     on_click=preserve_tab_state,
                 ):
-                    if not str(row.get("Adjuntos_Guia", "")).strip():
+                    adjuntos_guia_val = str(row.get("Adjuntos_Guia", "")).strip()
+                    requiere_guia = bool(row.get("requiere_guia"))
+                    if requiere_guia and not adjuntos_guia_val:
+                        st.error(
+                            "❌ No se puede completar el pedido: se detectó solicitud de guía / hoja de ruta con dirección, pero no se adjuntó el archivo de guía correspondiente."
+                        )
+                        del st.session_state[flag_key]
+                    elif not adjuntos_guia_val:
                         st.warning("⚠️ Sube al menos una guía antes de completar.")
                         del st.session_state[flag_key]
                     else:
