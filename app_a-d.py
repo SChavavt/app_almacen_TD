@@ -72,6 +72,27 @@ _LOCAL_TURNO_TO_SUBTAB = {
 _UNKNOWN_TAB_LABEL = "Sin pestaña identificada"
 
 
+_EMPTY_TEXT_MARKERS = {"", "nan", "none", "null", "n/a"}
+
+GUIDE_REQUIRED_ERROR_MSG = (
+    "❌ No puedes completar este pedido hasta subir la guía solicitada."
+)
+
+
+def normalize_sheet_text(value: Any) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, str):
+        text = value.strip()
+    else:
+        text = str(value).strip()
+
+    if text.lower() in _EMPTY_TEXT_MARKERS:
+        return ""
+
+    return text
+
+
 def _normalize_tab_field(value: Optional[Any]) -> str:
     if value is None:
         return ""
@@ -581,7 +602,7 @@ def process_sheet_data(all_data: list[list[str]]) -> tuple[pd.DataFrame, list[st
         'Tipo_Envio', 'Fecha_Entrega', 'Comentario', 'Modificacion_Surtido',
         'Adjuntos', 'Adjuntos_Surtido', 'Adjuntos_Guia',
         'Estado', 'Estado_Pago', 'Fecha_Completado', 'Hora_Proceso', 'Turno',
-        'Estado_Entrega'
+        'Estado_Entrega', 'Direccion_Guia_Retorno'
     ]
 
 
@@ -590,10 +611,13 @@ def process_sheet_data(all_data: list[list[str]]) -> tuple[pd.DataFrame, list[st
         if col not in df.columns:
             df[col] = ''
 
-    df['Comentario'] = df['Comentario'].astype(str)
-    df['Comentario'] = df['Comentario'].apply(
-        lambda x: "" if str(x).strip().lower() in {"nan", "none"} else str(x).strip()
-    )
+    df['Comentario'] = df['Comentario'].apply(normalize_sheet_text)
+    if 'Direccion_Guia_Retorno' in df.columns:
+        df['Direccion_Guia_Retorno'] = df['Direccion_Guia_Retorno'].apply(
+            normalize_sheet_text
+        )
+    else:
+        df['Direccion_Guia_Retorno'] = ''
     df['Fecha_Entrega'] = df['Fecha_Entrega'].apply(
         lambda x: str(x) if pd.notna(x) and str(x).strip() != '' else ''
     )
@@ -609,7 +633,9 @@ def process_sheet_data(all_data: list[list[str]]) -> tuple[pd.DataFrame, list[st
     if 'Estado_Entrega' in df.columns:
         df['Estado_Entrega'] = df['Estado_Entrega'].astype(str).str.strip()
 
-    df['requiere_guia'] = df['Comentario'].apply(comentario_requiere_guia)
+    comentario_requiere = df['Comentario'].apply(comentario_requiere_guia)
+    direccion_requiere = df['Direccion_Guia_Retorno'].apply(lambda val: bool(val))
+    df['requiere_guia'] = comentario_requiere | direccion_requiere
 
     return df, headers
 
@@ -1109,6 +1135,29 @@ def _normalize_urls(value):
                 normalized.append(candidate_str)
 
     return normalized
+
+
+def pedido_requiere_guia(row: Any) -> bool:
+    if not row:
+        return False
+
+    if bool(row.get("requiere_guia")):
+        return True
+
+    comentario_val = row.get("Comentario")
+    if comentario_requiere_guia(comentario_val):
+        return True
+
+    direccion_val = normalize_sheet_text(row.get("Direccion_Guia_Retorno", ""))
+    return bool(direccion_val)
+
+
+def pedido_tiene_guia_adjunta(row: Any) -> bool:
+    if not row:
+        return False
+
+    adjuntos = _normalize_urls(row.get("Adjuntos_Guia", ""))
+    return len(adjuntos) > 0
 
 
 # --- Helper Functions (existing in app.py) ---
@@ -1770,12 +1819,18 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
         # Complete Button with confirmation
         if not es_local_no_entregado:
             flag_key = f"confirm_complete_id_{row['ID_Pedido']}"
+            requiere_guia_pedido = pedido_requiere_guia(row)
+            tiene_guia_adjunta = pedido_tiene_guia_adjunta(row)
             if col_complete_btn.button(
                 "🟢 Completar",
                 key=f"complete_button_{row['ID_Pedido']}_{origen_tab}",
                 disabled=disabled_if_completed,
             ):
-                st.session_state[flag_key] = row["ID_Pedido"]
+                if requiere_guia_pedido and not tiene_guia_adjunta:
+                    st.error(GUIDE_REQUIRED_ERROR_MSG)
+                    st.session_state.pop(flag_key, None)
+                else:
+                    st.session_state[flag_key] = row["ID_Pedido"]
 
             if st.session_state.get(flag_key) == row["ID_Pedido"]:
                 st.warning("¿Estás seguro de completar este pedido?")
@@ -1786,15 +1841,12 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
                         key=f"confirm_complete_{row['ID_Pedido']}_{origen_tab}",
                     ):
                         try:
-                            requiere_guia = bool(row.get("requiere_guia"))
-                            adjuntos_guia_val = str(row.get("Adjuntos_Guia", "")).strip()
+                            requiere_guia = pedido_requiere_guia(row)
+                            tiene_guia_adjunta = pedido_tiene_guia_adjunta(row)
 
-                            if requiere_guia and not adjuntos_guia_val:
-                                st.error(
-                                    "❌ No se puede completar el pedido: se detectó solicitud de guía / hoja de ruta con dirección, pero no se adjuntó el archivo de guía correspondiente."
-                                )
-                                if flag_key in st.session_state:
-                                    del st.session_state[flag_key]
+                            if requiere_guia and not tiene_guia_adjunta:
+                                st.error(GUIDE_REQUIRED_ERROR_MSG)
+                                st.session_state.pop(flag_key, None)
                             elif gsheet_row_index <= 0:
                                 st.error(
                                     f"❌ No se puede completar el pedido '{row['ID_Pedido']}' porque su fila en Google Sheets no es válida."
@@ -2357,12 +2409,18 @@ def mostrar_pedido_solo_guia(df, idx, row, orden, origen_tab, current_main_tab_l
                     st.warning("⚠️ No se subió ningún archivo válido.")
 
         flag_key = f"confirm_complete_id_{row['ID_Pedido']}"
+        requiere_guia_pedido = pedido_requiere_guia(row)
+        tiene_guia_adjunta = pedido_tiene_guia_adjunta(row)
         if st.button(
             "🟢 Completar",
             key=f"btn_completar_only_{row['ID_Pedido']}",
             on_click=preserve_tab_state,
         ):
-            st.session_state[flag_key] = row["ID_Pedido"]
+            if requiere_guia_pedido and not tiene_guia_adjunta:
+                st.error(GUIDE_REQUIRED_ERROR_MSG)
+                st.session_state.pop(flag_key, None)
+            else:
+                st.session_state[flag_key] = row["ID_Pedido"]
 
         if st.session_state.get(flag_key) == row["ID_Pedido"]:
             st.warning("¿Estás seguro de completar este pedido?")
@@ -2373,16 +2431,14 @@ def mostrar_pedido_solo_guia(df, idx, row, orden, origen_tab, current_main_tab_l
                     key=f"confirm_completar_only_{row['ID_Pedido']}",
                     on_click=preserve_tab_state,
                 ):
-                    adjuntos_guia_val = str(row.get("Adjuntos_Guia", "")).strip()
-                    requiere_guia = bool(row.get("requiere_guia"))
-                    if requiere_guia and not adjuntos_guia_val:
-                        st.error(
-                            "❌ No se puede completar el pedido: se detectó solicitud de guía / hoja de ruta con dirección, pero no se adjuntó el archivo de guía correspondiente."
-                        )
-                        del st.session_state[flag_key]
-                    elif not adjuntos_guia_val:
+                    requiere_guia = pedido_requiere_guia(row)
+                    tiene_guia_adjunta = pedido_tiene_guia_adjunta(row)
+                    if requiere_guia and not tiene_guia_adjunta:
+                        st.error(GUIDE_REQUIRED_ERROR_MSG)
+                        st.session_state.pop(flag_key, None)
+                    elif not tiene_guia_adjunta:
                         st.warning("⚠️ Sube al menos una guía antes de completar.")
-                        del st.session_state[flag_key]
+                        st.session_state.pop(flag_key, None)
                     else:
                         updates = []
                         if "Estado" in headers:
@@ -2410,13 +2466,12 @@ def mostrar_pedido_solo_guia(df, idx, row, orden, origen_tab, current_main_tab_l
                             st.success("✅ Pedido marcado como **🟢 Completado**.")
                             set_active_main_tab(3)
                             st.cache_data.clear()
-                            del st.session_state[flag_key]
+                            st.session_state.pop(flag_key, None)
                             marcar_contexto_pedido(row["ID_Pedido"], origen_tab)
                             st.rerun()
                         else:
                             st.error("❌ No se pudo actualizar Google Sheets con el estado.")
-                            if flag_key in st.session_state:
-                                del st.session_state[flag_key]
+                            st.session_state.pop(flag_key, None)
             with cancel_col:
                 if st.button(
                     "Cancelar",
