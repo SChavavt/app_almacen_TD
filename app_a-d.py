@@ -1137,8 +1137,30 @@ def _normalize_urls(value):
     return normalized
 
 
+def _is_row_empty(row: Any) -> bool:
+    """Return True if ``row`` should be treated as empty."""
+
+    if row is None:
+        return True
+
+    # Pandas objects (Series/DataFrame) expose ``empty`` to signal no values.
+    empty_attr = getattr(row, "empty", None)
+    if isinstance(empty_attr, bool):
+        return empty_attr
+    if callable(empty_attr):  # defensive: some objects expose empty() method
+        try:
+            return bool(empty_attr())
+        except Exception:
+            pass
+
+    if isinstance(row, (list, tuple, set, dict)):
+        return len(row) == 0
+
+    return False
+
+
 def pedido_requiere_guia(row: Any) -> bool:
-    if not row:
+    if _is_row_empty(row):
         return False
 
     if bool(row.get("requiere_guia")):
@@ -1153,7 +1175,7 @@ def pedido_requiere_guia(row: Any) -> bool:
 
 
 def pedido_tiene_guia_adjunta(row: Any) -> bool:
-    if not row:
+    if _is_row_empty(row):
         return False
 
     adjuntos = _normalize_urls(row.get("Adjuntos_Guia", ""))
