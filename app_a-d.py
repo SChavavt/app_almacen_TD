@@ -44,6 +44,34 @@ def mx_today():
     return mx_now().date()
 
 
+def _ensure_visual_state_defaults():
+    """Ensure session_state has all UI control keys with safe defaults."""
+
+    state = st.session_state
+
+    # Índices de pestañas y banderas de scroll
+    state.setdefault("active_main_tab_index", 0)
+    state.setdefault("active_subtab_local_index", 0)
+    state.setdefault("active_date_tab_m_index", 0)
+    state.setdefault("active_date_tab_t_index", 0)
+    state.setdefault("scroll_to_pedido_id", None)
+
+    # Diccionarios que controlan expanders o secciones dinámicas
+    state.setdefault("expanded_pedidos", {})
+    state.setdefault("expanded_attachments", {})
+    state.setdefault("expanded_subir_guia", {})
+    state.setdefault("expanded_devoluciones", {})
+    state.setdefault("expanded_garantias", {})
+
+    # Otros mapas auxiliares usados por callbacks
+    state.setdefault("guia_upload_success", {})
+    state.setdefault("last_pedidos_count", 0)
+    state.setdefault("last_casos_count", 0)
+    state.setdefault("prev_pedidos_count", 0)
+    state.setdefault("prev_casos_count", 0)
+    state.setdefault("need_compare", False)
+
+
 _TAB_LABELS_BY_TIPO = {
     "📍 Pedido Local": "📍 Pedidos Locales",
     "📍 Pedidos Locales": "📍 Pedidos Locales",
@@ -351,6 +379,9 @@ if st.button(
     st.cache_resource.clear()
 
 
+_ensure_visual_state_defaults()
+
+
 # --- Google Sheets Constants (pueden venir de st.secrets si se prefiere) ---
 GOOGLE_SHEET_ID = '1aWkSelodaz0nWfQx7FZAysGnIYGQFJxAN7RO3YgCiZY'
 GOOGLE_SHEET_WORKSHEET_NAME = 'datos_pedidos'
@@ -373,35 +404,6 @@ except KeyError as e:
     st.stop()
 
 S3_ATTACHMENT_PREFIX = 'adjuntos_pedidos/'
-
-# --- Initialize Session State for tab persistence ---
-if "active_main_tab_index" not in st.session_state:
-    st.session_state["active_main_tab_index"] = 0
-if "active_subtab_local_index" not in st.session_state:
-    st.session_state["active_subtab_local_index"] = 0
-if "active_date_tab_m_index" not in st.session_state:
-    st.session_state["active_date_tab_m_index"] = 0
-if "active_date_tab_t_index" not in st.session_state:
-    st.session_state["active_date_tab_t_index"] = 0
-if "expanded_pedidos" not in st.session_state:
-    st.session_state["expanded_pedidos"] = {}
-    st.session_state["expanded_attachments"] = {}
-    st.session_state["expanded_subir_guia"] = {}
-st.session_state.setdefault("guia_upload_success", {})
-if "expanded_devoluciones" not in st.session_state:
-    st.session_state["expanded_devoluciones"] = {}
-if "expanded_garantias" not in st.session_state:
-    st.session_state["expanded_garantias"] = {}
-if "last_pedidos_count" not in st.session_state:
-    st.session_state["last_pedidos_count"] = 0
-if "last_casos_count" not in st.session_state:
-    st.session_state["last_casos_count"] = 0
-if "prev_pedidos_count" not in st.session_state:
-    st.session_state["prev_pedidos_count"] = 0
-if "prev_casos_count" not in st.session_state:
-    st.session_state["prev_casos_count"] = 0
-if "need_compare" not in st.session_state:
-    st.session_state["need_compare"] = False
 
 # --- Soft reload si el usuario presionó "Recargar Pedidos (seguro)"
 if st.session_state.get("reload_pedidos_soft"):
