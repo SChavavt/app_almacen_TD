@@ -54,6 +54,8 @@ def _ensure_visual_state_defaults():
     state.setdefault("active_subtab_local_index", 0)
     state.setdefault("active_date_tab_m_index", 0)
     state.setdefault("active_date_tab_t_index", 0)
+    state.setdefault("active_date_tab_m_label", "")
+    state.setdefault("active_date_tab_t_label", "")
     state.setdefault("scroll_to_pedido_id", None)
 
     # Diccionarios que controlan expanders o secciones dinámicas
@@ -119,6 +121,73 @@ def _clamp_tab_index(index: Any, options: Sequence[Any]) -> int:
         return max_index
 
     return parsed_index
+
+
+def _get_first_query_value(params: Any, key: str) -> Optional[str]:
+    """Return the first value for ``key`` from Streamlit query params."""
+
+    if params is None:
+        return None
+
+    value = params.get(key)
+
+    if isinstance(value, list):
+        if not value:
+            return None
+        return value[0]
+
+    return value
+
+
+def _resolve_tab_index_from_query(
+    params: Any,
+    query_key: str,
+    options: Sequence[Any],
+    fallback_index: Any = 0,
+) -> int:
+    """Resolve a persisted tab index using the query string when available."""
+
+    query_value = _get_first_query_value(params, query_key)
+
+    if query_value is not None:
+        return _clamp_tab_index(query_value, options)
+
+    return _clamp_tab_index(fallback_index, options)
+
+
+def _emit_recent_tab_group_script(active_index: int, query_param: str) -> None:
+    """Attach JS to focus the most recently rendered tab group and persist selection."""
+
+    components.html(
+        f"""
+        <script>
+        (function() {{
+            const tabGroups = window.parent.document.querySelectorAll('.stTabs');
+            const targetGroup = tabGroups[tabGroups.length - 1];
+            if (!targetGroup) {{
+                return;
+            }}
+            const tabs = targetGroup.querySelectorAll('[data-baseweb="tab"]');
+            const activeIndex = {int(active_index)};
+            if (tabs[activeIndex]) {{
+                tabs[activeIndex].click();
+            }}
+            const paramKey = {json.dumps(query_param)};
+            tabs.forEach((tab, idx) => {{
+                tab.addEventListener('click', () => {{
+                    const params = new URLSearchParams(window.parent.location.search);
+                    params.set(paramKey, idx);
+                    const base = window.parent.location.origin + window.parent.location.pathname;
+                    const query = params.toString();
+                    const newUrl = query ? `${{base}}?${{query}}` : base;
+                    window.parent.history.replaceState(null, '', newUrl);
+                }});
+            }});
+        }})();
+        </script>
+        """,
+        height=0,
+    )
 
 _UNKNOWN_TAB_LABEL = "Sin pestaña identificada"
 
@@ -357,6 +426,8 @@ st.set_page_config(page_title="Recepción de Pedidos TD", layout="wide")
 # 🔁 Restaurar pestañas activas si venimos de una acción que modificó datos
 restoring_tabs = st.session_state.pop("restore_tabs_after_print", False)
 
+params = st.query_params
+
 if "preserve_main_tab" in st.session_state:
     restoring_tabs = True
     st.session_state["active_main_tab_index"] = st.session_state.pop("preserve_main_tab", 0)
@@ -368,7 +439,6 @@ if "preserve_main_tab" in st.session_state:
     st.session_state["active_date_tab_t_index"] = st.session_state.pop("preserve_date_tab_t", 0)
 else:
     # 🧭 Leer pestaña activa desde parámetros de URL
-    params = st.query_params
     if "tab" in params:
         try:
             tab_val = params["tab"]
@@ -378,21 +448,11 @@ else:
         except (ValueError, TypeError):
             st.session_state["active_main_tab_index"] = 0
 
-    if "local_tab" in params:
-        try:
-            local_val = params["local_tab"]
-            if isinstance(local_val, list):
-                local_val = local_val[0]
-            st.session_state["active_subtab_local_index"] = _clamp_tab_index(
-                local_val,
-                _LOCAL_SUBTAB_OPTIONS,
-            )
-        except (ValueError, TypeError):
-            st.session_state["active_subtab_local_index"] = 0
-
-st.session_state["active_subtab_local_index"] = _clamp_tab_index(
-    st.session_state.get("active_subtab_local_index", 0),
+st.session_state["active_subtab_local_index"] = _resolve_tab_index_from_query(
+    params,
+    "local_tab",
     _LOCAL_SUBTAB_OPTIONS,
+    st.session_state.get("active_subtab_local_index", 0),
 )
 
 if restoring_tabs and "active_main_tab_index" in st.session_state:
@@ -2895,9 +2955,34 @@ if not df_main.empty:
 
                 if fechas_unicas_dt:
                     date_tab_labels = [f"📅 {pd.to_datetime(fecha).strftime('%d/%m/%Y')}" for fecha in fechas_unicas_dt]
-                    
+
+                    saved_label = st.session_state.get("active_date_tab_m_label", "")
+                    fallback_index = (
+                        date_tab_labels.index(saved_label)
+                        if saved_label in date_tab_labels
+                        else _clamp_tab_index(
+                            st.session_state.get("active_date_tab_m_index", 0),
+                            date_tab_labels,
+                        )
+                    )
+                    active_date_tab_m_index = _resolve_tab_index_from_query(
+                        st.query_params,
+                        "local_m_date_tab",
+                        date_tab_labels,
+                        fallback_index,
+                    )
+                    st.session_state["active_date_tab_m_index"] = active_date_tab_m_index
+                    st.session_state["active_date_tab_m_label"] = date_tab_labels[
+                        active_date_tab_m_index
+                    ]
+                    st.query_params["local_m_date_tab"] = str(active_date_tab_m_index)
+
                     date_tabs_m = st.tabs(date_tab_labels)
-                    
+                    _emit_recent_tab_group_script(
+                        active_date_tab_m_index,
+                        "local_m_date_tab",
+                    )
+
                     for i, fecha_dt in enumerate(fechas_unicas_dt):
                         date_label = f"📅 {pd.to_datetime(fecha_dt).strftime('%d/%m/%Y')}"
                         with date_tabs_m[i]:
@@ -2916,10 +3001,16 @@ if not df_main.empty:
                                     headers_main,
                                     s3_client,
                                 )
-                                
+
                 else: # Added: Message if no orders for morning shift
+                    st.session_state["active_date_tab_m_index"] = 0
+                    st.session_state["active_date_tab_m_label"] = ""
+                    st.query_params["local_m_date_tab"] = "0"
                     st.info("No hay pedidos para el turno mañana.")
             else: # Added: Message if no orders for morning shift
+                st.session_state["active_date_tab_m_index"] = 0
+                st.session_state["active_date_tab_m_label"] = ""
+                st.query_params["local_m_date_tab"] = "0"
                 st.info("No hay pedidos para el turno mañana.")
                                 
         with subtabs_local[1]:  # 🌇 Tarde
@@ -2933,14 +3024,43 @@ if not df_main.empty:
 
                 if fechas_unicas_dt:
                     date_tab_labels = [f"📅 {pd.to_datetime(fecha).strftime('%d/%m/%Y')}" for fecha in fechas_unicas_dt]
-                    
+
+                    saved_label_t = st.session_state.get("active_date_tab_t_label", "")
+                    fallback_index_t = (
+                        date_tab_labels.index(saved_label_t)
+                        if saved_label_t in date_tab_labels
+                        else _clamp_tab_index(
+                            st.session_state.get("active_date_tab_t_index", 0),
+                            date_tab_labels,
+                        )
+                    )
+                    active_date_tab_t_index = _resolve_tab_index_from_query(
+                        st.query_params,
+                        "local_t_date_tab",
+                        date_tab_labels,
+                        fallback_index_t,
+                    )
+                    st.session_state["active_date_tab_t_index"] = active_date_tab_t_index
+                    st.session_state["active_date_tab_t_label"] = date_tab_labels[
+                        active_date_tab_t_index
+                    ]
+                    st.query_params["local_t_date_tab"] = str(active_date_tab_t_index)
+
                     date_tabs_t = st.tabs(date_tab_labels)
+                    _emit_recent_tab_group_script(
+                        active_date_tab_t_index,
+                        "local_t_date_tab",
+                    )
                     for i, date_label in enumerate(date_tab_labels):
                         with date_tabs_t[i]:
                             current_selected_date_dt_str = date_label.replace("📅 ", "")
-                            current_selected_date_dt = pd.to_datetime(current_selected_date_dt_str, format='%d/%m/%Y')
-                            
-                            pedidos_fecha = pedidos_t_display[pedidos_t_display["Fecha_Entrega_dt"] == current_selected_date_dt].copy()
+                            current_selected_date_dt = pd.to_datetime(
+                                current_selected_date_dt_str, format='%d/%m/%Y'
+                            )
+
+                            pedidos_fecha = pedidos_t_display[
+                                pedidos_t_display["Fecha_Entrega_dt"] == current_selected_date_dt
+                            ].copy()
                             pedidos_fecha = ordenar_pedidos_custom(pedidos_fecha)
                             st.markdown(f"#### 🌇 Pedidos Locales - Tarde - {date_label}")
                             for orden, (idx, row) in enumerate(pedidos_fecha.iterrows(), start=1):
@@ -2956,8 +3076,14 @@ if not df_main.empty:
                                     s3_client,
                                 )
                 else:
+                    st.session_state["active_date_tab_t_index"] = 0
+                    st.session_state["active_date_tab_t_label"] = ""
+                    st.query_params["local_t_date_tab"] = "0"
                     st.info("No hay pedidos para el turno tarde.")
             else:
+                st.session_state["active_date_tab_t_index"] = 0
+                st.session_state["active_date_tab_t_label"] = ""
+                st.query_params["local_t_date_tab"] = "0"
                 st.info("No hay pedidos para el turno tarde.")
 
         with subtabs_local[2]: # ⛰️ Saltillo
