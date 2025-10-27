@@ -1450,8 +1450,8 @@ def render_guia_upload_feedback(
             key=ack_key or f"ack_guia_{row_id}",
         )
         if acknowledge_pressed:
-            guia_success_map.pop(row_id, None)
             marcar_contexto_pedido(row_id, origen_tab, scroll=False)
+            guia_success_map.pop(row_id, None)
             placeholder.empty()
 
 def mostrar_pedido_detalle(
@@ -1848,6 +1848,7 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
                 key=f"complete_button_{row['ID_Pedido']}_{origen_tab}",
                 disabled=disabled_if_completed,
             ):
+                marcar_contexto_pedido(row["ID_Pedido"], origen_tab)
                 if requiere_guia_pedido and not tiene_guia_adjunta:
                     st.error(GUIDE_REQUIRED_ERROR_MSG)
                     st.session_state.pop(flag_key, None)
@@ -1862,6 +1863,7 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
                         "Confirmar",
                         key=f"confirm_complete_{row['ID_Pedido']}_{origen_tab}",
                     ):
+                        marcar_contexto_pedido(row["ID_Pedido"], origen_tab)
                         try:
                             requiere_guia = pedido_requiere_guia(row)
                             tiene_guia_adjunta = pedido_tiene_guia_adjunta(row)
@@ -1969,6 +1971,7 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
                         "Cancelar",
                         key=f"cancel_complete_{row['ID_Pedido']}_{origen_tab}",
                     ):
+                        marcar_contexto_pedido(row["ID_Pedido"], origen_tab, scroll=False)
                         if flag_key in st.session_state:
                             del st.session_state[flag_key]
         else:
@@ -2050,7 +2053,6 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
                     handle_generic_upload_change(
                         row["ID_Pedido"],
                         ("expanded_pedidos", "expanded_subir_guia"),
-                        scroll_to_row=False,
                     )
 
                     if archivos_guia:
@@ -2361,7 +2363,7 @@ def mostrar_pedido_solo_guia(df, idx, row, orden, origen_tab, current_main_tab_l
 
         if submitted_upload:
             handle_generic_upload_change(
-                row["ID_Pedido"], ("expanded_pedidos",), scroll_to_row=False
+                row["ID_Pedido"], ("expanded_pedidos",)
             )
             if not archivos_guia:
                 st.warning("⚠️ Primero sube al menos un archivo de guía.")
@@ -2438,6 +2440,7 @@ def mostrar_pedido_solo_guia(df, idx, row, orden, origen_tab, current_main_tab_l
             key=f"btn_completar_only_{row['ID_Pedido']}",
             on_click=preserve_tab_state,
         ):
+            marcar_contexto_pedido(row["ID_Pedido"], origen_tab)
             if requiere_guia_pedido and not tiene_guia_adjunta:
                 st.error(GUIDE_REQUIRED_ERROR_MSG)
                 st.session_state.pop(flag_key, None)
@@ -2453,6 +2456,7 @@ def mostrar_pedido_solo_guia(df, idx, row, orden, origen_tab, current_main_tab_l
                     key=f"confirm_completar_only_{row['ID_Pedido']}",
                     on_click=preserve_tab_state,
                 ):
+                    marcar_contexto_pedido(row["ID_Pedido"], origen_tab)
                     requiere_guia = pedido_requiere_guia(row)
                     tiene_guia_adjunta = pedido_tiene_guia_adjunta(row)
                     if requiere_guia and not tiene_guia_adjunta:
@@ -2500,6 +2504,7 @@ def mostrar_pedido_solo_guia(df, idx, row, orden, origen_tab, current_main_tab_l
                     key=f"cancel_completar_only_{row['ID_Pedido']}",
                     on_click=preserve_tab_state,
                 ):
+                    marcar_contexto_pedido(row["ID_Pedido"], origen_tab, scroll=False)
                     if flag_key in st.session_state:
                         del st.session_state[flag_key]
 
@@ -3670,6 +3675,7 @@ with main_tabs[5]:
                 key=f"btn_completar_{folio}_{cliente}",
                 on_click=preserve_tab_state,
             ):
+                ensure_expanders_open(row_key, "expanded_devoluciones")
                 st.session_state[flag_key] = row["ID_Pedido"]
 
             if st.session_state.get(flag_key) == row["ID_Pedido"]:
@@ -3681,6 +3687,7 @@ with main_tabs[5]:
                         key=f"confirm_completar_{folio}_{cliente}",
                         on_click=preserve_tab_state,
                     ):
+                        ensure_expanders_open(row_key, "expanded_devoluciones")
                         try:
                             if not str(row.get("Hoja_Ruta_Mensajero", "")).strip():
                                 st.info("Completarás la devolución sin guía.")
@@ -3777,6 +3784,7 @@ with main_tabs[5]:
                         key=f"cancel_completar_{folio}_{cliente}",
                         on_click=preserve_tab_state,
                     ):
+                        ensure_expanders_open(row_key, "expanded_devoluciones")
                         if flag_key in st.session_state:
                             del st.session_state[flag_key]
 
@@ -4325,6 +4333,7 @@ with main_tabs[6]:  # 🛠 Garantías
                 key=f"btn_completar_g_{unique_suffix}",
                 on_click=preserve_tab_state,
             ):
+                ensure_expanders_open(row_key, "expanded_garantias")
                 st.session_state[flag_key] = row["ID_Pedido"]
 
             if st.session_state.get(flag_key) == row["ID_Pedido"]:
@@ -4336,6 +4345,7 @@ with main_tabs[6]:  # 🛠 Garantías
                         key=f"confirm_completar_g_{unique_suffix}",
                         on_click=preserve_tab_state,
                     ):
+                        ensure_expanders_open(row_key, "expanded_garantias")
                         try:
                             if not str(row.get("Hoja_Ruta_Mensajero", "")).strip():
                                 st.info("Completarás la garantía sin guía.")
@@ -4432,6 +4442,7 @@ with main_tabs[6]:  # 🛠 Garantías
                         key=f"cancel_completar_g_{unique_suffix}",
                         on_click=preserve_tab_state,
                     ):
+                        ensure_expanders_open(row_key, "expanded_garantias")
                         if flag_key in st.session_state:
                             del st.session_state[flag_key]
                             
