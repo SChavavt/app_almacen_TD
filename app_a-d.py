@@ -1848,7 +1848,6 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
                 "🟢 Completar",
                 key=f"complete_button_{row['ID_Pedido']}_{origen_tab}",
                 disabled=disabled_if_completed,
-                on_click=preserve_tab_state,
             ):
                 if requiere_guia_pedido and not tiene_guia_adjunta:
                     st.error(GUIDE_REQUIRED_ERROR_MSG)
