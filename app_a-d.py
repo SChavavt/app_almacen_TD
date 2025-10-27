@@ -97,6 +97,29 @@ _LOCAL_TURNO_TO_SUBTAB = {
     "📦 Pasa a Bodega": "📦 En Bodega",
 }
 
+_LOCAL_SUBTAB_OPTIONS = ["🌅 Mañana", "🌇 Tarde", "⛰️ Saltillo", "📦 En Bodega"]
+
+
+def _clamp_tab_index(index: Any, options: Sequence[Any]) -> int:
+    """Return a safe tab index within the bounds of ``options``."""
+
+    if not options:
+        return 0
+
+    try:
+        parsed_index = int(index)
+    except (TypeError, ValueError):
+        return 0
+
+    if parsed_index < 0:
+        return 0
+
+    max_index = len(options) - 1
+    if parsed_index > max_index:
+        return max_index
+
+    return parsed_index
+
 _UNKNOWN_TAB_LABEL = "Sin pestaña identificada"
 
 
@@ -337,7 +360,10 @@ restoring_tabs = st.session_state.pop("restore_tabs_after_print", False)
 if "preserve_main_tab" in st.session_state:
     restoring_tabs = True
     st.session_state["active_main_tab_index"] = st.session_state.pop("preserve_main_tab", 0)
-    st.session_state["active_subtab_local_index"] = st.session_state.pop("preserve_local_tab", 0)
+    st.session_state["active_subtab_local_index"] = _clamp_tab_index(
+        st.session_state.pop("preserve_local_tab", 0),
+        _LOCAL_SUBTAB_OPTIONS,
+    )
     st.session_state["active_date_tab_m_index"] = st.session_state.pop("preserve_date_tab_m", 0)
     st.session_state["active_date_tab_t_index"] = st.session_state.pop("preserve_date_tab_t", 0)
 else:
@@ -352,10 +378,31 @@ else:
         except (ValueError, TypeError):
             st.session_state["active_main_tab_index"] = 0
 
+    if "local_tab" in params:
+        try:
+            local_val = params["local_tab"]
+            if isinstance(local_val, list):
+                local_val = local_val[0]
+            st.session_state["active_subtab_local_index"] = _clamp_tab_index(
+                local_val,
+                _LOCAL_SUBTAB_OPTIONS,
+            )
+        except (ValueError, TypeError):
+            st.session_state["active_subtab_local_index"] = 0
+
+st.session_state["active_subtab_local_index"] = _clamp_tab_index(
+    st.session_state.get("active_subtab_local_index", 0),
+    _LOCAL_SUBTAB_OPTIONS,
+)
+
 if restoring_tabs and "active_main_tab_index" in st.session_state:
     st.query_params["tab"] = str(st.session_state["active_main_tab_index"])
 else:
     st.query_params["tab"] = str(st.session_state.get("active_main_tab_index", 0))
+
+st.query_params["local_tab"] = str(
+    st.session_state.get("active_subtab_local_index", 0)
+)
 
 st.title("📬 Bandeja de Pedidos TD")
 
@@ -1334,6 +1381,12 @@ def set_active_main_tab(idx: int):
     """Actualiza la pestaña principal activa y sincroniza la URL."""
     st.session_state["active_main_tab_index"] = idx
     st.query_params["tab"] = str(idx)
+    st.query_params["local_tab"] = str(
+        _clamp_tab_index(
+            st.session_state.get("active_subtab_local_index", 0),
+            _LOCAL_SUBTAB_OPTIONS,
+        )
+    )
 
 
 def ensure_expanders_open(row_id: Any, *dict_names: str) -> None:
@@ -2784,9 +2837,52 @@ if not df_main.empty:
 
     with main_tabs[0]: # 📍 Pedidos Locales
         st.markdown("### 📋 Pedidos Locales")
-        subtab_options_local = ["🌅 Mañana", "🌇 Tarde", "⛰️ Saltillo", "📦 En Bodega"]
-        
+        subtab_options_local = _LOCAL_SUBTAB_OPTIONS
+
         subtabs_local = st.tabs(subtab_options_local)
+
+        local_tabs_script = f"""
+        <script>
+        (function() {{
+            const expectedLabels = {json.dumps(subtab_options_local)};
+            const tabGroups = window.parent.document.querySelectorAll('.stTabs');
+            let targetGroup = null;
+            tabGroups.forEach(group => {{
+                if (targetGroup) {{
+                    return;
+                }}
+                const tabs = group.querySelectorAll('[data-baseweb="tab"]');
+                if (tabs.length !== expectedLabels.length) {{
+                    return;
+                }}
+                const labels = Array.from(tabs, tab => tab.textContent.trim());
+                const matches = expectedLabels.every(label => labels.includes(label));
+                if (matches) {{
+                    targetGroup = group;
+                }}
+            }});
+            if (!targetGroup) {{
+                return;
+            }}
+            const localTabs = targetGroup.querySelectorAll('[data-baseweb="tab"]');
+            const activeIndex = {st.session_state.get("active_subtab_local_index", 0)};
+            if (localTabs[activeIndex]) {{
+                localTabs[activeIndex].click();
+            }}
+            localTabs.forEach((tab, idx) => {{
+                tab.addEventListener('click', () => {{
+                    const params = new URLSearchParams(window.parent.location.search);
+                    params.set('local_tab', idx);
+                    const base = window.parent.location.origin + window.parent.location.pathname;
+                    const query = params.toString();
+                    const newUrl = query ? `${{base}}?${{query}}` : base;
+                    window.parent.history.replaceState(null, '', newUrl);
+                }});
+            }});
+        }})();
+        </script>
+        """
+        components.html(local_tabs_script, height=0)
 
         with subtabs_local[0]: # 🌅 Mañana
             pedidos_m_display = df_pendientes_proceso_demorado[
