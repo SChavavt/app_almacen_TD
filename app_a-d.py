@@ -1448,11 +1448,12 @@ def render_guia_upload_feedback(
         acknowledge_pressed = st.button(
             "Aceptar",
             key=ack_key or f"ack_guia_{row_id}",
+            on_click=preserve_tab_state,
         )
         if acknowledge_pressed:
             guia_success_map.pop(row_id, None)
-            marcar_contexto_pedido(row_id, origen_tab, scroll=False)
             placeholder.empty()
+            marcar_contexto_pedido(row_id, origen_tab, scroll=False)
 
 def mostrar_pedido_detalle(
     df,
