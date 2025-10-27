@@ -1470,9 +1470,8 @@ def mostrar_pedido_detalle(
         key=f"print_{row['ID_Pedido']}_{origen_tab}",
     ):
         fijar_y_preservar(row, origen_tab)
+        # ✅ Mantener expandido y sin cambio de pestaña
         st.session_state["scroll_to_pedido_id"] = row["ID_Pedido"]
-
-        # Mantener abiertos los expanders relevantes sin forzar recarga manual.
         ensure_expanders_open(
             row["ID_Pedido"],
             "expanded_pedidos",
@@ -1643,6 +1642,9 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
                         key=turno_key,
                     )
 
+                # ✅ Mantener pestaña y pedido abiertos antes del cambio
+                fijar_y_preservar(row, origen_tab)
+
                 if st.button(
                     "✅ Aplicar Cambios de Fecha/Turno",
                     key=f"btn_apply_{widget_suffix}",
@@ -1688,6 +1690,12 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
                             st.toast(
                                 f"📅 Pedido {row['ID_Pedido']} actualizado.",
                                 icon="✅",
+                            )
+                            # ✅ Evitar que se cierre el expander o cambie de pestaña tras aplicar cambios
+                            st.session_state["scroll_to_pedido_id"] = row["ID_Pedido"]
+                            ensure_expanders_open(
+                                row["ID_Pedido"],
+                                "expanded_pedidos",
                             )
                         else:
                             st.error("❌ Falló la actualización en Google Sheets.")
@@ -1843,6 +1851,9 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
             flag_key = f"confirm_complete_id_{row['ID_Pedido']}"
             requiere_guia_pedido = pedido_requiere_guia(row)
             tiene_guia_adjunta = pedido_tiene_guia_adjunta(row)
+            # ✅ Mantener pestaña y pedido visibles al completar
+            fijar_y_preservar(row, origen_tab)
+            ensure_expanders_open(row["ID_Pedido"], "expanded_pedidos")
             if col_complete_btn.button(
                 "🟢 Completar",
                 key=f"complete_button_{row['ID_Pedido']}_{origen_tab}",
@@ -1955,7 +1966,12 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
                                         del st.session_state[flag_key]
 
                                     marcar_contexto_pedido(row["ID_Pedido"], origen_tab)
-                                    st.rerun()
+                                    # ✅ Mantener scroll y expander abiertos tras completar
+                                    st.session_state["scroll_to_pedido_id"] = row["ID_Pedido"]
+                                    ensure_expanders_open(
+                                        row["ID_Pedido"],
+                                        "expanded_pedidos",
+                                    )
                                 else:
                                     st.error("❌ No se pudo completar el pedido.")
                                     if flag_key in st.session_state:
@@ -2047,10 +2063,10 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
                     )
 
                 if submitted_upload:
+                    # ✅ Mantener pestaña y expander abiertos al subir guía
                     handle_generic_upload_change(
                         row["ID_Pedido"],
-                        ("expanded_pedidos", "expanded_subir_guia"),
-                        scroll_to_row=False,
+                        ["expanded_pedidos", "expanded_subir_guia"],
                     )
 
                     if archivos_guia:
@@ -4659,3 +4675,12 @@ with main_tabs[7]:  # ✅ Historial Completados/Cancelados
                         render_caso_especial_garantia_hist(row)
         else:
             st.info("No hay casos especiales completados/cancelados o ya fueron limpiados.")
+
+# 🧭 Reenfocar en el pedido activo tras acciones locales
+if "scroll_to_pedido_id" in st.session_state:
+    pedido_anchor = f"pedido_{st.session_state['scroll_to_pedido_id']}"
+    components.html(
+        f"<script>document.querySelector('a[name=\"{pedido_anchor}\"]').scrollIntoView({{behavior: 'smooth', block: 'center'}});</script>",
+        height=0,
+    )
+    st.session_state.pop("scroll_to_pedido_id", None)
