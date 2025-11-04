@@ -501,6 +501,18 @@ try:
         st.stop()
 
     AWS_CREDENTIALS = st.secrets["aws"]
+    required_aws_keys = {
+        "aws_access_key_id",
+        "aws_secret_access_key",
+        "aws_region",
+        "s3_bucket_name",
+    }
+    missing_aws_keys = sorted(required_aws_keys.difference(AWS_CREDENTIALS.keys()))
+    if missing_aws_keys:
+        st.error("❌ Las credenciales de AWS S3 están incompletas. Faltan las claves: " + ", ".join(missing_aws_keys))
+        st.info("Asegúrate de definir todas las claves requeridas dentro de la sección [aws] en tus secretos.")
+        st.stop()
+
     AWS_ACCESS_KEY_ID = AWS_CREDENTIALS["aws_access_key_id"]
     AWS_SECRET_ACCESS_KEY = AWS_CREDENTIALS["aws_secret_access_key"]
     AWS_REGION = AWS_CREDENTIALS["aws_region"]
@@ -589,7 +601,27 @@ try:
         st.info("Falta la clave: 'st.secrets has no key \"gsheets\". Did you forget to add it to secrets.toml, mount it to secret directory, or the app settings on Streamlit Cloud? More info: https://docs.streamlit.io/deploy/streamlit-community-cloud/deploy-your-app/secrets-management'")
         st.stop()
 
-    GSHEETS_CREDENTIALS = json.loads(st.secrets["gsheets"]["google_credentials"])
+    gsheets_secrets = st.secrets["gsheets"]
+
+    if "google_credentials" not in gsheets_secrets:
+        st.error("❌ Las credenciales de Google Sheets están incompletas. Falta la clave 'google_credentials' en la sección [gsheets].")
+        st.info("Incluye el JSON completo de la cuenta de servicio en la clave google_credentials dentro de la sección [gsheets] de tu archivo .streamlit/secrets.toml o en los secretos de Streamlit Cloud.")
+        st.stop()
+
+    try:
+        GSHEETS_CREDENTIALS = json.loads(gsheets_secrets["google_credentials"])
+    except json.JSONDecodeError as decode_err:
+        st.error("❌ No se pudieron leer las credenciales de Google Sheets. El valor de 'google_credentials' no es un JSON válido.")
+        st.info(f"Detalle del error: {decode_err}. Revisa que el JSON esté completo y que los saltos de línea de la llave privada estén escapados (\\n).")
+        st.stop()
+
+    required_google_keys = {"client_email", "private_key", "token_uri"}
+    missing_google_keys = sorted(required_google_keys.difference(GSHEETS_CREDENTIALS))
+    if missing_google_keys:
+        st.error("❌ Las credenciales de Google Sheets están incompletas. Faltan las claves: " + ", ".join(missing_google_keys))
+        st.info("Descarga nuevamente el archivo JSON de la cuenta de servicio y copia todo su contenido en la clave google_credentials.")
+        st.stop()
+
     GSHEETS_CREDENTIALS["private_key"] = GSHEETS_CREDENTIALS["private_key"].replace("\\n", "\n")
 
 
