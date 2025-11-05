@@ -790,25 +790,59 @@ with tabs[0]:
                                 return None
                             return valor_str.lower()
 
-                        for key, url in otros_s3:
-                            nombre = key.split("/")[-1] if key else "Archivo"
-                            otros_items.append((nombre, url))
-                            clave = extract_s3_key(key) or key or url
-                            clave_norm = _normalizar_clave(clave)
+                        def _registrar_clave(valor):
+                            clave_norm = _normalizar_clave(valor)
                             if clave_norm:
                                 claves_vistas.add(clave_norm)
+
+                        def _esta_registrada(valor):
+                            clave_norm = _normalizar_clave(valor)
+                            if not clave_norm:
+                                return False
+                            return clave_norm in claves_vistas
+
+                        for raw_url in guia_hoja:
+                            clave = extract_s3_key(raw_url) or raw_url
+                            _registrar_clave(clave)
+                            _registrar_clave(raw_url)
+
+                        for key, url in res.get("Coincidentes") or []:
+                            clave = extract_s3_key(key) or key
+                            _registrar_clave(clave)
+                            if url:
+                                _registrar_clave(extract_s3_key(url) or url)
+
+                        for key, url in res.get("Comprobantes") or []:
+                            clave = extract_s3_key(key) or key
+                            _registrar_clave(clave)
+                            if url:
+                                _registrar_clave(extract_s3_key(url) or url)
+
+                        for key, url in res.get("Facturas") or []:
+                            clave = extract_s3_key(key) or key
+                            _registrar_clave(clave)
+                            if url:
+                                _registrar_clave(extract_s3_key(url) or url)
+
+                        for key, url in otros_s3:
+                            clave = extract_s3_key(key) or key or url
+                            if _esta_registrada(clave) or _esta_registrada(url):
+                                continue
+                            nombre = key.split("/")[-1] if key else "Archivo"
+                            otros_items.append((nombre, url))
+                            _registrar_clave(clave)
+                            if url:
+                                _registrar_clave(url)
 
                         for idx, raw_url in enumerate(adjuntos_hoja, start=1):
                             nombre, enlace = resolver_nombre_y_enlace(raw_url, f"Adjunto hoja #{idx}")
                             if not enlace:
                                 continue
                             clave = extract_s3_key(raw_url) or enlace
-                            clave_norm = _normalizar_clave(clave)
-                            if clave_norm and clave_norm in claves_vistas:
+                            if _esta_registrada(clave):
                                 continue
-                            if clave_norm:
-                                claves_vistas.add(clave_norm)
                             otros_items.append((nombre or f"Adjunto hoja #{idx}", enlace))
+                            _registrar_clave(clave)
 
                         if otros_items:
                             st.markdown("#### 📂 Otros Archivos:")
