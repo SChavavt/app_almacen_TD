@@ -54,7 +54,8 @@ def cargar_pedidos():
     # columnas mínimas que usaremos (incluye modif. y refacturación)
     needed = [
         "ID_Pedido","Hora_Registro","Cliente","Estado","Vendedor_Registro","Folio_Factura",
-        "Modificacion_Surtido","Adjuntos_Surtido","Adjuntos_Guia","Adjuntos",
+        "Comentario","Comentarios","Modificacion_Surtido","Adjuntos_Surtido","Adjuntos_Guia",
+        "Adjuntos","Direccion_Guia_Retorno","Nota_Venta","Tiene_Nota_Venta","Motivo_NotaVenta",
         "Refacturacion_Tipo","Refacturacion_Subtipo","Folio_Factura_Refacturada"
     ]
     for c in needed:
@@ -81,7 +82,9 @@ def cargar_casos_especiales():
         "Comentarios_Admin_Devolucion","Modificacion_Surtido","Adjuntos_Surtido","Refacturacion_Tipo",
         "Refacturacion_Subtipo","Folio_Factura_Refacturada","Turno","Hora_Proceso",
         # Campos específicos de garantías
-        "Numero_Serie","Fecha_Compra"
+        "Numero_Serie","Fecha_Compra",
+        "Comentario","Comentarios","Direccion_Guia_Retorno","Nota_Venta",
+        "Tiene_Nota_Venta","Motivo_NotaVenta"
     ]
     for c in columnas_ejemplo:
         if c not in df.columns:
@@ -298,6 +301,12 @@ def preparar_resultado_caso(row):
         "Hora_Proceso": row.get("Hora_Proceso", ""),
         "Numero_Serie": row.get("Numero_Serie", ""),
         "Fecha_Compra": row.get("Fecha_Compra", ""),
+        "Comentario": str(row.get("Comentario", "")).strip(),
+        "Comentarios": str(row.get("Comentarios", "")).strip(),
+        "Direccion_Guia_Retorno": str(row.get("Direccion_Guia_Retorno", "")).strip(),
+        "Nota_Venta": str(row.get("Nota_Venta", "")).strip(),
+        "Tiene_Nota_Venta": str(row.get("Tiene_Nota_Venta", "")).strip(),
+        "Motivo_NotaVenta": str(row.get("Motivo_NotaVenta", "")).strip(),
         # 🛠 Modificación de surtido
         "Modificacion_Surtido": str(row.get("Modificacion_Surtido", "")).strip(),
         "Adjuntos_Surtido_urls": partir_urls(row.get("Adjuntos_Surtido", "")),
@@ -342,6 +351,28 @@ def render_caso_especial(res):
         st.markdown(
             f"**🔢 Número de Serie:** {res.get('Numero_Serie','') or 'N/A'}  |  **📅 Fecha de Compra:** {res.get('Fecha_Compra','') or 'N/A'}"
         )
+
+    comentario_txt = str(res.get("Comentario", "") or res.get("Comentarios", "")).strip()
+    if comentario_txt:
+        st.markdown("#### 📝 Comentarios del pedido")
+        st.info(comentario_txt)
+
+    direccion_retorno = str(res.get("Direccion_Guia_Retorno", "")).strip()
+    if direccion_retorno:
+        st.markdown("#### 📍 Dirección para guía de retorno")
+        st.info(direccion_retorno)
+
+    nota_venta_valor = str(res.get("Nota_Venta", "")).strip()
+    tiene_nota_venta = str(res.get("Tiene_Nota_Venta", "")).strip()
+    motivo_nota_venta = str(res.get("Motivo_NotaVenta", "")).strip()
+    if nota_venta_valor or tiene_nota_venta or motivo_nota_venta:
+        st.markdown("#### 🧾 Nota de venta")
+        estado_texto = tiene_nota_venta or ("Sí" if nota_venta_valor else "No")
+        st.markdown(f"- **¿Tiene nota de venta?:** {estado_texto}")
+        if nota_venta_valor:
+            st.markdown(f"- **Detalle:** {nota_venta_valor}")
+        if motivo_nota_venta:
+            st.markdown(f"- **Motivo:** {motivo_nota_venta}")
 
     ref_t = res.get("Refacturacion_Tipo","")
     ref_st = res.get("Refacturacion_Subtipo","")
@@ -559,6 +590,12 @@ with tabs[0]:
                     "Vendedor": row.get("Vendedor_Registro", ""),
                     "Folio": row.get("Folio_Factura", ""),
                     "Hora_Registro": row.get("Hora_Registro", ""),
+                    "Comentario": str(row.get("Comentario", "")).strip(),
+                    "Comentarios": str(row.get("Comentarios", "")).strip(),
+                    "Direccion_Guia_Retorno": str(row.get("Direccion_Guia_Retorno", "")).strip(),
+                    "Nota_Venta": str(row.get("Nota_Venta", "")).strip(),
+                    "Tiene_Nota_Venta": str(row.get("Tiene_Nota_Venta", "")).strip(),
+                    "Motivo_NotaVenta": str(row.get("Motivo_NotaVenta", "")).strip(),
                     # 🛠 Modificación de surtido
                     "Modificacion_Surtido": str(row.get("Modificacion_Surtido", "")).strip(),
                     "Adjuntos_Surtido_urls": partir_urls(row.get("Adjuntos_Surtido", "")),
@@ -654,6 +691,12 @@ with tabs[0]:
                             "Vendedor": row.get("Vendedor_Registro", ""),
                             "Folio": row.get("Folio_Factura", ""),
                             "Hora_Registro": row.get("Hora_Registro", ""),
+                            "Comentario": str(row.get("Comentario", "")).strip(),
+                            "Comentarios": str(row.get("Comentarios", "")).strip(),
+                            "Direccion_Guia_Retorno": str(row.get("Direccion_Guia_Retorno", "")).strip(),
+                            "Nota_Venta": str(row.get("Nota_Venta", "")).strip(),
+                            "Tiene_Nota_Venta": str(row.get("Tiene_Nota_Venta", "")).strip(),
+                            "Motivo_NotaVenta": str(row.get("Motivo_NotaVenta", "")).strip(),
                             # 🛠 Modificación de surtido
                             "Modificacion_Surtido": str(row.get("Modificacion_Surtido", "")).strip(),
                             "Adjuntos_Surtido_urls": partir_urls(row.get("Adjuntos_Surtido", "")),
@@ -713,6 +756,28 @@ with tabs[0]:
                     st.markdown(
                         f"📄 **Folio:** `{res['Folio'] or 'N/D'}`  |  🔍 **Estado:** `{res['Estado'] or 'N/D'}`  |  🧑‍💼 **Vendedor:** `{res['Vendedor'] or 'N/D'}`  |  🕒 **Hora:** `{res['Hora_Registro'] or 'N/D'}`"
                     )
+
+                    comentario_txt = str(res.get("Comentario", "") or res.get("Comentarios", "")).strip()
+                    if comentario_txt:
+                        st.markdown("#### 📝 Comentarios del pedido")
+                        st.info(comentario_txt)
+
+                    direccion_retorno = str(res.get("Direccion_Guia_Retorno", "")).strip()
+                    if direccion_retorno:
+                        st.markdown("#### 📍 Dirección para guía de retorno")
+                        st.info(direccion_retorno)
+
+                    nota_venta_valor = str(res.get("Nota_Venta", "")).strip()
+                    tiene_nota_venta = str(res.get("Tiene_Nota_Venta", "")).strip()
+                    motivo_nota_venta = str(res.get("Motivo_NotaVenta", "")).strip()
+                    if nota_venta_valor or tiene_nota_venta or motivo_nota_venta:
+                        st.markdown("#### 🧾 Nota de venta")
+                        estado_texto = tiene_nota_venta or ("Sí" if nota_venta_valor else "No")
+                        st.markdown(f"- **¿Tiene nota de venta?:** {estado_texto}")
+                        if nota_venta_valor:
+                            st.markdown(f"- **Detalle:** {nota_venta_valor}")
+                        if motivo_nota_venta:
+                            st.markdown(f"- **Motivo:** {motivo_nota_venta}")
 
                     mod_txt = res.get("Modificacion_Surtido", "") or ""
                     mod_urls = res.get("Adjuntos_Surtido_urls", []) or []
