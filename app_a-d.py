@@ -74,6 +74,83 @@ def _ensure_visual_state_defaults():
     state.setdefault("need_compare", False)
 
 
+_VISUAL_EXPANDER_STATE_KEYS = (
+    "expanded_pedidos",
+    "expanded_attachments",
+    "expanded_subir_guia",
+    "expanded_devoluciones",
+    "expanded_garantias",
+)
+
+
+def _capture_visual_expanders_state() -> dict[str, list[Any]]:
+    """Return a snapshot of the expanders currently abiertos en sesión."""
+
+    snapshot: dict[str, list[Any]] = {}
+    for dict_name in _VISUAL_EXPANDER_STATE_KEYS:
+        current_state = st.session_state.get(dict_name)
+        if isinstance(current_state, dict):
+            expanded_ids = [key for key, is_open in current_state.items() if is_open]
+            if expanded_ids:
+                snapshot[dict_name] = expanded_ids
+    return snapshot
+
+
+def _queue_visual_context_restore(*, scroll_target: Any, origen_tab: Optional[str] = None) -> None:
+    """Persist the visual context so it can be restored after un rerun implícito."""
+
+    state = st.session_state
+    payload = {
+        "active_main_tab_index": state.get("active_main_tab_index", 0),
+        "active_subtab_local_index": state.get("active_subtab_local_index", 0),
+        "active_date_tab_m_index": state.get("active_date_tab_m_index", 0),
+        "active_date_tab_m_label": state.get("active_date_tab_m_label", ""),
+        "active_date_tab_t_index": state.get("active_date_tab_t_index", 0),
+        "active_date_tab_t_label": state.get("active_date_tab_t_label", ""),
+        "scroll_to_pedido_id": scroll_target,
+        "subtab_local": origen_tab if origen_tab is not None else state.get("subtab_local"),
+        "expanders": _capture_visual_expanders_state(),
+    }
+    state["pending_visual_restore"] = payload
+
+
+def _restore_visual_context_if_pending() -> None:
+    """Reaplica pestañas, expanders y scroll guardados previamente."""
+
+    context = st.session_state.pop("pending_visual_restore", None)
+    if not context:
+        return
+
+    for key in (
+        "active_main_tab_index",
+        "active_subtab_local_index",
+        "active_date_tab_m_index",
+        "active_date_tab_m_label",
+        "active_date_tab_t_index",
+        "active_date_tab_t_label",
+    ):
+        if key in context:
+            st.session_state[key] = context[key]
+
+    if context.get("subtab_local") is not None:
+        st.session_state["subtab_local"] = context["subtab_local"]
+
+    expanders_context = context.get("expanders") or {}
+    for dict_name, row_ids in expanders_context.items():
+        expander_state = st.session_state.setdefault(dict_name, {})
+        if not isinstance(expander_state, dict):
+            expander_state = st.session_state[dict_name] = {}
+
+        if isinstance(row_ids, (list, tuple, set)):
+            for row_id in row_ids:
+                expander_state[row_id] = True
+        elif row_ids is not None:
+            expander_state[row_ids] = True
+
+    scroll_target = context.get("scroll_to_pedido_id")
+    if scroll_target is not None:
+        st.session_state["scroll_to_pedido_id"] = scroll_target
+
 _TAB_LABELS_BY_TIPO = {
     "📍 Pedido Local": "📍 Pedidos Locales",
     "📍 Pedidos Locales": "📍 Pedidos Locales",
@@ -428,6 +505,12 @@ restoring_tabs = st.session_state.pop("restore_tabs_after_print", False)
 
 params = st.query_params
 
+_ensure_visual_state_defaults()
+pending_visual_restore = "pending_visual_restore" in st.session_state
+if pending_visual_restore:
+    restoring_tabs = True
+_restore_visual_context_if_pending()
+
 if "preserve_main_tab" in st.session_state:
     restoring_tabs = True
     st.session_state["active_main_tab_index"] = st.session_state.pop("preserve_main_tab", 0)
@@ -484,9 +567,6 @@ if st.button(
     st.session_state["reload_pedidos_soft"] = True
     st.cache_data.clear()
     st.cache_resource.clear()
-
-
-_ensure_visual_state_defaults()
 
 
 # --- Google Sheets Constants (pueden venir de st.secrets si se prefiere) ---
@@ -1422,6 +1502,7 @@ def marcar_contexto_pedido(row_id, origen_tab=None, *, scroll=True):
         siguiente ejecución. Útil para callbacks que requieren reenfocar el pedido.
     """
 
+    _ensure_visual_state_defaults()
     if origen_tab is not None:
         st.session_state["subtab_local"] = origen_tab
 
@@ -1431,19 +1512,26 @@ def marcar_contexto_pedido(row_id, origen_tab=None, *, scroll=True):
     expanded_subir_guia = st.session_state.setdefault("expanded_subir_guia", {})
     expanded_subir_guia[row_id] = True
 
-    expanded_attachments = st.session_state.get("expanded_attachments")
-    if isinstance(expanded_attachments, dict):
-        expanded_attachments[row_id] = True
+    expanded_attachments = st.session_state.setdefault("expanded_attachments", {})
+    expanded_attachments[row_id] = True
 
     if scroll:
         st.session_state["scroll_to_pedido_id"] = row_id
+        scroll_target = row_id
+    else:
+        scroll_target = st.session_state.get("scroll_to_pedido_id")
     preserve_tab_state()
+    _queue_visual_context_restore(
+        scroll_target=scroll_target,
+        origen_tab=origen_tab,
+    )
     st.session_state["restore_tabs_after_print"] = True
 
 
 def fijar_y_preservar(row, origen_tab):
     """Preserva pestañas y expansores antes de un posible rerun."""
 
+    _ensure_visual_state_defaults()
     st.session_state["pedido_editado"] = row["ID_Pedido"]
     st.session_state["fecha_seleccionada"] = row.get("Fecha_Entrega", "")
     st.session_state["subtab_local"] = origen_tab
@@ -1626,6 +1714,9 @@ def mostrar_pedido_detalle(
             "expanded_attachments",
             "expanded_subir_guia",
         )
+
+        if row["Estado"] in ["🟢 Completado", "✅ Viajó"]:
+            return
 
         if row["Estado"] in ["🟡 Pendiente", "🔴 Demorado"]:
             zona_mexico = timezone("America/Mexico_City")
