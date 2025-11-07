@@ -1040,169 +1040,175 @@ with tabs[2]:
 
     df_garantias = df_casos[df_casos.apply(es_garantia, axis=1)].copy()
 
-    st.markdown("### 🛡️ Garantías registradas")
-    termino_busqueda_garantia = st.text_input(
-        "Buscar por cliente o folio",
-        key="busqueda_garantias",
-        placeholder="Cliente o folio",
+    mostrar_garantias = st.checkbox(
+        "🔘 Mostrar sección de garantías",
+        help="Activa esta opción para consultar únicamente la información de garantías.",
     )
 
-    termino_normalizado = normalizar(termino_busqueda_garantia or "")
-    termino_folio = (
-        normalizar_folio(termino_busqueda_garantia)
-        if termino_busqueda_garantia
-        else ""
-    )
-
-    if termino_normalizado:
-
-        def coincide_garantia(row):
-            cliente = normalizar(str(row.get("Cliente", "")))
-            folio = normalizar_folio(
-                row.get("Folio_Factura") or row.get("Folio") or ""
-            )
-            return termino_normalizado in cliente or (
-                termino_folio and termino_folio in folio
-            )
-
-        df_garantias_filtrado = df_garantias[
-            df_garantias.apply(coincide_garantia, axis=1)
-        ]
-    else:
-        df_garantias_filtrado = df_garantias
-
-    if df_garantias_filtrado.empty:
-        st.info(
-            "No se encontraron garantías con el criterio de búsqueda proporcionado."
+    if mostrar_garantias:
+        st.markdown("### 🛡️ Garantías registradas")
+        termino_busqueda_garantia = st.text_input(
+            "Buscar por cliente o folio",
+            key="busqueda_garantias",
+            placeholder="Cliente o folio",
         )
-    else:
 
-        def formatear_fecha(valor, formato):
-            if pd.isna(valor):
-                return ""
-            if isinstance(valor, pd.Timestamp):
-                return valor.strftime(formato)
-            try:
-                fecha = pd.to_datetime(valor)
-                if pd.isna(fecha):
+        termino_normalizado = normalizar(termino_busqueda_garantia or "")
+        termino_folio = (
+            normalizar_folio(termino_busqueda_garantia)
+            if termino_busqueda_garantia
+            else ""
+        )
+
+        if termino_normalizado:
+
+            def coincide_garantia(row):
+                cliente = normalizar(str(row.get("Cliente", "")))
+                folio = normalizar_folio(
+                    row.get("Folio_Factura") or row.get("Folio") or ""
+                )
+                return termino_normalizado in cliente or (
+                    termino_folio and termino_folio in folio
+                )
+
+            df_garantias_filtrado = df_garantias[
+                df_garantias.apply(coincide_garantia, axis=1)
+            ]
+        else:
+            df_garantias_filtrado = df_garantias
+
+        if df_garantias_filtrado.empty:
+            st.info(
+                "No se encontraron garantías con el criterio de búsqueda proporcionado."
+            )
+        else:
+
+            def formatear_fecha(valor, formato):
+                if pd.isna(valor):
                     return ""
-                return fecha.strftime(formato)
-            except Exception:
-                return str(valor)
-
-        columnas_tabla = {
-            "ID_Pedido": "Pedido",
-            "Hora_Registro": "Hora Registro",
-            "Vendedor_Registro": "Vendedor Registro",
-            "Cliente": "Cliente",
-            "Folio_Factura": "Folio / Factura",
-            "Numero_Serie": "Número Serie",
-            "Fecha_Compra": "Fecha Compra",
-            "Tipo_Envio": "Tipo Envío",
-            "Estado": "Estado",
-            "Estado_Caso": "Estado Caso",
-            "Seguimiento": "Seguimiento",
-        }
-
-        tabla_garantias = df_garantias_filtrado[list(columnas_tabla.keys())].copy()
-        tabla_garantias["Hora_Registro"] = tabla_garantias["Hora_Registro"].apply(
-            lambda v: formatear_fecha(v, "%d/%m/%Y %H:%M")
-        )
-        tabla_garantias["Fecha_Compra"] = tabla_garantias["Fecha_Compra"].apply(
-            lambda v: formatear_fecha(v, "%d/%m/%Y") if str(v).strip() else ""
-        )
-
-        tabla_garantias = tabla_garantias.rename(columns=columnas_tabla)
-        st.dataframe(tabla_garantias, use_container_width=True)
-
-        opciones_select = [None] + df_garantias_filtrado.index.tolist()
-
-        def format_garantia(idx):
-            if idx is None:
-                return "Selecciona una garantía"
-            row = df_garantias_filtrado.loc[idx]
-            hora = formatear_fecha(row.get("Hora_Registro"), "%d/%m/%Y %H:%M")
-            estado = row.get("Estado_Caso") or row.get("Estado") or ""
-            return (
-                f"📦 {row.get('ID_Pedido', '')} | 🧾 {row.get('Folio_Factura', '')} | "
-                f"👤 {row.get('Cliente', '')} | 🚚 {row.get('Tipo_Envio', '')} | "
-                f"🔍 {estado} | 🕒 {hora}"
-            )
-
-        idx_garantia = st.selectbox(
-            "Selecciona una garantía para ver detalles o modificarla:",
-            opciones_select,
-            format_func=format_garantia,
-            key="select_garantia",
-        )
-
-        if idx_garantia is not None and idx_garantia in df_garantias_filtrado.index:
-            row_garantia = df_garantias_filtrado.loc[idx_garantia]
-            pedido_sel = row_garantia.get("ID_Pedido")
-            source_sel = "casos"
-            st.markdown("#### 📘 Detalles de la garantía seleccionada")
-
-            def limpiar(valor):
-                if valor is None:
-                    return ""
-                if isinstance(valor, str):
-                    return "" if not valor.strip() or valor.strip().lower() == "nan" else valor.strip()
+                if isinstance(valor, pd.Timestamp):
+                    return valor.strftime(formato)
                 try:
-                    if pd.isna(valor):
+                    fecha = pd.to_datetime(valor)
+                    if pd.isna(fecha):
                         return ""
+                    return fecha.strftime(formato)
                 except Exception:
-                    pass
-                return valor
+                    return str(valor)
 
-            detalles_principales = [
-                ("Pedido", row_garantia.get("ID_Pedido", "")),
-                ("Cliente", row_garantia.get("Cliente", "")),
-                ("Folio / Factura", row_garantia.get("Folio_Factura", "")),
-                ("Tipo de envío", row_garantia.get("Tipo_Envio", "")),
-                ("Estado", row_garantia.get("Estado", "")),
-                ("Estado del caso", row_garantia.get("Estado_Caso", "")),
-                ("Seguimiento", row_garantia.get("Seguimiento", "")),
-                ("Número de serie", row_garantia.get("Numero_Serie", "")),
-                (
-                    "Fecha de compra",
-                    formatear_fecha(row_garantia.get("Fecha_Compra"), "%d/%m/%Y"),
-                ),
-                ("Vendedor", row_garantia.get("Vendedor_Registro", "")),
-                (
-                    "Hora de registro",
-                    formatear_fecha(row_garantia.get("Hora_Registro"), "%d/%m/%Y %H:%M"),
-                ),
-            ]
+            columnas_tabla = {
+                "ID_Pedido": "Pedido",
+                "Hora_Registro": "Hora Registro",
+                "Vendedor_Registro": "Vendedor Registro",
+                "Cliente": "Cliente",
+                "Folio_Factura": "Folio / Factura",
+                "Numero_Serie": "Número Serie",
+                "Fecha_Compra": "Fecha Compra",
+                "Tipo_Envio": "Tipo Envío",
+                "Estado": "Estado",
+                "Estado_Caso": "Estado Caso",
+                "Seguimiento": "Seguimiento",
+            }
 
-            for etiqueta, valor in detalles_principales:
-                st.markdown(f"**{etiqueta}:** {limpiar(valor)}")
+            tabla_garantias = df_garantias_filtrado[list(columnas_tabla.keys())].copy()
+            tabla_garantias["Hora_Registro"] = tabla_garantias["Hora_Registro"].apply(
+                lambda v: formatear_fecha(v, "%d/%m/%Y %H:%M")
+            )
+            tabla_garantias["Fecha_Compra"] = tabla_garantias["Fecha_Compra"].apply(
+                lambda v: formatear_fecha(v, "%d/%m/%Y") if str(v).strip() else ""
+            )
 
-            comentarios = str(row_garantia.get("Comentario", "")).strip()
-            comentarios_adicionales = str(row_garantia.get("Comentarios", "")).strip()
-            if comentarios or comentarios_adicionales:
-                st.markdown("**Comentarios:**")
-                if comentarios:
-                    st.markdown(f"- {comentarios}")
-                if comentarios_adicionales:
-                    st.markdown(f"- {comentarios_adicionales}")
+            tabla_garantias = tabla_garantias.rename(columns=columnas_tabla)
+            st.dataframe(tabla_garantias, use_container_width=True)
 
-            detalles_adicionales = [
-                ("Resultado esperado", row_garantia.get("Resultado_Esperado", "")),
-                ("Material devuelto", row_garantia.get("Material_Devuelto", "")),
-                ("Monto devuelto", row_garantia.get("Monto_Devuelto", "")),
-                ("Motivo detallado", row_garantia.get("Motivo_Detallado", "")),
-                ("Área responsable", row_garantia.get("Area_Responsable", "")),
-                ("Responsable", row_garantia.get("Nombre_Responsable", "")),
-                ("Nota de venta", row_garantia.get("Nota_Venta", "")),
-                ("¿Tiene nota de venta?", row_garantia.get("Tiene_Nota_Venta", "")),
-                ("Motivo nota de venta", row_garantia.get("Motivo_NotaVenta", "")),
-                ("Dirección guía retorno", row_garantia.get("Direccion_Guia_Retorno", "")),
-            ]
+            opciones_select = [None] + df_garantias_filtrado.index.tolist()
 
-            for etiqueta, valor in detalles_adicionales:
-                valor_limpio = limpiar(str(valor).strip())
-                if valor_limpio:
-                    st.markdown(f"**{etiqueta}:** {valor_limpio}")
+            def format_garantia(idx):
+                if idx is None:
+                    return "Selecciona una garantía"
+                row = df_garantias_filtrado.loc[idx]
+                hora = formatear_fecha(row.get("Hora_Registro"), "%d/%m/%Y %H:%M")
+                estado = row.get("Estado_Caso") or row.get("Estado") or ""
+                return (
+                    f"📦 {row.get('ID_Pedido', '')} | 🧾 {row.get('Folio_Factura', '')} | "
+                    f"👤 {row.get('Cliente', '')} | 🚚 {row.get('Tipo_Envio', '')} | "
+                    f"🔍 {estado} | 🕒 {hora}"
+                )
+
+            idx_garantia = st.selectbox(
+                "Selecciona una garantía para ver detalles o modificarla:",
+                opciones_select,
+                format_func=format_garantia,
+                key="select_garantia",
+            )
+
+            if idx_garantia is not None and idx_garantia in df_garantias_filtrado.index:
+                row_garantia = df_garantias_filtrado.loc[idx_garantia]
+                pedido_sel = row_garantia.get("ID_Pedido")
+                source_sel = "casos"
+                st.markdown("#### 📘 Detalles de la garantía seleccionada")
+
+                def limpiar(valor):
+                    if valor is None:
+                        return ""
+                    if isinstance(valor, str):
+                        return "" if not valor.strip() or valor.strip().lower() == "nan" else valor.strip()
+                    try:
+                        if pd.isna(valor):
+                            return ""
+                    except Exception:
+                        pass
+                    return valor
+
+                detalles_principales = [
+                    ("Pedido", row_garantia.get("ID_Pedido", "")),
+                    ("Cliente", row_garantia.get("Cliente", "")),
+                    ("Folio / Factura", row_garantia.get("Folio_Factura", "")),
+                    ("Tipo de envío", row_garantia.get("Tipo_Envio", "")),
+                    ("Estado", row_garantia.get("Estado", "")),
+                    ("Estado del caso", row_garantia.get("Estado_Caso", "")),
+                    ("Seguimiento", row_garantia.get("Seguimiento", "")),
+                    ("Número de serie", row_garantia.get("Numero_Serie", "")),
+                    (
+                        "Fecha de compra",
+                        formatear_fecha(row_garantia.get("Fecha_Compra"), "%d/%m/%Y"),
+                    ),
+                    ("Vendedor", row_garantia.get("Vendedor_Registro", "")),
+                    (
+                        "Hora de registro",
+                        formatear_fecha(row_garantia.get("Hora_Registro"), "%d/%m/%Y %H:%M"),
+                    ),
+                ]
+
+                for etiqueta, valor in detalles_principales:
+                    st.markdown(f"**{etiqueta}:** {limpiar(valor)}")
+
+                comentarios = str(row_garantia.get("Comentario", "")).strip()
+                comentarios_adicionales = str(row_garantia.get("Comentarios", "")).strip()
+                if comentarios or comentarios_adicionales:
+                    st.markdown("**Comentarios:**")
+                    if comentarios:
+                        st.markdown(f"- {comentarios}")
+                    if comentarios_adicionales:
+                        st.markdown(f"- {comentarios_adicionales}")
+
+                detalles_adicionales = [
+                    ("Resultado esperado", row_garantia.get("Resultado_Esperado", "")),
+                    ("Material devuelto", row_garantia.get("Material_Devuelto", "")),
+                    ("Monto devuelto", row_garantia.get("Monto_Devuelto", "")),
+                    ("Motivo detallado", row_garantia.get("Motivo_Detallado", "")),
+                    ("Área responsable", row_garantia.get("Area_Responsable", "")),
+                    ("Responsable", row_garantia.get("Nombre_Responsable", "")),
+                    ("Nota de venta", row_garantia.get("Nota_Venta", "")),
+                    ("¿Tiene nota de venta?", row_garantia.get("Tiene_Nota_Venta", "")),
+                    ("Motivo nota de venta", row_garantia.get("Motivo_NotaVenta", "")),
+                    ("Dirección guía retorno", row_garantia.get("Direccion_Guia_Retorno", "")),
+                ]
+
+                for etiqueta, valor in detalles_adicionales:
+                    valor_limpio = limpiar(str(valor).strip())
+                    if valor_limpio:
+                        st.markdown(f"**{etiqueta}:** {valor_limpio}")
     
 
     if "pedido_modificado" in st.session_state:
