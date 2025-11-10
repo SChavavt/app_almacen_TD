@@ -1161,55 +1161,109 @@ with tabs[2]:
                         pass
                     return valor
 
-                detalles_principales = [
-                    ("Pedido", row_garantia.get("ID_Pedido", "")),
-                    ("Cliente", row_garantia.get("Cliente", "")),
-                    ("Folio / Factura", row_garantia.get("Folio_Factura", "")),
-                    ("Tipo de envío", row_garantia.get("Tipo_Envio", "")),
-                    ("Estado", row_garantia.get("Estado", "")),
-                    ("Estado del caso", row_garantia.get("Estado_Caso", "")),
-                    ("Seguimiento", row_garantia.get("Seguimiento", "")),
-                    ("Número de serie", row_garantia.get("Numero_Serie", "")),
+                def formatear_monto(valor):
+                    try:
+                        if valor is None or str(valor).strip() == "":
+                            return ""
+                        valor_float = float(valor)
+                        valor_formateado = f"{valor_float:,.2f}"
+                        valor_formateado = (
+                            valor_formateado.replace(",", "_")
+                            .replace(".", ",")
+                            .replace("_", ".")
+                        )
+                        return f"${valor_formateado}"
+                    except Exception:
+                        valor_limpio = limpiar(valor)
+                        return f"${valor_limpio}" if valor_limpio else ""
+
+                col_izq, col_der = st.columns(2)
+
+                detalles_izq = [
+                    ("📦 Pedido", row_garantia.get("ID_Pedido", "")),
+                    ("👤 Cliente", row_garantia.get("Cliente", "")),
+                    ("🧾 Folio / Factura", row_garantia.get("Folio_Factura", "")),
+                    ("🚚 Tipo de envío", row_garantia.get("Tipo_Envio", "")),
+                    ("📊 Estado", row_garantia.get("Estado", "")),
+                    ("🧮 Estado del caso", row_garantia.get("Estado_Caso", "")),
+                    ("🕵️ Seguimiento", row_garantia.get("Seguimiento", "")),
+                    ("🧑‍💼 Vendedor", row_garantia.get("Vendedor_Registro", "")),
                     (
-                        "Fecha de compra",
-                        formatear_fecha(row_garantia.get("Fecha_Compra"), "%d/%m/%Y"),
-                    ),
-                    ("Vendedor", row_garantia.get("Vendedor_Registro", "")),
-                    (
-                        "Hora de registro",
+                        "🕒 Hora de registro",
                         formatear_fecha(row_garantia.get("Hora_Registro"), "%d/%m/%Y %H:%M"),
                     ),
                 ]
 
-                for etiqueta, valor in detalles_principales:
-                    st.markdown(f"**{etiqueta}:** {limpiar(valor)}")
+                detalles_der = [
+                    ("🔢 Número de serie", row_garantia.get("Numero_Serie", "")),
+                    (
+                        "🗓️ Fecha de compra",
+                        formatear_fecha(row_garantia.get("Fecha_Compra"), "%d/%m/%Y"),
+                    ),
+                    ("🎯 Resultado esperado", row_garantia.get("Resultado_Esperado", "")),
+                    ("📦 Material devuelto", row_garantia.get("Material_Devuelto", "")),
+                    ("💵 Monto devuelto", formatear_monto(row_garantia.get("Monto_Devuelto", ""))),
+                    ("📝 Motivo detallado", row_garantia.get("Motivo_Detallado", "")),
+                    ("🏢 Área responsable", row_garantia.get("Area_Responsable", "")),
+                    ("👥 Responsable", row_garantia.get("Nombre_Responsable", "")),
+                    ("🧾 Nota de venta", row_garantia.get("Nota_Venta", "")),
+                    ("❓ ¿Tiene nota de venta?", row_garantia.get("Tiene_Nota_Venta", "")),
+                    ("🧾 Motivo nota de venta", row_garantia.get("Motivo_NotaVenta", "")),
+                    ("📍 Dirección guía retorno", row_garantia.get("Direccion_Guia_Retorno", "")),
+                ]
+
+                etiquetas_resaltadas = {"🕵️ Seguimiento", "📝 Motivo detallado"}
+
+                for columna, items in ((col_izq, detalles_izq), (col_der, detalles_der)):
+                    for etiqueta, valor in items:
+                        valor_limpio = limpiar(valor)
+                        if not valor_limpio:
+                            continue
+                        if etiqueta in etiquetas_resaltadas:
+                            columna.info(f"{etiqueta}: {valor_limpio}")
+                        else:
+                            columna.markdown(f"**{etiqueta}:** {valor_limpio}")
 
                 comentarios = str(row_garantia.get("Comentario", "")).strip()
                 comentarios_adicionales = str(row_garantia.get("Comentarios", "")).strip()
                 if comentarios or comentarios_adicionales:
-                    st.markdown("**Comentarios:**")
+                    st.markdown("#### 💬 Comentarios")
                     if comentarios:
-                        st.markdown(f"- {comentarios}")
+                        st.info(comentarios)
                     if comentarios_adicionales:
-                        st.markdown(f"- {comentarios_adicionales}")
+                        st.info(comentarios_adicionales)
 
-                detalles_adicionales = [
-                    ("Resultado esperado", row_garantia.get("Resultado_Esperado", "")),
-                    ("Material devuelto", row_garantia.get("Material_Devuelto", "")),
-                    ("Monto devuelto", row_garantia.get("Monto_Devuelto", "")),
-                    ("Motivo detallado", row_garantia.get("Motivo_Detallado", "")),
-                    ("Área responsable", row_garantia.get("Area_Responsable", "")),
-                    ("Responsable", row_garantia.get("Nombre_Responsable", "")),
-                    ("Nota de venta", row_garantia.get("Nota_Venta", "")),
-                    ("¿Tiene nota de venta?", row_garantia.get("Tiene_Nota_Venta", "")),
-                    ("Motivo nota de venta", row_garantia.get("Motivo_NotaVenta", "")),
-                    ("Dirección guía retorno", row_garantia.get("Direccion_Guia_Retorno", "")),
-                ]
+                secciones_adjuntos = []
 
-                for etiqueta, valor in detalles_adicionales:
-                    valor_limpio = limpiar(str(valor).strip())
-                    if valor_limpio:
-                        st.markdown(f"**{etiqueta}:** {valor_limpio}")
+                def agregar_adjuntos(titulo, valores):
+                    urls = partir_urls(valores)
+                    urls_limpias = []
+                    for u in urls:
+                        url_limpio = limpiar(u)
+                        if url_limpio:
+                            urls_limpias.append(url_limpio)
+                    if urls_limpias:
+                        secciones_adjuntos.append((titulo, urls_limpias))
+
+                agregar_adjuntos("📎 Archivos adjuntos", row_garantia.get("Adjuntos", ""))
+                agregar_adjuntos("🧾 Guías asociadas", row_garantia.get("Adjuntos_Guia", ""))
+                agregar_adjuntos("📬 Hoja de ruta", row_garantia.get("Hoja_Ruta_Mensajero", ""))
+                agregar_adjuntos("🛠 Archivos de surtido", row_garantia.get("Adjuntos_Surtido", ""))
+                agregar_adjuntos("💳 Notas de crédito", row_garantia.get("Nota_Credito_URL", ""))
+                agregar_adjuntos("📄 Documentos adicionales", row_garantia.get("Documento_Adicional_URL", ""))
+
+                if secciones_adjuntos:
+                    st.markdown("#### 🗂️ Archivos de la garantía")
+                    for titulo, urls in secciones_adjuntos:
+                        st.markdown(f"**{titulo}:**")
+                        for idx, raw_url in enumerate(urls, start=1):
+                            nombre, enlace = resolver_nombre_y_enlace(raw_url, f"{titulo} #{idx}")
+                            if not enlace:
+                                continue
+                            st.markdown(
+                                f'- <a href="{enlace}" target="_blank">{nombre}</a>',
+                                unsafe_allow_html=True,
+                            )
             else:
                 pedido_sel = None
                 source_sel = None
