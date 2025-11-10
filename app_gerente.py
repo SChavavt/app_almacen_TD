@@ -1081,6 +1081,7 @@ with tabs[2]:
             st.info(
                 "No se encontraron garantías con el criterio de búsqueda proporcionado."
             )
+            st.stop()
         else:
 
             def formatear_fecha(valor, formato):
@@ -1209,6 +1210,11 @@ with tabs[2]:
                     valor_limpio = limpiar(str(valor).strip())
                     if valor_limpio:
                         st.markdown(f"**{etiqueta}:** {valor_limpio}")
+            else:
+                pedido_sel = None
+                source_sel = None
+                st.info("Selecciona una garantía para ver detalles o modificarla.")
+                st.stop()
     
 
     if "pedido_modificado" in st.session_state:
