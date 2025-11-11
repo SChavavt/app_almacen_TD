@@ -420,6 +420,34 @@ _GUIDE_TERMS = (
     "hoja_ruta",
 )
 
+
+def _term_positions(text: str, term: str) -> list[int]:
+    """Return the start indexes of ``term`` within ``text`` using word boundaries."""
+
+    # ``term`` can include spaces, so we rely on regex with \b boundaries on each
+    # side. The normalization step removed diacritics and lowercased the text,
+    # keeping punctuation such as commas that naturally delimit sentences.
+    pattern = re.compile(rf"\b{re.escape(term)}\b")
+    return [match.start() for match in pattern.finditer(text)]
+
+
+def _has_nearby_request_for_guide(text: str, *, max_distance: int = 25) -> bool:
+    """Return ``True`` when a request keyword appears near a guide term."""
+
+    guide_positions: list[int] = []
+    for guide_term in _GUIDE_TERMS:
+        guide_positions.extend(_term_positions(text, guide_term))
+
+    if not guide_positions:
+        return False
+
+    for keyword in _GUIDE_REQUEST_KEYWORDS:
+        for match_pos in _term_positions(text, keyword):
+            if any(abs(match_pos - guide_pos) <= max_distance for guide_pos in guide_positions):
+                return True
+
+    return False
+
 _ADDRESS_TERMS = (
     "calle",
     "col ",
@@ -470,9 +498,7 @@ def comentario_requiere_guia(comentario: Any) -> bool:
     has_specific_phrase = any(phrase in normalized for phrase in _GUIDE_REQUEST_PHRASES)
 
     if not has_specific_phrase:
-        has_request_keyword = any(keyword in normalized for keyword in _GUIDE_REQUEST_KEYWORDS)
-        has_guide_term = any(term in normalized for term in _GUIDE_TERMS)
-        has_specific_phrase = has_request_keyword and has_guide_term
+        has_specific_phrase = _has_nearby_request_for_guide(normalized)
 
     if not has_specific_phrase:
         return False
