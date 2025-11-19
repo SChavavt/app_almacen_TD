@@ -1616,16 +1616,16 @@ def mostrar_pedido_detalle(
         "🖨 Imprimir",
         key=f"print_{row['ID_Pedido']}_{origen_tab}",
     ):
-        fijar_y_preservar(row, origen_tab)
-        st.session_state["scroll_to_pedido_id"] = row["ID_Pedido"]
+        # --- Evitar rebotes visuales en impresión ---
+        st.session_state.setdefault("printed_items", {})
+        st.session_state["printed_items"][row["ID_Pedido"]] = True
 
-        # Mantener abiertos los expanders relevantes sin forzar recarga manual.
-        ensure_expanders_open(
-            row["ID_Pedido"],
-            "expanded_pedidos",
-            "expanded_attachments",
-            "expanded_subir_guia",
-        )
+        # 🔥 Mantener abierto el expander de archivos SIN rebote
+        st.session_state["expanded_attachments"][row["ID_Pedido"]] = True
+
+        # (opcional) Mantener abierto el expander principal del pedido
+        st.session_state["expanded_pedidos"][row["ID_Pedido"]] = True
+
 
         if row["Estado"] in ["🟡 Pendiente", "🔴 Demorado"]:
             zona_mexico = timezone("America/Mexico_City")
