@@ -1323,86 +1323,6 @@ def pedido_tiene_guia_adjunta(row: Any) -> bool:
     return len(adjuntos) > 0
 
 
-def completar_pedido(
-    df: pd.DataFrame,
-    idx: int,
-    row: Any,
-    worksheet: Any,
-    headers: list,
-    gsheet_row_index: int,
-    origen_tab: str,
-    success_message: Optional[str] = None,
-) -> bool:
-    """Marca un pedido como completado y preserva el estado visual."""
-
-    try:
-        gsheet_row_index = int(gsheet_row_index)
-    except (TypeError, ValueError):
-        st.error(
-            f"❌ No se puede completar el pedido '{row.get('ID_Pedido', '?')}' porque su índice de fila es inválido: {gsheet_row_index}."
-        )
-        return False
-
-    if gsheet_row_index <= 0:
-        st.error(
-            f"❌ No se puede completar el pedido '{row.get('ID_Pedido', '?')}' porque su fila en Google Sheets no es válida."
-        )
-        return False
-
-    try:
-        estado_col_idx = headers.index("Estado") + 1
-        fecha_completado_col_idx = headers.index("Fecha_Completado") + 1
-    except ValueError as err:
-        st.error(f"❌ No se puede completar el pedido porque falta la columna requerida: {err}")
-        return False
-
-    now = mx_now()
-    now_str = now.strftime("%Y-%m-%d %H:%M:%S")
-
-    updates = [
-        {
-            "range": gspread.utils.rowcol_to_a1(gsheet_row_index, estado_col_idx),
-            "values": [["🟢 Completado"]],
-        },
-        {
-            "range": gspread.utils.rowcol_to_a1(gsheet_row_index, fecha_completado_col_idx),
-            "values": [[now_str]],
-        },
-    ]
-
-    if not batch_update_gsheet_cells(worksheet, updates):
-        st.error("❌ No se pudo completar el pedido.")
-        return False
-
-    df.loc[idx, "Estado"] = "🟢 Completado"
-    df.loc[idx, "Fecha_Completado"] = now
-    if isinstance(row, pd.Series):
-        row["Estado"] = "🟢 Completado"
-        row["Fecha_Completado"] = now
-
-    st.success(success_message or f"✅ Pedido {row.get('ID_Pedido', '?')} completado exitosamente.")
-
-    st.session_state["pedido_editado"] = row.get("ID_Pedido")
-    st.session_state["fecha_seleccionada"] = row.get("Fecha_Entrega", "")
-    st.session_state["subtab_local"] = origen_tab
-
-    st.cache_data.clear()
-
-    set_active_main_tab(st.session_state.get("active_main_tab_index", 0))
-    st.session_state["active_subtab_local_index"] = st.session_state.get(
-        "active_subtab_local_index", 0
-    )
-    st.session_state["active_date_tab_m_index"] = st.session_state.get(
-        "active_date_tab_m_index", 0
-    )
-    st.session_state["active_date_tab_t_index"] = st.session_state.get(
-        "active_date_tab_t_index", 0
-    )
-
-    marcar_contexto_pedido(row.get("ID_Pedido"), origen_tab)
-    return True
-
-
 # --- Helper Functions (existing in app.py) ---
 
 def ordenar_pedidos_custom(df_pedidos_filtrados):
@@ -2065,102 +1985,142 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
                     )
 
 
-        # Complete Button with streamlined confirmation
+        # Complete Button with confirmation
         if not es_local_no_entregado:
-            requires = pedido_requiere_guia(row)
-            has_file = pedido_tiene_guia_adjunta(row)
-            is_tab_guias = (
-                origen_tab == "solicitudes_guia"
-                or str(origen_tab).strip().lower()
-                in {"solicitudes", "solicitudes de guía", "solicitudes de guia"}
-            )
+            flag_key = f"confirm_complete_id_{row['ID_Pedido']}"
+            requiere_guia_pedido = pedido_requiere_guia(row)
+            tiene_guia_adjunta = pedido_tiene_guia_adjunta(row)
+            if col_complete_btn.button(
+                "🟢 Completar",
+                key=f"complete_button_{row['ID_Pedido']}_{origen_tab}",
+                disabled=disabled_if_completed,
+            ):
+                marcar_contexto_pedido(row["ID_Pedido"], origen_tab)
+                if requiere_guia_pedido and not tiene_guia_adjunta:
+                    st.error(GUIDE_REQUIRED_ERROR_MSG)
+                    st.session_state.pop(flag_key, None)
+                else:
+                    st.session_state[flag_key] = row["ID_Pedido"]
 
-            if is_tab_guias:
-                if col_complete_btn.button(
-                    "🟢 Completar",
-                    key=f"complete_button_{row['ID_Pedido']}_{origen_tab}",
-                    disabled=disabled_if_completed,
-                ):
-                    if not has_file:
-                        st.error(
-                            "⚠️ Debes subir la guía antes de completar este pedido."
-                        )
-                    else:
-                        completar_pedido(
-                            df,
-                            idx,
-                            row,
-                            worksheet,
-                            headers,
-                            gsheet_row_index,
-                            origen_tab,
-                        )
-            elif not requires:
-                if col_complete_btn.button(
-                    "🟢 Completar",
-                    key=f"complete_button_{row['ID_Pedido']}_{origen_tab}",
-                    disabled=disabled_if_completed,
-                ):
-                    completar_pedido(
-                        df,
-                        idx,
-                        row,
-                        worksheet,
-                        headers,
-                        gsheet_row_index,
-                        origen_tab,
-                    )
-            elif has_file:
-                if col_complete_btn.button(
-                    "🟢 Completar",
-                    key=f"complete_button_{row['ID_Pedido']}_{origen_tab}",
-                    disabled=disabled_if_completed,
-                ):
-                    completar_pedido(
-                        df,
-                        idx,
-                        row,
-                        worksheet,
-                        headers,
-                        gsheet_row_index,
-                        origen_tab,
-                    )
-            else:
-                flag_key = f"confirmar_completar_{row['ID_Pedido']}"
-                if col_complete_btn.button(
-                    "🟢 Completar",
-                    key=f"complete_button_{row['ID_Pedido']}_{origen_tab}",
-                    disabled=disabled_if_completed,
-                ):
-                    st.session_state[flag_key] = True
-
-                if st.session_state.get(flag_key):
-                    st.warning(
-                        "⚠️ Este pedido requiere guía pero no se ha subido ninguna. ¿Quieres completarlo de todos modos?"
-                    )
-
-                    col1, col2 = st.columns(2)
-
-                    if col1.button(
-                        "📤 Subir guía primero",
-                        key=f"btn_cancel_{row['ID_Pedido']}",
+            if st.session_state.get(flag_key) == row["ID_Pedido"]:
+                st.warning("¿Estás seguro de completar este pedido?")
+                confirm_col, cancel_col = st.columns(2)
+                with confirm_col:
+                    if st.button(
+                        "Confirmar",
+                        key=f"confirm_complete_{row['ID_Pedido']}_{origen_tab}",
                     ):
-                        st.session_state[flag_key] = False
+                        marcar_contexto_pedido(row["ID_Pedido"], origen_tab)
+                        try:
+                            requiere_guia = pedido_requiere_guia(row)
+                            tiene_guia_adjunta = pedido_tiene_guia_adjunta(row)
 
-                    if col2.button(
-                        "🟢 Completar sin guía",
-                        key=f"btn_force_complete_{row['ID_Pedido']}",
+                            if requiere_guia and not tiene_guia_adjunta:
+                                st.error(GUIDE_REQUIRED_ERROR_MSG)
+                                st.session_state.pop(flag_key, None)
+                            elif gsheet_row_index <= 0:
+                                st.error(
+                                    f"❌ No se puede completar el pedido '{row['ID_Pedido']}' porque su fila en Google Sheets no es válida."
+                                )
+                                if flag_key in st.session_state:
+                                    del st.session_state[flag_key]
+                            else:
+                                estado_col_idx = headers.index("Estado") + 1
+                                fecha_completado_col_idx = (
+                                    headers.index("Fecha_Completado") + 1
+                                )
+
+                                zona_mexico = timezone("America/Mexico_City")
+                                now = datetime.now(zona_mexico)
+                                now_str = now.strftime("%Y-%m-%d %H:%M:%S")
+
+                                updates = [
+                                    {
+                                        "range": gspread.utils.rowcol_to_a1(
+                                            gsheet_row_index, estado_col_idx
+                                        ),
+                                        "values": [["🟢 Completado"]],
+                                    },
+                                    {
+                                        "range": gspread.utils.rowcol_to_a1(
+                                            gsheet_row_index, fecha_completado_col_idx
+                                        ),
+                                        "values": [[now_str]],
+                                    },
+                                ]
+
+                                if batch_update_gsheet_cells(worksheet, updates):
+                                    df.loc[idx, "Estado"] = "🟢 Completado"
+                                    df.loc[idx, "Fecha_Completado"] = now
+                                    st.success(
+                                        f"✅ Pedido {row['ID_Pedido']} completado exitosamente."
+                                    )
+
+                                    # 🔁 Mantener pestaña activa
+                                    st.session_state["pedido_editado"] = row["ID_Pedido"]
+                                    st.session_state["fecha_seleccionada"] = row.get(
+                                        "Fecha_Entrega", ""
+                                    )
+                                    st.session_state["subtab_local"] = origen_tab
+
+                                    st.cache_data.clear()
+
+                                    try:
+                                        time.sleep(0.5)
+                                        estado_actual = worksheet.cell(
+                                            gsheet_row_index, estado_col_idx
+                                        ).value
+                                        if estado_actual != "🟢 Completado":
+                                            st.warning(
+                                                "⚠️ El pedido se marcó como completado, pero aún no "
+                                                "se refleja en Google Sheets. La vista se actualizará "
+                                                "de todos modos."
+                                            )
+                                    except Exception as refresh_error:
+                                        st.warning(
+                                            f"⚠️ No se pudo verificar la actualización en Google Sheets: {refresh_error}"
+                                        )
+
+                                    set_active_main_tab(
+                                        st.session_state.get("active_main_tab_index", 0)
+                                    )
+                                    st.session_state["active_subtab_local_index"] = (
+                                        st.session_state.get(
+                                            "active_subtab_local_index", 0
+                                        )
+                                    )
+                                    st.session_state["active_date_tab_m_index"] = (
+                                        st.session_state.get(
+                                            "active_date_tab_m_index", 0
+                                        )
+                                    )
+                                    st.session_state["active_date_tab_t_index"] = (
+                                        st.session_state.get(
+                                            "active_date_tab_t_index", 0
+                                        )
+                                    )
+
+                                    if flag_key in st.session_state:
+                                        del st.session_state[flag_key]
+
+                                    marcar_contexto_pedido(row["ID_Pedido"], origen_tab)
+                                    st.rerun()
+                                else:
+                                    st.error("❌ No se pudo completar el pedido.")
+                                    if flag_key in st.session_state:
+                                        del st.session_state[flag_key]
+                        except Exception as e:
+                            st.error(f"Error al completar el pedido: {e}")
+                            if flag_key in st.session_state:
+                                del st.session_state[flag_key]
+                with cancel_col:
+                    if st.button(
+                        "Cancelar",
+                        key=f"cancel_complete_{row['ID_Pedido']}_{origen_tab}",
                     ):
-                        completar_pedido(
-                            df,
-                            idx,
-                            row,
-                            worksheet,
-                            headers,
-                            gsheet_row_index,
-                            origen_tab,
-                        )
-                        st.session_state[flag_key] = False
+                        marcar_contexto_pedido(row["ID_Pedido"], origen_tab, scroll=False)
+                        if flag_key in st.session_state:
+                            del st.session_state[flag_key]
         else:
             col_complete_btn.write("")
 
@@ -2619,89 +2579,81 @@ def mostrar_pedido_solo_guia(df, idx, row, orden, origen_tab, current_main_tab_l
                 else:
                     st.warning("⚠️ No se subió ningún archivo válido.")
 
-        requires = pedido_requiere_guia(row)
-        has_file = pedido_tiene_guia_adjunta(row)
-        is_tab_guias = (
-            origen_tab == "solicitudes_guia"
-            or str(origen_tab).strip().lower()
-            in {"solicitudes", "solicitudes de guía", "solicitudes de guia"}
-        )
-
+        flag_key = f"confirm_complete_id_{row['ID_Pedido']}"
+        requiere_guia_pedido = pedido_requiere_guia(row)
+        tiene_guia_adjunta = pedido_tiene_guia_adjunta(row)
         if st.button(
             "🟢 Completar",
             key=f"btn_completar_only_{row['ID_Pedido']}",
             on_click=preserve_tab_state,
         ):
-            if is_tab_guias and not has_file:
-                st.error("⚠️ Debes subir la guía antes de completar este pedido.")
-            elif is_tab_guias:
-                completar_pedido(
-                    df,
-                    idx,
-                    row,
-                    worksheet,
-                    headers,
-                    gsheet_row_index,
-                    origen_tab,
-                    "✅ Pedido marcado como **🟢 Completado**.",
-                )
-            elif not requires:
-                completar_pedido(
-                    df,
-                    idx,
-                    row,
-                    worksheet,
-                    headers,
-                    gsheet_row_index,
-                    origen_tab,
-                    "✅ Pedido marcado como **🟢 Completado**.",
-                )
-            elif has_file:
-                completar_pedido(
-                    df,
-                    idx,
-                    row,
-                    worksheet,
-                    headers,
-                    gsheet_row_index,
-                    origen_tab,
-                    "✅ Pedido marcado como **🟢 Completado**.",
-                )
+            marcar_contexto_pedido(row["ID_Pedido"], origen_tab)
+            if requiere_guia_pedido and not tiene_guia_adjunta:
+                st.error(GUIDE_REQUIRED_ERROR_MSG)
+                st.session_state.pop(flag_key, None)
             else:
-                flag_key = f"confirmar_completar_{row['ID_Pedido']}"
-                st.session_state[flag_key] = True
+                st.session_state[flag_key] = row["ID_Pedido"]
 
-        flag_key = f"confirmar_completar_{row['ID_Pedido']}"
-        if st.session_state.get(flag_key):
-            st.warning(
-                "⚠️ Este pedido requiere guía pero no se ha subido ninguna. ¿Quieres completarlo de todos modos?"
-            )
-
-            col1, col2 = st.columns(2)
-
-            if col1.button(
-                "📤 Subir guía primero",
-                key=f"btn_cancel_{row['ID_Pedido']}",
-                on_click=preserve_tab_state,
-            ):
-                st.session_state[flag_key] = False
-
-            if col2.button(
-                "🟢 Completar sin guía",
-                key=f"btn_force_complete_{row['ID_Pedido']}",
-                on_click=preserve_tab_state,
-            ):
-                completar_pedido(
-                    df,
-                    idx,
-                    row,
-                    worksheet,
-                    headers,
-                    gsheet_row_index,
-                    origen_tab,
-                    "✅ Pedido marcado como **🟢 Completado**.",
-                )
-                st.session_state[flag_key] = False
+        if st.session_state.get(flag_key) == row["ID_Pedido"]:
+            st.warning("¿Estás seguro de completar este pedido?")
+            confirm_col, cancel_col = st.columns(2)
+            with confirm_col:
+                if st.button(
+                    "Confirmar",
+                    key=f"confirm_completar_only_{row['ID_Pedido']}",
+                    on_click=preserve_tab_state,
+                ):
+                    marcar_contexto_pedido(row["ID_Pedido"], origen_tab)
+                    requiere_guia = pedido_requiere_guia(row)
+                    tiene_guia_adjunta = pedido_tiene_guia_adjunta(row)
+                    if requiere_guia and not tiene_guia_adjunta:
+                        st.error(GUIDE_REQUIRED_ERROR_MSG)
+                        st.session_state.pop(flag_key, None)
+                    elif not tiene_guia_adjunta:
+                        st.warning("⚠️ Sube al menos una guía antes de completar.")
+                        st.session_state.pop(flag_key, None)
+                    else:
+                        updates = []
+                        if "Estado" in headers:
+                            col_idx = headers.index("Estado") + 1
+                            updates.append(
+                                {
+                                    'range': gspread.utils.rowcol_to_a1(gsheet_row_index, col_idx),
+                                    'values': [["🟢 Completado"]],
+                                }
+                            )
+                        mx_now = datetime.now(timezone("America/Mexico_City")).strftime(
+                            "%Y-%m-%d %H:%M:%S"
+                        )
+                        if "Fecha_Completado" in headers:
+                            col_idx = headers.index("Fecha_Completado") + 1
+                            updates.append(
+                                {
+                                    'range': gspread.utils.rowcol_to_a1(gsheet_row_index, col_idx),
+                                    'values': [[mx_now]],
+                                }
+                            )
+                        if updates and batch_update_gsheet_cells(worksheet, updates):
+                            df.at[idx, "Estado"] = "🟢 Completado"
+                            df.at[idx, "Fecha_Completado"] = mx_now
+                            st.success("✅ Pedido marcado como **🟢 Completado**.")
+                            set_active_main_tab(3)
+                            st.cache_data.clear()
+                            st.session_state.pop(flag_key, None)
+                            marcar_contexto_pedido(row["ID_Pedido"], origen_tab)
+                            st.rerun()
+                        else:
+                            st.error("❌ No se pudo actualizar Google Sheets con el estado.")
+                            st.session_state.pop(flag_key, None)
+            with cancel_col:
+                if st.button(
+                    "Cancelar",
+                    key=f"cancel_completar_only_{row['ID_Pedido']}",
+                    on_click=preserve_tab_state,
+                ):
+                    marcar_contexto_pedido(row["ID_Pedido"], origen_tab, scroll=False)
+                    if flag_key in st.session_state:
+                        del st.session_state[flag_key]
 
 # --- Main Application Logic ---
 
