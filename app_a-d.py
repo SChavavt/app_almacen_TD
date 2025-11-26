@@ -1311,6 +1311,16 @@ def pedido_requiere_guia(row: Any) -> bool:
     if comentario_requiere_guia(comentario_val):
         return True
 
+    # 🔎 Detección nueva: dirección dentro del comentario
+    comentario_norm = normalize_sheet_text(row.get("Comentario", ""))
+    direccion_keywords = ["calle", "col.", "colonia", "av ", "avenida", "blvd", "cp", "c.p", "numero", "número"]
+    if any(k in comentario_norm for k in direccion_keywords):
+        return True
+
+    # Detectar código postal de 5 dígitos dentro del comentario
+    if re.search(r"\b\d{5}\b", comentario_norm):
+        return True
+
     direccion_val = normalize_sheet_text(row.get("Direccion_Guia_Retorno", ""))
     return bool(direccion_val)
 
@@ -1402,7 +1412,7 @@ def completar_pedido(
         "active_date_tab_t_index", 0
     )
 
-    marcar_contexto_pedido(row.get("ID_Pedido"), origen_tab)
+    marcar_contexto_pedido(row.get("ID_Pedido"), origen_tab, scroll=False)
     try:
         df["Fecha_Completado"] = pd.to_datetime(df["Fecha_Completado"], errors="coerce")
     except:
