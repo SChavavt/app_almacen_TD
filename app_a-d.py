@@ -1380,6 +1380,9 @@ def completar_pedido(
         row["Estado"] = "🟢 Completado"
         row["Fecha_Completado"] = now
 
+    st.session_state["expanded_pedidos"][row["ID_Pedido"]] = True
+    st.session_state["expanded_attachments"][row["ID_Pedido"]] = True
+
     st.success(success_message or f"✅ Pedido {row.get('ID_Pedido', '?')} completado exitosamente.")
 
     st.session_state["pedido_editado"] = row.get("ID_Pedido")
@@ -1400,6 +1403,11 @@ def completar_pedido(
     )
 
     marcar_contexto_pedido(row.get("ID_Pedido"), origen_tab)
+    try:
+        df["Fecha_Completado"] = pd.to_datetime(df["Fecha_Completado"], errors="coerce")
+    except:
+        pass
+    st.rerun()
     return True
 
 
@@ -4855,6 +4863,10 @@ with main_tabs[7]:  # ✅ Historial Completados/Cancelados
                     set_active_main_tab(7)
                     st.rerun()
 
+        df_completados_historial["Fecha_Completado"] = pd.to_datetime(
+            df_completados_historial["Fecha_Completado"],
+            errors="coerce"
+        )
         df_completados_historial = df_completados_historial.sort_values(by="Fecha_Completado", ascending=False)
         for orden, (idx, row) in enumerate(df_completados_historial.iterrows(), start=1):
             mostrar_pedido(
