@@ -269,6 +269,31 @@ def normalizar_folio(texto):
     return limpio_sin_espacios.upper()
 
 
+def obtener_fecha_modificacion(row):
+    """Devuelve la fecha de modificación del surtido.
+
+    Se contemplan variaciones comunes del nombre de la columna y se limpia
+    un posible prefijo de apostrofe (') con el que algunas celdas pueden
+    guardarse en Google Sheets.
+    """
+    posibles_keys = [
+        "fecha_modificacion",
+        "Fecha_Modificacion",
+        "Fecha_modificacion",
+        "Fecha Modificacion",
+        "Fecha de Modificación",
+        "Fecha modificación",
+    ]
+    valor = ""
+    for k in posibles_keys:
+        if k in row:
+            valor = str(row.get(k, ""))
+            break
+    if valor.startswith("'"):
+        valor = valor.lstrip("'")
+    return valor.strip()
+
+
 def preparar_resultado_caso(row):
     """Convierte una fila de la hoja `casos_especiales` en un diccionario uniforme."""
     return {
@@ -309,7 +334,7 @@ def preparar_resultado_caso(row):
         "Motivo_NotaVenta": str(row.get("Motivo_NotaVenta", "")).strip(),
         # 🛠 Modificación de surtido
         "Modificacion_Surtido": str(row.get("Modificacion_Surtido", "")).strip(),
-        "Fecha_Modificacion_Surtido": str(row.get("fecha_modificacion", "")).strip(),
+        "Fecha_Modificacion_Surtido": obtener_fecha_modificacion(row),
         "Adjuntos_Surtido_urls": partir_urls(row.get("Adjuntos_Surtido", "")),
         # ♻️ Refacturación
         "Refacturacion_Tipo": str(row.get("Refacturacion_Tipo", "")).strip(),
@@ -419,7 +444,7 @@ def render_caso_especial(res):
     mod_txt = res.get("Modificacion_Surtido", "") or ""
     mod_fecha = res.get("Fecha_Modificacion_Surtido", "") or ""
     mod_urls = res.get("Adjuntos_Surtido_urls", []) or []
-    if mod_txt or mod_urls:
+    if mod_txt or mod_urls or mod_fecha:
         st.markdown("#### 🛠 Modificación de surtido")
         if mod_fecha:
             st.caption(f"📅 Fecha de modificación: {mod_fecha}")
@@ -602,7 +627,7 @@ with tabs[0]:
                     "Motivo_NotaVenta": str(row.get("Motivo_NotaVenta", "")).strip(),
                     # 🛠 Modificación de surtido
                     "Modificacion_Surtido": str(row.get("Modificacion_Surtido", "")).strip(),
-                    "Fecha_Modificacion_Surtido": str(row.get("fecha_modificacion", "")).strip(),
+                    "Fecha_Modificacion_Surtido": obtener_fecha_modificacion(row),
                     "Adjuntos_Surtido_urls": partir_urls(row.get("Adjuntos_Surtido", "")),
                     # Archivos registrados en la hoja
                     "Adjuntos_Guia_urls": partir_urls(row.get("Adjuntos_Guia", "")),
@@ -704,7 +729,7 @@ with tabs[0]:
                             "Motivo_NotaVenta": str(row.get("Motivo_NotaVenta", "")).strip(),
                             # 🛠 Modificación de surtido
                             "Modificacion_Surtido": str(row.get("Modificacion_Surtido", "")).strip(),
-                            "Fecha_Modificacion_Surtido": str(row.get("fecha_modificacion", "")).strip(),
+                            "Fecha_Modificacion_Surtido": obtener_fecha_modificacion(row),
                             "Adjuntos_Surtido_urls": partir_urls(row.get("Adjuntos_Surtido", "")),
                             # Archivos registrados en la hoja
                             "Adjuntos_Guia_urls": partir_urls(row.get("Adjuntos_Guia", "")),
@@ -788,7 +813,7 @@ with tabs[0]:
                     mod_txt = res.get("Modificacion_Surtido", "") or ""
                     mod_fecha = res.get("Fecha_Modificacion_Surtido", "") or ""
                     mod_urls = res.get("Adjuntos_Surtido_urls", []) or []
-                    if mod_txt or mod_urls:
+                    if mod_txt or mod_urls or mod_fecha:
                         st.markdown("#### 🛠 Modificación de surtido")
                         if mod_fecha:
                             st.caption(f"📅 Fecha de modificación: {mod_fecha}")
