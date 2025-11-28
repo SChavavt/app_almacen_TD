@@ -56,7 +56,7 @@ def cargar_pedidos():
         "ID_Pedido","Hora_Registro","Cliente","Estado","Vendedor_Registro","Folio_Factura",
         "Comentario","Comentarios","Modificacion_Surtido","Adjuntos_Surtido","Adjuntos_Guia",
         "Adjuntos","Direccion_Guia_Retorno","Nota_Venta","Tiene_Nota_Venta","Motivo_NotaVenta",
-        "Refacturacion_Tipo","Refacturacion_Subtipo","Folio_Factura_Refacturada","fecha_modificacion"
+        "Refacturacion_Tipo","Refacturacion_Subtipo","Folio_Factura_Refacturada"
     ]
     for c in needed:
         if c not in df.columns:
@@ -80,7 +80,7 @@ def cargar_casos_especiales():
         "Tipo_Caso","Fecha_Recepcion_Devolucion","Estado_Recepcion","Nota_Credito_URL","Documento_Adicional_URL",
         "Seguimiento",
         "Comentarios_Admin_Devolucion","Modificacion_Surtido","Adjuntos_Surtido","Refacturacion_Tipo",
-        "Refacturacion_Subtipo","Folio_Factura_Refacturada","Turno","Hora_Proceso","fecha_modificacion",
+        "Refacturacion_Subtipo","Folio_Factura_Refacturada","Turno","Hora_Proceso",
         # Campos específicos de garantías
         "Numero_Serie","Fecha_Compra",
         "Comentario","Comentarios","Direccion_Guia_Retorno","Nota_Venta",
@@ -309,7 +309,6 @@ def preparar_resultado_caso(row):
         "Motivo_NotaVenta": str(row.get("Motivo_NotaVenta", "")).strip(),
         # 🛠 Modificación de surtido
         "Modificacion_Surtido": str(row.get("Modificacion_Surtido", "")).strip(),
-        "fecha_modificacion": str(row.get("fecha_modificacion", "")).strip(),
         "Adjuntos_Surtido_urls": partir_urls(row.get("Adjuntos_Surtido", "")),
         # ♻️ Refacturación
         "Refacturacion_Tipo": str(row.get("Refacturacion_Tipo", "")).strip(),
@@ -417,12 +416,9 @@ def render_caso_especial(res):
         st.info(seguimiento_txt.strip())
 
     mod_txt = res.get("Modificacion_Surtido", "") or ""
-    mod_fecha = res.get("fecha_modificacion", "") or ""
     mod_urls = res.get("Adjuntos_Surtido_urls", []) or []
     if mod_txt or mod_urls:
         st.markdown("#### 🛠 Modificación de surtido")
-        if mod_fecha:
-            st.caption(f"📅 Fecha de modificación: {mod_fecha}")
         if mod_txt:
             st.info(mod_txt)
         if mod_urls:
@@ -602,7 +598,6 @@ with tabs[0]:
                     "Motivo_NotaVenta": str(row.get("Motivo_NotaVenta", "")).strip(),
                     # 🛠 Modificación de surtido
                     "Modificacion_Surtido": str(row.get("Modificacion_Surtido", "")).strip(),
-                    "fecha_modificacion": str(row.get("fecha_modificacion", "")).strip(),
                     "Adjuntos_Surtido_urls": partir_urls(row.get("Adjuntos_Surtido", "")),
                     # Archivos registrados en la hoja
                     "Adjuntos_Guia_urls": partir_urls(row.get("Adjuntos_Guia", "")),
@@ -704,7 +699,6 @@ with tabs[0]:
                             "Motivo_NotaVenta": str(row.get("Motivo_NotaVenta", "")).strip(),
                             # 🛠 Modificación de surtido
                             "Modificacion_Surtido": str(row.get("Modificacion_Surtido", "")).strip(),
-                            "fecha_modificacion": str(row.get("fecha_modificacion", "")).strip(),
                             "Adjuntos_Surtido_urls": partir_urls(row.get("Adjuntos_Surtido", "")),
                             # Archivos registrados en la hoja
                             "Adjuntos_Guia_urls": partir_urls(row.get("Adjuntos_Guia", "")),
@@ -786,12 +780,9 @@ with tabs[0]:
                             st.markdown(f"- **Motivo:** {motivo_nota_venta}")
 
                     mod_txt = res.get("Modificacion_Surtido", "") or ""
-                    mod_fecha = res.get("fecha_modificacion", "") or ""
                     mod_urls = res.get("Adjuntos_Surtido_urls", []) or []
                     if mod_txt or mod_urls:
                         st.markdown("#### 🛠 Modificación de surtido")
-                        if mod_fecha:
-                            st.caption(f"📅 Fecha de modificación: {mod_fecha}")
                         if mod_txt:
                             st.info(mod_txt)
                         if mod_urls:
