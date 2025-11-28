@@ -260,19 +260,6 @@ def normalizar(texto):
     return unicodedata.normalize('NFKD', texto).encode('ASCII', 'ignore').decode('utf-8').lower()
 
 
-def obtener_valor(row, *keys):
-    """Devuelve el primer valor encontrado para las llaves dadas, ignorando mayúsculas/minúsculas."""
-    lower_map = {str(k).lower(): k for k in row.keys()}
-    for k in keys:
-        real_key = lower_map.get(str(k).lower())
-        if real_key is None:
-            continue
-        valor = row.get(real_key, "")
-        if valor is not None:
-            return valor
-    return ""
-
-
 def normalizar_folio(texto):
     """Normaliza folios ignorando acentos, mayúsculas y espacios."""
     if texto is None:
@@ -322,7 +309,7 @@ def preparar_resultado_caso(row):
         "Motivo_NotaVenta": str(row.get("Motivo_NotaVenta", "")).strip(),
         # 🛠 Modificación de surtido
         "Modificacion_Surtido": str(row.get("Modificacion_Surtido", "")).strip(),
-        "Fecha_Modificacion_Surtido": str(obtener_valor(row, "fecha_modificacion", "Fecha_Modificacion")).strip(),
+        "Fecha_Modificacion_Surtido": str(row.get("fecha_modificacion", "")).strip(),
         "Adjuntos_Surtido_urls": partir_urls(row.get("Adjuntos_Surtido", "")),
         # ♻️ Refacturación
         "Refacturacion_Tipo": str(row.get("Refacturacion_Tipo", "")).strip(),
@@ -615,7 +602,7 @@ with tabs[0]:
                     "Motivo_NotaVenta": str(row.get("Motivo_NotaVenta", "")).strip(),
                     # 🛠 Modificación de surtido
                     "Modificacion_Surtido": str(row.get("Modificacion_Surtido", "")).strip(),
-                    "Fecha_Modificacion_Surtido": str(obtener_valor(row, "fecha_modificacion", "Fecha_Modificacion")).strip(),
+                    "Fecha_Modificacion_Surtido": str(row.get("fecha_modificacion", "")).strip(),
                     "Adjuntos_Surtido_urls": partir_urls(row.get("Adjuntos_Surtido", "")),
                     # Archivos registrados en la hoja
                     "Adjuntos_Guia_urls": partir_urls(row.get("Adjuntos_Guia", "")),
@@ -717,7 +704,7 @@ with tabs[0]:
                             "Motivo_NotaVenta": str(row.get("Motivo_NotaVenta", "")).strip(),
                             # 🛠 Modificación de surtido
                             "Modificacion_Surtido": str(row.get("Modificacion_Surtido", "")).strip(),
-                            "Fecha_Modificacion_Surtido": str(obtener_valor(row, "fecha_modificacion", "Fecha_Modificacion")).strip(),
+                            "Fecha_Modificacion_Surtido": str(row.get("fecha_modificacion", "")).strip(),
                             "Adjuntos_Surtido_urls": partir_urls(row.get("Adjuntos_Surtido", "")),
                             # Archivos registrados en la hoja
                             "Adjuntos_Guia_urls": partir_urls(row.get("Adjuntos_Guia", "")),
