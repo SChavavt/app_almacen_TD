@@ -56,7 +56,7 @@ def cargar_pedidos():
         "ID_Pedido","Hora_Registro","Cliente","Estado","Vendedor_Registro","Folio_Factura",
         "Comentario","Comentarios","Modificacion_Surtido","Adjuntos_Surtido","Adjuntos_Guia",
         "Adjuntos","Direccion_Guia_Retorno","Nota_Venta","Tiene_Nota_Venta","Motivo_NotaVenta",
-        "Refacturacion_Tipo","Refacturacion_Subtipo","Folio_Factura_Refacturada","fecha_modificacion"
+        "Refacturacion_Tipo","Refacturacion_Subtipo","Folio_Factura_Refacturada","fecha_modificacion","Fecha_Modificacion"
     ]
     for c in needed:
         if c not in df.columns:
@@ -80,7 +80,7 @@ def cargar_casos_especiales():
         "Tipo_Caso","Fecha_Recepcion_Devolucion","Estado_Recepcion","Nota_Credito_URL","Documento_Adicional_URL",
         "Seguimiento",
         "Comentarios_Admin_Devolucion","Modificacion_Surtido","Adjuntos_Surtido","Refacturacion_Tipo",
-        "Refacturacion_Subtipo","Folio_Factura_Refacturada","Turno","Hora_Proceso","fecha_modificacion",
+        "Refacturacion_Subtipo","Folio_Factura_Refacturada","Turno","Hora_Proceso","fecha_modificacion","Fecha_Modificacion",
         # Campos específicos de garantías
         "Numero_Serie","Fecha_Compra",
         "Comentario","Comentarios","Direccion_Guia_Retorno","Nota_Venta",
@@ -269,6 +269,11 @@ def normalizar_folio(texto):
     return limpio_sin_espacios.upper()
 
 
+def obtener_fecha_modificacion(row):
+    """Devuelve la fecha de modificación sin importar el nombre exacto de la columna."""
+    return str(row.get("Fecha_Modificacion") or row.get("fecha_modificacion") or "").strip()
+
+
 def preparar_resultado_caso(row):
     """Convierte una fila de la hoja `casos_especiales` en un diccionario uniforme."""
     return {
@@ -309,7 +314,7 @@ def preparar_resultado_caso(row):
         "Motivo_NotaVenta": str(row.get("Motivo_NotaVenta", "")).strip(),
         # 🛠 Modificación de surtido
         "Modificacion_Surtido": str(row.get("Modificacion_Surtido", "")).strip(),
-        "Fecha_Modificacion_Surtido": str(row.get("fecha_modificacion", "")).strip(),
+        "Fecha_Modificacion_Surtido": obtener_fecha_modificacion(row),
         "Adjuntos_Surtido_urls": partir_urls(row.get("Adjuntos_Surtido", "")),
         # ♻️ Refacturación
         "Refacturacion_Tipo": str(row.get("Refacturacion_Tipo", "")).strip(),
@@ -602,7 +607,7 @@ with tabs[0]:
                     "Motivo_NotaVenta": str(row.get("Motivo_NotaVenta", "")).strip(),
                     # 🛠 Modificación de surtido
                     "Modificacion_Surtido": str(row.get("Modificacion_Surtido", "")).strip(),
-                    "Fecha_Modificacion_Surtido": str(row.get("fecha_modificacion", "")).strip(),
+                    "Fecha_Modificacion_Surtido": obtener_fecha_modificacion(row),
                     "Adjuntos_Surtido_urls": partir_urls(row.get("Adjuntos_Surtido", "")),
                     # Archivos registrados en la hoja
                     "Adjuntos_Guia_urls": partir_urls(row.get("Adjuntos_Guia", "")),
@@ -704,7 +709,7 @@ with tabs[0]:
                             "Motivo_NotaVenta": str(row.get("Motivo_NotaVenta", "")).strip(),
                             # 🛠 Modificación de surtido
                             "Modificacion_Surtido": str(row.get("Modificacion_Surtido", "")).strip(),
-                            "Fecha_Modificacion_Surtido": str(row.get("fecha_modificacion", "")).strip(),
+                            "Fecha_Modificacion_Surtido": obtener_fecha_modificacion(row),
                             "Adjuntos_Surtido_urls": partir_urls(row.get("Adjuntos_Surtido", "")),
                             # Archivos registrados en la hoja
                             "Adjuntos_Guia_urls": partir_urls(row.get("Adjuntos_Guia", "")),
