@@ -2816,7 +2816,7 @@ if not df_main.empty:
             f"⚠️ Hay {mod_surtido_count} pedido(s) con **Modificación de Surtido** ➤ {ubicaciones_str}"
         )
 
-    estados_visibles = ["🟡 Pendiente", "🔵 En Proceso", "🔴 Demorado", "🛠 Modificación"]
+    estados_visibles = ["🟡 Pendiente", "🔵 En Proceso", "🔴 Demorado", "🛠 Modificación", "✏️ Modificación"]
     mask_estados_activos = df_main["Estado"].isin(estados_visibles)
     estado_entrega_series = df_main.get("Estado_Entrega")
     if estado_entrega_series is not None:
@@ -2898,6 +2898,7 @@ if not df_main.empty:
             '🔵 En Proceso': (df["Estado"] == '🔵 En Proceso').sum(),
             '🔴 Demorado': (df["Estado"] == '🔴 Demorado').sum(),
             '🛠 Modificación': (df["Estado"] == '🛠 Modificación').sum(),
+            '✏️ Modificación': (df["Estado"] == '✏️ Modificación').sum(),
             '🟣 Cancelado': len(cancelados_visible),
             '🟢 Completado': len(completados_visible),
         }
@@ -2905,11 +2906,11 @@ if not df_main.empty:
     counts_main = _count_states(df_main)
     counts_casos = _count_states(df_casos)
     estado_counts = {k: counts_main.get(k, 0) + counts_casos.get(k, 0)
-                     for k in ['🟡 Pendiente', '🔵 En Proceso', '🔴 Demorado', '🛠 Modificación', '🟣 Cancelado', '🟢 Completado']}
+                     for k in ['🟡 Pendiente', '🔵 En Proceso', '🔴 Demorado', '🛠 Modificación', '✏️ Modificación', '🟣 Cancelado', '🟢 Completado']}
 
     total_pedidos_estados = sum(estado_counts.values())
     estados_fijos = ['🟡 Pendiente', '🔵 En Proceso', '🟢 Completado']
-    estados_condicionales = ['🔴 Demorado', '🛠 Modificación', '🟣 Cancelado']
+    estados_condicionales = ['🔴 Demorado', '🛠 Modificación', '✏️ Modificación', '🟣 Cancelado']
     estados_a_mostrar = []
     estados_a_mostrar.append(("📦 Total Pedidos", total_pedidos_estados))
     for estado in estados_fijos:
