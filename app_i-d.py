@@ -1076,13 +1076,12 @@ def status_counts_block(df_src):
         "🟡 Pendiente": (comps["Estado"] == "🟡 Pendiente").sum(),
         "🔵 En Proceso": (comps["Estado"] == "🔵 En Proceso").sum(),
         "🔴 Demorado": (comps["Estado"] == "🔴 Demorado").sum(),
-        "🛠 Modificación": (comps["Estado"] == "🛠 Modificación").sum(),
         "🟣 Cancelado": len(cancelados_visibles),
         "🟢 Completado": len(completados_visibles),
     }
     total = sum(counts.values())
     estados_fijos = ["🟡 Pendiente", "🔵 En Proceso", "🟢 Completado"]
-    estados_cond = ["🔴 Demorado", "🛠 Modificación", "🟣 Cancelado"]
+    estados_cond = ["🔴 Demorado", "🟣 Cancelado"]
     items = [("📦 Total Pedidos", total)]
     for e in estados_fijos:
         items.append((e, counts[e]))
