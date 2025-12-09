@@ -123,6 +123,25 @@ def _clamp_tab_index(index: Any, options: Sequence[Any]) -> int:
     return parsed_index
 
 
+def _clear_offscreen_pedido_flags(visible_ids: set[str]) -> None:
+    """Remove confirmation flags for pedidos that are no longer visible."""
+
+    if not visible_ids:
+        visible_ids = set()
+
+    keys_to_delete = []
+    for key in st.session_state.keys():
+        if not key.startswith("confirmar_completar_"):
+            continue
+
+        pedido_id = key.replace("confirmar_completar_", "", 1)
+        if pedido_id not in visible_ids:
+            keys_to_delete.append(key)
+
+    for key in keys_to_delete:
+        del st.session_state[key]
+
+
 def _get_first_query_value(params: Any, key: str) -> Optional[str]:
     """Return the first value for ``key`` from Streamlit query params."""
 
@@ -2601,6 +2620,8 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
         """, height=0)
         st.session_state["scroll_to_pedido_id"] = None
 
+    _clear_offscreen_pedido_flags(st.session_state.get("pedidos_en_pantalla", set()))
+
 def mostrar_pedido_solo_guia(df, idx, row, orden, origen_tab, current_main_tab_label, worksheet, headers, s3_client_param):
     """
     Render minimalista SOLO para subir guía y marcar como completado.
@@ -2840,6 +2861,8 @@ def mostrar_pedido_solo_guia(df, idx, row, orden, origen_tab, current_main_tab_l
                 )
                 st.session_state[flag_key] = False
 
+    _clear_offscreen_pedido_flags(st.session_state.get("pedidos_en_pantalla", set()))
+
 # --- Main Application Logic ---
 
 def _load_pedidos():
@@ -2944,6 +2967,12 @@ if not df_main.empty:
         & (estado_entrega_normalizado == "⏳ No Entregado")
     )
     df_pendientes_proceso_demorado = df_main[mask_estados_activos | mask_local_no_entregado].copy()
+
+    st.session_state["pedidos_en_pantalla"] = set(
+        df_pendientes_proceso_demorado.get("ID_Pedido", pd.Series(dtype=str))
+        .astype(str)
+        .str.strip()
+    )
 
     df_demorados_activos = df_pendientes_proceso_demorado[
         df_pendientes_proceso_demorado["Estado"] == "🔴 Demorado"
