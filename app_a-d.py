@@ -142,6 +142,27 @@ def _clear_offscreen_pedido_flags(visible_ids: set[str]) -> None:
         del st.session_state[key]
 
 
+def _clear_offscreen_guide_flags(visible_ids: set[str]) -> None:
+    prompts = st.session_state.get("confirm_complete_after_guide", {})
+
+    if not visible_ids:
+        return
+
+    if not isinstance(prompts, dict):
+        return
+
+    keys_to_delete = []
+    for pedido_id in list(prompts.keys()):
+        if pedido_id not in visible_ids:
+            keys_to_delete.append(pedido_id)
+
+    for pedido_id in keys_to_delete:
+        try:
+            prompts.pop(pedido_id, None)
+        except Exception:
+            continue
+
+
 def _get_first_query_value(params: Any, key: str) -> Optional[str]:
     """Return the first value for ``key`` from Streamlit query params."""
 
@@ -2621,6 +2642,7 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
         st.session_state["scroll_to_pedido_id"] = None
 
     _clear_offscreen_pedido_flags(st.session_state.get("pedidos_en_pantalla", set()))
+    _clear_offscreen_guide_flags(st.session_state.get("pedidos_en_pantalla", set()))
 
 def mostrar_pedido_solo_guia(df, idx, row, orden, origen_tab, current_main_tab_label, worksheet, headers, s3_client_param):
     """
@@ -2862,6 +2884,7 @@ def mostrar_pedido_solo_guia(df, idx, row, orden, origen_tab, current_main_tab_l
                 st.session_state[flag_key] = False
 
     _clear_offscreen_pedido_flags(st.session_state.get("pedidos_en_pantalla", set()))
+    _clear_offscreen_guide_flags(st.session_state.get("pedidos_en_pantalla", set()))
 
 # --- Main Application Logic ---
 
