@@ -1355,6 +1355,19 @@ def pedido_tiene_guia_adjunta(row: Any) -> bool:
     return len(adjuntos) > 0
 
 
+def es_tab_solicitudes_guia(origen_tab: Any) -> bool:
+    """Devuelve ``True`` cuando el contexto corresponde a Solicitudes de Guía."""
+
+    normalized = str(origen_tab or "").strip().lower()
+    return normalized in {
+        "solicitudes",
+        "solicitudes_guia",
+        "solicitudes de guía",
+        "solicitudes de guia",
+        "📋 solicitudes de guía",
+    }
+
+
 def completar_pedido(
     df: pd.DataFrame,
     idx: int,
@@ -1720,6 +1733,52 @@ def render_guia_upload_feedback(
             marcar_contexto_pedido(row_id, origen_tab, scroll=False)
             guia_success_map.pop(row_id, None)
             placeholder.empty()
+
+
+def mostrar_confirmacion_completado_guia(
+    row,
+    df,
+    idx,
+    worksheet,
+    headers,
+    gsheet_row_index,
+    origen_tab,
+    *,
+    success_message: Optional[str] = None,
+):
+    """Muestra confirmación antes de completar pedido tras subir guía."""
+
+    prompts = st.session_state.setdefault("confirm_complete_after_guide", {})
+    if not prompts.get(row["ID_Pedido"]):
+        return
+
+    st.warning("¿Deseas marcar como completado este pedido al subir esta guía?")
+    col_yes, col_cancel = st.columns(2)
+
+    if col_yes.button(
+        "Sí, completar pedido",
+        key=f"confirm_complete_yes_{row['ID_Pedido']}",
+        on_click=preserve_tab_state,
+    ):
+        completar_pedido(
+            df,
+            idx,
+            row,
+            worksheet,
+            headers,
+            gsheet_row_index,
+            origen_tab,
+            success_message or "✅ Pedido marcado como **🟢 Completado**.",
+        )
+        prompts.pop(row["ID_Pedido"], None)
+
+    if col_cancel.button(
+        "Cancelar",
+        key=f"confirm_complete_cancel_{row['ID_Pedido']}",
+        on_click=preserve_tab_state,
+    ):
+        prompts.pop(row["ID_Pedido"], None)
+        st.info("Puedes completar el pedido manualmente desde el botón 🟢 Completar.")
 
 def mostrar_pedido_detalle(
     df,
@@ -2109,11 +2168,7 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
         if not es_local_no_entregado:
             requires = pedido_requiere_guia(row)
             has_file = pedido_tiene_guia_adjunta(row)
-            is_tab_guias = (
-                origen_tab == "solicitudes_guia"
-                or str(origen_tab).strip().lower()
-                in {"solicitudes", "solicitudes de guía", "solicitudes de guia"}
-            )
+            is_tab_guias = es_tab_solicitudes_guia(origen_tab)
 
             if is_tab_guias:
                 if col_complete_btn.button(
@@ -2260,6 +2315,15 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
                     origen_tab,
                     s3_client_param,
                 )
+                mostrar_confirmacion_completado_guia(
+                    row,
+                    df,
+                    idx,
+                    worksheet,
+                    headers,
+                    gsheet_row_index,
+                    origen_tab,
+                )
 
                 upload_key = f"file_guia_{row['ID_Pedido']}"
                 form_key = f"form_guia_{row['ID_Pedido']}"
@@ -2335,6 +2399,11 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
                                     f"📤 {len(uploaded_keys)} guía(s) subida(s) con éxito.",
                                     icon="📦",
                                 )
+                                if es_tab_solicitudes_guia(origen_tab):
+                                    prompts = st.session_state.setdefault(
+                                        "confirm_complete_after_guide", {}
+                                    )
+                                    prompts[row["ID_Pedido"]] = True
                                 ensure_expanders_open(
                                     row["ID_Pedido"],
                                     "expanded_pedidos",
@@ -2371,6 +2440,15 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
                                     row["ID_Pedido"],
                                     origen_tab,
                                     s3_client_param,
+                                )
+                                mostrar_confirmacion_completado_guia(
+                                    row,
+                                    df,
+                                    idx,
+                                    worksheet,
+                                    headers,
+                                    gsheet_row_index,
+                                    origen_tab,
                                 )
                             else:
                                 st.error(
@@ -2571,6 +2649,15 @@ def mostrar_pedido_solo_guia(df, idx, row, orden, origen_tab, current_main_tab_l
             s3_client_param,
             ack_key=f"ack_guia_only_{row['ID_Pedido']}",
         )
+        mostrar_confirmacion_completado_guia(
+            row,
+            df,
+            idx,
+            worksheet,
+            headers,
+            gsheet_row_index,
+            origen_tab,
+        )
 
         # Uploader siempre visible (sin expander)
         upload_key = f"file_guia_only_{row['ID_Pedido']}"
@@ -2630,6 +2717,11 @@ def mostrar_pedido_solo_guia(df, idx, row, orden, origen_tab, current_main_tab_l
                             f"📤 {len(uploaded_keys)} guía(s) subida(s) con éxito.",
                             icon="📦",
                         )
+                        if es_tab_solicitudes_guia(origen_tab):
+                            prompts = st.session_state.setdefault(
+                                "confirm_complete_after_guide", {}
+                            )
+                            prompts[row["ID_Pedido"]] = True
                         ensure_expanders_open(
                             row["ID_Pedido"],
                             "expanded_pedidos",
@@ -2654,6 +2746,15 @@ def mostrar_pedido_solo_guia(df, idx, row, orden, origen_tab, current_main_tab_l
                             s3_client_param,
                             ack_key=f"ack_guia_only_{row['ID_Pedido']}",
                         )
+                        mostrar_confirmacion_completado_guia(
+                            row,
+                            df,
+                            idx,
+                            worksheet,
+                            headers,
+                            gsheet_row_index,
+                            origen_tab,
+                        )
                     else:
                         st.error("❌ No se pudo actualizar Google Sheets con la guía.")
                 else:
@@ -2661,11 +2762,7 @@ def mostrar_pedido_solo_guia(df, idx, row, orden, origen_tab, current_main_tab_l
 
         requires = pedido_requiere_guia(row)
         has_file = pedido_tiene_guia_adjunta(row)
-        is_tab_guias = (
-            origen_tab == "solicitudes_guia"
-            or str(origen_tab).strip().lower()
-            in {"solicitudes", "solicitudes de guía", "solicitudes de guia"}
-        )
+        is_tab_guias = es_tab_solicitudes_guia(origen_tab)
 
         if st.button(
             "🟢 Completar",
