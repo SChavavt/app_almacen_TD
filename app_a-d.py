@@ -2997,6 +2997,10 @@ if not df_main.empty:
         .str.strip()
     )
 
+    # Limpieza preventiva de banderas de confirmación ligadas a pedidos que ya no están visibles
+    _clear_offscreen_pedido_flags(st.session_state.get("pedidos_en_pantalla", set()))
+    _clear_offscreen_guide_flags(st.session_state.get("pedidos_en_pantalla", set()))
+
     df_demorados_activos = df_pendientes_proceso_demorado[
         df_pendientes_proceso_demorado["Estado"] == "🔴 Demorado"
     ].copy()
