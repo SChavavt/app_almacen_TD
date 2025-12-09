@@ -199,6 +199,28 @@ GUIDE_REQUIRED_ERROR_MSG = (
 )
 
 
+def _pending_modificaciones(df: pd.DataFrame) -> pd.DataFrame:
+    """Return rows with Modificacion_Surtido pending confirmation."""
+
+    if df is None:
+        return pd.DataFrame()
+
+    if df.empty or "Modificacion_Surtido" not in df.columns:
+        return df.iloc[0:0]
+
+    mod_text = df["Modificacion_Surtido"].astype(str).str.strip()
+    estado_series = df.get("Estado", pd.Series("", index=df.index)).astype(str)
+    refact_tipo_series = df.get("Refacturacion_Tipo", pd.Series("", index=df.index)).astype(str)
+
+    mask_non_empty = mod_text != ""
+    mask_not_confirmed = ~mod_text.str.endswith("[✔CONFIRMADO]")
+    mask_estado_activo = ~estado_series.isin(["🟢 Completado", "✅ Viajó"])
+    mask_valid_refact_tipo = refact_tipo_series.str.strip() != "Datos Fiscales"
+
+    mask = mask_non_empty & mask_not_confirmed & mask_estado_activo & mask_valid_refact_tipo
+    return df[mask]
+
+
 def normalize_sheet_text(value: Any) -> str:
     if value is None:
         return ""
@@ -2797,20 +2819,16 @@ if not df_main.empty:
 
         st.rerun()
 
-    # --- 🔔 Alerta de Modificación de Surtido ---  
-    mod_surtido_df = df_main[
-        (df_main['Modificacion_Surtido'].astype(str).str.strip() != '') &
-        (~df_main['Modificacion_Surtido'].astype(str).str.endswith('[✔CONFIRMADO]')) &
-        (~df_main['Estado'].isin(['🟢 Completado', '✅ Viajó'])) &
-        (df_main['Refacturacion_Tipo'].fillna("").str.strip() != "Datos Fiscales")
-    ]
+    # --- 🔔 Alerta de Modificación de Surtido ---
+    mod_surtido_main_df = _pending_modificaciones(df_main)
+    mod_surtido_casos_df = _pending_modificaciones(df_casos)
 
-
-    mod_surtido_count = len(mod_surtido_df)
+    mod_surtido_count = len(mod_surtido_main_df) + len(mod_surtido_casos_df)
 
     if mod_surtido_count > 0:
-        ubicaciones = collect_tab_locations(mod_surtido_df)
-        ubicaciones_str = ", ".join(ubicaciones)
+        ubicaciones = collect_tab_locations(mod_surtido_main_df) + collect_tab_locations(mod_surtido_casos_df)
+        ubicaciones_unicas = sorted(set(ubicaciones))
+        ubicaciones_str = ", ".join(ubicaciones_unicas) if ubicaciones_unicas else _UNKNOWN_TAB_LABEL
 
         st.warning(
             f"⚠️ Hay {mod_surtido_count} pedido(s) con **Modificación de Surtido** ➤ {ubicaciones_str}"
