@@ -2515,8 +2515,17 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
                         success = update_gsheet_cell(
                             worksheet, headers, gsheet_row_index, "Modificacion_Surtido", nuevo_texto
                         )
+                        if success and "Estado" in headers:
+                            success = update_gsheet_cell(
+                                worksheet,
+                                headers,
+                                gsheet_row_index,
+                                "Estado",
+                                "🔵 En Proceso",
+                            )
                         if success:
-                            st.success("✅ Cambios de surtido confirmados.")
+                            row["Estado"] = "🔵 En Proceso"
+                            st.success("✅ Cambios de surtido confirmados y pedido en '🔵 En Proceso'.")
                             st.cache_data.clear()
                             marcar_contexto_pedido(row["ID_Pedido"], origen_tab)
                             st.rerun()
@@ -4013,8 +4022,18 @@ with main_tabs[5]:
                                 else:
                                     nuevo_texto = mod_texto + " [✔CONFIRMADO]"
                                     ok = update_gsheet_cell(worksheet_casos, headers_casos, gsheet_row_idx, "Modificacion_Surtido", nuevo_texto)
+                                    if ok and "Estado" in headers_casos:
+                                        ok = update_gsheet_cell(
+                                            worksheet_casos,
+                                            headers_casos,
+                                            gsheet_row_idx,
+                                            "Estado",
+                                            "🔵 En Proceso",
+                                        )
+
                                     if ok:
-                                        st.success("✅ Cambios de surtido confirmados.")
+                                        row["Estado"] = "🔵 En Proceso"
+                                        st.success("✅ Cambios de surtido confirmados y pedido en '🔵 En Proceso'.")
                                         st.cache_data.clear()
                                         st.rerun()
                                     else:
@@ -4664,8 +4683,18 @@ with main_tabs[6]:  # 🛠 Garantías
                                 else:
                                     nuevo_texto = mod_texto + " [✔CONFIRMADO]"
                                     ok = update_gsheet_cell(worksheet_casos, headers_casos, gsheet_row_idx, "Modificacion_Surtido", nuevo_texto)
+                                    if ok and "Estado" in headers_casos:
+                                        ok = update_gsheet_cell(
+                                            worksheet_casos,
+                                            headers_casos,
+                                            gsheet_row_idx,
+                                            "Estado",
+                                            "🔵 En Proceso",
+                                        )
+
                                     if ok:
-                                        st.success("✅ Cambios de surtido confirmados.")
+                                        row["Estado"] = "🔵 En Proceso"
+                                        st.success("✅ Cambios de surtido confirmados y pedido en '🔵 En Proceso'.")
                                         st.cache_data.clear()
                                         st.rerun()
                                     else:
