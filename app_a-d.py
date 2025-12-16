@@ -3736,7 +3736,7 @@ with main_tabs[5]:
                 st.info("Sin archivos registrados en la hoja.")
 
     # 4) Recorrer cada devolución
-    for _, row in devoluciones_display.iterrows():
+    for idx, row in devoluciones_display.iterrows():
         idp         = str(row.get("ID_Pedido", "")).strip()
         folio       = str(row.get("Folio_Factura", "")).strip()
         cliente     = str(row.get("Cliente", "")).strip()
@@ -3744,7 +3744,8 @@ with main_tabs[5]:
         vendedor    = str(row.get("Vendedor_Registro", "")).strip()
         estado_rec  = str(row.get("Estado_Recepcion", "N/A")).strip()
         area_resp   = str(row.get("Area_Responsable", "")).strip()
-        row_key     = (idp or f"{folio}_{cliente}").replace(" ", "_")
+        row_key_base = (idp or f"{folio}_{cliente}").replace(" ", "_") or "sin_id"
+        row_key     = f"{row_key_base}_{idx}"
 
         if area_resp.lower() == "cliente":
             if estado.lower() == "aprobado" and estado_rec.lower() == "todo correcto":
