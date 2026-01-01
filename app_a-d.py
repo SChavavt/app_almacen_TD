@@ -229,6 +229,55 @@ def _emit_recent_tab_group_script(active_index: int, query_param: str) -> None:
         height=0,
     )
 
+
+def render_inline_preview(display_name: str, file_url: str) -> None:
+    """Render an inline preview for common file types.
+
+    Parameters
+    ----------
+    display_name : str
+        Nombre que se mostrará junto a la vista previa.
+    file_url : str
+        URL accesible del archivo a previsualizar.
+    """
+
+    lower_name = display_name.lower()
+    ext = os.path.splitext(lower_name)[1]
+
+    image_exts = {".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp"}
+    pdf_exts = {".pdf"}
+    video_exts = {".mp4", ".mov", ".webm"}
+    audio_exts = {".mp3", ".wav", ".ogg", ".m4a"}
+
+    if ext in image_exts:
+        st.image(file_url, caption=f"Vista previa: {display_name}", use_column_width=True)
+    elif ext in pdf_exts:
+        components.html(
+            f'<iframe src="{file_url}" width="100%" height="600" style="border:none;"></iframe>',
+            height=620,
+        )
+    elif ext in video_exts:
+        st.video(file_url)
+    elif ext in audio_exts:
+        st.audio(file_url)
+    else:
+        st.info(
+            "Vista previa no disponible para este tipo de archivo. Usa el enlace para abrirlo en otra pestaña."
+        )
+
+
+def render_attachment_with_preview(display_name: str, file_url: str, key_prefix: str) -> None:
+    """Show a downloadable link plus an optional inline preview in an expander."""
+
+    st.markdown(
+        f'- 📄 **{display_name}** (<a href="{file_url}" target="_blank">🔗 Ver/Descargar</a>)',
+        unsafe_allow_html=True,
+    )
+
+    preview_key = f"preview_{key_prefix}_{display_name}"
+    with st.expander(f"👁️ Vista previa: {display_name}", expanded=False, key=preview_key):
+        render_inline_preview(display_name, file_url)
+
 _UNKNOWN_TAB_LABEL = "Sin pestaña identificada"
 
 
@@ -2153,9 +2202,10 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
                             display_name = os.path.basename(urlparse(attachment_url).path)
                         if not display_name:
                             display_name = attachment
-                        st.markdown(
-                            f'- 📄 **{display_name}** (<a href="{attachment_url}" target="_blank">🔗 Ver/Descargar</a>)',
-                            unsafe_allow_html=True,
+                        render_attachment_with_preview(
+                            display_name,
+                            attachment_url,
+                            f"{row['ID_Pedido']}_sheet",
                         )
 
                 pedido_folder_prefix = find_pedido_subfolder_prefix(
@@ -2188,9 +2238,10 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
                                         display_name.replace(row['ID_Pedido'], "").replace("__", "_")
                                         .replace("_-", "_").replace("-_", "_").strip('_').strip('-')
                                     )
-                                st.markdown(
-                                    f'- 📄 **{display_name}** (<a href="{file_url}" target="_blank">🔗 Ver/Descargar</a>)',
-                                    unsafe_allow_html=True,
+                                render_attachment_with_preview(
+                                    display_name or file_info['title'],
+                                    file_url,
+                                    f"{row['ID_Pedido']}_s3",
                                 )
                         else:
                             if not contenido_attachments:
