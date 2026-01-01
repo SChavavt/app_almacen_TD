@@ -182,14 +182,17 @@ def extraer_texto_pdf(s3_key):
 
 
 # --- AWS S3 Helper Functions ---
+INLINE_EXT = (".pdf", ".jpg", ".jpeg", ".png", ".webp")
+
 def upload_file_to_s3(s3_client_param, bucket_name, file_obj, s3_key):
     try:
+        lower_key = s3_key.lower() if isinstance(s3_key, str) else ""
+        is_inline = lower_key.endswith(INLINE_EXT)
         put_kwargs = {
             "Bucket": bucket_name,
             "Key": s3_key,
             "Body": file_obj.getvalue(),
-            # FORCE INLINE PDF
-            "ContentDisposition": "inline",
+            "ContentDisposition": "inline" if is_inline else "attachment",  # FORCE INLINE VIEW
         }
         if hasattr(file_obj, "type") and file_obj.type:
             put_kwargs["ContentType"] = file_obj.type
@@ -217,12 +220,19 @@ def get_s3_file_download_url(s3_client_param, object_key_or_url, expires_in=6048
     try:
         clean_key = extract_s3_key(object_key_or_url)
         params = {"Bucket": S3_BUCKET, "Key": clean_key}
-        is_pdf = isinstance(clean_key, str) and clean_key.lower().endswith(".pdf")
-        if is_pdf:
-            filename = (clean_key.split("/")[-1] if clean_key else "").replace('"', "")
-            # FORCE INLINE PDF
-            params["ResponseContentDisposition"] = f'inline; filename="{filename}"'
-            params["ResponseContentType"] = "application/pdf"
+        if isinstance(clean_key, str):
+            lower_key = clean_key.lower()
+            if lower_key.endswith(INLINE_EXT):
+                filename = (clean_key.split("/")[-1] or "archivo").replace('"', "")
+                params["ResponseContentDisposition"] = f'inline; filename="{filename}"'  # FORCE INLINE VIEW
+                if lower_key.endswith(".pdf"):
+                    params["ResponseContentType"] = "application/pdf"
+                elif lower_key.endswith((".jpg", ".jpeg")):
+                    params["ResponseContentType"] = "image/jpeg"
+                elif lower_key.endswith(".png"):
+                    params["ResponseContentType"] = "image/png"
+                elif lower_key.endswith(".webp"):
+                    params["ResponseContentType"] = "image/webp"
 
         return s3_client_param.generate_presigned_url(
             "get_object",
