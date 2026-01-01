@@ -1,5 +1,4 @@
 import streamlit as st
-import streamlit.components.v1 as components
 import pandas as pd
 import boto3
 import gspread
@@ -225,23 +224,6 @@ def get_s3_file_download_url(s3_client_param, object_key_or_url, expires_in=6048
         return "#"
 
 
-def render_link_with_preview(nombre, enlace, icono="📄", alto=620):
-    """Muestra un enlace y una vista previa incrustada en un expander."""
-    if not enlace or enlace == "#":
-        st.warning(f"No se pudo generar la vista previa para {nombre}.")
-        return
-
-    st.markdown(
-        f'- <a href="{enlace}" target="_blank">{icono} {nombre}</a>',
-        unsafe_allow_html=True,
-    )
-    with st.expander(f"👁️ Vista previa: {nombre}", expanded=False):
-        components.html(
-            f'<iframe src="{enlace}" width="100%" height="600px" style="border: none;"></iframe>',
-            height=alto,
-        )
-
-
 def resolver_nombre_y_enlace(valor, etiqueta_fallback):
     """Genera un nombre legible y una URL de descarga para cualquier valor almacenado en la hoja."""
     valor = str(valor).strip()
@@ -453,7 +435,10 @@ def render_caso_especial(res):
             for u in mod_urls:
                 nombre = extract_s3_key(u).split("/")[-1]
                 tmp = get_s3_file_download_url(s3_client, u)
-                render_link_with_preview(nombre, tmp, icono="🛠")
+                st.markdown(
+                    f'- <a href="{tmp}" target="_blank">{nombre}</a>',
+                    unsafe_allow_html=True,
+                )
 
     with st.expander("📎 Archivos (Adjuntos y Guía)", expanded=False):
         adj = res.get("Adjuntos_urls", []) or []
@@ -463,7 +448,10 @@ def render_caso_especial(res):
             for u in adj:
                 nombre = extract_s3_key(u).split("/")[-1]
                 tmp = get_s3_file_download_url(s3_client, u)
-                render_link_with_preview(nombre, tmp)
+                st.markdown(
+                    f'- <a href="{tmp}" target="_blank">{nombre}</a>',
+                    unsafe_allow_html=True,
+                )
         if guias:
             st.markdown("**Guías:**")
             for idx, u in enumerate(guias, start=1):
@@ -473,7 +461,10 @@ def render_caso_especial(res):
                 if not nombre:
                     nombre = f"Guía #{idx}"
                 tmp = get_s3_file_download_url(s3_client, u)
-                render_link_with_preview(nombre, tmp, icono="🧾")
+                st.markdown(
+                    f'- <a href="{tmp}" target="_blank">{nombre}</a>',
+                    unsafe_allow_html=True,
+                )
         if not adj and not guias:
             st.info("Sin archivos registrados en la hoja.")
 
@@ -813,7 +804,10 @@ with tabs[0]:
                             for u in mod_urls:
                                 nombre = extract_s3_key(u).split("/")[-1]
                                 tmp = get_s3_file_download_url(s3_client, u)
-                                render_link_with_preview(nombre, tmp, icono="🛠")
+                                st.markdown(
+                                    f'- <a href="{tmp}" target="_blank">{nombre}</a>',
+                                    unsafe_allow_html=True,
+                                )
 
                     # ♻️ Refacturación (si hay)
                     ref_t = res.get("Refacturacion_Tipo","")
@@ -833,23 +827,35 @@ with tabs[0]:
                                 nombre, enlace = resolver_nombre_y_enlace(raw_url, f"Guía hoja #{idx}")
                                 if not enlace:
                                     continue
-                                render_link_with_preview(f"{nombre} (hoja)", enlace, icono="🧾")
+                                st.markdown(
+                                    f'- <a href="{enlace}" target="_blank">🧾 {nombre} (hoja)</a>',
+                                    unsafe_allow_html=True,
+                                )
 
                         if res.get("Coincidentes"):
                             st.markdown("#### 🔍 Guías detectadas en S3:")
                             for key, url in res["Coincidentes"]:
                                 nombre = key.split("/")[-1]
-                                render_link_with_preview(nombre, url, icono="🔍")
+                                st.markdown(
+                                    f'- <a href="{url}" target="_blank">🔍 {nombre}</a>',
+                                    unsafe_allow_html=True,
+                                )
                         if res.get("Comprobantes"):
                             st.markdown("#### 🧾 Comprobantes:")
                             for key, url in res["Comprobantes"]:
                                 nombre = key.split("/")[-1]
-                                render_link_with_preview(nombre, url, icono="🧾")
+                                st.markdown(
+                                    f'- <a href="{url}" target="_blank">📄 {nombre}</a>',
+                                    unsafe_allow_html=True,
+                                )
                         if res.get("Facturas"):
                             st.markdown("#### 📁 Facturas:")
                             for key, url in res["Facturas"]:
                                 nombre = key.split("/")[-1]
-                                render_link_with_preview(nombre, url, icono="📁")
+                                st.markdown(
+                                    f'- <a href="{url}" target="_blank">📄 {nombre}</a>',
+                                    unsafe_allow_html=True,
+                                )
                         adjuntos_hoja = res.get("Adjuntos_urls") or []
                         otros_s3 = res.get("Otros") or []
                         otros_items = []
@@ -920,7 +926,10 @@ with tabs[0]:
                         if otros_items:
                             st.markdown("#### 📂 Otros Archivos:")
                             for nombre, enlace in otros_items:
-                                render_link_with_preview(nombre, enlace, icono="📌")
+                                st.markdown(
+                                    f'- <a href="{enlace}" target="_blank">📌 {nombre}</a>',
+                                    unsafe_allow_html=True,
+                                )
 
         else:
             mensaje = (
@@ -1265,7 +1274,10 @@ with tabs[2]:
                             nombre, enlace = resolver_nombre_y_enlace(raw_url, f"{titulo} #{idx}")
                             if not enlace:
                                 continue
-                            render_link_with_preview(nombre, enlace)
+                            st.markdown(
+                                f'- <a href="{enlace}" target="_blank">{nombre}</a>',
+                                unsafe_allow_html=True,
+                            )
             else:
                 pedido_sel = None
                 source_sel = None
@@ -1393,13 +1405,13 @@ with tabs[2]:
                 for u in existentes_guias:
                     tmp = get_s3_file_download_url(s3_client, u)
                     nombre = extract_s3_key(u).split("/")[-1]
-                    render_link_with_preview(nombre, tmp)
+                    st.markdown(f'- <a href="{tmp}" target="_blank">{nombre}</a>', unsafe_allow_html=True)
             if existentes_otros:
                 st.markdown("**Otros:**")
                 for u in existentes_otros:
                     tmp = get_s3_file_download_url(s3_client, u)
                     nombre = extract_s3_key(u).split("/")[-1]
-                    render_link_with_preview(nombre, tmp)
+                    st.markdown(f'- <a href="{tmp}" target="_blank">{nombre}</a>', unsafe_allow_html=True)
 
     uploaded_guias = st.file_uploader("📄 Guías", accept_multiple_files=True)
     uploaded_otros = st.file_uploader("📁 Otros", accept_multiple_files=True)
