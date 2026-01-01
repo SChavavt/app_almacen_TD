@@ -208,20 +208,15 @@ def extract_s3_key(url_or_key: str) -> str:
     return url_or_key
 
 
-def get_s3_file_download_url(
-    s3_client_param, object_key_or_url, expires_in=604800, force_inline=True
-):
+def get_s3_file_download_url(s3_client_param, object_key_or_url, expires_in=604800):
     if not s3_client_param or not S3_BUCKET:
         st.error("❌ Configuración de S3 incompleta. Verifica el cliente y el nombre del bucket.")
         return "#"
     try:
         clean_key = extract_s3_key(object_key_or_url)
-        params = {"Bucket": S3_BUCKET, "Key": clean_key}
-        if force_inline:
-            params["ResponseContentDisposition"] = "inline"
         return s3_client_param.generate_presigned_url(
             "get_object",
-            Params=params,
+            Params={"Bucket": S3_BUCKET, "Key": clean_key},
             ExpiresIn=expires_in,
         )
     except Exception as e:
