@@ -188,6 +188,8 @@ def upload_file_to_s3(s3_client_param, bucket_name, file_obj, s3_key):
             "Bucket": bucket_name,
             "Key": s3_key,
             "Body": file_obj.getvalue(),
+            # FORCE INLINE PDF
+            "ContentDisposition": "inline",
         }
         if hasattr(file_obj, "type") and file_obj.type:
             put_kwargs["ContentType"] = file_obj.type
@@ -214,9 +216,17 @@ def get_s3_file_download_url(s3_client_param, object_key_or_url, expires_in=6048
         return "#"
     try:
         clean_key = extract_s3_key(object_key_or_url)
+        params = {"Bucket": S3_BUCKET, "Key": clean_key}
+        is_pdf = isinstance(clean_key, str) and clean_key.lower().endswith(".pdf")
+        if is_pdf:
+            filename = (clean_key.split("/")[-1] if clean_key else "").replace('"', "")
+            # FORCE INLINE PDF
+            params["ResponseContentDisposition"] = f'inline; filename="{filename}"'
+            params["ResponseContentType"] = "application/pdf"
+
         return s3_client_param.generate_presigned_url(
             "get_object",
-            Params={"Bucket": S3_BUCKET, "Key": clean_key},
+            Params=params,
             ExpiresIn=expires_in,
         )
     except Exception as e:
