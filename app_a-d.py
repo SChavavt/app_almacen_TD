@@ -1931,7 +1931,7 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
             else:
                 mostrar_cambio = st.checkbox(
                     "📅 Cambiar Fecha y Turno",
-                    key=f"chk_fecha_{row['ID_Pedido']}",
+                    key=f"chk_fecha_{row['ID_Pedido']}_{idx}_{origen_tab}",
                 )
 
             if mostrar_cambio:
