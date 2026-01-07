@@ -4186,7 +4186,7 @@ with main_tabs[5]:
             flag_key = f"confirm_complete_id_{row['ID_Pedido']}"
             if st.button(
                 "🟢 Completar",
-                key=f"btn_completar_{folio}_{cliente}",
+                key=f"btn_completar_{row_key}",
                 on_click=preserve_tab_state,
             ):
                 ensure_expanders_open(row_key, "expanded_devoluciones")
@@ -4198,7 +4198,7 @@ with main_tabs[5]:
                 with confirm_col:
                     if st.button(
                         "Confirmar",
-                        key=f"confirm_completar_{folio}_{cliente}",
+                        key=f"confirm_completar_{row_key}",
                         on_click=preserve_tab_state,
                     ):
                         ensure_expanders_open(row_key, "expanded_devoluciones")
