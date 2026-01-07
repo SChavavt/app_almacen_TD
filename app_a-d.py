@@ -4086,11 +4086,11 @@ with main_tabs[5]:
                 "🔁 Devoluciones",
                 s3_client,
             )
-            form_key = f"form_guia_{folio}_{cliente}"
+            form_key = f"form_guia_{row_key}"
             with st.form(key=form_key):
                 guia_files = st.file_uploader(
                     "📋 Subir Guía de Retorno (opcional)",
-                    key=f"guia_{folio}_{cliente}",
+                    key=f"guia_{row_key}",
                     help="Opcional: sube la guía de mensajería para el retorno del producto (PDF/JPG/PNG)",
                     accept_multiple_files=True,
                 )
