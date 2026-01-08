@@ -1125,15 +1125,20 @@ def ensure_columns(worksheet, headers, required_cols):
 
 
 # --- AWS S3 Helper Functions (Copied from app_admin.py directly) ---
+INLINE_EXT = (".pdf", ".jpg", ".jpeg", ".png", ".webp")
+
 def upload_file_to_s3(s3_client_param, bucket_name, file_obj, s3_key):
     try:
         # La visibilidad pública se controla mediante la bucket policy.
         # Sólo añadimos el ContentType si está disponible para evitar
         # errores "AccessControlListNotSupported".
+        lower_key = s3_key.lower() if isinstance(s3_key, str) else ""
+        is_inline = lower_key.endswith(INLINE_EXT)
         put_kwargs = {
             "Bucket": bucket_name,
             "Key": s3_key,
             "Body": file_obj.getvalue(),
+            "ContentDisposition": "inline" if is_inline else "attachment",  # FORCE INLINE VIEW (PDF / IMAGES)
         }
         # Si Streamlit provee el content-type, pásalo (mejor vista/descarga en navegador)
         if hasattr(file_obj, "type") and file_obj.type:
@@ -1254,9 +1259,23 @@ def get_s3_file_download_url(s3_client_param, object_key_or_url, expires_in=6048
         return "#"
     try:
         clean_key = extract_s3_key(object_key_or_url)
+        params = {"Bucket": S3_BUCKET_NAME, "Key": clean_key}
+        if isinstance(clean_key, str):
+            lower_key = clean_key.lower()
+            if lower_key.endswith(INLINE_EXT):
+                filename = (clean_key.split("/")[-1] or "archivo").replace('"', "")
+                params["ResponseContentDisposition"] = f'inline; filename="{filename}"'  # FORCE INLINE VIEW (PDF / IMAGES)
+                if lower_key.endswith(".pdf"):
+                    params["ResponseContentType"] = "application/pdf"
+                elif lower_key.endswith((".jpg", ".jpeg")):
+                    params["ResponseContentType"] = "image/jpeg"
+                elif lower_key.endswith(".png"):
+                    params["ResponseContentType"] = "image/png"
+                elif lower_key.endswith(".webp"):
+                    params["ResponseContentType"] = "image/webp"
         return s3_client_param.generate_presigned_url(
             "get_object",
-            Params={"Bucket": S3_BUCKET_NAME, "Key": clean_key},
+            Params=params,
             ExpiresIn=expires_in,
         )
     except Exception as e:
