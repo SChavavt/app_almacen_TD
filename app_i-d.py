@@ -18,8 +18,8 @@ TZ = ZoneInfo("America/Mexico_City")
 
 st.set_page_config(page_title="Panel de Almacén Integrado", layout="wide")
 
-# --- Controles: recarga manual + autorefresco ---
-col_title, col_actions = st.columns([0.7, 0.3])
+# --- Encabezado ---
+col_title, col_actions = st.columns([0.75, 0.25])
 with col_title:
     st.markdown(
         """
@@ -40,23 +40,11 @@ with col_title:
     """,
         unsafe_allow_html=True,
     )
-
 with col_actions:
-    if st.button("🔄 Recargar pedidos ahora", use_container_width=True):
+    if st.button("🔄 Refrescar ahora", use_container_width=True):
         st.cache_data.clear()
         st.cache_resource.clear()
         st.rerun()
-
-    st.checkbox(
-        "⚡ Autorefrescar", key="auto_reload", help="Rerun automático sin limpiar caché"
-    )
-    st.selectbox("Intervalo (seg)", [60, 45], index=0, key="auto_reload_interval")
-
-# ⏱️ Autorefresco (no limpia caché)
-if st.session_state.get("auto_reload"):
-    interval = int(st.session_state.get("auto_reload_interval", 60))
-    # Utilizar st_autorefresh evita recargar la página y conserva la sesión
-    st_autorefresh(interval=interval * 1000, key="auto_refresh_counter")
 
 st.markdown("---")
 
