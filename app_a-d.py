@@ -918,7 +918,57 @@ def update_gsheet_cell(worksheet, headers, row_index, col_name, value):
             break
 
     return False
-    
+
+
+def validate_gsheet_row_id(worksheet, headers, gsheet_row_index, row) -> bool:
+    """Validate that the sheet row matches the expected ID_Pedido."""
+    if "ID_Pedido" not in headers:
+        st.error("❌ No se pudo validar el ID_Pedido porque falta la columna en Google Sheets.")
+        return False
+
+    row_id = str(row.get("ID_Pedido", "")).strip()
+    if not row_id:
+        return True
+    id_col = headers.index("ID_Pedido") + 1
+    try:
+        sheet_id = worksheet.cell(gsheet_row_index, id_col).value
+    except Exception as exc:
+        st.error(f"❌ No se pudo leer el ID_Pedido de Google Sheets: {exc}")
+        return False
+
+    sheet_id = str(sheet_id or "").strip()
+    if sheet_id != row_id:
+        st.error(
+            "❌ Índice de fila incorrecto: el ID_Pedido no coincide. No se registró la guía."
+        )
+        return False
+
+    return True
+
+
+def read_cell_value_with_retry(worksheet, row_index, col_index, attempts=3, delay=0.6) -> str:
+    """Read a cell value with short retries to confirm persisted content."""
+    for attempt in range(attempts):
+        try:
+            value = worksheet.cell(row_index, col_index).value
+            return str(value or "").strip()
+        except Exception as exc:
+            if attempt >= attempts - 1:
+                st.error(f"❌ No se pudo validar la celda en Google Sheets: {exc}")
+                break
+            time.sleep(delay)
+    return ""
+
+
+def merge_unique_urls(existing_value, new_items) -> str:
+    """Merge existing and new URLs without duplicates."""
+    merged = _normalize_urls(existing_value)
+    for item in new_items or []:
+        item = str(item).strip()
+        if item and item not in merged:
+            merged.append(item)
+    return ", ".join(merged)
+
 def cargar_pedidos_desde_google_sheet(sheet_id, worksheet_name):
     """
     Carga los datos de una hoja de Google Sheets y devuelve un DataFrame y los encabezados.
@@ -1094,7 +1144,10 @@ def ensure_columns(worksheet, headers, required_cols):
             except TypeError:
                 # En otras funciona 'A1'
                 worksheet.update('A1', [new_headers])
-            return new_headers
+            try:
+                return worksheet.row_values(1)
+            except Exception:
+                return new_headers
     except AttributeError:
         # No tiene update -> caemos al plan B
         pass
@@ -1117,7 +1170,10 @@ def ensure_columns(worksheet, headers, required_cols):
         cell_list = [gspread.Cell(row=1, col=i+1, value=val)
                      for i, val in enumerate(new_headers)]
         worksheet.update_cells(cell_list)
-        return new_headers
+        try:
+            return worksheet.row_values(1)
+        except Exception:
+            return new_headers
     except Exception as e:
         st.error(f"❌ No se pudieron actualizar encabezados con compatibilidad: {e}")
         return headers
@@ -1414,6 +1470,13 @@ def pedido_tiene_guia_adjunta(row: Any) -> bool:
     return len(adjuntos) > 0
 
 
+def get_guia_column_for_tab(origen_tab: Any) -> str:
+    normalized = str(origen_tab or "").strip().lower()
+    if any(term in normalized for term in ("devol", "garant", "casos")):
+        return "Hoja_Ruta_Mensajero"
+    return "Adjuntos_Guia"
+
+
 def es_tab_solicitudes_guia(origen_tab: Any) -> bool:
     """Devuelve ``True`` cuando el contexto corresponde a Solicitudes de Guía."""
 
@@ -1459,6 +1522,21 @@ def completar_pedido(
     except ValueError as err:
         st.error(f"❌ No se puede completar el pedido porque falta la columna requerida: {err}")
         return False
+
+    if pedido_requiere_guia(row):
+        guia_col = get_guia_column_for_tab(origen_tab)
+        if guia_col not in headers:
+            st.error(
+                "❌ No se puede completar el pedido porque falta la columna de guías en Google Sheets."
+            )
+            return False
+        guia_col_idx = headers.index(guia_col) + 1
+        guia_val = read_cell_value_with_retry(worksheet, gsheet_row_index, guia_col_idx)
+        if not guia_val:
+            st.error(
+                f"❌ No se puede completar el pedido '{row.get('ID_Pedido', '?')}' porque la guía no está registrada en Google Sheets."
+            )
+            return False
 
     now = mx_now()
     now_str = now.strftime("%Y-%m-%d %H:%M:%S")
@@ -2409,106 +2487,109 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
                         uploaded_keys = []
                         for archivo in archivos_guia:
                             ext = os.path.splitext(archivo.name)[1]
-                            s3_key = f"{row['ID_Pedido']}/guia_{uuid.uuid4().hex[:6]}{ext}"
+                            s3_key = f"{S3_ATTACHMENT_PREFIX}{row['ID_Pedido']}/guia_{uuid.uuid4().hex[:6]}{ext}"
                             success, uploaded_key = upload_file_to_s3(
                                 s3_client_param, S3_BUCKET_NAME, archivo, s3_key
                             )
-                            if success and uploaded_key:
-                                uploaded_keys.append(uploaded_key)
+                            if success:
+                                uploaded_keys.append(s3_key)
 
                         if uploaded_keys:
                             uploaded_entries = [
                                 {"key": key, "name": os.path.basename(key)}
                                 for key in uploaded_keys
                             ]
-                            tipo_envio_str = str(row.get("Tipo_Envio", "")).lower()
-                            use_hoja_ruta = ("devol" in tipo_envio_str) or ("garant" in tipo_envio_str)
-                            target_col_for_guide = (
-                                "Hoja_Ruta_Mensajero" if use_hoja_ruta else "Adjuntos_Guia"
-                            )
+                            target_col_for_guide = "Adjuntos_Guia"
                             if target_col_for_guide not in headers:
                                 headers = ensure_columns(worksheet, headers, [target_col_for_guide])
-                            anterior = str(row.get(target_col_for_guide, "")).strip()
-                            nueva_lista = (
-                                (anterior + ", " if anterior else "")
-                                + ", ".join(uploaded_keys)
-                            )
-                            success = update_gsheet_cell(
-                                worksheet, headers, gsheet_row_index, target_col_for_guide, nueva_lista
-                            )
-                            if success:
-                                if target_col_for_guide == "Hoja_Ruta_Mensajero":
-                                    df.at[idx, "Hoja_Ruta_Mensajero"] = nueva_lista
-                                    row["Hoja_Ruta_Mensajero"] = nueva_lista
-                                else:
-                                    df.at[idx, "Adjuntos_Guia"] = nueva_lista
-                                    row["Adjuntos_Guia"] = nueva_lista
-
-                                headers = mirror_guide_value(
-                                    worksheet,
-                                    headers,
-                                    gsheet_row_index,
-                                    df,
-                                    idx,
-                                    row,
-                                    target_col_for_guide,
-                                    nueva_lista,
+                            if validate_gsheet_row_id(
+                                worksheet, headers, gsheet_row_index, row
+                            ):
+                                nueva_lista = merge_unique_urls(
+                                    row.get(target_col_for_guide, ""),
+                                    uploaded_keys,
                                 )
-                                st.toast(
-                                    f"📤 {len(uploaded_keys)} guía(s) subida(s) con éxito.",
-                                    icon="📦",
+                                success = update_gsheet_cell(
+                                    worksheet, headers, gsheet_row_index, target_col_for_guide, nueva_lista
                                 )
-                                if es_tab_solicitudes_guia(origen_tab):
-                                    prompts = st.session_state.setdefault(
-                                        "confirm_complete_after_guide", {}
+                                if success:
+                                    col_index = headers.index(target_col_for_guide) + 1
+                                    persisted_value = read_cell_value_with_retry(
+                                        worksheet, gsheet_row_index, col_index
                                     )
-                                    prompts[row["ID_Pedido"]] = True
-                                ensure_expanders_open(
-                                    row["ID_Pedido"],
-                                    "expanded_pedidos",
-                                    "expanded_subir_guia",
-                                )
-                                guia_success_map = st.session_state.setdefault(
-                                    "guia_upload_success", {}
-                                )
-                                guia_success_map[row["ID_Pedido"]] = {
-                                    "count": len(uploaded_keys),
-                                    "column": target_col_for_guide,
-                                    "files": uploaded_entries,
-                                    "timestamp": mx_now_str(),
-                                }
-                                st.cache_data.clear()
-                                st.cache_resource.clear()
-                                st.session_state["pedido_editado"] = row["ID_Pedido"]
-                                st.session_state["fecha_seleccionada"] = row.get(
-                                    "Fecha_Entrega", ""
-                                )
-                                st.session_state["subtab_local"] = origen_tab
-                                tab_val = st.query_params.get("tab")
-                                if tab_val is not None:
-                                    if isinstance(tab_val, list):
-                                        tab_val = tab_val[0]
-                                    try:
-                                        st.session_state["active_main_tab_index"] = int(tab_val)
-                                    except (ValueError, TypeError):
-                                        st.session_state["active_main_tab_index"] = 0
-                                marcar_contexto_pedido(row["ID_Pedido"], origen_tab)
-                                preserve_tab_state()
-                                render_guia_upload_feedback(
-                                    success_placeholder,
-                                    row["ID_Pedido"],
-                                    origen_tab,
-                                    s3_client_param,
-                                )
-                                mostrar_confirmacion_completado_guia(
-                                    row,
-                                    df,
-                                    idx,
-                                    worksheet,
-                                    headers,
-                                    gsheet_row_index,
-                                    origen_tab,
-                                )
+                                    if not persisted_value:
+                                        st.error(
+                                            "❌ La guía no quedó registrada en Google Sheets. Intenta de nuevo."
+                                        )
+                                    else:
+                                        df.at[idx, target_col_for_guide] = persisted_value
+                                        row[target_col_for_guide] = persisted_value
+
+                                        headers = mirror_guide_value(
+                                            worksheet,
+                                            headers,
+                                            gsheet_row_index,
+                                            df,
+                                            idx,
+                                            row,
+                                            target_col_for_guide,
+                                            persisted_value,
+                                        )
+                                        st.toast(
+                                            f"📤 {len(uploaded_keys)} guía(s) subida(s) con éxito.",
+                                            icon="📦",
+                                        )
+                                        if es_tab_solicitudes_guia(origen_tab):
+                                            prompts = st.session_state.setdefault(
+                                                "confirm_complete_after_guide", {}
+                                            )
+                                            prompts[row["ID_Pedido"]] = True
+                                        ensure_expanders_open(
+                                            row["ID_Pedido"],
+                                            "expanded_pedidos",
+                                            "expanded_subir_guia",
+                                        )
+                                        guia_success_map = st.session_state.setdefault(
+                                            "guia_upload_success", {}
+                                        )
+                                        guia_success_map[row["ID_Pedido"]] = {
+                                            "count": len(uploaded_keys),
+                                            "column": target_col_for_guide,
+                                            "files": uploaded_entries,
+                                            "timestamp": mx_now_str(),
+                                        }
+                                        st.cache_data.clear()
+                                        st.cache_resource.clear()
+                                        st.session_state["pedido_editado"] = row["ID_Pedido"]
+                                        st.session_state["fecha_seleccionada"] = row.get(
+                                            "Fecha_Entrega", ""
+                                        )
+                                        st.session_state["subtab_local"] = origen_tab
+                                        tab_val = st.query_params.get("tab")
+                                        if tab_val is not None:
+                                            if isinstance(tab_val, list):
+                                                tab_val = tab_val[0]
+                                            try:
+                                                st.session_state["active_main_tab_index"] = int(tab_val)
+                                            except (ValueError, TypeError):
+                                                st.session_state["active_main_tab_index"] = 0
+                                        marcar_contexto_pedido(row["ID_Pedido"], origen_tab)
+                                        preserve_tab_state()
+                                        render_guia_upload_feedback(
+                                            success_placeholder,
+                                            row["ID_Pedido"],
+                                            origen_tab,
+                                            s3_client_param,
+                                        )
+                                        mostrar_confirmacion_completado_guia(
+                                            row,
+                                            df,
+                                            idx,
+                                            worksheet,
+                                            headers,
+                                            gsheet_row_index,
+                                            origen_tab,
+                                        )
                             else:
                                 st.error(
                                     "❌ No se pudo actualizar el Google Sheet con los archivos de guía."
@@ -2756,76 +2837,85 @@ def mostrar_pedido_solo_guia(df, idx, row, orden, origen_tab, current_main_tab_l
                 uploaded_keys = []
                 for archivo in archivos_guia:
                     ext = os.path.splitext(archivo.name)[1]
-                    s3_key = f"{row['ID_Pedido']}/guia_{uuid.uuid4().hex[:6]}{ext}"
+                    s3_key = f"{S3_ATTACHMENT_PREFIX}{row['ID_Pedido']}/guia_{uuid.uuid4().hex[:6]}{ext}"
                     success, uploaded_key = upload_file_to_s3(s3_client_param, S3_BUCKET_NAME, archivo, s3_key)
-                    if success and uploaded_key:
-                        uploaded_keys.append(uploaded_key)
+                    if success:
+                        uploaded_keys.append(s3_key)
 
                 if uploaded_keys:
                     uploaded_entries = [
                         {"key": key, "name": os.path.basename(key)}
                         for key in uploaded_keys
                     ]
-                    nueva_lista = str(row.get("Adjuntos_Guia", "")).strip()
-                    nueva_lista = (nueva_lista + ", " if nueva_lista else "") + ", ".join(uploaded_keys)
-                    success = update_gsheet_cell(
-                        worksheet, headers, gsheet_row_index, "Adjuntos_Guia", nueva_lista
-                    )
-                    if success:
-                        df.at[idx, "Adjuntos_Guia"] = nueva_lista
-                        row["Adjuntos_Guia"] = nueva_lista
-                        headers = mirror_guide_value(
-                            worksheet,
-                            headers,
-                            gsheet_row_index,
-                            df,
-                            idx,
-                            row,
-                            "Adjuntos_Guia",
-                            nueva_lista,
+                    if validate_gsheet_row_id(worksheet, headers, gsheet_row_index, row):
+                        nueva_lista = merge_unique_urls(row.get("Adjuntos_Guia", ""), uploaded_keys)
+                        success = update_gsheet_cell(
+                            worksheet, headers, gsheet_row_index, "Adjuntos_Guia", nueva_lista
                         )
-                        st.toast(
-                            f"📤 {len(uploaded_keys)} guía(s) subida(s) con éxito.",
-                            icon="📦",
-                        )
-                        if es_tab_solicitudes_guia(origen_tab):
-                            prompts = st.session_state.setdefault(
-                                "confirm_complete_after_guide", {}
+                        if success:
+                            col_index = headers.index("Adjuntos_Guia") + 1
+                            persisted_value = read_cell_value_with_retry(
+                                worksheet, gsheet_row_index, col_index
                             )
-                            prompts[row["ID_Pedido"]] = True
-                        ensure_expanders_open(
-                            row["ID_Pedido"],
-                            "expanded_pedidos",
-                        )
-                        guia_success_map = st.session_state.setdefault(
-                            "guia_upload_success", {}
-                        )
-                        guia_success_map[row["ID_Pedido"]] = {
-                            "count": len(uploaded_keys),
-                            "column": "Adjuntos_Guia",
-                            "files": uploaded_entries,
-                            "timestamp": mx_now_str(),
-                        }
-                        set_active_main_tab(3)
-                        st.cache_data.clear()
-                        marcar_contexto_pedido(row["ID_Pedido"], origen_tab)
-                        preserve_tab_state()
-                        render_guia_upload_feedback(
-                            success_placeholder,
-                            row["ID_Pedido"],
-                            origen_tab,
-                            s3_client_param,
-                            ack_key=f"ack_guia_only_{row['ID_Pedido']}",
-                        )
-                        mostrar_confirmacion_completado_guia(
-                            row,
-                            df,
-                            idx,
-                            worksheet,
-                            headers,
-                            gsheet_row_index,
-                            origen_tab,
-                        )
+                            if not persisted_value:
+                                st.error(
+                                    "❌ La guía no quedó registrada en Google Sheets. Intenta de nuevo."
+                                )
+                            else:
+                                df.at[idx, "Adjuntos_Guia"] = persisted_value
+                                row["Adjuntos_Guia"] = persisted_value
+                                headers = mirror_guide_value(
+                                    worksheet,
+                                    headers,
+                                    gsheet_row_index,
+                                    df,
+                                    idx,
+                                    row,
+                                    "Adjuntos_Guia",
+                                    persisted_value,
+                                )
+                                st.toast(
+                                    f"📤 {len(uploaded_keys)} guía(s) subida(s) con éxito.",
+                                    icon="📦",
+                                )
+                                if es_tab_solicitudes_guia(origen_tab):
+                                    prompts = st.session_state.setdefault(
+                                        "confirm_complete_after_guide", {}
+                                    )
+                                    prompts[row["ID_Pedido"]] = True
+                                ensure_expanders_open(
+                                    row["ID_Pedido"],
+                                    "expanded_pedidos",
+                                )
+                                guia_success_map = st.session_state.setdefault(
+                                    "guia_upload_success", {}
+                                )
+                                guia_success_map[row["ID_Pedido"]] = {
+                                    "count": len(uploaded_keys),
+                                    "column": "Adjuntos_Guia",
+                                    "files": uploaded_entries,
+                                    "timestamp": mx_now_str(),
+                                }
+                                set_active_main_tab(3)
+                                st.cache_data.clear()
+                                marcar_contexto_pedido(row["ID_Pedido"], origen_tab)
+                                preserve_tab_state()
+                                render_guia_upload_feedback(
+                                    success_placeholder,
+                                    row["ID_Pedido"],
+                                    origen_tab,
+                                    s3_client_param,
+                                    ack_key=f"ack_guia_only_{row['ID_Pedido']}",
+                                )
+                                mostrar_confirmacion_completado_guia(
+                                    row,
+                                    df,
+                                    idx,
+                                    worksheet,
+                                    headers,
+                                    gsheet_row_index,
+                                    origen_tab,
+                                )
                     else:
                         st.error("❌ No se pudo actualizar Google Sheets con la guía.")
                 else:
@@ -4150,51 +4240,71 @@ with main_tabs[5]:
                             if gsheet_row_idx is None:
                                 st.error("❌ No se encontró el caso en 'casos_especiales'.")
                             else:
-                                existing = str(row.get("Hoja_Ruta_Mensajero", "")).strip()
-                                if existing.lower() in ("nan", "none", "n/a"):
-                                    existing = ""
-                                new_keys = ", ".join(guia_keys)
-                                guia_final = f"{existing}, {new_keys}" if existing else new_keys
-                                ok = update_gsheet_cell(
-                                    worksheet_casos,
-                                    headers_casos,
-                                    gsheet_row_idx,
-                                    "Hoja_Ruta_Mensajero",
-                                    guia_final,
-                                )
-                                if ok:
-                                    uploaded_entries = [
-                                        {"key": key, "name": os.path.basename(key)}
-                                        for key in guia_keys
-                                    ]
-                                    devoluciones_display.at[
-                                        row.name, "Hoja_Ruta_Mensajero"
-                                    ] = guia_final
-                                    row["Hoja_Ruta_Mensajero"] = guia_final
-                                    st.toast(f"📤 {len(guia_keys)} guía(s) subida(s) con éxito.", icon="📦")
-                                    ensure_expanders_open(
-                                        row_key,
-                                        "expanded_devoluciones",
+                                if "Hoja_Ruta_Mensajero" not in headers_casos:
+                                    headers_casos = ensure_columns(
+                                        worksheet_casos,
+                                        headers_casos,
+                                        ["Hoja_Ruta_Mensajero"],
                                     )
-                                    set_active_main_tab(5)
-                                    guia_success_map = st.session_state.setdefault(
-                                        "guia_upload_success", {}
+                                if validate_gsheet_row_id(
+                                    worksheet_casos, headers_casos, gsheet_row_idx, row
+                                ):
+                                    guia_final = merge_unique_urls(
+                                        row.get("Hoja_Ruta_Mensajero", ""),
+                                        guia_keys,
                                     )
-                                    guia_success_map[row_key] = {
-                                        "count": len(guia_keys),
-                                        "column": "Hoja_Ruta_Mensajero",
-                                        "files": uploaded_entries,
-                                        "timestamp": mx_now_str(),
-                                    }
-                                    st.cache_data.clear()
-                                    st.cache_resource.clear()
-                                    marcar_contexto_pedido(row_key, "🔁 Devoluciones")
-                                    render_guia_upload_feedback(
-                                        success_placeholder,
-                                        row_key,
-                                        "🔁 Devoluciones",
-                                        s3_client,
+                                    ok = update_gsheet_cell(
+                                        worksheet_casos,
+                                        headers_casos,
+                                        gsheet_row_idx,
+                                        "Hoja_Ruta_Mensajero",
+                                        guia_final,
                                     )
+                                    if ok:
+                                        col_index = headers_casos.index("Hoja_Ruta_Mensajero") + 1
+                                        persisted_value = read_cell_value_with_retry(
+                                            worksheet_casos, gsheet_row_idx, col_index
+                                        )
+                                        if not persisted_value:
+                                            st.error(
+                                                "❌ La guía no quedó registrada en Google Sheets. Intenta de nuevo."
+                                            )
+                                        else:
+                                            uploaded_entries = [
+                                                {"key": key, "name": os.path.basename(key)}
+                                                for key in guia_keys
+                                            ]
+                                            devoluciones_display.at[
+                                                row.name, "Hoja_Ruta_Mensajero"
+                                            ] = persisted_value
+                                            row["Hoja_Ruta_Mensajero"] = persisted_value
+                                            st.toast(
+                                                f"📤 {len(guia_keys)} guía(s) subida(s) con éxito.",
+                                                icon="📦",
+                                            )
+                                            ensure_expanders_open(
+                                                row_key,
+                                                "expanded_devoluciones",
+                                            )
+                                            set_active_main_tab(5)
+                                            guia_success_map = st.session_state.setdefault(
+                                                "guia_upload_success", {}
+                                            )
+                                            guia_success_map[row_key] = {
+                                                "count": len(guia_keys),
+                                                "column": "Hoja_Ruta_Mensajero",
+                                                "files": uploaded_entries,
+                                                "timestamp": mx_now_str(),
+                                            }
+                                            st.cache_data.clear()
+                                            st.cache_resource.clear()
+                                            marcar_contexto_pedido(row_key, "🔁 Devoluciones")
+                                            render_guia_upload_feedback(
+                                                success_placeholder,
+                                                row_key,
+                                                "🔁 Devoluciones",
+                                                s3_client,
+                                            )
                                 else:
                                     st.error("❌ No se pudo actualizar la guía en Google Sheets.")
                         else:
@@ -4818,51 +4928,71 @@ with main_tabs[6]:  # 🛠 Garantías
                             if gsheet_row_idx is None:
                                 st.error("❌ No se encontró el caso en 'casos_especiales'.")
                             else:
-                                existing = str(row.get("Hoja_Ruta_Mensajero", "")).strip()
-                                if existing.lower() in ("nan", "none", "n/a"):
-                                    existing = ""
-                                new_keys = ", ".join(guia_keys)
-                                guia_final = f"{existing}, {new_keys}" if existing else new_keys
-                                ok = update_gsheet_cell(
-                                    worksheet_casos,
-                                    headers_casos,
-                                    gsheet_row_idx,
-                                    "Hoja_Ruta_Mensajero",
-                                    guia_final,
-                                )
-                                if ok:
-                                    uploaded_entries = [
-                                        {"key": key, "name": os.path.basename(key)}
-                                        for key in guia_keys
-                                    ]
-                                    garantias_display.at[
-                                        row.name, "Hoja_Ruta_Mensajero"
-                                    ] = guia_final
-                                    row["Hoja_Ruta_Mensajero"] = guia_final
-                                    st.toast(f"📤 {len(guia_keys)} guía(s) subida(s) con éxito.", icon="📦")
-                                    ensure_expanders_open(
-                                        row_key,
-                                        "expanded_garantias",
+                                if "Hoja_Ruta_Mensajero" not in headers_casos:
+                                    headers_casos = ensure_columns(
+                                        worksheet_casos,
+                                        headers_casos,
+                                        ["Hoja_Ruta_Mensajero"],
                                     )
-                                    set_active_main_tab(6)
-                                    guia_success_map = st.session_state.setdefault(
-                                        "guia_upload_success", {}
+                                if validate_gsheet_row_id(
+                                    worksheet_casos, headers_casos, gsheet_row_idx, row
+                                ):
+                                    guia_final = merge_unique_urls(
+                                        row.get("Hoja_Ruta_Mensajero", ""),
+                                        guia_keys,
                                     )
-                                    guia_success_map[row_key] = {
-                                        "count": len(guia_keys),
-                                        "column": "Hoja_Ruta_Mensajero",
-                                        "files": uploaded_entries,
-                                        "timestamp": mx_now_str(),
-                                    }
-                                    st.cache_data.clear()
-                                    st.cache_resource.clear()
-                                    marcar_contexto_pedido(row_key, "🛠 Garantías")
-                                    render_guia_upload_feedback(
-                                        success_placeholder,
-                                        row_key,
-                                        "🛠 Garantías",
-                                        s3_client,
+                                    ok = update_gsheet_cell(
+                                        worksheet_casos,
+                                        headers_casos,
+                                        gsheet_row_idx,
+                                        "Hoja_Ruta_Mensajero",
+                                        guia_final,
                                     )
+                                    if ok:
+                                        col_index = headers_casos.index("Hoja_Ruta_Mensajero") + 1
+                                        persisted_value = read_cell_value_with_retry(
+                                            worksheet_casos, gsheet_row_idx, col_index
+                                        )
+                                        if not persisted_value:
+                                            st.error(
+                                                "❌ La guía no quedó registrada en Google Sheets. Intenta de nuevo."
+                                            )
+                                        else:
+                                            uploaded_entries = [
+                                                {"key": key, "name": os.path.basename(key)}
+                                                for key in guia_keys
+                                            ]
+                                            garantias_display.at[
+                                                row.name, "Hoja_Ruta_Mensajero"
+                                            ] = persisted_value
+                                            row["Hoja_Ruta_Mensajero"] = persisted_value
+                                            st.toast(
+                                                f"📤 {len(guia_keys)} guía(s) subida(s) con éxito.",
+                                                icon="📦",
+                                            )
+                                            ensure_expanders_open(
+                                                row_key,
+                                                "expanded_garantias",
+                                            )
+                                            set_active_main_tab(6)
+                                            guia_success_map = st.session_state.setdefault(
+                                                "guia_upload_success", {}
+                                            )
+                                            guia_success_map[row_key] = {
+                                                "count": len(guia_keys),
+                                                "column": "Hoja_Ruta_Mensajero",
+                                                "files": uploaded_entries,
+                                                "timestamp": mx_now_str(),
+                                            }
+                                            st.cache_data.clear()
+                                            st.cache_resource.clear()
+                                            marcar_contexto_pedido(row_key, "🛠 Garantías")
+                                            render_guia_upload_feedback(
+                                                success_placeholder,
+                                                row_key,
+                                                "🛠 Garantías",
+                                                s3_client,
+                                            )
                                 else:
                                     st.error("❌ No se pudo actualizar la guía en Google Sheets.")
                         else:
