@@ -11,16 +11,14 @@ import unicodedata
 from itertools import count
 from typing import Optional, Tuple
 from zoneinfo import ZoneInfo
-from streamlit_autorefresh import st_autorefresh
 from textwrap import dedent
 
 TZ = ZoneInfo("America/Mexico_City")
 
 st.set_page_config(page_title="Panel de Almacén Integrado", layout="wide")
 
-# --- Controles: recarga manual + autorefresco ---
-col_title, col_actions = st.columns([0.7, 0.3])
-with col_title:
+# --- Encabezado ---
+with st.container():
     st.markdown(
         """
         <h2 style="color: white; font-size: 1.8rem; margin-bottom: 0rem;">
@@ -40,23 +38,6 @@ with col_title:
     """,
         unsafe_allow_html=True,
     )
-
-with col_actions:
-    if st.button("🔄 Recargar pedidos ahora", use_container_width=True):
-        st.cache_data.clear()
-        st.cache_resource.clear()
-        st.rerun()
-
-    st.checkbox(
-        "⚡ Autorefrescar", key="auto_reload", help="Rerun automático sin limpiar caché"
-    )
-    st.selectbox("Intervalo (seg)", [60, 45], index=0, key="auto_reload_interval")
-
-# ⏱️ Autorefresco (no limpia caché)
-if st.session_state.get("auto_reload"):
-    interval = int(st.session_state.get("auto_reload_interval", 60))
-    # Utilizar st_autorefresh evita recargar la página y conserva la sesión
-    st_autorefresh(interval=interval * 1000, key="auto_refresh_counter")
 
 st.markdown("---")
 
