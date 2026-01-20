@@ -147,7 +147,9 @@ def compute_sort_key(row) -> pd.Timestamp:
 def assign_numbers(entries, counter):
     for entry in entries:
         entry["numero"] = next(counter)
-        entry.pop("sort_key", None)
+        # NO borrar sort_key
+
+
 
 
 _TURNOS_CANONICAL = {
@@ -378,6 +380,12 @@ def render_auto_list(entries, title: str, subtitle: str = "", max_rows: int = 60
             is_missing = (dt_ent is None)
         if is_missing:
             chips.insert(0, "<span class='chip'>⚠️ Sin Fecha_Entrega</span>")
+
+        # 📅 Fecha de entrega visible (si existe)
+        fecha_txt = sanitize_text(e.get("fecha", ""))
+        if fecha_txt:
+            chips.insert(0, f"<span class='chip'>📅 {fecha_txt}</span>")
+
 
         chips_html = (
             f"<div class='board-meta'>{''.join(chips)}"
@@ -1472,7 +1480,30 @@ tab_labels = [
     "⚙️ Auto Local",
     "🚚 Auto Foráneo",
 ]
-tabs = st.tabs(tab_labels)
+
+# ---------------------------
+# Persistencia de tab activa (para autorefresh)
+# ---------------------------
+if "active_main_tab" not in st.session_state:
+    st.session_state.active_main_tab = 0
+
+def _set_active_main_tab(i: int):
+    st.session_state.active_main_tab = i
+
+selected_tab = st.radio(
+    "Vista",
+    options=list(range(len(tab_labels))),
+    format_func=lambda i: tab_labels[i],
+    index=st.session_state.active_main_tab,
+    horizontal=True,
+    label_visibility="collapsed",
+    on_change=lambda: _set_active_main_tab(st.session_state["_radio_main_tab"]),
+    key="_radio_main_tab",
+)
+
+# helper para "simular" tabs
+tabs = [None] * len(tab_labels)
+
 
 # Contador compartido para numeración en vistas automáticas
 auto_card_counter = count(1)
@@ -1480,7 +1511,7 @@ auto_card_counter = count(1)
 # ---------------------------
 # TAB 0: Local
 # ---------------------------
-with tabs[0]:
+if selected_tab == 0:
     if df_all.empty:
         st.info("Sin datos en 'datos_pedidos'.")
     else:
@@ -1505,7 +1536,7 @@ with tabs[0]:
 # ---------------------------
 # TAB 1: Foráneo
 # ---------------------------
-with tabs[1]:
+if selected_tab == 1:
     if df_all.empty:
         st.info("Sin datos en 'datos_pedidos'.")
     else:
@@ -1521,7 +1552,7 @@ with tabs[1]:
 # ---------------------------
 # TAB 2: CDMX y Guías
 # ---------------------------
-with tabs[2]:
+if selected_tab == 2:
     if df_all.empty:
         st.info("Sin datos en 'datos_pedidos'.")
     else:
@@ -1598,7 +1629,7 @@ with tabs[2]:
 # ---------------------------
 # TAB 3: Casos Especiales (Devoluciones + Garantías)
 # ---------------------------
-with tabs[3]:
+if selected_tab == 3:
     casos = get_casos_orders(df_all)
     if casos.empty:
         st.info("Sin datos de devoluciones o garantías.")
@@ -1609,15 +1640,15 @@ with tabs[3]:
         show_grouped_panel_casos(casos)
 
 # ---------------------------
-# TAB 4: Auto Local (Casos asignados)
+# TAB 4: Auto Local (Casos asignados) — 2 columnas
 # ---------------------------
-with tabs[4]:
+if selected_tab == 4:
     st_autorefresh(interval=60000, key="auto_refresh_local_casos")
 
     hoy = datetime.now(TZ).date()
     start_prev, end_prev = last_3_days_previous_range(hoy)
 
-    st.caption("Auto Local • lista por fechas (pantalla almacén) • auto refresh 60 s.")
+    st.caption("Auto Local • 2 columnas (anteriores vs hoy) • auto refresh 60 s.")
 
     # 1) Armar entradas (local + casos asignados a local)
     df_local_auto = get_local_orders(df_all)
@@ -1629,36 +1660,28 @@ with tabs[4]:
     if not casos_local_auto.empty:
         combined_entries.extend(build_entries_casos(casos_local_auto))
 
-    # importante: ordenar antes de filtrar
     combined_entries.sort(key=lambda e: e.get("sort_key", pd.Timestamp.max))
 
-    # 2) Subpestañas (fechas automáticas)
-    tab_ant, tab_hoy = st.tabs(
-        [
-            f"🕘 Anteriores ({start_prev.strftime('%d/%m')}–{end_prev.strftime('%d/%m')})",
-            f"📌 Hoy ({hoy.strftime('%d/%m')})",
-        ]
-    )
+    # 2) Layout: izquierda/derecha
+    col_left, col_right = st.columns(2, gap="large")
 
-    # --- A) ANTERIORES: últimos 3 días previos, SOLO NO completados ---
-    with tab_ant:
+    # --- IZQUIERDA: ANTERIORES (últimos 3 días previos) SOLO NO completados ---
+    with col_left:
         ant = filter_entries_by_entrega(combined_entries, start_prev, end_prev)
         ant = [e for e in ant if not _is_done_estado(e.get("estado", ""))]
-
         ant.sort(key=lambda e: e.get("sort_key", pd.Timestamp.max))
-        assign_numbers(ant, count(1))
 
-        st.markdown("<div class='board-wrap'>", unsafe_allow_html=True)
+        assign_numbers(ant, auto_card_counter)
+
         render_auto_list(
             ant,
-            title="📍 LOCALES • ANTERIORES (últimos 3 días)",
-            subtitle="Solo NO completados",
+            title=f"📍 LOCALES • ANTERIORES ({start_prev.strftime('%d/%m')}–{end_prev.strftime('%d/%m')})",
+            subtitle="Solo NO completados (últimos 3 días previos)",
             max_rows=140,
         )
-        st.markdown("</div>", unsafe_allow_html=True)
 
-    # --- B) HOY: todos los de hoy + SIN Fecha_Entrega ---
-    with tab_hoy:
+    # --- DERECHA: HOY (todos los de hoy) + SIN Fecha_Entrega ---
+    with col_right:
         hoy_entries = filter_entries_by_entrega(combined_entries, hoy, hoy)
         sin_fecha = filter_entries_no_entrega_date(combined_entries)
 
@@ -1666,7 +1689,6 @@ with tabs[4]:
         seen = set()
         merged = []
         for e in (hoy_entries + sin_fecha):
-            # preferimos ID_Pedido; si no existe, fallback a cliente+hora
             key = sanitize_text(e.get("id_pedido", "")) or (
                 sanitize_text(e.get("cliente", "")) + "|" + sanitize_text(e.get("hora", ""))
             )
@@ -1676,30 +1698,27 @@ with tabs[4]:
             merged.append(e)
 
         merged.sort(key=lambda e: e.get("sort_key", pd.Timestamp.max))
-        assign_numbers(merged, count(1))
+        assign_numbers(merged, auto_card_counter)
 
-        st.markdown("<div class='board-wrap'>", unsafe_allow_html=True)
         render_auto_list(
             merged,
-            title="📍 LOCALES • HOY",
+            title=f"📍 LOCALES • HOY ({hoy.strftime('%d/%m')})",
             subtitle="Todos los de hoy + pedidos sin Fecha_Entrega",
             max_rows=140,
         )
-        st.markdown("</div>", unsafe_allow_html=True)
-
 
 # ---------------------------
-# TAB 5: Auto Foráneo (Casos asignados)
+# TAB 5: Auto Foráneo (Casos asignados) — 2 columnas
 # ---------------------------
-with tabs[5]:
+if selected_tab == 5:
     st_autorefresh(interval=60000, key="auto_refresh_foraneo_cdmx")
 
     hoy = datetime.now(TZ).date()
     start_prev, end_prev = last_3_days_previous_range(hoy)
 
-    st.caption("Auto Foráneo • lista por fechas (pantalla almacén) • auto refresh 60 s.")
+    st.caption("Auto Foráneo • 2 columnas (anteriores vs hoy) • auto refresh 60 s.")
 
-    # 1) Entradas (foráneo + casos asignados a foráneo ya vienen en get_foraneo_orders)
+    # 1) Entradas (foráneo + casos asignados a foráneo)
     df_for_auto = get_foraneo_orders(df_all)
 
     combined_entries = []
@@ -1708,33 +1727,26 @@ with tabs[5]:
 
     combined_entries.sort(key=lambda e: e.get("sort_key", pd.Timestamp.max))
 
-    # 2) Subpestañas (fechas automáticas)
-    tab_ant, tab_hoy = st.tabs(
-        [
-            f"🕘 Anteriores ({start_prev.strftime('%d/%m')}–{end_prev.strftime('%d/%m')})",
-            f"📌 Hoy ({hoy.strftime('%d/%m')})",
-        ]
-    )
+    # 2) Layout: izquierda/derecha
+    col_left, col_right = st.columns(2, gap="large")
 
-    # --- A) ANTERIORES: últimos 3 días previos, SOLO NO completados ---
-    with tab_ant:
+    # --- IZQUIERDA: ANTERIORES (últimos 3 días previos) SOLO NO completados ---
+    with col_left:
         ant = filter_entries_by_entrega(combined_entries, start_prev, end_prev)
         ant = [e for e in ant if not _is_done_estado(e.get("estado", ""))]
-
         ant.sort(key=lambda e: e.get("sort_key", pd.Timestamp.max))
-        assign_numbers(ant, count(1))
 
-        st.markdown("<div class='board-wrap'>", unsafe_allow_html=True)
+        assign_numbers(ant, auto_card_counter)
+
         render_auto_list(
             ant,
-            title="🚚 FORÁNEOS • ANTERIORES (últimos 3 días)",
-            subtitle="Solo NO completados",
+            title=f"🚚 FORÁNEOS • ANTERIORES ({start_prev.strftime('%d/%m')}–{end_prev.strftime('%d/%m')})",
+            subtitle="Solo NO completados (últimos 3 días previos)",
             max_rows=140,
         )
-        st.markdown("</div>", unsafe_allow_html=True)
 
-    # --- B) HOY: todos los de hoy + SIN Fecha_Entrega ---
-    with tab_hoy:
+    # --- DERECHA: HOY (todos los de hoy) + SIN Fecha_Entrega ---
+    with col_right:
         hoy_entries = filter_entries_by_entrega(combined_entries, hoy, hoy)
         sin_fecha = filter_entries_no_entrega_date(combined_entries)
 
@@ -1750,13 +1762,11 @@ with tabs[5]:
             merged.append(e)
 
         merged.sort(key=lambda e: e.get("sort_key", pd.Timestamp.max))
-        assign_numbers(merged, count(1))
+        assign_numbers(merged, auto_card_counter)
 
-        st.markdown("<div class='board-wrap'>", unsafe_allow_html=True)
         render_auto_list(
             merged,
-            title="🚚 FORÁNEOS • HOY",
+            title=f"🚚 FORÁNEOS • HOY ({hoy.strftime('%d/%m')})",
             subtitle="Todos los de hoy + pedidos sin Fecha_Entrega",
             max_rows=140,
         )
-        st.markdown("</div>", unsafe_allow_html=True)
