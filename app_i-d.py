@@ -8,6 +8,7 @@ import boto3
 import gspread.utils
 import time
 import unicodedata
+import streamlit.components.v1 as components
 from itertools import count
 from typing import Optional, Tuple
 from zoneinfo import ZoneInfo
@@ -371,7 +372,11 @@ def render_auto_list(entries, title: str, subtitle: str = "", max_rows: int = 60
 
         # ⚠️ Marca “Sin fecha”
         dt_ent = e.get("fecha_entrega_dt")
-        if dt_ent is None or (hasattr(pd, "isna") and pd.isna(dt_ent)):
+        try:
+            is_missing = (dt_ent is None) or pd.isna(dt_ent)
+        except Exception:
+            is_missing = (dt_ent is None)
+        if is_missing:
             chips.insert(0, "<span class='chip'>⚠️ Sin Fecha_Entrega</span>")
 
         chips_html = (
@@ -392,20 +397,21 @@ def render_auto_list(entries, title: str, subtitle: str = "", max_rows: int = 60
         )
 
     sub = f"<div class='board-sub'>{subtitle}</div>" if subtitle else ""
-    st.markdown(
-        f"""
-        <div class="board-col">
-          <div class="board-title">
-            <div>{title}{sub}</div>
-            <div class="board-sub">Mostrando {len(visible)}/{len(entries)}</div>
-          </div>
-          <table class="board-table">
-            {''.join(rows_html)}
-          </table>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
+
+    html = f"""
+    <div class="board-col">
+      <div class="board-title">
+        <div>{title}{sub}</div>
+        <div class="board-sub">Mostrando {len(visible)}/{len(entries)}</div>
+      </div>
+      <table class="board-table">
+        {''.join(rows_html)}
+      </table>
+    </div>
+    """
+
+    # ✅ Forzar render HTML real (no texto)
+    components.html(html, height=850, scrolling=True)
 
 
 def _is_done_estado(estado: str) -> bool:
