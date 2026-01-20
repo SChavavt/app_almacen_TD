@@ -1359,6 +1359,27 @@ def _normalize_urls(value):
     return normalized
 
 
+def _merge_uploaded_urls(existing_value, new_urls: Sequence[str]) -> str:
+    """Merge existing stored URLs with new ones, preserving order and removing blanks."""
+
+    existing_urls = _normalize_urls(existing_value)
+    combined = list(existing_urls)
+    for url in new_urls or []:
+        if not url:
+            continue
+        combined.append(str(url).strip())
+
+    seen = set()
+    unique_urls = []
+    for url in combined:
+        if not url or url in seen:
+            continue
+        seen.add(url)
+        unique_urls.append(url)
+
+    return ", ".join(unique_urls)
+
+
 def _is_row_empty(row: Any) -> bool:
     """Return True if ``row`` should be treated as empty."""
 
@@ -2428,10 +2449,9 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
                             )
                             if target_col_for_guide not in headers:
                                 headers = ensure_columns(worksheet, headers, [target_col_for_guide])
-                            anterior = str(row.get(target_col_for_guide, "")).strip()
-                            nueva_lista = (
-                                (anterior + ", " if anterior else "")
-                                + ", ".join(uploaded_keys)
+                            nueva_lista = _merge_uploaded_urls(
+                                row.get(target_col_for_guide, ""),
+                                uploaded_keys,
                             )
                             success = update_gsheet_cell(
                                 worksheet, headers, gsheet_row_index, target_col_for_guide, nueva_lista
@@ -2513,6 +2533,12 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
                                 st.error(
                                     "❌ No se pudo actualizar el Google Sheet con los archivos de guía."
                                 )
+                                st.warning(
+                                    "⚠️ Los archivos sí se subieron a S3, pero no quedaron registrados en el sheet. "
+                                    "Copia estos enlaces para registrarlos manualmente si es necesario:"
+                                )
+                                for uploaded_key in uploaded_keys:
+                                    st.code(uploaded_key)
                         else:
                             st.warning("⚠️ No se subió ningún archivo válido.")
                     else:
@@ -2766,8 +2792,10 @@ def mostrar_pedido_solo_guia(df, idx, row, orden, origen_tab, current_main_tab_l
                         {"key": key, "name": os.path.basename(key)}
                         for key in uploaded_keys
                     ]
-                    nueva_lista = str(row.get("Adjuntos_Guia", "")).strip()
-                    nueva_lista = (nueva_lista + ", " if nueva_lista else "") + ", ".join(uploaded_keys)
+                    nueva_lista = _merge_uploaded_urls(
+                        row.get("Adjuntos_Guia", ""),
+                        uploaded_keys,
+                    )
                     success = update_gsheet_cell(
                         worksheet, headers, gsheet_row_index, "Adjuntos_Guia", nueva_lista
                     )
@@ -2806,7 +2834,6 @@ def mostrar_pedido_solo_guia(df, idx, row, orden, origen_tab, current_main_tab_l
                             "files": uploaded_entries,
                             "timestamp": mx_now_str(),
                         }
-                        set_active_main_tab(3)
                         st.cache_data.clear()
                         marcar_contexto_pedido(row["ID_Pedido"], origen_tab)
                         preserve_tab_state()
@@ -2827,7 +2854,15 @@ def mostrar_pedido_solo_guia(df, idx, row, orden, origen_tab, current_main_tab_l
                             origen_tab,
                         )
                     else:
-                        st.error("❌ No se pudo actualizar Google Sheets con la guía.")
+                        st.error(
+                            "❌ No se pudo actualizar el Google Sheet con los archivos de guía."
+                        )
+                        st.warning(
+                            "⚠️ Los archivos sí se subieron a S3, pero no quedaron registrados en el sheet. "
+                            "Copia estos enlaces para registrarlos manualmente si es necesario:"
+                        )
+                        for uploaded_key in uploaded_keys:
+                            st.code(uploaded_key)
                 else:
                     st.warning("⚠️ No se subió ningún archivo válido.")
 
