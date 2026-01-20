@@ -399,16 +399,31 @@ def render_auto_list(entries, title: str, subtitle: str = "", max_rows: int = 60
     sub = f"<div class='board-sub'>{subtitle}</div>" if subtitle else ""
 
     html = f"""
+    <style>
+    .board-col{{flex:1;background:rgba(18,18,20,0.92);border-radius:0.9rem;padding:0.8rem 0.9rem;box-shadow:0 2px 14px rgba(0,0,0,0.25);}}
+    .board-title{{display:flex;justify-content:space-between;align-items:center;gap:0.6rem;margin-bottom:0.6rem;font-weight:800;font-size:1.35rem;color:#fff;}}
+    .board-sub{{font-size:0.9rem;opacity:0.8;font-weight:600;}}
+    .board-table{{width:100%;border-collapse:collapse;table-layout:fixed;}}
+    .board-row{{border-top:1px solid rgba(255,255,255,0.08);}}
+    .board-row:first-child{{border-top:none;}}
+    .board-n{{width:3.2rem;font-size:1.35rem;font-weight:900;padding:0.25rem 0.2rem;opacity:0.95;vertical-align:top;white-space:nowrap;color:#fff;}}
+    .board-main{{padding:0.25rem 0.2rem;vertical-align:top;}}
+    .board-client{{font-size:1.05rem;font-weight:800;line-height:1.25rem;color:#fff;word-break:break-word;}}
+    .board-meta{{margin-top:0.18rem;display:flex;flex-wrap:wrap;gap:0.35rem;font-size:0.85rem;opacity:0.85;font-weight:650;align-items:center;color:#fff;}}
+    .chip{{padding:0.1rem 0.45rem;border-radius:0.7rem;background:rgba(255,255,255,0.10);white-space:nowrap;}}
+    .board-status{{margin-left:auto;font-size:0.95rem;font-weight:900;white-space:nowrap;opacity:0.95;}}
+    </style>
     <div class="board-col">
-      <div class="board-title">
+    <div class="board-title">
         <div>{title}{sub}</div>
         <div class="board-sub">Mostrando {len(visible)}/{len(entries)}</div>
-      </div>
-      <table class="board-table">
+    </div>
+    <table class="board-table">
         {''.join(rows_html)}
-      </table>
+    </table>
     </div>
     """
+
 
     # ✅ Forzar render HTML real (no texto)
     components.html(html, height=850, scrolling=True)
