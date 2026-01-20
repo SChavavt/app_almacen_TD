@@ -205,6 +205,7 @@ def build_base_entry(row, categoria: str):
         "cliente": format_cliente_line(row),
         "fecha": format_date(row.get("Fecha_Entrega")),
         "hora": format_time(row.get("Hora_Registro")),
+        "fecha_entrega_dt": parse_datetime(row.get("Fecha_Entrega")),
         "id_pedido": sanitize_text(row.get("ID_Pedido", "")),
         "vendedor": sanitize_text(row.get("Vendedor_Registro", "")),
         "turno": sanitize_text(row.get("Turno", "")),
@@ -343,6 +344,116 @@ def render_auto_cards(entries, layout: str = "small"):
         f"<div class='{panel_class}'>" + "".join(cards_html) + "</div>",
         unsafe_allow_html=True,
     )
+
+def render_auto_list(entries, title: str, subtitle: str = "", max_rows: int = 60):
+    if not entries:
+        st.info("No hay pedidos para mostrar.")
+        return
+
+    visible = entries[:max_rows]
+
+    rows_html = []
+    for e in visible:
+        chips = []
+
+        # Chips principales (máx 3)
+        for b in (e.get("badges", []) or [])[:3]:
+            bb = sanitize_text(b)
+            if bb:
+                chips.append(f"<span class='chip'>{bb}</span>")
+
+        # Detalles (máx 1)
+        details = e.get("details", []) or []
+        if details:
+            d0 = sanitize_text(details[0])
+            if d0:
+                chips.append(f"<span class='chip'>{d0}</span>")
+
+        # ⚠️ Marca “Sin fecha”
+        dt_ent = e.get("fecha_entrega_dt")
+        if dt_ent is None or (hasattr(pd, "isna") and pd.isna(dt_ent)):
+            chips.insert(0, "<span class='chip'>⚠️ Sin Fecha_Entrega</span>")
+
+        chips_html = (
+            f"<div class='board-meta'>{''.join(chips)}"
+            f"<span class='board-status'>{sanitize_text(e.get('estado',''))}</span></div>"
+        )
+
+        rows_html.append(
+            f"""
+            <tr class='board-row'>
+              <td class='board-n'>#{e.get('numero','?')}</td>
+              <td class='board-main'>
+                <div class='board-client'>{e.get('cliente','—')}</div>
+                {chips_html}
+              </td>
+            </tr>
+            """
+        )
+
+    sub = f"<div class='board-sub'>{subtitle}</div>" if subtitle else ""
+    st.markdown(
+        f"""
+        <div class="board-col">
+          <div class="board-title">
+            <div>{title}{sub}</div>
+            <div class="board-sub">Mostrando {len(visible)}/{len(entries)}</div>
+          </div>
+          <table class="board-table">
+            {''.join(rows_html)}
+          </table>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def _is_done_estado(estado: str) -> bool:
+    s = sanitize_text(estado)
+    return s in {"🟢 Completado", "🟣 Cancelado", "✅ Viajó"}
+
+
+def last_3_days_previous_range(today_date):
+    start = today_date - timedelta(days=3)
+    end = today_date - timedelta(days=1)
+    return start, end
+
+
+def filter_entries_by_entrega(entries, start_date, end_date):
+    """Incluye entries cuya Fecha_Entrega_dt esté entre start_date y end_date (incluye límites)."""
+    out = []
+    for e in entries:
+        dt = e.get("fecha_entrega_dt")
+        if dt is None:
+            continue
+        try:
+            if pd.isna(dt):
+                continue
+        except Exception:
+            continue
+
+        d = pd.to_datetime(dt).date()
+        if start_date <= d <= end_date:
+            out.append(e)
+    return out
+
+
+
+def filter_entries_no_entrega_date(entries):
+    """Entries sin Fecha_Entrega (para que no se pierdan)."""
+    out = []
+    for e in entries:
+        dt = e.get("fecha_entrega_dt")
+        if dt is None:
+            out.append(e)
+            continue
+        try:
+            if pd.isna(dt):
+                out.append(e)
+        except Exception:
+            pass
+    return out
+
 
 
 def get_local_orders(df_all: pd.DataFrame) -> pd.DataFrame:
@@ -598,6 +709,33 @@ def get_case_envio_assignments(
         df_foraneo["Tipo_Envio"] = "🚚 Pedido Foráneo"
 
     return df_local, df_foraneo
+
+st.markdown(
+    """
+    <style>
+    .board-wrap{display:flex;gap:0.8rem;width:100%;align-items:flex-start;}
+    .board-col{flex:1;background:rgba(18,18,20,0.92);border-radius:0.9rem;padding:0.8rem 0.9rem;box-shadow:0 2px 14px rgba(0,0,0,0.25);min-height:70vh;}
+    .board-title{display:flex;justify-content:space-between;align-items:center;gap:0.6rem;margin-bottom:0.6rem;font-weight:800;font-size:1.35rem;color:#fff;}
+    .board-sub{font-size:0.9rem;opacity:0.8;font-weight:600;}
+    .board-table{width:100%;border-collapse:collapse;table-layout:fixed;}
+    .board-row{border-top:1px solid rgba(255,255,255,0.08);}
+    .board-row:first-child{border-top:none;}
+    .board-n{width:3.2rem;font-size:1.35rem;font-weight:900;padding:0.25rem 0.2rem;opacity:0.95;vertical-align:top;white-space:nowrap;}
+    .board-main{padding:0.25rem 0.2rem;vertical-align:top;}
+    .board-client{font-size:1.05rem;font-weight:800;line-height:1.25rem;color:#fff;word-break:break-word;}
+    .board-meta{margin-top:0.18rem;display:flex;flex-wrap:wrap;gap:0.35rem;font-size:0.85rem;opacity:0.85;font-weight:650;align-items:center;}
+    .chip{padding:0.1rem 0.45rem;border-radius:0.7rem;background:rgba(255,255,255,0.10);white-space:nowrap;}
+    .board-status{margin-left:auto;font-size:0.95rem;font-weight:900;white-space:nowrap;opacity:0.95;}
+    @media (min-width: 1200px){
+      .board-client{font-size:1.15rem;}
+      .board-n{font-size:1.5rem;}
+      .board-title{font-size:1.5rem;}
+    }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
+
 # Estilos para paneles automáticos
 st.markdown(
     """
@@ -1454,31 +1592,150 @@ with tabs[3]:
 # ---------------------------
 with tabs[4]:
     st_autorefresh(interval=60000, key="auto_refresh_local_casos")
-    st.caption("Local con casos asignados • actualización automática cada 60 s.")
+
+    hoy = datetime.now(TZ).date()
+    start_prev, end_prev = last_3_days_previous_range(hoy)
+
+    st.caption("Auto Local • lista por fechas (pantalla almacén) • auto refresh 60 s.")
+
+    # 1) Armar entradas (local + casos asignados a local)
     df_local_auto = get_local_orders(df_all)
     casos_local_auto, _ = get_case_envio_assignments(df_all)
+
     combined_entries = []
     if not df_local_auto.empty:
         combined_entries.extend(build_entries_local(df_local_auto))
     if not casos_local_auto.empty:
-        casos_local_entries = build_entries_casos(casos_local_auto)
-        combined_entries.extend(casos_local_entries)
+        combined_entries.extend(build_entries_casos(casos_local_auto))
+
+    # importante: ordenar antes de filtrar
     combined_entries.sort(key=lambda e: e.get("sort_key", pd.Timestamp.max))
-    assign_numbers(combined_entries, auto_card_counter)
-    render_auto_cards(combined_entries, layout="small")
+
+    # 2) Subpestañas (fechas automáticas)
+    tab_ant, tab_hoy = st.tabs(
+        [
+            f"🕘 Anteriores ({start_prev.strftime('%d/%m')}–{end_prev.strftime('%d/%m')})",
+            f"📌 Hoy ({hoy.strftime('%d/%m')})",
+        ]
+    )
+
+    # --- A) ANTERIORES: últimos 3 días previos, SOLO NO completados ---
+    with tab_ant:
+        ant = filter_entries_by_entrega(combined_entries, start_prev, end_prev)
+        ant = [e for e in ant if not _is_done_estado(e.get("estado", ""))]
+
+        ant.sort(key=lambda e: e.get("sort_key", pd.Timestamp.max))
+        assign_numbers(ant, count(1))
+
+        st.markdown("<div class='board-wrap'>", unsafe_allow_html=True)
+        render_auto_list(
+            ant,
+            title="📍 LOCALES • ANTERIORES (últimos 3 días)",
+            subtitle="Solo NO completados",
+            max_rows=140,
+        )
+        st.markdown("</div>", unsafe_allow_html=True)
+
+    # --- B) HOY: todos los de hoy + SIN Fecha_Entrega ---
+    with tab_hoy:
+        hoy_entries = filter_entries_by_entrega(combined_entries, hoy, hoy)
+        sin_fecha = filter_entries_no_entrega_date(combined_entries)
+
+        # unir sin duplicados
+        seen = set()
+        merged = []
+        for e in (hoy_entries + sin_fecha):
+            # preferimos ID_Pedido; si no existe, fallback a cliente+hora
+            key = sanitize_text(e.get("id_pedido", "")) or (
+                sanitize_text(e.get("cliente", "")) + "|" + sanitize_text(e.get("hora", ""))
+            )
+            if key in seen:
+                continue
+            seen.add(key)
+            merged.append(e)
+
+        merged.sort(key=lambda e: e.get("sort_key", pd.Timestamp.max))
+        assign_numbers(merged, count(1))
+
+        st.markdown("<div class='board-wrap'>", unsafe_allow_html=True)
+        render_auto_list(
+            merged,
+            title="📍 LOCALES • HOY",
+            subtitle="Todos los de hoy + pedidos sin Fecha_Entrega",
+            max_rows=140,
+        )
+        st.markdown("</div>", unsafe_allow_html=True)
+
 
 # ---------------------------
 # TAB 5: Auto Foráneo (Casos asignados)
 # ---------------------------
 with tabs[5]:
     st_autorefresh(interval=60000, key="auto_refresh_foraneo_cdmx")
-    st.caption(
-        "Foráneo automático • solo pedidos foráneos y casos con envío foráneo asignado."
-    )
+
+    hoy = datetime.now(TZ).date()
+    start_prev, end_prev = last_3_days_previous_range(hoy)
+
+    st.caption("Auto Foráneo • lista por fechas (pantalla almacén) • auto refresh 60 s.")
+
+    # 1) Entradas (foráneo + casos asignados a foráneo ya vienen en get_foraneo_orders)
     df_for_auto = get_foraneo_orders(df_all)
+
     combined_entries = []
     if not df_for_auto.empty:
         combined_entries.extend(build_entries_foraneo(df_for_auto))
+
     combined_entries.sort(key=lambda e: e.get("sort_key", pd.Timestamp.max))
-    assign_numbers(combined_entries, auto_card_counter)
-    render_auto_cards(combined_entries, layout="large")
+
+    # 2) Subpestañas (fechas automáticas)
+    tab_ant, tab_hoy = st.tabs(
+        [
+            f"🕘 Anteriores ({start_prev.strftime('%d/%m')}–{end_prev.strftime('%d/%m')})",
+            f"📌 Hoy ({hoy.strftime('%d/%m')})",
+        ]
+    )
+
+    # --- A) ANTERIORES: últimos 3 días previos, SOLO NO completados ---
+    with tab_ant:
+        ant = filter_entries_by_entrega(combined_entries, start_prev, end_prev)
+        ant = [e for e in ant if not _is_done_estado(e.get("estado", ""))]
+
+        ant.sort(key=lambda e: e.get("sort_key", pd.Timestamp.max))
+        assign_numbers(ant, count(1))
+
+        st.markdown("<div class='board-wrap'>", unsafe_allow_html=True)
+        render_auto_list(
+            ant,
+            title="🚚 FORÁNEOS • ANTERIORES (últimos 3 días)",
+            subtitle="Solo NO completados",
+            max_rows=140,
+        )
+        st.markdown("</div>", unsafe_allow_html=True)
+
+    # --- B) HOY: todos los de hoy + SIN Fecha_Entrega ---
+    with tab_hoy:
+        hoy_entries = filter_entries_by_entrega(combined_entries, hoy, hoy)
+        sin_fecha = filter_entries_no_entrega_date(combined_entries)
+
+        seen = set()
+        merged = []
+        for e in (hoy_entries + sin_fecha):
+            key = sanitize_text(e.get("id_pedido", "")) or (
+                sanitize_text(e.get("cliente", "")) + "|" + sanitize_text(e.get("hora", ""))
+            )
+            if key in seen:
+                continue
+            seen.add(key)
+            merged.append(e)
+
+        merged.sort(key=lambda e: e.get("sort_key", pd.Timestamp.max))
+        assign_numbers(merged, count(1))
+
+        st.markdown("<div class='board-wrap'>", unsafe_allow_html=True)
+        render_auto_list(
+            merged,
+            title="🚚 FORÁNEOS • HOY",
+            subtitle="Todos los de hoy + pedidos sin Fecha_Entrega",
+            max_rows=140,
+        )
+        st.markdown("</div>", unsafe_allow_html=True)
