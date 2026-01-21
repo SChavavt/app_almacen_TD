@@ -518,12 +518,22 @@ def get_local_orders(df_all: pd.DataFrame) -> pd.DataFrame:
             df_all["Tipo_Envio"].isin(["📍 Pedido Local", "🎓 Cursos y Eventos"])
         ].copy()
 
+    extra_local = pd.DataFrame()
+    if not df_all.empty and "Turno" in df_all.columns:
+        turnos_locales = {"🌵 Saltillo", "📦 Pasa a Bodega"}
+        turno_normalizado = df_all["Turno"].fillna("").astype(str).str.strip().apply(
+            normalize_turno_label
+        )
+        mask_turno_local = turno_normalizado.isin(turnos_locales)
+        extra_local = df_all[mask_turno_local].copy()
+
     casos_local, _ = get_case_envio_assignments(df_all)
-    frames = [df for df in [base_local, casos_local] if not df.empty]
+    frames = [df for df in [base_local, extra_local, casos_local] if not df.empty]
     if not frames:
         return pd.DataFrame()
 
     df_local = pd.concat(frames, ignore_index=True, sort=False)
+    df_local = df_local.drop_duplicates()
 
     if "Completados_Limpiado" not in df_local.columns:
         df_local["Completados_Limpiado"] = ""
