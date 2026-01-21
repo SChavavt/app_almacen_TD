@@ -144,9 +144,35 @@ def compute_sort_key(row) -> pd.Timestamp:
     return pd.Timestamp.max
 
 
-def assign_numbers(entries, counter):
-    for entry in entries:
-        entry["numero"] = next(counter)
+def build_auto_number_key(entry) -> str:
+    base_id = sanitize_text(entry.get("id_pedido", ""))
+    fallback = f"{sanitize_text(entry.get('cliente', ''))}|{sanitize_text(entry.get('hora', ''))}"
+    base = base_id or fallback
+    categoria = sanitize_text(entry.get("categoria", ""))
+    if not base:
+        return ""
+    if categoria:
+        return f"{categoria}|{base}"
+    return base
+
+
+def assign_shared_numbers(entries_local, entries_foraneo):
+    combined = list(entries_local) + list(entries_foraneo)
+    combined.sort(key=lambda e: e.get("sort_key", pd.Timestamp.max))
+    counter = count(1)
+    def next_number() -> int:
+        return next(counter)
+
+    number_map = {}
+    for entry in combined:
+        key = build_auto_number_key(entry)
+        if not key:
+            number = next_number()
+            key = f"__auto__{number}"
+            number_map[key] = number
+        elif key not in number_map:
+            number_map[key] = next_number()
+        entry["numero"] = number_map[key]
         # NO borrar sort_key
 
 
@@ -1505,8 +1531,25 @@ selected_tab = st.radio(
 tabs = [None] * len(tab_labels)
 
 
-# Contador compartido para numeración en vistas automáticas
-auto_card_counter = count(1)
+# Entradas compartidas para numeración única entre Auto Local y Auto Foráneo
+auto_local_entries = []
+auto_foraneo_entries = []
+if selected_tab in (4, 5):
+    df_local_auto = get_local_orders(df_all)
+    casos_local_auto, _ = get_case_envio_assignments(df_all)
+    if not df_local_auto.empty:
+        auto_local_entries.extend(build_entries_local(df_local_auto))
+    if not casos_local_auto.empty:
+        auto_local_entries.extend(build_entries_casos(casos_local_auto))
+
+    df_for_auto = get_foraneo_orders(df_all)
+    if not df_for_auto.empty:
+        auto_foraneo_entries.extend(build_entries_foraneo(df_for_auto))
+
+    auto_local_entries.sort(key=lambda e: e.get("sort_key", pd.Timestamp.max))
+    auto_foraneo_entries.sort(key=lambda e: e.get("sort_key", pd.Timestamp.max))
+
+    assign_shared_numbers(auto_local_entries, auto_foraneo_entries)
 
 # ---------------------------
 # TAB 0: Local
@@ -1651,16 +1694,7 @@ if selected_tab == 4:
     st.caption("Auto Local • 2 columnas (anteriores vs hoy) • auto refresh 60 s.")
 
     # 1) Armar entradas (local + casos asignados a local)
-    df_local_auto = get_local_orders(df_all)
-    casos_local_auto, _ = get_case_envio_assignments(df_all)
-
-    combined_entries = []
-    if not df_local_auto.empty:
-        combined_entries.extend(build_entries_local(df_local_auto))
-    if not casos_local_auto.empty:
-        combined_entries.extend(build_entries_casos(casos_local_auto))
-
-    combined_entries.sort(key=lambda e: e.get("sort_key", pd.Timestamp.max))
+    combined_entries = list(auto_local_entries)
 
     # 2) Layout: izquierda/derecha
     col_left, col_right = st.columns(2, gap="large")
@@ -1670,8 +1704,6 @@ if selected_tab == 4:
         ant = filter_entries_by_entrega(combined_entries, start_prev, end_prev)
         ant = [e for e in ant if not _is_done_estado(e.get("estado", ""))]
         ant.sort(key=lambda e: e.get("sort_key", pd.Timestamp.max))
-
-        assign_numbers(ant, auto_card_counter)
 
         render_auto_list(
             ant,
@@ -1698,8 +1730,6 @@ if selected_tab == 4:
             merged.append(e)
 
         merged.sort(key=lambda e: e.get("sort_key", pd.Timestamp.max))
-        assign_numbers(merged, auto_card_counter)
-
         render_auto_list(
             merged,
             title=f"📍 LOCALES • HOY ({hoy.strftime('%d/%m')})",
@@ -1719,13 +1749,7 @@ if selected_tab == 5:
     st.caption("Auto Foráneo • 2 columnas (anteriores vs hoy) • auto refresh 60 s.")
 
     # 1) Entradas (foráneo + casos asignados a foráneo)
-    df_for_auto = get_foraneo_orders(df_all)
-
-    combined_entries = []
-    if not df_for_auto.empty:
-        combined_entries.extend(build_entries_foraneo(df_for_auto))
-
-    combined_entries.sort(key=lambda e: e.get("sort_key", pd.Timestamp.max))
+    combined_entries = list(auto_foraneo_entries)
 
     # 2) Layout: izquierda/derecha
     col_left, col_right = st.columns(2, gap="large")
@@ -1735,8 +1759,6 @@ if selected_tab == 5:
         ant = filter_entries_by_entrega(combined_entries, start_prev, end_prev)
         ant = [e for e in ant if not _is_done_estado(e.get("estado", ""))]
         ant.sort(key=lambda e: e.get("sort_key", pd.Timestamp.max))
-
-        assign_numbers(ant, auto_card_counter)
 
         render_auto_list(
             ant,
@@ -1762,8 +1784,6 @@ if selected_tab == 5:
             merged.append(e)
 
         merged.sort(key=lambda e: e.get("sort_key", pd.Timestamp.max))
-        assign_numbers(merged, auto_card_counter)
-
         render_auto_list(
             merged,
             title=f"🚚 FORÁNEOS • HOY ({hoy.strftime('%d/%m')})",
