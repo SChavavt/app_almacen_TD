@@ -412,8 +412,6 @@ def render_auto_list(entries, title: str, subtitle: str = "", max_rows: int = 60
         if fecha_txt:
             chips.insert(0, f"<span class='chip'>📅 {fecha_txt}</span>")
 
-        fecha_label = fecha_txt or "Sin fecha"
-
 
         chips_html = (
             f"<div class='board-meta'>{''.join(chips)}"
@@ -426,7 +424,6 @@ def render_auto_list(entries, title: str, subtitle: str = "", max_rows: int = 60
               <td class='board-n'>#{e.get('numero','?')}</td>
               <td class='board-main'>
                 <div class='board-client'>{e.get('cliente','—')}</div>
-                <div class='board-date'>📅 Entrega: {fecha_label}</div>
                 {chips_html}
               </td>
             </tr>
@@ -446,7 +443,6 @@ def render_auto_list(entries, title: str, subtitle: str = "", max_rows: int = 60
     .board-n{{width:3.2rem;font-size:1.35rem;font-weight:900;padding:0.25rem 0.2rem;opacity:0.95;vertical-align:top;white-space:nowrap;color:#fff;}}
     .board-main{{padding:0.25rem 0.2rem;vertical-align:top;}}
     .board-client{{font-size:1.05rem;font-weight:800;line-height:1.25rem;color:#fff;word-break:break-word;}}
-    .board-date{{margin-top:0.15rem;font-size:0.9rem;font-weight:700;opacity:0.85;color:#fff;}}
     .board-meta{{margin-top:0.18rem;display:flex;flex-wrap:wrap;gap:0.35rem;font-size:0.85rem;opacity:0.85;font-weight:650;align-items:center;color:#fff;}}
     .chip{{padding:0.1rem 0.45rem;border-radius:0.7rem;background:rgba(255,255,255,0.10);white-space:nowrap;}}
     .board-status{{margin-left:auto;font-size:0.95rem;font-weight:900;white-space:nowrap;opacity:0.95;}}
