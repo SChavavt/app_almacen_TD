@@ -19,14 +19,33 @@ TZ = ZoneInfo("America/Mexico_City")
 
 st.set_page_config(page_title="Panel de Almacén Integrado", layout="wide")
 
+# --- Ajustes UI compactos ---
+st.markdown(
+    """
+    <style>
+    section.main > div { padding-top: 0.5rem; }
+    .header-compact h2 { margin: 0; font-size: 1.5rem; line-height: 1.6rem; }
+    .header-meta { font-size: 0.8rem; color: #c9c9c9; }
+    div[data-testid="stHorizontalBlock"] { gap: 0.4rem; }
+    div[data-testid="stRadio"] > label { margin-bottom: 0; }
+    div[data-testid="stRadio"] div[role="radiogroup"] { gap: 0.25rem; }
+    div[data-testid="stRadio"] label { padding: 0.1rem 0.4rem; font-size: 0.8rem; }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
+
 # --- Encabezado ---
-col_title, col_actions = st.columns([0.75, 0.25])
+current_time = datetime.now(TZ).strftime("%d/%m %H:%M:%S")
+col_title, col_update, col_actions = st.columns([0.6, 0.2, 0.2])
 with col_title:
     st.markdown(
         """
-        <h2 style="color: white; font-size: 1.8rem; margin-bottom: 0rem;">
-            <span style="font-size: 2.2rem;">🏷️</span> Flujo de Pedidos en Tiempo Real
-        </h2>
+        <div class="header-compact">
+            <h2 style="color: white;">
+                <span style="font-size: 1.8rem;">🏷️</span> Flujo de Pedidos en Tiempo Real
+            </h2>
+        </div>
     """,
         unsafe_allow_html=True,
     )
@@ -41,13 +60,13 @@ with col_title:
     """,
         unsafe_allow_html=True,
     )
+with col_update:
+    st.markdown(f'<div class="header-meta">🕒 Última actualización: {current_time}</div>', unsafe_allow_html=True)
 with col_actions:
     if st.button("🔄 Refrescar ahora", use_container_width=True):
         st.cache_data.clear()
         st.cache_resource.clear()
         st.rerun()
-
-st.markdown("---")
 
 # CSS tabla compacta
 st.markdown(
@@ -1573,7 +1592,6 @@ if "show_grouped_panel_casos" not in globals():
 #        MAIN RENDER
 # ===========================
 df_all = load_data_from_gsheets()
-st.caption(f"🕒 Última actualización: {datetime.now(TZ).strftime('%d/%m %H:%M:%S')}")
 
 # Tabs principales
 tab_labels = [
