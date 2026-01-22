@@ -506,8 +506,10 @@ def render_auto_list(
     #{list_id} .board-scroll.auto-scroll .board-table{{animation: board-scroll-{list_id} var(--scroll-duration, 18s) linear infinite;}}
     @keyframes board-scroll-{list_id} {{
         0% {{ transform: translateY(0); }}
+        10% {{ transform: translateY(0); }}
         45% {{ transform: translateY(calc(var(--scroll-distance, 0px) * -1)); }}
         55% {{ transform: translateY(calc(var(--scroll-distance, 0px) * -1)); }}
+        90% {{ transform: translateY(0); }}
         100% {{ transform: translateY(0); }}
     }}
     </style>
