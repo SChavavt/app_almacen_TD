@@ -556,7 +556,7 @@ def _is_done_estado(estado: str) -> bool:
 
 def _is_surtidor_visible_estado(estado: str) -> bool:
     cleaned = sanitize_text(estado).lower()
-    return "en proceso" in cleaned or "completado" in cleaned
+    return not ("en proceso" in cleaned or "completado" in cleaned)
 
 
 def last_3_days_previous_range(today_date):
@@ -1848,9 +1848,19 @@ if selected_tab == 2:
 
     surtidor_nombre = st.text_input("Nombre o inicial del surtidor")
 
+    local_on_or_after = filter_entries_on_or_after(auto_local_entries, hoy)
+    local_no_fecha = filter_entries_no_entrega_date(auto_local_entries)
+    local_merged = []
+    seen_local = set()
+    for entry in local_on_or_after + local_no_fecha:
+        key = build_surtidor_key(entry)
+        if not key or key in seen_local:
+            continue
+        seen_local.add(key)
+        local_merged.append(entry)
     local_hoy = [
         e
-        for e in filter_entries_on_date(auto_local_entries, hoy)
+        for e in local_merged
         if _is_surtidor_visible_estado(e.get("estado", ""))
     ]
     foraneo_hoy = [
