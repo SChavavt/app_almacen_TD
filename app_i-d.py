@@ -379,11 +379,10 @@ def render_auto_list(entries, title: str, subtitle: str = "", max_rows: int = 60
         st.info("No hay pedidos para mostrar.")
         return
 
-    indexed_entries = list(enumerate(entries, 1))
-    visible = indexed_entries[:max_rows]
+    visible = entries[:max_rows]
 
     rows_html = []
-    for display_number, e in visible:
+    for e in visible:
         chips = []
 
         # Chips principales (máx 3)
@@ -422,7 +421,7 @@ def render_auto_list(entries, title: str, subtitle: str = "", max_rows: int = 60
         rows_html.append(
             f"""
             <tr class='board-row'>
-              <td class='board-n'>#{display_number}</td>
+              <td class='board-n'>#{e.get('numero','?')}</td>
               <td class='board-main'>
                 <div class='board-client'>{e.get('cliente','—')}</div>
                 {chips_html}
