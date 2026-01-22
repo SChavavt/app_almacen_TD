@@ -266,6 +266,7 @@ def build_base_entry(row, categoria: str):
         "categoria": categoria,
         "estado": sanitize_text(row.get("Estado", "")),
         "cliente": format_cliente_line(row),
+        "cliente_nombre": sanitize_text(row.get("Cliente", "")),
         "folio": sanitize_text(row.get("Folio_Factura", "")),
         "fecha": format_date(row.get("Fecha_Entrega")),
         "hora": format_time(row.get("Hora_Registro")),
@@ -551,6 +552,11 @@ def render_auto_list(
 def _is_done_estado(estado: str) -> bool:
     s = sanitize_text(estado)
     return s in {"🟢 Completado", "🟣 Cancelado", "✅ Viajó"}
+
+
+def _is_surtidor_visible_estado(estado: str) -> bool:
+    cleaned = sanitize_text(estado).lower()
+    return "en proceso" in cleaned or "completado" in cleaned
 
 
 def last_3_days_previous_range(today_date):
@@ -1842,19 +1848,22 @@ if selected_tab == 2:
 
     surtidor_nombre = st.text_input("Nombre o inicial del surtidor")
 
-    local_hoy = filter_entries_on_date(auto_local_entries, hoy)
-    foraneo_hoy = filter_entries_on_date(auto_foraneo_entries, hoy)
+    local_hoy = [
+        e
+        for e in filter_entries_on_date(auto_local_entries, hoy)
+        if _is_surtidor_visible_estado(e.get("estado", ""))
+    ]
+    foraneo_hoy = [
+        e
+        for e in filter_entries_on_date(auto_foraneo_entries, hoy)
+        if _is_surtidor_visible_estado(e.get("estado", ""))
+    ]
 
     def _entry_label(entry) -> str:
         numero = entry.get("numero", "—")
-        cliente = sanitize_text(entry.get("cliente", ""))
-        folio = sanitize_text(entry.get("folio", ""))
-        hora = sanitize_text(entry.get("hora", ""))
-        parts = [f"#{numero}", cliente]
-        if folio:
-            parts.append(f"📄 {folio}")
-        if hora:
-            parts.append(f"🕒 {hora}")
+        cliente = sanitize_text(entry.get("cliente_nombre", ""))
+        estado = sanitize_text(entry.get("estado", ""))
+        parts = [f"#{numero}", cliente, estado]
         return " · ".join([p for p in parts if p])
 
     local_options = {build_surtidor_key(e): _entry_label(e) for e in local_hoy}
@@ -1896,8 +1905,33 @@ if selected_tab == 2:
     if not assignments:
         st.info("Sin asignaciones registradas.")
     else:
+        entry_lookup = {}
+        envio_lookup = {}
+        for entry in auto_local_entries:
+            key = build_surtidor_key(entry)
+            if key:
+                entry_lookup[key] = entry
+                envio_lookup[key] = "📍"
+        for entry in auto_foraneo_entries:
+            key = build_surtidor_key(entry)
+            if key:
+                entry_lookup[key] = entry
+                envio_lookup[key] = "🚚"
+
+        def _assignment_label(key: str) -> str:
+            entry = entry_lookup.get(key)
+            if not entry:
+                return key
+            numero = entry.get("numero", "—")
+            cliente = sanitize_text(entry.get("cliente_nombre", ""))
+            estado = sanitize_text(entry.get("estado", ""))
+            envio = envio_lookup.get(key, "")
+            numero_label = f"{envio} #{numero}" if envio else f"#{numero}"
+            parts = [numero_label, cliente, estado]
+            return " · ".join([p for p in parts if p])
+
         rows = [
-            {"Pedido": key, "Surtidor": value}
+            {"Pedido": _assignment_label(key), "Surtidor": value}
             for key, value in assignments.items()
             if value
         ]
