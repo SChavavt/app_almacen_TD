@@ -374,15 +374,22 @@ def render_auto_cards(entries, layout: str = "small"):
         unsafe_allow_html=True,
     )
 
-def render_auto_list(entries, title: str, subtitle: str = "", max_rows: int = 60):
+def render_auto_list(
+    entries,
+    title: str,
+    subtitle: str = "",
+    max_rows: int = 60,
+    start_number: int = 1,
+):
     if not entries:
         st.info("No hay pedidos para mostrar.")
-        return
+        return start_number
 
-    visible = entries[:max_rows]
+    indexed_entries = list(enumerate(entries, start_number))
+    visible = indexed_entries[:max_rows]
 
     rows_html = []
-    for e in visible:
+    for display_number, e in visible:
         chips = []
 
         # Chips principales (máx 3)
@@ -421,7 +428,7 @@ def render_auto_list(entries, title: str, subtitle: str = "", max_rows: int = 60
         rows_html.append(
             f"""
             <tr class='board-row'>
-              <td class='board-n'>#{e.get('numero','?')}</td>
+              <td class='board-n'>#{display_number}</td>
               <td class='board-main'>
                 <div class='board-client'>{e.get('cliente','—')}</div>
                 {chips_html}
@@ -461,6 +468,7 @@ def render_auto_list(entries, title: str, subtitle: str = "", max_rows: int = 60
 
     # ✅ Forzar render HTML real (no texto)
     components.html(html, height=850, scrolling=True)
+    return start_number + len(visible)
 
 
 def _is_done_estado(estado: str) -> bool:
@@ -1771,7 +1779,7 @@ if selected_tab == 4:
         ant = [e for e in ant if not _is_done_estado(e.get("estado", ""))]
         ant = sort_entries_by_delivery(ant)
 
-        render_auto_list(
+        next_number = render_auto_list(
             ant,
             title="📍 LOCALES • ANTERIORES",
             subtitle="Todos los turnos y fechas previas (sin completados)",
@@ -1801,6 +1809,7 @@ if selected_tab == 4:
             title=f"📍 LOCALES • HOY ({hoy.strftime('%d/%m')})",
             subtitle="Todos los de hoy y fechas futuras + pedidos sin Fecha_Entrega",
             max_rows=140,
+            start_number=next_number,
         )
 
 # ---------------------------
@@ -1825,7 +1834,7 @@ if selected_tab == 5:
         ant = [e for e in ant if not _is_done_estado(e.get("estado", ""))]
         ant = sort_entries_by_delivery(ant)
 
-        render_auto_list(
+        next_number = render_auto_list(
             ant,
             title="🚚 FORÁNEOS • ANTERIORES",
             subtitle="Todos los turnos y fechas previas (sin completados)",
@@ -1854,4 +1863,5 @@ if selected_tab == 5:
             title=f"🚚 FORÁNEOS • HOY ({hoy.strftime('%d/%m')})",
             subtitle="Todos los de hoy y fechas futuras + pedidos sin Fecha_Entrega",
             max_rows=140,
+            start_number=next_number,
         )
