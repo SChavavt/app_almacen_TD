@@ -283,7 +283,10 @@ def build_entries_foraneo(df_for: pd.DataFrame):
         entry = build_base_entry(row, "🌍 Foráneo")
         badges = unique_preserve([entry["tipo_envio"], entry["turno"]])
         details = []
-        if entry["tipo_envio_original"] and entry["tipo_envio_original"] not in badges:
+        tipo_caso = sanitize_text(entry.get("tipo", ""))
+        if tipo_caso and tipo_caso != "—":
+            details.append(tipo_caso)
+        elif entry["tipo_envio_original"] and entry["tipo_envio_original"] not in badges:
             details.append(f"📦 {entry['tipo_envio_original']}")
         entry["badges"] = badges
         entry["details"] = unique_preserve(details)
