@@ -553,11 +553,6 @@ def _is_done_estado(estado: str) -> bool:
     return s in {"🟢 Completado", "🟣 Cancelado", "✅ Viajó"}
 
 
-def _is_pending_or_delayed_estado(estado: str) -> bool:
-    s = sanitize_text(estado).lower()
-    return "pendiente" in s or "demorado" in s
-
-
 def last_3_days_previous_range(today_date):
     start = today_date - timedelta(days=3)
     end = today_date - timedelta(days=1)
@@ -1853,19 +1848,14 @@ if selected_tab == 2:
     def _entry_label(entry) -> str:
         numero = entry.get("numero", "—")
         cliente = sanitize_text(entry.get("cliente", ""))
-        estado = sanitize_text(entry.get("estado", ""))
-        parts = [f"#{numero}", cliente, estado]
+        folio = sanitize_text(entry.get("folio", ""))
+        hora = sanitize_text(entry.get("hora", ""))
+        parts = [f"#{numero}", cliente]
+        if folio:
+            parts.append(f"📄 {folio}")
+        if hora:
+            parts.append(f"🕒 {hora}")
         return " · ".join([p for p in parts if p])
-
-    def _format_assignment_label(entry, tipo_emoji: str) -> str:
-        numero = entry.get("numero", "—")
-        cliente = sanitize_text(entry.get("cliente", ""))
-        estado = sanitize_text(entry.get("estado", ""))
-        parts = [tipo_emoji, f"#{numero}", cliente, estado]
-        return " · ".join([p for p in parts if p])
-
-    local_hoy = [e for e in local_hoy if _is_pending_or_delayed_estado(e.get("estado", ""))]
-    foraneo_hoy = [e for e in foraneo_hoy if _is_pending_or_delayed_estado(e.get("estado", ""))]
 
     local_options = {build_surtidor_key(e): _entry_label(e) for e in local_hoy}
     foraneo_options = {build_surtidor_key(e): _entry_label(e) for e in foraneo_hoy}
@@ -1906,22 +1896,8 @@ if selected_tab == 2:
     if not assignments:
         st.info("Sin asignaciones registradas.")
     else:
-        entry_lookup = {}
-        for entry in auto_local_entries + auto_foraneo_entries:
-            key = build_surtidor_key(entry)
-            if key:
-                entry_lookup[key] = entry
         rows = [
-            {
-                "Pedido": (
-                    _format_assignment_label(entry_lookup[key], "📍")
-                    if key in entry_lookup and entry_lookup[key] in auto_local_entries
-                    else _format_assignment_label(entry_lookup[key], "🚚")
-                )
-                if key in entry_lookup
-                else key,
-                "Surtidor": value,
-            }
+            {"Pedido": key, "Surtidor": value}
             for key, value in assignments.items()
             if value
         ]
