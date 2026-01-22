@@ -1803,7 +1803,7 @@ if selected_tab == 4:
         next_number = render_auto_list(
             ant,
             title="📍 LOCALES • ANTERIORES",
-            subtitle="Todos los turnos y fechas previas (sin completados)",
+            subtitle="Fechas previas (sin completados)",
             max_rows=140,
         )
 
@@ -1857,7 +1857,7 @@ if selected_tab == 5:
         next_number = render_auto_list(
             ant,
             title="🚚 FORÁNEOS • ANTERIORES",
-            subtitle="Todos los turnos y fechas previas (sin completados)",
+            subtitle="Fechas previas (sin completados)",
             max_rows=140,
         )
 
