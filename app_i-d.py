@@ -1667,10 +1667,6 @@ df_all = load_data_from_gsheets()
 
 # Tabs principales
 tab_labels = [
-    "📍 Local",
-    "🌍 Foráneo",
-    "🏙️ CDMX y Guías",
-    "🧰 Casos Especiales",
     "⚙️ Auto Local",
     "🚚 Auto Foráneo",
     "🧑‍🔧 Surtidores",
@@ -1680,6 +1676,8 @@ tab_labels = [
 # Persistencia de tab activa (para autorefresh)
 # ---------------------------
 if "active_main_tab" not in st.session_state:
+    st.session_state.active_main_tab = 0
+elif st.session_state.active_main_tab >= len(tab_labels):
     st.session_state.active_main_tab = 0
 
 def _set_active_main_tab(i: int):
@@ -1703,7 +1701,7 @@ tabs = [None] * len(tab_labels)
 # Entradas compartidas para numeración única entre Auto Local y Auto Foráneo
 auto_local_entries = []
 auto_foraneo_entries = []
-if selected_tab in (4, 5, 6):
+if selected_tab in (0, 1, 2):
     df_local_auto = get_local_orders(df_all)
     casos_local_auto, _ = get_case_envio_assignments(df_all)
     if not df_local_auto.empty:
@@ -1726,140 +1724,9 @@ if selected_tab in (4, 5, 6):
     apply_surtidor_assignments(auto_foraneo_entries, st.session_state.surtidor_assignments)
 
 # ---------------------------
-# TAB 0: Local
+# TAB 0: Auto Local (Casos asignados) — 2 columnas
 # ---------------------------
 if selected_tab == 0:
-    if df_all.empty:
-        st.info("Sin datos en 'datos_pedidos'.")
-    else:
-        df_local = get_local_orders(df_all)
-        if df_local.empty:
-            st.info("Sin pedidos locales.")
-        else:
-            turnos = df_local["Turno"].dropna().unique()
-            if len(turnos) == 0:
-                st.info("Sin pedidos locales.")
-            else:
-                sub_tabs = st.tabs([t if t else "Sin Turno" for t in turnos])
-                for idx, turno in enumerate(turnos):
-                    df_turno = df_local[df_local["Turno"] == turno]
-                    with sub_tabs[idx]:
-                        label = turno if turno else "Sin Turno"
-                        st.markdown(f"#### 📊 Resumen ({label})")
-                        status_counts_block(df_turno)
-                        st.markdown("### 📚 Grupos")
-                        show_grouped_panel(df_turno, mode="local", group_turno=False)
-
-# ---------------------------
-# TAB 1: Foráneo
-# ---------------------------
-if selected_tab == 1:
-    if df_all.empty:
-        st.info("Sin datos en 'datos_pedidos'.")
-    else:
-        df_for = get_foraneo_orders(df_all)
-        if df_for.empty:
-            st.info("Sin pedidos foráneos.")
-        else:
-            st.markdown("#### 📊 Resumen (Foráneo)")
-            status_counts_block(df_for)
-            st.markdown("### 📚 Grupos")
-            show_grouped_panel(df_for, mode="foraneo")
-
-# ---------------------------
-# TAB 2: CDMX y Guías
-# ---------------------------
-if selected_tab == 2:
-    if df_all.empty:
-        st.info("Sin datos en 'datos_pedidos'.")
-    else:
-        df_cdmx_filtrado = get_cdmx_orders(df_all)
-        df_guias_filtrado = get_guias_orders(df_all)
-
-        df_cdmx_guias = pd.concat(
-            [df_cdmx_filtrado, df_guias_filtrado], ignore_index=True
-        )
-        if df_cdmx_guias.empty:
-            st.info("No hay pedidos CDMX ni solicitudes de guía visibles para resumir.")
-        else:
-            st.markdown("##### Resumen CDMX + Guías")
-            status_counts_block(df_cdmx_guias)
-
-        st.subheader("🏙️ Pedidos CDMX")
-        if df_cdmx_filtrado.empty:
-            st.info("No hay pedidos CDMX.")
-        else:
-            st.markdown("##### Grupos CDMX (por fecha)")
-            work = df_cdmx_filtrado.copy()
-            work["Fecha_Entrega_Str"] = work["Fecha_Entrega"].dt.strftime("%d/%m")
-            work["Grupo_Clave"] = work.apply(
-                lambda r: f"CDMX – {r['Fecha_Entrega_Str']}", axis=1
-            )
-            grouped = work.groupby(["Grupo_Clave", "Fecha_Entrega"])
-            grupos = []
-            for (clave, f), df_g in sorted(
-                grouped,
-                key=lambda x: x[0][1] if pd.notna(x[0][1]) else pd.Timestamp.max,
-            ):
-                if not df_g.empty:
-                    grupos.append((f"🏙️ {clave} ({len(df_g)})", df_g))
-            if not grupos:
-                st.info("No hay grupos para mostrar.")
-            else:
-                for titulo, df_g in grupos:
-                    st.markdown(f"#### {titulo}")
-                    df_g = df_g.sort_values(
-                        by="Hora_Registro", ascending=False
-                    ).reset_index(drop=True)
-                    display_dataframe_with_formatting(df_g)
-
-        st.markdown("---")
-
-        st.subheader("📋 Solicitudes de Guía")
-        if df_guias_filtrado.empty:
-            st.info("No hay solicitudes de guía.")
-        else:
-            st.markdown("##### Grupos Guías (por fecha)")
-            work = df_guias_filtrado.copy()
-            work["Fecha_Entrega_Str"] = work["Fecha_Entrega"].dt.strftime("%d/%m")
-            work["Grupo_Clave"] = work.apply(
-                lambda r: f"Guías – {r['Fecha_Entrega_Str']}", axis=1
-            )
-            grouped = work.groupby(["Grupo_Clave", "Fecha_Entrega"])
-            grupos = []
-            for (clave, f), df_g in sorted(
-                grouped,
-                key=lambda x: x[0][1] if pd.notna(x[0][1]) else pd.Timestamp.max,
-            ):
-                if not df_g.empty:
-                    grupos.append((f"📋 {clave} ({len(df_g)})", df_g))
-            if not grupos:
-                st.info("No hay grupos para mostrar.")
-            else:
-                for titulo, df_g in grupos:
-                    st.markdown(f"#### {titulo}")
-                    df_g = df_g.sort_values(
-                        by="Hora_Registro", ascending=False
-                    ).reset_index(drop=True)
-                    display_dataframe_with_formatting(df_g)
-
-# ---------------------------
-# TAB 3: Casos Especiales (Devoluciones + Garantías)
-# ---------------------------
-if selected_tab == 3:
-    casos = get_casos_orders(df_all)
-    if casos.empty:
-        st.info("Sin datos de devoluciones o garantías.")
-    else:
-        st.markdown("#### 📊 Resumen Casos Especiales")
-        status_counts_block_casos(casos)
-        st.markdown("### 📚 Grupos (Local por Turno / Foráneo genérico)")
-        show_grouped_panel_casos(casos)
-
-# ---------------------------
-# TAB 4: Auto Local (Casos asignados) — 2 columnas
-# ---------------------------
-if selected_tab == 4:
     st_autorefresh(interval=60000, key="auto_refresh_local_casos")
 
     hoy = datetime.now(TZ).date()
@@ -1910,9 +1777,9 @@ if selected_tab == 4:
         )
 
 # ---------------------------
-# TAB 5: Auto Foráneo (Casos asignados) — 2 columnas
+# TAB 1: Auto Foráneo (Casos asignados) — 2 columnas
 # ---------------------------
-if selected_tab == 5:
+if selected_tab == 1:
     st_autorefresh(interval=60000, key="auto_refresh_foraneo_cdmx")
 
     hoy = datetime.now(TZ).date()
@@ -1963,9 +1830,9 @@ if selected_tab == 5:
         )
 
 # ---------------------------
-# TAB 6: Surtidores (Asignación)
+# TAB 2: Surtidores (Asignación)
 # ---------------------------
-if selected_tab == 6:
+if selected_tab == 2:
     hoy = datetime.now(TZ).date()
 
     st.markdown("### 🧑‍🔧 Asignación de surtidores")
