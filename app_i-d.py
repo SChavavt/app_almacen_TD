@@ -175,6 +175,21 @@ def build_auto_number_key(entry) -> str:
     return base
 
 
+def build_surtidor_key(entry) -> str:
+    key = build_auto_number_key(entry)
+    if key:
+        return key
+    fallback = f"{sanitize_text(entry.get('cliente', ''))}|{sanitize_text(entry.get('hora', ''))}"
+    return fallback
+
+
+def apply_surtidor_assignments(entries, assignments: dict) -> None:
+    for entry in entries:
+        key = build_surtidor_key(entry)
+        if key:
+            entry["surtidor"] = assignments.get(key, "")
+
+
 def assign_shared_numbers(entries_local, entries_foraneo):
     combined = list(entries_local) + list(entries_foraneo)
     combined.sort(key=lambda e: e.get("sort_key", pd.Timestamp.max))
@@ -251,6 +266,7 @@ def build_base_entry(row, categoria: str):
         "categoria": categoria,
         "estado": sanitize_text(row.get("Estado", "")),
         "cliente": format_cliente_line(row),
+        "folio": sanitize_text(row.get("Folio_Factura", "")),
         "fecha": format_date(row.get("Fecha_Entrega")),
         "hora": format_time(row.get("Hora_Registro")),
         "fecha_entrega_dt": parse_datetime(row.get("Fecha_Entrega")),
@@ -448,12 +464,16 @@ def render_auto_list(
             f"<span class='board-status'>{sanitize_text(e.get('estado',''))}</span></div>"
         )
 
+        surtidor = sanitize_text(e.get("surtidor", ""))
+        surtidor_html = (
+            f"<span class='surtidor-tag'>{surtidor}</span>" if surtidor else ""
+        )
         rows_html.append(
             f"""
             <tr class='board-row'>
               <td class='board-n'>#{display_number}</td>
               <td class='board-main'>
-                <div class='board-client'>{e.get('cliente','—')}</div>
+                <div class='board-client'>{e.get('cliente','—')}{surtidor_html}</div>
                 {chips_html}
               </td>
             </tr>
@@ -477,7 +497,8 @@ def render_auto_list(
     .board-row:first-child{{border-top:none;}}
     .board-n{{width:2.6rem;font-size:1.1rem;font-weight:900;padding:0.18rem 0.15rem;opacity:0.95;vertical-align:top;white-space:nowrap;color:#fff;}}
     .board-main{{padding:0.18rem 0.15rem;vertical-align:top;}}
-    .board-client{{font-size:0.95rem;font-weight:800;line-height:1.15rem;color:#fff;word-break:break-word;}}
+    .board-client{{font-size:0.95rem;font-weight:800;line-height:1.15rem;color:#fff;word-break:break-word;display:flex;align-items:center;gap:0.4rem;flex-wrap:wrap;}}
+    .surtidor-tag{{margin-left:0.25rem;padding:0.1rem 0.45rem;border-radius:0.7rem;background:rgba(114,190,255,0.18);color:#a9dcff;font-weight:800;font-size:0.75rem;white-space:nowrap;}}
     .board-meta{{margin-top:0.12rem;display:flex;flex-wrap:wrap;gap:0.25rem;font-size:0.72rem;opacity:0.85;font-weight:650;align-items:center;color:#fff;}}
     .chip{{padding:0.05rem 0.4rem;border-radius:0.6rem;background:rgba(255,255,255,0.10);white-space:nowrap;}}
     .board-status{{margin-left:auto;font-size:0.82rem;font-weight:900;white-space:nowrap;opacity:0.95;}}
@@ -589,6 +610,25 @@ def filter_entries_on_or_after(entries, reference_date):
 
         d = pd.to_datetime(dt).date()
         if d >= reference_date:
+            out.append(e)
+    return out
+
+
+def filter_entries_on_date(entries, reference_date):
+    """Incluye entries con Fecha_Entrega exactamente en reference_date."""
+    out = []
+    for e in entries:
+        dt = e.get("fecha_entrega_dt")
+        if dt is None:
+            continue
+        try:
+            if pd.isna(dt):
+                continue
+        except Exception:
+            continue
+
+        d = pd.to_datetime(dt).date()
+        if d == reference_date:
             out.append(e)
     return out
 
@@ -1633,6 +1673,7 @@ tab_labels = [
     "🧰 Casos Especiales",
     "⚙️ Auto Local",
     "🚚 Auto Foráneo",
+    "🧑‍🔧 Surtidores",
 ]
 
 # ---------------------------
@@ -1662,7 +1703,7 @@ tabs = [None] * len(tab_labels)
 # Entradas compartidas para numeración única entre Auto Local y Auto Foráneo
 auto_local_entries = []
 auto_foraneo_entries = []
-if selected_tab in (4, 5):
+if selected_tab in (4, 5, 6):
     df_local_auto = get_local_orders(df_all)
     casos_local_auto, _ = get_case_envio_assignments(df_all)
     if not df_local_auto.empty:
@@ -1678,6 +1719,11 @@ if selected_tab in (4, 5):
     auto_foraneo_entries.sort(key=lambda e: e.get("sort_key", pd.Timestamp.max))
 
     assign_shared_numbers(auto_local_entries, auto_foraneo_entries)
+
+    if "surtidor_assignments" not in st.session_state:
+        st.session_state.surtidor_assignments = {}
+    apply_surtidor_assignments(auto_local_entries, st.session_state.surtidor_assignments)
+    apply_surtidor_assignments(auto_foraneo_entries, st.session_state.surtidor_assignments)
 
 # ---------------------------
 # TAB 0: Local
@@ -1915,3 +1961,79 @@ if selected_tab == 5:
             max_rows=140,
             start_number=next_number,
         )
+
+# ---------------------------
+# TAB 6: Surtidores (Asignación)
+# ---------------------------
+if selected_tab == 6:
+    hoy = datetime.now(TZ).date()
+
+    st.markdown("### 🧑‍🔧 Asignación de surtidores")
+    st.caption("Selecciona pedidos de hoy y escribe tu nombre o inicial para asignarlos.")
+
+    surtidor_nombre = st.text_input("Nombre o inicial del surtidor")
+
+    local_hoy = filter_entries_on_date(auto_local_entries, hoy)
+    foraneo_hoy = filter_entries_on_date(auto_foraneo_entries, hoy)
+
+    def _entry_label(entry) -> str:
+        numero = entry.get("numero", "—")
+        cliente = sanitize_text(entry.get("cliente", ""))
+        folio = sanitize_text(entry.get("folio", ""))
+        hora = sanitize_text(entry.get("hora", ""))
+        parts = [f"#{numero}", cliente]
+        if folio:
+            parts.append(f"📄 {folio}")
+        if hora:
+            parts.append(f"🕒 {hora}")
+        return " · ".join([p for p in parts if p])
+
+    local_options = {build_surtidor_key(e): _entry_label(e) for e in local_hoy}
+    foraneo_options = {build_surtidor_key(e): _entry_label(e) for e in foraneo_hoy}
+
+    col_local, col_foraneo = st.columns(2, gap="large")
+    with col_local:
+        st.markdown("#### 📍 Auto Local (hoy)")
+        selected_local = st.multiselect(
+            "Pedidos locales",
+            options=list(local_options.keys()),
+            format_func=lambda k: local_options.get(k, k),
+        )
+    with col_foraneo:
+        st.markdown("#### 🚚 Auto Foráneo (hoy)")
+        selected_foraneo = st.multiselect(
+            "Pedidos foráneos",
+            options=list(foraneo_options.keys()),
+            format_func=lambda k: foraneo_options.get(k, k),
+        )
+
+    if st.button("✅ Asignar surtidor", use_container_width=True):
+        nombre = sanitize_text(surtidor_nombre)
+        if not nombre:
+            st.warning("Escribe un nombre o inicial para asignar.")
+        else:
+            selected_keys = selected_local + selected_foraneo
+            if not selected_keys:
+                st.warning("Selecciona al menos un pedido.")
+            else:
+                for key in selected_keys:
+                    st.session_state.surtidor_assignments[key] = nombre
+                st.success("Asignación guardada.")
+                st.rerun()
+
+    st.markdown("---")
+    st.markdown("#### 📋 Asignaciones actuales")
+    assignments = st.session_state.get("surtidor_assignments", {})
+    if not assignments:
+        st.info("Sin asignaciones registradas.")
+    else:
+        rows = [
+            {"Pedido": key, "Surtidor": value}
+            for key, value in assignments.items()
+            if value
+        ]
+        if rows:
+            df_assign = pd.DataFrame(rows)
+            st.dataframe(df_assign, use_container_width=True, height=300)
+        else:
+            st.info("Sin asignaciones registradas.")
