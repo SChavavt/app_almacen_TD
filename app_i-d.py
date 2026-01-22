@@ -493,43 +493,6 @@ def filter_entries_by_entrega(entries, start_date, end_date):
     return out
 
 
-def filter_entries_before_date(entries, reference_date):
-    """Incluye entries con Fecha_Entrega anterior a reference_date."""
-    out = []
-    for e in entries:
-        dt = e.get("fecha_entrega_dt")
-        if dt is None:
-            continue
-        try:
-            if pd.isna(dt):
-                continue
-        except Exception:
-            continue
-
-        d = pd.to_datetime(dt).date()
-        if d < reference_date:
-            out.append(e)
-    return out
-
-
-def filter_entries_on_or_after(entries, reference_date):
-    """Incluye entries con Fecha_Entrega en reference_date o posterior."""
-    out = []
-    for e in entries:
-        dt = e.get("fecha_entrega_dt")
-        if dt is None:
-            continue
-        try:
-            if pd.isna(dt):
-                continue
-        except Exception:
-            continue
-
-        d = pd.to_datetime(dt).date()
-        if d >= reference_date:
-            out.append(e)
-    return out
-
 
 def filter_entries_no_entrega_date(entries):
     """Entries sin Fecha_Entrega (para que no se pierdan)."""
@@ -1736,8 +1699,9 @@ if selected_tab == 4:
     st_autorefresh(interval=60000, key="auto_refresh_local_casos")
 
     hoy = datetime.now(TZ).date()
+    start_prev, end_prev = last_3_days_previous_range(hoy)
 
-    st.caption("Auto Local • 2 columnas (anteriores vs hoy y futuros) • auto refresh 60 s.")
+    st.caption("Auto Local • 2 columnas (anteriores vs hoy) • auto refresh 60 s.")
 
     # 1) Armar entradas (local + casos asignados a local)
     combined_entries = list(auto_local_entries)
@@ -1745,22 +1709,22 @@ if selected_tab == 4:
     # 2) Layout: izquierda/derecha
     col_left, col_right = st.columns(2, gap="large")
 
-    # --- IZQUIERDA: ANTERIORES (todos los previos) ---
+    # --- IZQUIERDA: ANTERIORES (últimos 3 días previos) SOLO NO completados ---
     with col_left:
-        ant = filter_entries_before_date(combined_entries, hoy)
+        ant = filter_entries_by_entrega(combined_entries, start_prev, end_prev)
         ant = [e for e in ant if not _is_done_estado(e.get("estado", ""))]
         ant.sort(key=lambda e: e.get("sort_key", pd.Timestamp.max))
 
         render_auto_list(
             ant,
-            title="📍 LOCALES • ANTERIORES",
-            subtitle="Todos los turnos y fechas previas (sin completados)",
+            title=f"📍 LOCALES • ANTERIORES ({start_prev.strftime('%d/%m')}–{end_prev.strftime('%d/%m')})",
+            subtitle="Solo NO completados (últimos 3 días previos)",
             max_rows=140,
         )
 
-    # --- DERECHA: HOY + FUTUROS + SIN Fecha_Entrega ---
+    # --- DERECHA: HOY (todos los de hoy) + SIN Fecha_Entrega ---
     with col_right:
-        hoy_entries = filter_entries_on_or_after(combined_entries, hoy)
+        hoy_entries = filter_entries_by_entrega(combined_entries, hoy, hoy)
         sin_fecha = filter_entries_no_entrega_date(combined_entries)
 
         # unir sin duplicados
@@ -1779,7 +1743,7 @@ if selected_tab == 4:
         render_auto_list(
             merged,
             title=f"📍 LOCALES • HOY ({hoy.strftime('%d/%m')})",
-            subtitle="Todos los de hoy y fechas futuras + pedidos sin Fecha_Entrega",
+            subtitle="Todos los de hoy + pedidos sin Fecha_Entrega",
             max_rows=140,
         )
 
