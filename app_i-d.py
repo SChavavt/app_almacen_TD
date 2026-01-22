@@ -1786,8 +1786,6 @@ if selected_tab == 4:
 
     hoy = datetime.now(TZ).date()
 
-    st.caption("Auto Local • 2 columnas (anteriores vs hoy y futuros) • auto refresh 60 s.")
-
     # 1) Armar entradas (local + casos asignados a local)
     combined_entries = list(auto_local_entries)
 
