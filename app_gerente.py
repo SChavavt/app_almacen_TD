@@ -974,10 +974,16 @@ with tabs[1]:
     df_todos = cargar_todos_los_pedidos()
     df_casos = cargar_casos_especiales()
 
-    mostrar_casos = st.checkbox("Mostrar solo casos especiales")
+    if "mostrar_casos" not in st.session_state:
+        st.session_state.mostrar_casos = False
+    if "solo_completados_sin_limpieza" not in st.session_state:
+        st.session_state.solo_completados_sin_limpieza = False
+
+    mostrar_casos = st.checkbox("Mostrar solo casos especiales", key="mostrar_casos")
     solo_completados_sin_limpieza = st.checkbox(
         "Solo pedidos 🟢 Completados sin limpiar",
         help="Muestra únicamente pedidos con Estado 🟢 Completado y Completados_Limpiado vacío.",
+        key="solo_completados_sin_limpieza",
     )
 
     if solo_completados_sin_limpieza:
