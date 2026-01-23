@@ -285,33 +285,6 @@ def build_base_entry(row, categoria: str):
     return entry
 
 
-def build_case_dedupe_key(df: pd.DataFrame) -> pd.Series:
-    index = df.index
-    id_series = (
-        df["ID_Pedido"].astype(str).fillna("").str.strip()
-        if "ID_Pedido" in df.columns
-        else pd.Series("", index=index)
-    )
-    folio_series = (
-        df["Folio_Factura"].astype(str).fillna("").str.strip()
-        if "Folio_Factura" in df.columns
-        else pd.Series("", index=index)
-    )
-    cliente_series = (
-        df["Cliente"].astype(str).fillna("").str.strip()
-        if "Cliente" in df.columns
-        else pd.Series("", index=index)
-    )
-    fecha_series = (
-        df["Fecha_Entrega"].astype(str).fillna("").str.strip()
-        if "Fecha_Entrega" in df.columns
-        else pd.Series("", index=index)
-    )
-    fallback = cliente_series + "|" + fecha_series
-    key = id_series.where(id_series != "", folio_series)
-    return key.where(key != "", fallback)
-
-
 def build_entries_local(df_local: pd.DataFrame):
     entries = []
     for _, row in df_local.iterrows():
@@ -733,14 +706,6 @@ def get_local_orders(df_all: pd.DataFrame) -> pd.DataFrame:
         extra_local = df_all[mask_turno_local].copy()
 
     casos_local, _ = get_case_envio_assignments(df_all)
-    if not casos_local.empty:
-        case_keys = {key for key in build_case_dedupe_key(casos_local) if key}
-        if not base_local.empty:
-            base_keys = build_case_dedupe_key(base_local)
-            base_local = base_local[~base_keys.isin(case_keys)].copy()
-        if not extra_local.empty:
-            extra_keys = build_case_dedupe_key(extra_local)
-            extra_local = extra_local[~extra_keys.isin(case_keys)].copy()
     frames = [df for df in [base_local, extra_local, casos_local] if not df.empty]
     if not frames:
         return pd.DataFrame()
