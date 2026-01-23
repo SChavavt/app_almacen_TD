@@ -212,6 +212,77 @@ def assign_shared_numbers(entries_local, entries_foraneo):
 
 _AUTO_LIST_COUNTER = count(1)
 
+
+def assign_display_numbers(auto_local_entries, auto_foraneo_entries, today_date) -> None:
+    for entry in auto_local_entries + auto_foraneo_entries:
+        entry.pop("display_num", None)
+
+    combined_local = [e for e in auto_local_entries if _is_visible_auto_entry(e)]
+    turno_priority = [
+        "☀️ Local Mañana",
+        "🌙 Local Tarde",
+        "🌵 Saltillo",
+        "📦 Pasa a Bodega",
+        "📍 Local (sin turno)",
+    ]
+    grouped_local: dict[str, list] = {label: [] for label in turno_priority}
+    for entry in combined_local:
+        turno = normalize_turno_label(entry.get("turno", ""))
+        if not turno:
+            turno = "📍 Local (sin turno)"
+        if turno not in grouped_local:
+            grouped_local[turno] = []
+        grouped_local[turno].append(entry)
+
+    ordered_labels = [
+        label for label in turno_priority if label in grouped_local and grouped_local[label]
+    ]
+    extra_labels = sorted(
+        [
+            label
+            for label in grouped_local.keys()
+            if label not in turno_priority and grouped_local[label]
+        ]
+    )
+    ordered_labels.extend(extra_labels)
+
+    next_number = 1
+    for label in ordered_labels:
+        entries = sort_entries_by_delivery(grouped_local[label])
+        visible_entries = entries[:140]
+        for offset, entry in enumerate(visible_entries, start=next_number):
+            entry["display_num"] = offset
+        next_number += len(visible_entries)
+
+    combined_foraneo = list(auto_foraneo_entries)
+    ant = filter_entries_before_date(combined_foraneo, today_date)
+    ant = [e for e in ant if _is_visible_auto_entry(e)]
+    ant = sort_entries_by_delivery(ant)
+    visible_ant = ant[:140]
+    for offset, entry in enumerate(visible_ant, start=1):
+        entry["display_num"] = offset
+
+    next_number = 1 + len(visible_ant)
+    hoy_entries = filter_entries_on_or_after(combined_foraneo, today_date)
+    sin_fecha = filter_entries_no_entrega_date(combined_foraneo)
+
+    seen = set()
+    merged = []
+    for entry in (hoy_entries + sin_fecha):
+        key = sanitize_text(entry.get("id_pedido", "")) or (
+            sanitize_text(entry.get("cliente", "")) + "|" + sanitize_text(entry.get("hora", ""))
+        )
+        if key in seen:
+            continue
+        seen.add(key)
+        merged.append(entry)
+
+    merged = [e for e in merged if _is_visible_auto_entry(e)]
+    merged = sort_entries_by_delivery(merged)
+    visible_merged = merged[:140]
+    for offset, entry in enumerate(visible_merged, start=next_number):
+        entry["display_num"] = offset
+
 _TURNOS_CANONICAL = {
     "☀ local manana": "☀️ Local Mañana",
     "local manana": "☀️ Local Mañana",
@@ -1741,6 +1812,7 @@ if selected_tab in (0, 1, 2):
         st.session_state.surtidor_assignments = {}
     apply_surtidor_assignments(auto_local_entries, st.session_state.surtidor_assignments)
     apply_surtidor_assignments(auto_foraneo_entries, st.session_state.surtidor_assignments)
+    assign_display_numbers(auto_local_entries, auto_foraneo_entries, datetime.now(TZ).date())
 
 # ---------------------------
 # TAB 0: Auto Local (Casos asignados) — 2 columnas
@@ -1856,34 +1928,39 @@ if selected_tab == 1:
 # TAB 2: Surtidores (Asignación)
 # ---------------------------
 if selected_tab == 2:
-    hoy = datetime.now(TZ).date()
 
     st.markdown("### 🧑‍🔧 Asignación de surtidores")
-    st.caption("Selecciona pedidos de hoy y escribe tu nombre o inicial para asignarlos.")
+    st.caption("Selecciona pedidos visibles y escribe tu nombre o inicial para asignarlos.")
 
     surtidor_nombre = st.text_input("Nombre o inicial del surtidor")
 
-    local_on_or_after = filter_entries_on_or_after(auto_local_entries, hoy)
-    local_no_fecha = filter_entries_no_entrega_date(auto_local_entries)
     seen_local = set()
     local_hoy = []
-    for entry in local_on_or_after + local_no_fecha:
-        key = sanitize_text(entry.get("id_pedido", "")) or (
-            sanitize_text(entry.get("cliente", "")) + "|" + sanitize_text(entry.get("hora", ""))
-        )
+    for entry in auto_local_entries:
+        if not _is_visible_auto_entry(entry):
+            continue
+        if entry.get("display_num") is None:
+            continue
+        key = build_surtidor_key(entry)
         if not key or key in seen_local:
             continue
         seen_local.add(key)
-        if _is_surtidor_visible_estado(entry.get("estado", "")):
-            local_hoy.append(entry)
-    foraneo_hoy = [
-        e
-        for e in filter_entries_on_date(auto_foraneo_entries, hoy)
-        if _is_surtidor_visible_estado(e.get("estado", ""))
-    ]
+        local_hoy.append(entry)
+    foraneo_hoy = []
+    seen_foraneo = set()
+    for entry in auto_foraneo_entries:
+        if not _is_visible_auto_entry(entry):
+            continue
+        if entry.get("display_num") is None:
+            continue
+        key = build_surtidor_key(entry)
+        if not key or key in seen_foraneo:
+            continue
+        seen_foraneo.add(key)
+        foraneo_hoy.append(entry)
 
     def _entry_label(entry) -> str:
-        numero = entry.get("numero", "—")
+        numero = entry.get("display_num", entry.get("numero", "—"))
         cliente = sanitize_text(entry.get("cliente_nombre", ""))
         estado = sanitize_text(entry.get("estado", ""))
         parts = [f"#{numero}", cliente, estado]
@@ -1894,14 +1971,14 @@ if selected_tab == 2:
 
     col_local, col_foraneo = st.columns(2, gap="large")
     with col_local:
-        st.markdown("#### 📍 Auto Local (hoy)")
+        st.markdown("#### 📍 Auto Local")
         selected_local = st.multiselect(
             "Pedidos locales",
             options=list(local_options.keys()),
             format_func=lambda k: local_options.get(k, k),
         )
     with col_foraneo:
-        st.markdown("#### 🚚 Auto Foráneo (hoy)")
+        st.markdown("#### 🚚 Auto Foráneo")
         selected_foraneo = st.multiselect(
             "Pedidos foráneos",
             options=list(foraneo_options.keys()),
@@ -1945,7 +2022,7 @@ if selected_tab == 2:
             entry = entry_lookup.get(key)
             if not entry:
                 return key
-            numero = entry.get("numero", "—")
+            numero = entry.get("display_num", entry.get("numero", "—"))
             cliente = sanitize_text(entry.get("cliente_nombre", ""))
             estado = sanitize_text(entry.get("estado", ""))
             envio = envio_lookup.get(key, "")
