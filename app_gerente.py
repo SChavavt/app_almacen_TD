@@ -964,6 +964,13 @@ with tabs[0]:
 with tabs[1]:
     st.header("⬇️ Descargar Datos")
 
+    if st.button(
+        "🔄 Refrescar datos",
+        help="Recarga los datos desde Google Sheets para ver la información más reciente.",
+    ):
+        st.cache_data.clear()
+        st.rerun()
+
     df_todos = cargar_todos_los_pedidos()
     df_casos = cargar_casos_especiales()
 
