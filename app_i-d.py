@@ -556,6 +556,8 @@ def _is_done_estado(estado: str) -> bool:
 
 def _is_surtidor_visible_estado(estado: str) -> bool:
     cleaned = sanitize_text(estado).lower()
+    if any(term in cleaned for term in ("pendiente", "demorado", "modificacion")):
+        return False
     return "en proceso" in cleaned or "completado" in cleaned
 
 
@@ -1848,11 +1850,19 @@ if selected_tab == 2:
 
     surtidor_nombre = st.text_input("Nombre o inicial del surtidor")
 
-    local_hoy = [
-        e
-        for e in filter_entries_on_date(auto_local_entries, hoy)
-        if _is_surtidor_visible_estado(e.get("estado", ""))
-    ]
+    local_on_or_after = filter_entries_on_or_after(auto_local_entries, hoy)
+    local_no_fecha = filter_entries_no_entrega_date(auto_local_entries)
+    seen_local = set()
+    local_hoy = []
+    for entry in local_on_or_after + local_no_fecha:
+        key = sanitize_text(entry.get("id_pedido", "")) or (
+            sanitize_text(entry.get("cliente", "")) + "|" + sanitize_text(entry.get("hora", ""))
+        )
+        if not key or key in seen_local:
+            continue
+        seen_local.add(key)
+        if _is_surtidor_visible_estado(entry.get("estado", "")):
+            local_hoy.append(entry)
     foraneo_hoy = [
         e
         for e in filter_entries_on_date(auto_foraneo_entries, hoy)
