@@ -968,7 +968,21 @@ with tabs[1]:
     df_casos = cargar_casos_especiales()
 
     mostrar_casos = st.checkbox("Mostrar solo casos especiales")
-    df = df_casos if mostrar_casos else df_todos
+    solo_completados_sin_limpieza = st.checkbox(
+        "Solo pedidos 🟢 Completados sin limpiar",
+        help="Muestra únicamente pedidos con Estado 🟢 Completado y Completados_Limpiado vacío.",
+    )
+
+    if solo_completados_sin_limpieza:
+        df = df_todos
+        if "Completados_Limpiado" not in df.columns:
+            df["Completados_Limpiado"] = ""
+        df = df[
+            (df["Estado"].astype(str).str.strip() == "🟢 Completado")
+            & (df["Completados_Limpiado"].astype(str).str.strip() == "")
+        ]
+    else:
+        df = df_casos if mostrar_casos else df_todos
 
     if df.empty:
         st.info("No hay datos disponibles para descargar.")
