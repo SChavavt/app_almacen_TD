@@ -433,13 +433,6 @@ def render_auto_list(
 
     rows_html = []
     for display_number, e in visible:
-        numero = e.get("numero")
-        try:
-            is_missing_num = numero is None or numero == "" or pd.isna(numero)
-        except Exception:
-            is_missing_num = numero is None or numero == ""
-        if is_missing_num:
-            numero = display_number
         chips = []
 
         # Chips principales (máx 3)
@@ -482,7 +475,7 @@ def render_auto_list(
         rows_html.append(
             f"""
             <tr class='board-row'>
-              <td class='board-n'>#{numero}</td>
+              <td class='board-n'>#{display_number}</td>
               <td class='board-main'>
                 <div class='board-client'>{e.get('cliente','—')}{surtidor_html}</div>
                 {chips_html}
@@ -1863,32 +1856,31 @@ if selected_tab == 1:
 # TAB 2: Surtidores (Asignación)
 # ---------------------------
 if selected_tab == 2:
+    hoy = datetime.now(TZ).date()
 
     st.markdown("### 🧑‍🔧 Asignación de surtidores")
-    st.caption("Selecciona pedidos visibles y escribe tu nombre o inicial para asignarlos.")
+    st.caption("Selecciona pedidos de hoy y escribe tu nombre o inicial para asignarlos.")
 
     surtidor_nombre = st.text_input("Nombre o inicial del surtidor")
 
+    local_on_or_after = filter_entries_on_or_after(auto_local_entries, hoy)
+    local_no_fecha = filter_entries_no_entrega_date(auto_local_entries)
     seen_local = set()
     local_hoy = []
-    for entry in auto_local_entries:
-        if not _is_visible_auto_entry(entry):
-            continue
-        key = build_surtidor_key(entry)
+    for entry in local_on_or_after + local_no_fecha:
+        key = sanitize_text(entry.get("id_pedido", "")) or (
+            sanitize_text(entry.get("cliente", "")) + "|" + sanitize_text(entry.get("hora", ""))
+        )
         if not key or key in seen_local:
             continue
         seen_local.add(key)
-        local_hoy.append(entry)
-    foraneo_hoy = []
-    seen_foraneo = set()
-    for entry in auto_foraneo_entries:
-        if not _is_visible_auto_entry(entry):
-            continue
-        key = build_surtidor_key(entry)
-        if not key or key in seen_foraneo:
-            continue
-        seen_foraneo.add(key)
-        foraneo_hoy.append(entry)
+        if _is_surtidor_visible_estado(entry.get("estado", "")):
+            local_hoy.append(entry)
+    foraneo_hoy = [
+        e
+        for e in filter_entries_on_date(auto_foraneo_entries, hoy)
+        if _is_surtidor_visible_estado(e.get("estado", ""))
+    ]
 
     def _entry_label(entry) -> str:
         numero = entry.get("numero", "—")
@@ -1902,14 +1894,14 @@ if selected_tab == 2:
 
     col_local, col_foraneo = st.columns(2, gap="large")
     with col_local:
-        st.markdown("#### 📍 Auto Local")
+        st.markdown("#### 📍 Auto Local (hoy)")
         selected_local = st.multiselect(
             "Pedidos locales",
             options=list(local_options.keys()),
             format_func=lambda k: local_options.get(k, k),
         )
     with col_foraneo:
-        st.markdown("#### 🚚 Auto Foráneo")
+        st.markdown("#### 🚚 Auto Foráneo (hoy)")
         selected_foraneo = st.multiselect(
             "Pedidos foráneos",
             options=list(foraneo_options.keys()),
