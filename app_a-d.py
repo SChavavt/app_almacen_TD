@@ -5238,49 +5238,108 @@ with main_tabs[7]:  # ✅ Historial Completados/Cancelados
                 set_active_main_tab(7)
                 st.rerun()
 
-    # 🧹 Limpieza específica por grupo de completados/cancelados locales
-    df_completados_historial["Fecha_dt"] = pd.to_datetime(df_completados_historial["Fecha_Entrega"], errors='coerce')
-    df_completados_historial["Grupo_Clave"] = df_completados_historial.apply(
-        lambda row: f"{row['Turno']} – {row['Fecha_dt'].strftime('%d/%m')}" if row["Tipo_Envio"] == "📍 Pedido Local" else None,
-        axis=1
+    df_completados_historial["Fecha_Completado"] = pd.to_datetime(
+        df_completados_historial["Fecha_Completado"],
+        errors="coerce",
+    )
+    df_completados_historial = df_completados_historial.sort_values(
+        by="Fecha_Completado",
+        ascending=False,
     )
 
-    grupos_locales = df_completados_historial[df_completados_historial["Grupo_Clave"].notna()]["Grupo_Clave"].unique().tolist()
+    displayed_historial_ids = set()
+
+    # 🧹 Limpieza específica por grupo de completados/cancelados locales
+    df_completados_historial["Fecha_dt"] = pd.to_datetime(
+        df_completados_historial["Fecha_Entrega"], errors="coerce"
+    )
+    df_completados_historial["Grupo_Clave"] = df_completados_historial.apply(
+        lambda row: (
+            f"{row['Turno']} – {row['Fecha_dt'].strftime('%d/%m')}"
+            if row["Tipo_Envio"] == "📍 Pedido Local"
+            else None
+        ),
+        axis=1,
+    )
+
+    grupos_locales = (
+        df_completados_historial[df_completados_historial["Grupo_Clave"].notna()][
+            "Grupo_Clave"
+        ]
+        .unique()
+        .tolist()
+    )
 
     if grupos_locales:
         st.markdown("### 🧹 Limpieza Específica de Completados/Cancelados Locales")
         for grupo in grupos_locales:
             turno, fecha_str = grupo.split(" – ")
-            fecha_dt = pd.to_datetime(fecha_str, format="%d/%m", errors='coerce').replace(year=datetime.now().year)
+            fecha_dt = (
+                pd.to_datetime(fecha_str, format="%d/%m", errors="coerce")
+                .replace(year=datetime.now().year)
+            )
 
             # Verificar si hay incompletos en ese grupo
             hay_incompletos = df_main[
-                (df_main["Turno"] == turno) &
-                (pd.to_datetime(df_main["Fecha_Entrega"], errors='coerce').dt.date == fecha_dt.date()) &
-                (df_main["Estado"].isin(["🟡 Pendiente", "🔵 En Proceso", "🔴 Demorado"]))
+                (df_main["Turno"] == turno)
+                & (
+                    pd.to_datetime(df_main["Fecha_Entrega"], errors="coerce").dt.date
+                    == fecha_dt.date()
+                )
+                & (
+                    df_main["Estado"].isin(
+                        ["🟡 Pendiente", "🔵 En Proceso", "🔴 Demorado"]
+                    )
+                )
             ]
 
             if hay_incompletos.empty:
                 label_btn = f"🧹 Limpiar {turno.strip()} - {fecha_str}"
                 if st.button(label_btn):
-                    pedidos_a_limpiar = df_completados_historial[df_completados_historial["Grupo_Clave"] == grupo]
+                    pedidos_a_limpiar = df_completados_historial[
+                        df_completados_historial["Grupo_Clave"] == grupo
+                    ]
                     col_idx = headers_main.index("Completados_Limpiado") + 1
                     updates = [
                         {
-                            'range': gspread.utils.rowcol_to_a1(int(row["_gsheet_row_index"]), col_idx),
-                            'values': [["sí"]]
+                            "range": gspread.utils.rowcol_to_a1(
+                                int(row["_gsheet_row_index"]), col_idx
+                            ),
+                            "values": [["sí"]],
                         }
                         for _, row in pedidos_a_limpiar.iterrows()
                     ]
                     if updates and batch_update_gsheet_cells(worksheet_main, updates):
-                        st.success(f"✅ {len(updates)} pedidos completados/cancelados en {grupo} marcados como limpiados.")
+                        st.success(
+                            f"✅ {len(updates)} pedidos completados/cancelados en {grupo} marcados como limpiados."
+                        )
                         st.cache_data.clear()
                         set_active_main_tab(7)
                         st.rerun()
 
+                pedidos_grupo = df_completados_historial[
+                    df_completados_historial["Grupo_Clave"] == grupo
+                ]
+                for orden, (idx, row) in enumerate(
+                    pedidos_grupo.iterrows(),
+                    start=1,
+                ):
+                    mostrar_pedido(
+                        df_main,
+                        idx,
+                        row,
+                        orden,
+                        "Historial",
+                        "✅ Historial Completados/Cancelados",
+                        worksheet_main,
+                        headers_main,
+                        s3_client,
+                    )
+                    displayed_historial_ids.add(row["ID_Pedido"])
+
     # Mostrar pedidos completados individuales
     if not df_completados_historial.empty:
-            # 🧹 Botón de limpieza específico para foráneos
+        # 🧹 Botón de limpieza específico para foráneos
         completados_foraneos = df_completados_historial[
             df_completados_historial["Tipo_Envio"] == "🚚 Pedido Foráneo"
         ]
@@ -5291,23 +5350,45 @@ with main_tabs[7]:  # ✅ Historial Completados/Cancelados
                 col_idx = headers_main.index("Completados_Limpiado") + 1
                 updates = [
                     {
-                        'range': gspread.utils.rowcol_to_a1(int(row["_gsheet_row_index"]), col_idx),
-                        'values': [["sí"]]
+                        "range": gspread.utils.rowcol_to_a1(
+                            int(row["_gsheet_row_index"]), col_idx
+                        ),
+                        "values": [["sí"]],
                     }
                     for _, row in completados_foraneos.iterrows()
                 ]
                 if updates and batch_update_gsheet_cells(worksheet_main, updates):
-                    st.success(f"✅ {len(updates)} pedidos foráneos completados/cancelados fueron marcados como limpiados.")
+                    st.success(
+                        f"✅ {len(updates)} pedidos foráneos completados/cancelados fueron marcados como limpiados."
+                    )
                     st.cache_data.clear()
                     set_active_main_tab(7)
                     st.rerun()
 
-        df_completados_historial["Fecha_Completado"] = pd.to_datetime(
-            df_completados_historial["Fecha_Completado"],
-            errors="coerce"
-        )
-        df_completados_historial = df_completados_historial.sort_values(by="Fecha_Completado", ascending=False)
-        for orden, (idx, row) in enumerate(df_completados_historial.iterrows(), start=1):
+            for orden, (idx, row) in enumerate(
+                completados_foraneos.iterrows(),
+                start=1,
+            ):
+                mostrar_pedido(
+                    df_main,
+                    idx,
+                    row,
+                    orden,
+                    "Historial",
+                    "✅ Historial Completados/Cancelados",
+                    worksheet_main,
+                    headers_main,
+                    s3_client,
+                )
+                displayed_historial_ids.add(row["ID_Pedido"])
+
+        pedidos_restantes = df_completados_historial[
+            ~df_completados_historial["ID_Pedido"].isin(displayed_historial_ids)
+        ]
+        for orden, (idx, row) in enumerate(
+            pedidos_restantes.iterrows(),
+            start=1,
+        ):
             mostrar_pedido(
                 df_main,
                 idx,
