@@ -759,6 +759,56 @@ def sort_entries_by_delivery(entries):
     return sorted(entries, key=_key)
 
 
+def _normalize_match_value(value: str) -> str:
+    cleaned = sanitize_text(value)
+    return cleaned.lower()
+
+
+def drop_local_duplicates_for_cases(
+    df_local: pd.DataFrame, df_casos: pd.DataFrame
+) -> pd.DataFrame:
+    if df_local.empty or df_casos.empty:
+        return df_local
+
+    case_ids = set()
+    case_folios = set()
+    if "ID_Pedido" in df_casos.columns:
+        case_ids = {
+            _normalize_match_value(v)
+            for v in df_casos["ID_Pedido"].astype(str)
+            if _normalize_match_value(v)
+        }
+    if "Folio_Factura" in df_casos.columns:
+        case_folios = {
+            _normalize_match_value(v)
+            for v in df_casos["Folio_Factura"].astype(str)
+            if _normalize_match_value(v)
+        }
+
+    if not case_ids and not case_folios:
+        return df_local
+
+    local_ids = pd.Series("", index=df_local.index, dtype=str)
+    local_folios = pd.Series("", index=df_local.index, dtype=str)
+    if "ID_Pedido" in df_local.columns:
+        local_ids = df_local["ID_Pedido"].astype(str).apply(_normalize_match_value)
+    if "Folio_Factura" in df_local.columns:
+        local_folios = df_local["Folio_Factura"].astype(str).apply(_normalize_match_value)
+
+    mask_case_id = (
+        local_ids.isin(case_ids)
+        if case_ids
+        else pd.Series(False, index=df_local.index)
+    )
+    mask_case_folio = (
+        local_folios.isin(case_folios)
+        if case_folios
+        else pd.Series(False, index=df_local.index)
+    )
+    mask_duplicate = mask_case_id | mask_case_folio
+
+    return df_local.loc[~mask_duplicate].copy()
+
 
 def get_local_orders(df_all: pd.DataFrame) -> pd.DataFrame:
     base_local = pd.DataFrame()
@@ -1794,6 +1844,7 @@ auto_foraneo_entries = []
 if selected_tab in (0, 1, 2):
     df_local_auto = get_local_orders(df_all)
     casos_local_auto, _ = get_case_envio_assignments(df_all)
+    df_local_auto = drop_local_duplicates_for_cases(df_local_auto, casos_local_auto)
     if not df_local_auto.empty:
         auto_local_entries.extend(build_entries_local(df_local_auto))
     if not casos_local_auto.empty:
