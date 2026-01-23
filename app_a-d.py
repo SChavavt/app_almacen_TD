@@ -1829,6 +1829,9 @@ def mostrar_confirmacion_completado_guia(
 ):
     """Muestra confirmación antes de completar pedido tras subir guía."""
 
+    if not es_tab_solicitudes_guia(origen_tab):
+        return
+
     prompts = st.session_state.setdefault("confirm_complete_after_guide", {})
     if not prompts.get(row["ID_Pedido"]):
         return
