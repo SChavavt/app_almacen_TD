@@ -265,6 +265,7 @@ def build_base_entry(row, categoria: str):
     entry = {
         "categoria": categoria,
         "estado": sanitize_text(row.get("Estado", "")),
+        "completados_limpiado": sanitize_text(row.get("Completados_Limpiado", "")),
         "cliente": format_cliente_line(row),
         "cliente_nombre": sanitize_text(row.get("Cliente", "")),
         "folio": sanitize_text(row.get("Folio_Factura", "")),
@@ -554,6 +555,12 @@ def render_auto_list(
 def _is_done_estado(estado: str) -> bool:
     s = sanitize_text(estado)
     return s in {"🟢 Completado", "🟣 Cancelado", "✅ Viajó"}
+
+
+def _is_visible_auto_entry(entry: dict) -> bool:
+    if not _is_done_estado(entry.get("estado", "")):
+        return True
+    return sanitize_text(entry.get("completados_limpiado", "")) == ""
 
 
 def _is_surtidor_visible_estado(estado: str) -> bool:
@@ -1742,7 +1749,7 @@ if selected_tab == 0:
     st_autorefresh(interval=60000, key="auto_refresh_local_casos")
 
     combined_entries = [
-        e for e in auto_local_entries if not _is_done_estado(e.get("estado", ""))
+        e for e in auto_local_entries if _is_visible_auto_entry(e)
     ]
 
     turno_priority = [
@@ -1809,7 +1816,7 @@ if selected_tab == 1:
     # --- IZQUIERDA: ANTERIORES (todos los previos) ---
     with col_left:
         ant = filter_entries_before_date(combined_entries, hoy)
-        ant = [e for e in ant if not _is_done_estado(e.get("estado", ""))]
+        ant = [e for e in ant if _is_visible_auto_entry(e)]
         ant = sort_entries_by_delivery(ant)
 
         next_number = render_auto_list(
@@ -1835,6 +1842,7 @@ if selected_tab == 1:
             seen.add(key)
             merged.append(e)
 
+        merged = [e for e in merged if _is_visible_auto_entry(e)]
         merged = sort_entries_by_delivery(merged)
         render_auto_list(
             merged,
