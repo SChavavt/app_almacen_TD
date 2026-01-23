@@ -968,7 +968,21 @@ with tabs[1]:
     df_casos = cargar_casos_especiales()
 
     mostrar_casos = st.checkbox("Mostrar solo casos especiales")
-    df = df_casos if mostrar_casos else df_todos
+    solo_completados_sin_limpieza = st.checkbox(
+        "Solo pedidos 🟢 Completados sin limpiar",
+        help="Muestra únicamente pedidos con Estado 🟢 Completado y Completados_Limpiado vacío.",
+    )
+
+    if solo_completados_sin_limpieza:
+        df = df_todos
+        if "Completados_Limpiado" not in df.columns:
+            df["Completados_Limpiado"] = ""
+        df = df[
+            (df["Estado"].astype(str).str.strip() == "🟢 Completado")
+            & (df["Completados_Limpiado"].astype(str).str.strip() == "")
+        ]
+    else:
+        df = df_casos if mostrar_casos else df_todos
 
     if df.empty:
         st.info("No hay datos disponibles para descargar.")
@@ -977,28 +991,31 @@ with tabs[1]:
         df["ID_Pedido"] = pd.to_numeric(df["ID_Pedido"], errors="coerce")
         df = df.sort_values(by="ID_Pedido", ascending=True)
 
-        rango_tiempo = st.selectbox(
-            "Rango de tiempo",
-            ["12 horas", "24 horas", "7 días", "Todos"],
-        )
-        estados_sel = st.multiselect("Estado", sorted(df["Estado"].dropna().unique()))
-        tipos_sel = st.multiselect("Tipo de envío", sorted(df["Tipo_Envio"].dropna().unique()))
+        if solo_completados_sin_limpieza:
+            filtrado = df
+        else:
+            rango_tiempo = st.selectbox(
+                "Rango de tiempo",
+                ["12 horas", "24 horas", "7 días", "Todos"],
+            )
+            estados_sel = st.multiselect("Estado", sorted(df["Estado"].dropna().unique()))
+            tipos_sel = st.multiselect("Tipo de envío", sorted(df["Tipo_Envio"].dropna().unique()))
 
-        filtrado = df
-        delta = None
-        if rango_tiempo == "12 horas":
-            delta = timedelta(hours=12)
-        elif rango_tiempo == "24 horas":
-            delta = timedelta(hours=24)
-        elif rango_tiempo == "7 días":
-            delta = timedelta(days=7)
+            filtrado = df
+            delta = None
+            if rango_tiempo == "12 horas":
+                delta = timedelta(hours=12)
+            elif rango_tiempo == "24 horas":
+                delta = timedelta(hours=24)
+            elif rango_tiempo == "7 días":
+                delta = timedelta(days=7)
 
-        if delta is not None:
-            filtrado = filtrado[filtrado["Hora_Registro"] >= datetime.now() - delta]
-        if estados_sel:
-            filtrado = filtrado[filtrado["Estado"].isin(estados_sel)]
-        if tipos_sel:
-            filtrado = filtrado[filtrado["Tipo_Envio"].isin(tipos_sel)]
+            if delta is not None:
+                filtrado = filtrado[filtrado["Hora_Registro"] >= datetime.now() - delta]
+            if estados_sel:
+                filtrado = filtrado[filtrado["Estado"].isin(estados_sel)]
+            if tipos_sel:
+                filtrado = filtrado[filtrado["Tipo_Envio"].isin(tipos_sel)]
 
         filtrado = filtrado.drop(columns=["ID_Pedido"], errors="ignore")
         filtrado = filtrado.reset_index(drop=True)
