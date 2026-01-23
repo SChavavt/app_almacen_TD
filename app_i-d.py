@@ -420,6 +420,8 @@ def render_auto_list(
     max_rows: int = 60,
     start_number: int = 1,
     scroll_threshold: int = 10,
+    panel_height: int = 720,
+    scroll_max_height: int = 640,
 ):
     if not entries:
         st.info("No hay pedidos para mostrar.")
@@ -503,7 +505,7 @@ def render_auto_list(
     .board-meta{{margin-top:0.12rem;display:flex;flex-wrap:wrap;gap:0.25rem;font-size:0.72rem;opacity:0.85;font-weight:650;align-items:center;color:#fff;}}
     .chip{{padding:0.05rem 0.4rem;border-radius:0.6rem;background:rgba(255,255,255,0.10);white-space:nowrap;}}
     .board-status{{margin-left:auto;font-size:0.82rem;font-weight:900;white-space:nowrap;opacity:0.95;}}
-    #{list_id} .board-scroll{{max-height:640px;overflow:hidden;position:relative;}}
+    #{list_id} .board-scroll{{max-height:{scroll_max_height}px;overflow:hidden;position:relative;}}
     #{list_id} .board-scroll.auto-scroll .board-table{{animation: board-scroll-{list_id} var(--scroll-duration, 18s) linear infinite;}}
     @keyframes board-scroll-{list_id} {{
         0% {{ transform: translateY(0); }}
@@ -545,7 +547,7 @@ def render_auto_list(
 
 
     # ✅ Forzar render HTML real (no texto)
-    components.html(html, height=720, scrolling=False)
+    components.html(html, height=panel_height, scrolling=False)
     return start_number + len(visible)
 
 
@@ -1739,52 +1741,55 @@ if selected_tab in (0, 1, 2):
 if selected_tab == 0:
     st_autorefresh(interval=60000, key="auto_refresh_local_casos")
 
-    hoy = datetime.now(TZ).date()
+    combined_entries = [
+        e for e in auto_local_entries if not _is_done_estado(e.get("estado", ""))
+    ]
 
-    # 1) Armar entradas (local + casos asignados a local)
-    combined_entries = list(auto_local_entries)
+    turno_priority = [
+        "☀️ Local Mañana",
+        "🌙 Local Tarde",
+        "🌵 Saltillo",
+        "📦 Pasa a Bodega",
+        "📍 Local (sin turno)",
+    ]
+    grouped: dict[str, list] = {label: [] for label in turno_priority}
+    for entry in combined_entries:
+        turno = normalize_turno_label(entry.get("turno", ""))
+        if not turno:
+            turno = "📍 Local (sin turno)"
+        if turno not in grouped:
+            grouped[turno] = []
+        grouped[turno].append(entry)
 
-    # 2) Layout: izquierda/derecha
-    col_left, col_right = st.columns(2, gap="large")
+    ordered_labels = [
+        label for label in turno_priority if label in grouped and grouped[label]
+    ]
+    extra_labels = sorted(
+        [label for label in grouped.keys() if label not in turno_priority and grouped[label]]
+    )
+    ordered_labels.extend(extra_labels)
 
-    # --- IZQUIERDA: ANTERIORES (todos los previos) ---
-    with col_left:
-        ant = filter_entries_before_date(combined_entries, hoy)
-        ant = [e for e in ant if not _is_done_estado(e.get("estado", ""))]
-        ant = sort_entries_by_delivery(ant)
+    if not ordered_labels:
+        st.info("No hay pedidos locales activos por turno.")
+    else:
+        col_left, col_right = st.columns(2, gap="large")
+        columns = [col_left, col_right]
+        next_number = 1
 
-        next_number = render_auto_list(
-            ant,
-            title="📍 LOCALES • ANTERIORES",
-            subtitle="Fechas previas (sin completados)",
-            max_rows=140,
-        )
-
-    # --- DERECHA: HOY + FUTUROS + SIN Fecha_Entrega ---
-    with col_right:
-        hoy_entries = filter_entries_on_or_after(combined_entries, hoy)
-        sin_fecha = filter_entries_no_entrega_date(combined_entries)
-
-        # unir sin duplicados
-        seen = set()
-        merged = []
-        for e in (hoy_entries + sin_fecha):
-            key = sanitize_text(e.get("id_pedido", "")) or (
-                sanitize_text(e.get("cliente", "")) + "|" + sanitize_text(e.get("hora", ""))
-            )
-            if key in seen:
-                continue
-            seen.add(key)
-            merged.append(e)
-
-        merged = sort_entries_by_delivery(merged)
-        render_auto_list(
-            merged,
-            title=f"📍 LOCALES • HOY ({hoy.strftime('%d/%m')})",
-            subtitle="Todos los de hoy y fechas futuras + pedidos sin Fecha_Entrega",
-            max_rows=140,
-            start_number=next_number,
-        )
+        for idx, label in enumerate(ordered_labels):
+            target_col = columns[idx % 2]
+            entries = sort_entries_by_delivery(grouped[label])
+            with target_col:
+                next_number = render_auto_list(
+                    entries,
+                    title=f"📍 LOCALES • {label}",
+                    subtitle="Pedidos activos por turno",
+                    max_rows=140,
+                    start_number=next_number,
+                    scroll_threshold=8,
+                    panel_height=380,
+                    scroll_max_height=300,
+                )
 
 # ---------------------------
 # TAB 1: Auto Foráneo (Casos asignados) — 2 columnas
