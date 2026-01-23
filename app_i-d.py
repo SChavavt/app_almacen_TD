@@ -1848,17 +1848,18 @@ if selected_tab == 1:
 # TAB 2: Surtidores (Asignación)
 # ---------------------------
 if selected_tab == 2:
+    hoy = datetime.now(TZ).date()
+
     st.markdown("### 🧑‍🔧 Asignación de surtidores")
-    st.caption(
-        "Selecciona pedidos en proceso o completados (sin importar la fecha de entrega) "
-        "y escribe tu nombre o inicial para asignarlos."
-    )
+    st.caption("Selecciona pedidos de hoy y escribe tu nombre o inicial para asignarlos.")
 
     surtidor_nombre = st.text_input("Nombre o inicial del surtidor")
 
+    local_on_or_after = filter_entries_on_or_after(auto_local_entries, hoy)
+    local_no_fecha = filter_entries_no_entrega_date(auto_local_entries)
     seen_local = set()
     local_hoy = []
-    for entry in auto_local_entries:
+    for entry in local_on_or_after + local_no_fecha:
         key = sanitize_text(entry.get("id_pedido", "")) or (
             sanitize_text(entry.get("cliente", "")) + "|" + sanitize_text(entry.get("hora", ""))
         )
@@ -1869,7 +1870,7 @@ if selected_tab == 2:
             local_hoy.append(entry)
     foraneo_hoy = [
         e
-        for e in auto_foraneo_entries
+        for e in filter_entries_on_date(auto_foraneo_entries, hoy)
         if _is_surtidor_visible_estado(e.get("estado", ""))
     ]
 
@@ -1885,14 +1886,14 @@ if selected_tab == 2:
 
     col_local, col_foraneo = st.columns(2, gap="large")
     with col_local:
-        st.markdown("#### 📍 Auto Local")
+        st.markdown("#### 📍 Auto Local (hoy)")
         selected_local = st.multiselect(
             "Pedidos locales",
             options=list(local_options.keys()),
             format_func=lambda k: local_options.get(k, k),
         )
     with col_foraneo:
-        st.markdown("#### 🚚 Auto Foráneo")
+        st.markdown("#### 🚚 Auto Foráneo (hoy)")
         selected_foraneo = st.multiselect(
             "Pedidos foráneos",
             options=list(foraneo_options.keys()),
