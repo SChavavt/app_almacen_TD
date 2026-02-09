@@ -2599,7 +2599,10 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
                     st.info(f"🟡 Modificación de Surtido:\n{mod_texto}")
                 else:
                     st.warning(f"🟡 Modificación de Surtido:\n{mod_texto}")
-                    if st.button("✅ Confirmar Cambios de Surtido", key=f"confirm_mod_{row['ID_Pedido']}"):
+                    if st.button(
+                        "✅ Confirmar Cambios de Surtido",
+                        key=f"confirm_mod_{row['ID_Pedido']}_{idx}_{origen_tab}",
+                    ):
                         st.session_state["expanded_pedidos"][row['ID_Pedido']] = True
                         st.session_state["scroll_to_pedido_id"] = row["ID_Pedido"]
                         nuevo_texto = mod_texto + " [✔CONFIRMADO]"
@@ -2641,7 +2644,7 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
                         st.warning(f"✉️ Modificación (Datos Fiscales):\n{mod_texto}")
                         if st.button(
                             "✅ Confirmar Cambios de Surtido",
-                            key=f"confirm_mod_df_{row['ID_Pedido']}",
+                            key=f"confirm_mod_df_{row['ID_Pedido']}_{idx}_{origen_tab}",
                         ):
                             st.session_state["expanded_pedidos"][row["ID_Pedido"]] = True
                             st.session_state["scroll_to_pedido_id"] = row["ID_Pedido"]
