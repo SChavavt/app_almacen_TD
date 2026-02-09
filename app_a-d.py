@@ -2630,9 +2630,47 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
 
             # ℹ️ Si es refacturación por Datos Fiscales
             elif refact_tipo == "Datos Fiscales":
-                st.info("ℹ️ Esta modificación fue marcada como **Datos Fiscales**. Se muestra como referencia pero no requiere confirmación.")
+                st.info(
+                    "ℹ️ Esta modificación fue marcada como **Datos Fiscales**. "
+                    "Se muestra como referencia, pero puedes confirmarla para pasar a **🔵 En Proceso**."
+                )
                 if mod_texto:
-                    st.info(f"✉️ Modificación (Datos Fiscales):\n{mod_texto}")
+                    if mod_texto.endswith("[✔CONFIRMADO]"):
+                        st.info(f"✉️ Modificación (Datos Fiscales):\n{mod_texto}")
+                    else:
+                        st.warning(f"✉️ Modificación (Datos Fiscales):\n{mod_texto}")
+                        if st.button(
+                            "✅ Confirmar Cambios de Surtido",
+                            key=f"confirm_mod_df_{row['ID_Pedido']}",
+                        ):
+                            st.session_state["expanded_pedidos"][row["ID_Pedido"]] = True
+                            st.session_state["scroll_to_pedido_id"] = row["ID_Pedido"]
+                            nuevo_texto = mod_texto + " [✔CONFIRMADO]"
+                            success = update_gsheet_cell(
+                                worksheet,
+                                headers,
+                                gsheet_row_index,
+                                "Modificacion_Surtido",
+                                nuevo_texto,
+                            )
+                            if success and "Estado" in headers:
+                                success = update_gsheet_cell(
+                                    worksheet,
+                                    headers,
+                                    gsheet_row_index,
+                                    "Estado",
+                                    "🔵 En Proceso",
+                                )
+                            if success:
+                                row["Estado"] = "🔵 En Proceso"
+                                st.success(
+                                    "✅ Cambios de surtido confirmados y pedido en '🔵 En Proceso'."
+                                )
+                                st.cache_data.clear()
+                                marcar_contexto_pedido(row["ID_Pedido"], origen_tab)
+                                st.rerun()
+                            else:
+                                st.error("❌ No se pudo confirmar la modificación.")
 
             # Archivos mencionados en el texto
             mod_surtido_archivos_mencionados_raw = []
