@@ -1461,6 +1461,14 @@ def completar_pedido(
 ) -> bool:
     """Marca un pedido como completado y preserva el estado visual."""
 
+    estado_actual = str(row.get("Estado", "") or "").strip()
+    if estado_actual != "🔵 En Proceso":
+        st.warning(
+            "⚠️ Para completar el pedido primero debe estar en **🔵 En Proceso**. "
+            "Cambia el estado a en proceso antes de marcarlo como completado."
+        )
+        return False
+
     try:
         gsheet_row_index = int(gsheet_row_index)
     except (TypeError, ValueError):
