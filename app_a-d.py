@@ -3222,6 +3222,66 @@ if not df_main.empty:
     solicitudes_por_hoja_ruta = 0
 
     if not df_main.empty:
+        estado_no_completado = (
+            df_main.get("Estado", pd.Series(dtype=str)).astype(str).str.strip() != "🟢 Completado"
+        )
+        completados_limpiado_vacio = df_main.get(
+            "Completados_Limpiado",
+            pd.Series(dtype=str),
+        ).apply(_is_empty_text)
+        solicitudes_main_mask = df_main.apply(pedido_requiere_guia, axis=1)
+        adjuntos_vacios_mask = df_main.get("Adjuntos_Guia", pd.Series(dtype=str)).apply(
+            _is_empty_text
+        )
+        solicitudes_por_adjuntos = len(
+            df_main[
+                estado_no_completado
+                & completados_limpiado_vacio
+                & solicitudes_main_mask
+                & adjuntos_vacios_mask
+            ]
+        )
+        solicitudes_guia_count += solicitudes_por_adjuntos
+
+    if not df_casos.empty:
+        estado_no_completado = (
+            df_casos.get("Estado", pd.Series(dtype=str)).astype(str).str.strip() != "🟢 Completado"
+        )
+        completados_limpiado_vacio = df_casos.get(
+            "Completados_Limpiado",
+            pd.Series(dtype=str),
+        ).apply(_is_empty_text)
+        solicitudes_casos_mask = df_casos.apply(pedido_requiere_guia, axis=1)
+        hoja_ruta_vacia_mask = df_casos.get(
+            "Hoja_Ruta_Mensajero",
+            pd.Series(dtype=str),
+        ).apply(_is_empty_text)
+        solicitudes_por_hoja_ruta = len(
+            df_casos[
+                estado_no_completado
+                & completados_limpiado_vacio
+                & solicitudes_casos_mask
+                & hoja_ruta_vacia_mask
+            ]
+        )
+        solicitudes_guia_count += solicitudes_por_hoja_ruta
+
+    if solicitudes_guia_count:
+        st.warning(
+            "⚠️ Hay "
+            f"{solicitudes_guia_count} solicitud"
+            f"{'es' if solicitudes_guia_count != 1 else ''} de guía "
+            "sin hoja de ruta o adjuntos de guía."
+        )
+
+    def _is_empty_text(value: Any) -> bool:
+        return str(value).strip() == "" or str(value).strip().lower() == "nan"
+
+    solicitudes_guia_count = 0
+    solicitudes_por_adjuntos = 0
+    solicitudes_por_hoja_ruta = 0
+
+    if not df_main.empty:
         solicitudes_main_mask = df_main.apply(pedido_requiere_guia, axis=1)
         adjuntos_vacios_mask = df_main.get("Adjuntos_Guia", pd.Series(dtype=str)).apply(
             _is_empty_text
@@ -5693,3 +5753,4 @@ with main_tabs[7]:  # ✅ Historial Completados/Cancelados
                         render_caso_especial_garantia_hist(row)
         else:
             st.info("No hay casos especiales completados/cancelados o ya fueron limpiados.")
+
