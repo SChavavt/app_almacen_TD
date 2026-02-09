@@ -3214,48 +3214,6 @@ if not df_main.empty:
             f"⚠️ Hay {lista_casos} en estado pendiente en Casos Especiales."
         )
 
-    def _is_empty_text(value: Any) -> bool:
-        return str(value).strip() == "" or str(value).strip().lower() == "nan"
-
-    solicitudes_guia_count = 0
-    if "Estado" in df_main.columns:
-        estado_pendiente_main = df_main["Estado"].astype(str).str.strip().eq("🟡 Pendiente")
-        solicitudes_main_mask = (
-            df_main.get("Tipo_Envio", pd.Series(dtype=str))
-            .astype(str)
-            .str.contains(r"Solicitudes? de Gu[ií]a", case=False, na=False)
-        )
-        adjuntos_vacios_mask = df_main.get("Adjuntos_Guia", pd.Series(dtype=str)).apply(
-            _is_empty_text
-        )
-        solicitudes_guia_count += len(
-            df_main[estado_pendiente_main & solicitudes_main_mask & adjuntos_vacios_mask]
-        )
-
-    if "Estado" in df_casos.columns:
-        estado_pendiente_casos = df_casos["Estado"].astype(str).str.strip().eq("🟡 Pendiente")
-        tipo_casos_series = df_casos.get(tipo_casos_col, pd.Series(dtype=str)).astype(str)
-        solicitudes_casos_mask = tipo_casos_series.str.contains(
-            r"Solicitudes? de Gu[ií]a",
-            case=False,
-            na=False,
-        )
-        hoja_ruta_vacia_mask = df_casos.get(
-            "Hoja_Ruta_Mensajero",
-            pd.Series(dtype=str),
-        ).apply(_is_empty_text)
-        solicitudes_guia_count += len(
-            df_casos[estado_pendiente_casos & solicitudes_casos_mask & hoja_ruta_vacia_mask]
-        )
-
-    if solicitudes_guia_count:
-        st.warning(
-            "⚠️ Hay "
-            f"{solicitudes_guia_count} solicitud"
-            f"{'es' if solicitudes_guia_count != 1 else ''} de guía "
-            "pendiente sin hoja de ruta o adjuntos de guía."
-        )
-
 
     # --- Implementación de Pestañas con st.tabs ---
     tab_options = [
