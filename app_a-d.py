@@ -3299,7 +3299,7 @@ if not df_main.empty:
             "⚠️ Hay "
             f"{solicitudes_guia_count} solicitud"
             f"{'es' if solicitudes_guia_count != 1 else ''} de guía "
-            "sin hoja de ruta o adjuntos de guía."
+            "sin adjuntos de guía."
         )
 
 
@@ -5745,5 +5745,6 @@ with main_tabs[7]:  # ✅ Historial Completados/Cancelados
                         render_caso_especial_garantia_hist(row)
         else:
             st.info("No hay casos especiales completados/cancelados o ya fueron limpiados.")
+
 
 
