@@ -198,6 +198,32 @@ def _resolve_tab_index_from_query(
     return _clamp_tab_index(fallback_index, options)
 
 
+def _is_empty_text(value: Any) -> bool:
+    return str(value).strip() == "" or str(value).strip().lower() == "nan"
+
+
+def pedido_sin_guia(row: Any) -> bool:
+    if not pedido_requiere_guia(row):
+        return False
+
+    estado_no_completado = str(row.get("Estado", "")).strip() != "🟢 Completado"
+    completados_vacio = _is_empty_text(row.get("Completados_Limpiado", ""))
+
+    if not (estado_no_completado and completados_vacio):
+        return False
+
+    campos_guia = []
+    if "Adjuntos_Guia" in row:
+        campos_guia.append("Adjuntos_Guia")
+    if "Hoja_Ruta_Mensajero" in row:
+        campos_guia.append("Hoja_Ruta_Mensajero")
+
+    if not campos_guia:
+        return False
+
+    return all(_is_empty_text(row.get(campo, "")) for campo in campos_guia)
+
+
 def _emit_recent_tab_group_script(active_index: int, query_param: str) -> None:
     """Attach JS to focus the most recently rendered tab group and persist selection."""
 
@@ -1963,8 +1989,12 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
         )
         return
     folio = row.get("Folio_Factura", "").strip() or row['ID_Pedido']
+    guia_marker = "📋 " if pedido_sin_guia(row) else ""
     st.markdown(f'<a name="pedido_{row["ID_Pedido"]}"></a>', unsafe_allow_html=True)
-    with st.expander(f"{row['Estado']} - {folio} - {row['Cliente']}", expanded=st.session_state["expanded_pedidos"].get(row['ID_Pedido'], False)):
+    with st.expander(
+        f"{guia_marker}{row['Estado']} - {folio} - {row['Cliente']}",
+        expanded=st.session_state["expanded_pedidos"].get(row['ID_Pedido'], False),
+    ):
         st.markdown("---")
         mod_texto = str(row.get("Modificacion_Surtido", "")).strip()
         hay_modificacion = mod_texto != ""
@@ -2735,7 +2765,11 @@ def mostrar_pedido_solo_guia(df, idx, row, orden, origen_tab, current_main_tab_l
     st.markdown(f'<a name="pedido_{row["ID_Pedido"]}"></a>', unsafe_allow_html=True)
 
     # Expander simple con info básica (sin acciones extra)
-    with st.expander(f"{row['Estado']} - {folio} - {row.get('Cliente','')}", expanded=True):
+    guia_marker = "📋 " if pedido_sin_guia(row) else ""
+    with st.expander(
+        f"{guia_marker}{row['Estado']} - {folio} - {row.get('Cliente','')}",
+        expanded=True,
+    ):
         st.markdown("---")
 
         # Cabecera compacta
@@ -3213,9 +3247,6 @@ if not df_main.empty:
         st.warning(
             f"⚠️ Hay {lista_casos} en estado pendiente en Casos Especiales."
         )
-
-    def _is_empty_text(value: Any) -> bool:
-        return str(value).strip() == "" or str(value).strip().lower() == "nan"
 
     solicitudes_guia_count = 0
     solicitudes_por_adjuntos = 0
