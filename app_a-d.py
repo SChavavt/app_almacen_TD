@@ -1921,11 +1921,14 @@ def mostrar_pedido_detalle(
         st.session_state.setdefault("printed_items", {})
         st.session_state["printed_items"][row["ID_Pedido"]] = True
 
-        # 🔥 Mantener abierto el expander de archivos SIN rebote
-        st.session_state["expanded_attachments"][row["ID_Pedido"]] = True
-
-        # (opcional) Mantener abierto el expander principal del pedido
-        st.session_state["expanded_pedidos"][row["ID_Pedido"]] = True
+        ensure_expanders_open(
+            row["ID_Pedido"],
+            "expanded_attachments",
+            "expanded_pedidos",
+        )
+        st.session_state["scroll_to_pedido_id"] = row["ID_Pedido"]
+        preserve_tab_state()
+        st.session_state["restore_tabs_after_print"] = True
 
 
         if row["Estado"] in ["🟡 Pendiente", "🔴 Demorado"]:
