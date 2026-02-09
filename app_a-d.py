@@ -3214,24 +3214,6 @@ if not df_main.empty:
             f"⚠️ Hay {lista_casos} en estado pendiente en Casos Especiales."
         )
 
-    solicitudes_guia_count = 0
-    if "Tipo_Envio" in df_main.columns and "Estado" in df_main.columns:
-        estado_pendiente = df_main["Estado"].astype(str).str.strip().eq("🟡 Pendiente")
-        solicitudes_mask = df_main["Tipo_Envio"].astype(str).str.contains(
-            r"Solicitudes? de Gu[ií]a",
-            case=False,
-            na=False,
-        )
-        solicitudes_guia_count = len(df_main[estado_pendiente & solicitudes_mask])
-
-    if solicitudes_guia_count:
-        st.warning(
-            "⚠️ Hay "
-            f"{solicitudes_guia_count} solicitud"
-            f"{'es' if solicitudes_guia_count != 1 else ''} de guía "
-            "en estado pendiente."
-        )
-
 
     # --- Implementación de Pestañas con st.tabs ---
     tab_options = [
