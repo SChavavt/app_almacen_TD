@@ -1912,12 +1912,26 @@ def mostrar_pedido_detalle(
     gsheet_row_index,
     col_print_btn,
 ):
-    """Muestra el botón de procesar y actualiza el estado del pedido."""
+    """Muestra el botón de impresión y actualiza el estado del pedido."""
     if col_print_btn.button(
-        "⚙️ Procesar",
+        "🖨 Imprimir",
         key=f"print_{row['ID_Pedido']}_{origen_tab}",
     ):
-        if row["Estado"] in ["🟡 Pendiente", "🔴 Demorado", "🛠 Modificación", "✏️ Modificación"]:
+        # --- Evitar rebotes visuales en impresión ---
+        st.session_state.setdefault("printed_items", {})
+        st.session_state["printed_items"][row["ID_Pedido"]] = True
+
+        ensure_expanders_open(
+            row["ID_Pedido"],
+            "expanded_attachments",
+            "expanded_pedidos",
+        )
+        st.session_state["scroll_to_pedido_id"] = row["ID_Pedido"]
+        preserve_tab_state()
+        st.session_state["restore_tabs_after_print"] = True
+
+
+        if row["Estado"] in ["🟡 Pendiente", "🔴 Demorado"]:
             zona_mexico = timezone("America/Mexico_City")
             now = datetime.now(zona_mexico)
             now_str = now.strftime("%Y-%m-%d %H:%M:%S")
@@ -1948,7 +1962,7 @@ def mostrar_pedido_detalle(
                     df.at[idx, "Estado"] = "🔵 En Proceso"
                     df.at[idx, "Hora_Proceso"] = now_str
                     row["Estado"] = "🔵 En Proceso"
-                    st.toast("⚙️ Pedido procesado: estado actualizado a 'En Proceso'", icon="✅")
+                    st.toast("📄 Estado actualizado a 'En Proceso'", icon="📌")
                 else:
                     st.error("❌ Falló la actualización del estado a 'En Proceso'.")
 
@@ -2206,9 +2220,9 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
         # This block displays attachments inside an expander
         with st.expander(
             "📎 Archivos (Adjuntos y Guía)",
-            expanded=True,
+            expanded=st.session_state["expanded_attachments"].get(row["ID_Pedido"], False),
         ):
-            if True:
+            if st.session_state["expanded_attachments"].get(row["ID_Pedido"], False):
                 st.markdown(f"##### Adjuntos para ID: {row['ID_Pedido']}")
 
                 contenido_attachments = False
@@ -2757,6 +2771,19 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
                 if not (hay_adjuntos_texto or hay_adjuntos_s3 or hay_adjuntos_campo):
                     st.info("No hay adjuntos específicos para esta modificación de surtido mencionados en el texto.")
 
+
+    # --- Scroll automático al pedido impreso (si corresponde) ---
+    if st.session_state.get("scroll_to_pedido_id") == row["ID_Pedido"]:
+        import streamlit.components.v1 as components
+        components.html(f"""
+            <script>
+                const el = document.querySelector('a[name="pedido_{row["ID_Pedido"]}"]');
+                if (el) {{
+                    el.scrollIntoView({{ behavior: 'smooth', block: 'start' }});
+                }}
+            </script>
+        """, height=0)
+        st.session_state["scroll_to_pedido_id"] = None
 
     _clear_offscreen_pedido_flags(st.session_state.get("pedidos_en_pantalla", set()))
     _clear_offscreen_guide_flags(st.session_state.get("pedidos_en_pantalla", set()))
@@ -3334,39 +3361,21 @@ if not df_main.empty:
     main_tabs = st.tabs(tab_options)
     components.html(f"""
     <script>
-    (function() {{
-      const expectedLabels = {json.dumps(tab_options)};
-      const tabGroups = window.parent.document.querySelectorAll('.stTabs');
-      let targetGroup = null;
-
-      tabGroups.forEach(group => {{
-        if (targetGroup) return;
-        const tabs = group.querySelectorAll('[data-baseweb="tab"]');
-        if (tabs.length !== expectedLabels.length) return;
-
-        const labels = Array.from(tabs, t => t.textContent.trim());
-        const matches = expectedLabels.every(label => labels.includes(label));
-        if (matches) targetGroup = group;
-      }});
-
-      if (!targetGroup) return;
-
-      const tabs = targetGroup.querySelectorAll('[data-baseweb="tab"]');
-      const activeIndex = {int(st.session_state.get("active_main_tab_index", 0))};
-
-      if (tabs[activeIndex]) tabs[activeIndex].click();
-
-      tabs.forEach((tab, idx) => {{
+    const tabs = window.parent.document.querySelectorAll('.stTabs [data-baseweb="tab"]');
+    const activeIndex = {st.session_state.get("active_main_tab_index", 0)};
+    if (tabs[activeIndex]) {{
+        tabs[activeIndex].click();
+    }}
+    tabs.forEach((tab, idx) => {{
         tab.addEventListener('click', () => {{
-          const params = new URLSearchParams(window.parent.location.search);
-          params.set('tab', idx);
-          const base = window.parent.location.origin + window.parent.location.pathname;
-          const query = params.toString();
-          const newUrl = query ? `${{base}}?${{query}}` : base;
-          window.parent.history.replaceState(null, '', newUrl);
+            const params = new URLSearchParams(window.parent.location.search);
+            params.set('tab', idx);
+            const query = params.toString();
+            const base = window.parent.location.origin + window.parent.location.pathname;
+            const newUrl = query ? `${{base}}?${{query}}` : base;
+            window.parent.history.replaceState(null, '', newUrl);
         }});
-      }});
-    }})();
+    }});
     </script>
     """, height=0)
 
@@ -4204,7 +4213,7 @@ with main_tabs[5]:
 
         adjuntos = _normalize_urls(row.get("Adjuntos", ""))
         guias = _normalize_urls(row.get("Hoja_Ruta_Mensajero", ""))
-        with st.expander("📎 Archivos (Adjuntos y Guía)", expanded=True):
+        with st.expander("📎 Archivos (Adjuntos y Guía)", expanded=False):
             contenido = False
             if adjuntos:
                 contenido = True
@@ -4552,7 +4561,7 @@ with main_tabs[5]:
 
             st.markdown("---")
 
-            with st.expander("📎 Archivos del Caso", expanded=True):
+            with st.expander("📎 Archivos del Caso", expanded=False):
                 adjuntos_urls = _normalize_urls(row.get("Adjuntos", ""))
                 nota_credito_url = str(row.get("Nota_Credito_URL", "")).strip()
                 documento_adic_url = str(row.get("Documento_Adicional_URL", "")).strip()
@@ -5214,7 +5223,7 @@ with main_tabs[6]:  # 🛠 Garantías
             st.markdown("---")
 
             # === Archivos del Caso (Adjuntos + Dictamen/Nota + Adicional) ===
-            with st.expander("📎 Archivos del Caso (Garantía)", expanded=True):
+            with st.expander("📎 Archivos del Caso (Garantía)", expanded=False):
                 adjuntos_urls = _normalize_urls(row.get("Adjuntos", ""))
                 # Prioriza dictamen de garantía; si no existe, cae a Nota_Credito_URL
                 dictamen_url = str(row.get("Dictamen_Garantia_URL", "")).strip()
@@ -5712,7 +5721,7 @@ with main_tabs[7]:  # ✅ Historial Completados/Cancelados
                     st.markdown(f"💵 Monto estimado: {monto}")
                 adjuntos = _normalize_urls(row.get("Adjuntos", ""))
                 guia = str(row.get("Hoja_Ruta_Mensajero", "")).strip()
-                with st.expander("📎 Archivos del Caso", expanded=True):
+                with st.expander("📎 Archivos del Caso", expanded=False):
                     contenido = False
                     if adjuntos:
                         contenido = True
