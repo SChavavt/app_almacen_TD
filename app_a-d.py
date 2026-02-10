@@ -1912,45 +1912,51 @@ def mostrar_pedido_detalle(
     gsheet_row_index,
     col_print_btn,
 ):
-    """⚙️ Procesar: SOLO cambia Estado y Hora_Proceso. Sin expanders, sin scroll, sin tabs."""
-
+    """Procesa el pedido: actualiza estado a 'En Proceso' sin alterar UI."""
     if col_print_btn.button(
         "⚙️ Procesar",
         key=f"procesar_{row['ID_Pedido']}_{origen_tab}",
     ):
-        # Solo procesa si está Pendiente o Demorado
-        if row.get("Estado") not in ["🟡 Pendiente", "🔴 Demorado"]:
-            st.toast("ℹ️ Este pedido ya no está en Pendiente/Demorado.", icon="ℹ️")
-            return
+        # Solo para marcar que ya se presionó (si se usa para estilos/toasts)
+        st.session_state.setdefault("printed_items", {})
+        st.session_state["printed_items"][row["ID_Pedido"]] = True
 
-        now_str = datetime.now(timezone("America/Mexico_City")).strftime("%Y-%m-%d %H:%M:%S")
+        if row.get("Estado") in ["🟡 Pendiente", "🔴 Demorado"]:
+            zona_mexico = timezone("America/Mexico_City")
+            now = datetime.now(zona_mexico)
+            now_str = now.strftime("%Y-%m-%d %H:%M:%S")
 
-        try:
-            estado_col_idx = headers.index("Estado") + 1
-            hora_proc_col_idx = headers.index("Hora_Proceso") + 1
-        except ValueError:
-            st.error("❌ No se encontraron las columnas 'Estado' y/o 'Hora_Proceso' en Google Sheets.")
-            return
-
-        updates = [
-            {
-                "range": gspread.utils.rowcol_to_a1(gsheet_row_index, estado_col_idx),
-                "values": [["🔵 En Proceso"]],
-            },
-            {
-                "range": gspread.utils.rowcol_to_a1(gsheet_row_index, hora_proc_col_idx),
-                "values": [[now_str]],
-            },
-        ]
-
-        if batch_update_gsheet_cells(worksheet, updates):
-            df.at[idx, "Estado"] = "🔵 En Proceso"
-            df.at[idx, "Hora_Proceso"] = now_str
-            row["Estado"] = "🔵 En Proceso"
-            row["Hora_Proceso"] = now_str
-            st.toast("📌 Pedido marcado como 'En Proceso'", icon="⚙️")
+            try:
+                estado_col_idx = headers.index("Estado") + 1
+                hora_proc_col_idx = headers.index("Hora_Proceso") + 1
+            except ValueError:
+                st.error(
+                    "❌ No se encontraron las columnas 'Estado' y/o 'Hora_Proceso' en Google Sheets."
+                )
+            else:
+                updates = [
+                    {
+                        "range": gspread.utils.rowcol_to_a1(
+                            gsheet_row_index, estado_col_idx
+                        ),
+                        "values": [["🔵 En Proceso"]],
+                    },
+                    {
+                        "range": gspread.utils.rowcol_to_a1(
+                            gsheet_row_index, hora_proc_col_idx
+                        ),
+                        "values": [[now_str]],
+                    },
+                ]
+                if batch_update_gsheet_cells(worksheet, updates):
+                    df.at[idx, "Estado"] = "🔵 En Proceso"
+                    df.at[idx, "Hora_Proceso"] = now_str
+                    row["Estado"] = "🔵 En Proceso"
+                    st.toast("📌 Pedido marcado como 'En Proceso'", icon="⚙️")
+                else:
+                    st.error("❌ Falló la actualización del estado a 'En Proceso'.")
         else:
-            st.error("❌ Falló la actualización del estado a 'En Proceso'.")
+            st.toast("ℹ️ Este pedido ya no está en Pendiente/Demorado.", icon="ℹ️")
 
 def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, worksheet, headers, s3_client_param):
     """
@@ -5774,6 +5780,7 @@ with main_tabs[7]:  # ✅ Historial Completados/Cancelados
                         render_caso_especial_garantia_hist(row)
         else:
             st.info("No hay casos especiales completados/cancelados o ya fueron limpiados.")
+
 
 
 
