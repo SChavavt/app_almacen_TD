@@ -732,10 +732,9 @@ except Exception as e:
 def get_raw_sheet_data(
     sheet_id: str,
     worksheet_name: str,
-    client: Optional[gspread.client.Client] = None,
-    data_range: str = "A1:AZ",
+    client: Optional[gspread.client.Client] = None
 ) -> list[list[str]]:
-    """Obtiene datos en rango acotado para minimizar latencia de lectura."""
+    """Obtiene todos los datos de la hoja como estaba originalmente."""
 
     gspread_client = client or g_spread_client
     if gspread_client is None:
@@ -743,7 +742,7 @@ def get_raw_sheet_data(
 
     sheet = gspread_client.open_by_key(sheet_id)
     worksheet = sheet.worksheet(worksheet_name)
-    return worksheet.get(data_range)
+    return worksheet.get_all_values()
 
 
 def process_sheet_data(all_data: list[list[str]]) -> tuple[pd.DataFrame, list[str]]:
@@ -2851,7 +2850,6 @@ def _load_pedidos():
         sheet_id=GOOGLE_SHEET_ID,
         worksheet_name=GOOGLE_SHEET_WORKSHEET_NAME,
         client=g_spread_client,
-        data_range="A1:AZ",
     )
     return process_sheet_data(raw)
 
@@ -2861,7 +2859,6 @@ def _load_casos():
         sheet_id=GOOGLE_SHEET_ID,
         worksheet_name="casos_especiales",
         client=g_spread_client,
-        data_range="A1:AZ",
     )
     return process_sheet_data(raw)
 
