@@ -2212,77 +2212,76 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
         # This block displays attachments inside an expander
         with st.expander(
             "📎 Archivos (Adjuntos y Guía)",
-            expanded=st.session_state["expanded_attachments"].get(row["ID_Pedido"], False),
+            expanded=True,
         ):
-            if st.session_state["expanded_attachments"].get(row["ID_Pedido"], False):
-                st.markdown(f"##### Adjuntos para ID: {row['ID_Pedido']}")
+            st.markdown(f"##### Adjuntos para ID: {row['ID_Pedido']}")
 
-                contenido_attachments = False
-                sheet_attachments = _normalize_urls(row.get("Adjuntos", ""))
-                sheet_attachment_keys = {
-                    extract_s3_key(att) for att in sheet_attachments if att
-                }
+            contenido_attachments = False
+            sheet_attachments = _normalize_urls(row.get("Adjuntos", ""))
+            sheet_attachment_keys = {
+                extract_s3_key(att) for att in sheet_attachments if att
+            }
 
-                if sheet_attachments:
-                    contenido_attachments = True
-                    st.markdown("**Adjuntos registrados en la hoja:**")
-                    for attachment in sheet_attachments:
-                        attachment_url = resolve_storage_url(s3_client_param, attachment)
-                        parsed = urlparse(attachment)
-                        display_name = os.path.basename(parsed.path) or attachment
-                        if not display_name and attachment_url:
-                            display_name = os.path.basename(urlparse(attachment_url).path)
-                        if not display_name:
-                            display_name = attachment
-                        st.markdown(
-                            f'- 📄 **{display_name}** (<a href="{attachment_url}" target="_blank">🔗 Ver/Descargar</a>)',
-                            unsafe_allow_html=True,
-                        )
-
-                pedido_folder_prefix = find_pedido_subfolder_prefix(
-                    s3_client_param, S3_ATTACHMENT_PREFIX, row['ID_Pedido']
-                )
-
-                if pedido_folder_prefix:
-                    files_in_folder = get_files_in_s3_prefix(
-                        s3_client_param, pedido_folder_prefix
+            if sheet_attachments:
+                contenido_attachments = True
+                st.markdown("**Adjuntos registrados en la hoja:**")
+                for attachment in sheet_attachments:
+                    attachment_url = resolve_storage_url(s3_client_param, attachment)
+                    parsed = urlparse(attachment)
+                    display_name = os.path.basename(parsed.path) or attachment
+                    if not display_name and attachment_url:
+                        display_name = os.path.basename(urlparse(attachment_url).path)
+                    if not display_name:
+                        display_name = attachment
+                    st.markdown(
+                        f'- 📄 **{display_name}** (<a href="{attachment_url}" target="_blank">🔗 Ver/Descargar</a>)',
+                        unsafe_allow_html=True,
                     )
-                    if files_in_folder:
-                        filtered_files_to_display = [
-                            f for f in files_in_folder
-                            if "comprobante" not in f['title'].lower() and "surtido" not in f['title'].lower()
-                        ]
-                        filtered_files_to_display = [
-                            f for f in filtered_files_to_display
-                            if extract_s3_key(f['key']) not in sheet_attachment_keys
-                        ]
-                        if filtered_files_to_display:
-                            contenido_attachments = True
-                            st.markdown("**Adjuntos en carpeta S3:**")
-                            for file_info in filtered_files_to_display:
-                                file_url = get_s3_file_download_url(
-                                    s3_client_param, file_info['key']
+
+            pedido_folder_prefix = find_pedido_subfolder_prefix(
+                s3_client_param, S3_ATTACHMENT_PREFIX, row['ID_Pedido']
+            )
+
+            if pedido_folder_prefix:
+                files_in_folder = get_files_in_s3_prefix(
+                    s3_client_param, pedido_folder_prefix
+                )
+                if files_in_folder:
+                    filtered_files_to_display = [
+                        f for f in files_in_folder
+                        if "comprobante" not in f['title'].lower() and "surtido" not in f['title'].lower()
+                    ]
+                    filtered_files_to_display = [
+                        f for f in filtered_files_to_display
+                        if extract_s3_key(f['key']) not in sheet_attachment_keys
+                    ]
+                    if filtered_files_to_display:
+                        contenido_attachments = True
+                        st.markdown("**Adjuntos en carpeta S3:**")
+                        for file_info in filtered_files_to_display:
+                            file_url = get_s3_file_download_url(
+                                s3_client_param, file_info['key']
+                            )
+                            display_name = file_info['title']
+                            if row['ID_Pedido'] in display_name:
+                                display_name = (
+                                    display_name.replace(row['ID_Pedido'], "").replace("__", "_")
+                                    .replace("_-", "_").replace("-_", "_").strip('_').strip('-')
                                 )
-                                display_name = file_info['title']
-                                if row['ID_Pedido'] in display_name:
-                                    display_name = (
-                                        display_name.replace(row['ID_Pedido'], "").replace("__", "_")
-                                        .replace("_-", "_").replace("-_", "_").strip('_').strip('-')
-                                    )
-                                st.markdown(
-                                    f'- 📄 **{display_name}** (<a href="{file_url}" target="_blank">🔗 Ver/Descargar</a>)',
-                                    unsafe_allow_html=True,
-                                )
-                        else:
-                            if not contenido_attachments:
-                                st.info("No hay adjuntos para mostrar (excluyendo comprobantes y surtidos).")
+                            st.markdown(
+                                f'- 📄 **{display_name}** (<a href="{file_url}" target="_blank">🔗 Ver/Descargar</a>)',
+                                unsafe_allow_html=True,
+                            )
                     else:
                         if not contenido_attachments:
-                            st.info("No se encontraron archivos en la carpeta del pedido en S3.")
-                elif not contenido_attachments:
-                    st.error(
-                        f"❌ No se encontró la carpeta (prefijo S3) del pedido '{row['ID_Pedido']}'."
-                    )
+                            st.info("No hay adjuntos para mostrar (excluyendo comprobantes y surtidos).")
+                else:
+                    if not contenido_attachments:
+                        st.info("No se encontraron archivos en la carpeta del pedido en S3.")
+            elif not contenido_attachments:
+                st.error(
+                    f"❌ No se encontró la carpeta (prefijo S3) del pedido '{row['ID_Pedido']}'."
+                )
 
 
         # Complete Button with streamlined confirmation
