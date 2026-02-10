@@ -1912,26 +1912,16 @@ def mostrar_pedido_detalle(
     gsheet_row_index,
     col_print_btn,
 ):
-    """Muestra el botón de impresión y actualiza el estado del pedido."""
+    """Procesa el pedido: actualiza estado a 'En Proceso' sin alterar UI."""
     if col_print_btn.button(
-        "🖨 Imprimir",
-        key=f"print_{row['ID_Pedido']}_{origen_tab}",
+        "⚙️ Procesar",
+        key=f"procesar_{row['ID_Pedido']}_{origen_tab}",
     ):
-        # --- Evitar rebotes visuales en impresión ---
+        # Solo para marcar que ya se presionó (si se usa para estilos/toasts)
         st.session_state.setdefault("printed_items", {})
         st.session_state["printed_items"][row["ID_Pedido"]] = True
 
-        ensure_expanders_open(
-            row["ID_Pedido"],
-            "expanded_attachments",
-            "expanded_pedidos",
-        )
-        st.session_state["scroll_to_pedido_id"] = row["ID_Pedido"]
-        preserve_tab_state()
-        st.session_state["restore_tabs_after_print"] = True
-
-
-        if row["Estado"] in ["🟡 Pendiente", "🔴 Demorado"]:
+        if row.get("Estado") in ["🟡 Pendiente", "🔴 Demorado"]:
             zona_mexico = timezone("America/Mexico_City")
             now = datetime.now(zona_mexico)
             now_str = now.strftime("%Y-%m-%d %H:%M:%S")
@@ -1962,9 +1952,11 @@ def mostrar_pedido_detalle(
                     df.at[idx, "Estado"] = "🔵 En Proceso"
                     df.at[idx, "Hora_Proceso"] = now_str
                     row["Estado"] = "🔵 En Proceso"
-                    st.toast("📄 Estado actualizado a 'En Proceso'", icon="📌")
+                    st.toast("📌 Pedido marcado como 'En Proceso'", icon="⚙️")
                 else:
                     st.error("❌ Falló la actualización del estado a 'En Proceso'.")
+        else:
+            st.toast("ℹ️ Este pedido ya no está en Pendiente/Demorado.", icon="ℹ️")
 
 def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, worksheet, headers, s3_client_param):
     """
