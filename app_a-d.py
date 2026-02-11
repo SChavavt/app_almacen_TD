@@ -2419,7 +2419,7 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
                         st.toast("🔧 Modificación procesada - Estado actualizado a 'En Proceso'", icon="✅")
                         
                         # 🚀 OPTIMIZACIÓN 5: NO limpiar cache completo
-                        # st.cache_data.clear()  # ❌ REMOVIDO - Causa de lentitud
+                        get_raw_sheet_data.clear()  # ✅ Solo limpia datos de sheets (más rápido que cache completo)
                         
                         # 🚀 OPTIMIZACIÓN 6: Marcar contexto con scroll
                         marcar_contexto_pedido(row["ID_Pedido"], origen_tab, scroll=True)
