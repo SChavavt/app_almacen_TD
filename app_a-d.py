@@ -1489,7 +1489,7 @@ def completar_pedido(
     origen_tab: str,
     success_message: Optional[str] = None,
 ) -> bool:
-    """Marca un pedido como completado y preserva el estado visual."""
+    """Marca un pedido como completado y preserva el estado visual - OPTIMIZADO."""
 
     estado_actual = str(row.get("Estado", "") or "").strip()
     if estado_actual != "🔵 En Proceso":
@@ -1523,6 +1523,12 @@ def completar_pedido(
     now = mx_now()
     now_str = now.strftime("%Y-%m-%d %H:%M:%S")
 
+    # 🚀 OPTIMIZACIÓN 1: Preservar scroll position ANTES de actualizar
+    st.session_state["scroll_to_pedido_id"] = row["ID_Pedido"]
+    
+    # 🚀 OPTIMIZACIÓN 2: Preservar pestañas activas ANTES de la actualización
+    preserve_tab_state()
+
     updates = [
         {
             "range": gspread.utils.rowcol_to_a1(gsheet_row_index, estado_col_idx),
@@ -1538,6 +1544,7 @@ def completar_pedido(
         st.error("❌ No se pudo completar el pedido.")
         return False
 
+    # 🚀 OPTIMIZACIÓN 3: Actualizar el DataFrame localmente sin recargar desde GSheets
     df.loc[idx, "Estado"] = "🟢 Completado"
     df.loc[idx, "Fecha_Completado"] = now
     if isinstance(row, pd.Series):
@@ -1547,13 +1554,15 @@ def completar_pedido(
     st.session_state["expanded_pedidos"][row["ID_Pedido"]] = True
     st.session_state["expanded_attachments"][row["ID_Pedido"]] = True
 
-    st.success(success_message or f"✅ Pedido {row.get('ID_Pedido', '?')} completado exitosamente.")
+    # 🚀 OPTIMIZACIÓN 4: Usar toast en lugar de success para feedback más rápido
+    st.toast(success_message or f"✅ Pedido {row.get('ID_Pedido', '?')} completado", icon="✅")
 
     st.session_state["pedido_editado"] = row.get("ID_Pedido")
     st.session_state["fecha_seleccionada"] = row.get("Fecha_Entrega", "")
     st.session_state["subtab_local"] = origen_tab
 
-    st.cache_data.clear()
+    # 🚀 OPTIMIZACIÓN 5: NO limpiar toda la caché - esto es la causa principal de lentitud
+    # st.cache_data.clear()  # ❌ REMOVIDO
 
     set_active_main_tab(st.session_state.get("active_main_tab_index", 0))
     st.session_state["active_subtab_local_index"] = st.session_state.get(
@@ -1566,7 +1575,8 @@ def completar_pedido(
         "active_date_tab_t_index", 0
     )
 
-    marcar_contexto_pedido(row.get("ID_Pedido"), origen_tab, scroll=False)
+    # 🚀 OPTIMIZACIÓN 6: Marcar contexto con scroll habilitado
+    marcar_contexto_pedido(row.get("ID_Pedido"), origen_tab, scroll=True)
     try:
         df["Fecha_Completado"] = pd.to_datetime(df["Fecha_Completado"], errors="coerce")
     except:
@@ -2385,11 +2395,11 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
             col_process_mod = st.columns(1)[0]  # Crear columna para el botón
             if col_process_mod.button("🔧 Procesar Modificación", key=f"process_mod_{row['ID_Pedido']}_{origen_tab}"):
                 try:
-                    # 🧠 Preservar pestañas activas
-                    st.session_state["preserve_main_tab"] = st.session_state.get("active_main_tab_index", 0)
-                    st.session_state["preserve_local_tab"] = st.session_state.get("active_subtab_local_index", 0)
-                    st.session_state["preserve_date_tab_m"] = st.session_state.get("active_date_tab_m_index", 0)
-                    st.session_state["preserve_date_tab_t"] = st.session_state.get("active_date_tab_t_index", 0)
+                    # 🚀 OPTIMIZACIÓN 1: Preservar scroll position ANTES de todo
+                    st.session_state["scroll_to_pedido_id"] = row['ID_Pedido']
+                    
+                    # 🚀 OPTIMIZACIÓN 2: Usar función helper para preservar pestañas
+                    preserve_tab_state()
                     
                     # ✅ Expandir el pedido
                     st.session_state["expanded_pedidos"][row['ID_Pedido']] = True
@@ -2401,20 +2411,18 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
                     ]
                     
                     if batch_update_gsheet_cells(worksheet, updates):
-                        # ✅ Actualizar el DataFrame y la fila localmente
+                        # 🚀 OPTIMIZACIÓN 3: Actualizar DataFrame localmente
                         df.at[idx, "Estado"] = "🔵 En Proceso"
-                        row["Estado"] = "🔵 En Proceso"  # Refleja el cambio en pantalla
+                        row["Estado"] = "🔵 En Proceso"
                         
+                        # 🚀 OPTIMIZACIÓN 4: Usar toast para feedback rápido
                         st.toast("🔧 Modificación procesada - Estado actualizado a 'En Proceso'", icon="✅")
                         
-                        # 🔁 Mantener pestañas activas
-                        set_active_main_tab(st.session_state.get("active_main_tab_index", 0))
-                        st.session_state["active_subtab_local_index"] = st.session_state.get("active_subtab_local_index", 0)
-                        st.session_state["active_date_tab_m_index"] = st.session_state.get("active_date_tab_m_index", 0)
-                        st.session_state["active_date_tab_t_index"] = st.session_state.get("active_date_tab_t_index", 0)
+                        # 🚀 OPTIMIZACIÓN 5: NO limpiar cache completo
+                        # st.cache_data.clear()  # ❌ REMOVIDO - Causa de lentitud
                         
-                        st.cache_data.clear()
-                        marcar_contexto_pedido(row["ID_Pedido"], origen_tab)
+                        # 🚀 OPTIMIZACIÓN 6: Marcar contexto con scroll
+                        marcar_contexto_pedido(row["ID_Pedido"], origen_tab, scroll=True)
                         st.rerun()
                     else:
                         st.error("❌ Falló la actualización del estado a 'En Proceso'.")
@@ -2461,14 +2469,28 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
                     )
 
                 if submitted_upload:
+                    # 🚀 OPTIMIZACIÓN 1: Preservar posición de scroll INMEDIATAMENTE
+                    st.session_state["scroll_to_pedido_id"] = row["ID_Pedido"]
+                    
                     handle_generic_upload_change(
                         row["ID_Pedido"],
                         ("expanded_pedidos", "expanded_subir_guia"),
+                        scroll_to_row=True,  # 🚀 OPTIMIZACIÓN 2: Asegurar scroll
                     )
 
                     if archivos_guia:
+                        # 🚀 OPTIMIZACIÓN 3: Mostrar progreso durante la subida
+                        progress_bar = st.progress(0)
+                        status_text = st.empty()
+                        
                         uploaded_keys = []
-                        for archivo in archivos_guia:
+                        total_files = len(archivos_guia)
+                        
+                        for idx_file, archivo in enumerate(archivos_guia):
+                            # 🚀 Actualizar progreso
+                            progress_bar.progress((idx_file + 1) / total_files)
+                            status_text.text(f"Subiendo archivo {idx_file + 1} de {total_files}...")
+                            
                             ext = os.path.splitext(archivo.name)[1]
                             s3_key = f"{row['ID_Pedido']}/guia_{uuid.uuid4().hex[:6]}{ext}"
                             success, uploaded_key = upload_file_to_s3(
@@ -2476,6 +2498,10 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
                             )
                             if success and uploaded_key:
                                 uploaded_keys.append(uploaded_key)
+                        
+                        # 🚀 Limpiar indicadores de progreso
+                        progress_bar.empty()
+                        status_text.empty()
 
                         if uploaded_keys:
                             uploaded_entries = [
@@ -2497,6 +2523,7 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
                                 worksheet, headers, gsheet_row_index, target_col_for_guide, nueva_lista
                             )
                             if success:
+                                # 🚀 OPTIMIZACIÓN 4: Actualizar DataFrame localmente
                                 if target_col_for_guide == "Hoja_Ruta_Mensajero":
                                     df.at[idx, "Hoja_Ruta_Mensajero"] = nueva_lista
                                     row["Hoja_Ruta_Mensajero"] = nueva_lista
@@ -2514,6 +2541,7 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
                                     target_col_for_guide,
                                     nueva_lista,
                                 )
+                                # 🚀 OPTIMIZACIÓN 5: Feedback rápido con toast
                                 st.toast(
                                     f"📤 {len(uploaded_keys)} guía(s) subida(s) con éxito.",
                                     icon="📦",
@@ -2528,6 +2556,7 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
                                     "expanded_pedidos",
                                     "expanded_subir_guia",
                                 )
+                                # 🚀 OPTIMIZACIÓN 6: Guardar info de éxito
                                 guia_success_map = st.session_state.setdefault(
                                     "guia_upload_success", {}
                                 )
@@ -2537,8 +2566,10 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
                                     "files": uploaded_entries,
                                     "timestamp": mx_now_str(),
                                 }
-                                st.cache_data.clear()
-                                st.cache_resource.clear()
+                                # 🚀 OPTIMIZACIÓN 7: NO limpiar cache - Causa de lentitud
+                                # st.cache_data.clear()  # ❌ REMOVIDO
+                                # st.cache_resource.clear()  # ❌ REMOVIDO
+                                
                                 st.session_state["pedido_editado"] = row["ID_Pedido"]
                                 st.session_state["fecha_seleccionada"] = row.get(
                                     "Fecha_Entrega", ""
@@ -2552,7 +2583,8 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
                                         st.session_state["active_main_tab_index"] = int(tab_val)
                                     except (ValueError, TypeError):
                                         st.session_state["active_main_tab_index"] = 0
-                                marcar_contexto_pedido(row["ID_Pedido"], origen_tab)
+                                # 🚀 OPTIMIZACIÓN 8: Marcar contexto con scroll
+                                marcar_contexto_pedido(row["ID_Pedido"], origen_tab, scroll=True)
                                 preserve_tab_state()
                                 render_guia_upload_feedback(
                                     success_placeholder,
