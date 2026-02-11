@@ -4456,7 +4456,6 @@ with main_tabs[5]:
             expander_title = f"🔁 {folio or 's/folio'} – {cliente or 's/cliente'} | Estado: {estado} | Estado_Recepcion: {estado_rec}"
 
         with st.expander(expander_title, expanded=st.session_state["expanded_devoluciones"].get(row_key, False)):
-            st.session_state["expanded_devoluciones"][row_key] = True
             render_caso_especial_devolucion(row)
 
             # === 🆕 NUEVO: Clasificar Tipo_Envio_Original, Turno y Fecha_Entrega (sin opción vacía y sin recargar) ===
@@ -5106,7 +5105,6 @@ with main_tabs[6]:  # 🛠 Garantías
         # Título del expander
         expander_title = f"🛠 {folio or 's/folio'} – {cliente or 's/cliente'} | Estado: {estado} | Estado_Recepcion: {estado_rec}"
         with st.expander(expander_title, expanded=st.session_state["expanded_garantias"].get(row_key, False)):
-            st.session_state["expanded_garantias"][row_key] = True
             st.markdown("#### 📋 Información de la Garantía")
 
             col1, col2 = st.columns(2)
