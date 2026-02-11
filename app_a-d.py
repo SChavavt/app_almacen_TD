@@ -1,4 +1,5 @@
 
+import time
 import streamlit as st
 import pandas as pd
 from datetime import datetime, timedelta
@@ -574,6 +575,8 @@ if st.button(
     st.session_state["prev_casos_count"] = st.session_state.get("last_casos_count", 0)
     st.session_state["need_compare"] = True
     st.session_state["reload_pedidos_soft"] = True
+    st.cache_data.clear()
+    st.cache_resource.clear()
 
 
 _ensure_visual_state_defaults()
@@ -614,6 +617,12 @@ except KeyError as e:
 
 S3_ATTACHMENT_PREFIX = 'adjuntos_pedidos/'
 
+# --- Soft reload si el usuario presionó "Recargar Pedidos (seguro)"
+if st.session_state.get("reload_pedidos_soft"):
+    st.session_state["reload_pedidos_soft"] = False
+    st.rerun()  # 🔁 Solo recarga los datos sin perder el estado de pestañas
+
+
 # --- Cached Clients for Google Sheets and AWS S3 ---
 
 @st.cache_resource
@@ -628,7 +637,8 @@ def get_gspread_client(_credentials_json_dict):
     try:
         _ = client.open_by_key(GOOGLE_SHEET_ID)
     except gspread.exceptions.APIError:
-        # Token expirado o inválido → regenerar cliente una vez
+        # Token expirado o inválido → limpiar y regenerar
+        st.cache_resource.clear()
         st.warning("🔁 Token expirado. Reintentando autenticación...")
 
         creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
@@ -656,16 +666,25 @@ def get_s3_client():
         st.stop()
 
 
+def _reconnect_and_rerun():
+    """Limpia cachés y fuerza un rerun de la aplicación."""
+    st.cache_data.clear()
+    st.cache_resource.clear()
+    time.sleep(1)
+    st.rerun()
+
+
 def handle_auth_error(exc: Exception):
-    """Maneja errores de autenticación sin reintentos con espera en UI."""
+    """Intenta reparar la conexión ante errores comunes de autenticación o cuota."""
     if _is_recoverable_auth_error(exc):
-        st.error("❌ Error de autenticación o cuota con Google Sheets. Usa 'Recargar Pedidos' para refrescar datos.")
+        st.warning("🔁 Error de autenticación o cuota. Reintentando conexión...")
+        _reconnect_and_rerun()
     else:
         st.error(f"❌ Error general al autenticarse o inicializar clientes: {exc}")
-    st.info(
-        "ℹ️ Asegúrate de que las APIs de Google Sheets y Drive estén habilitadas para tu proyecto de Google Cloud. También, revisa tus credenciales de AWS S3 y Google Sheets en .streamlit/secrets.toml o en la interfaz de Streamlit Cloud."
-    )
-    st.stop()
+        st.info(
+            "ℹ️ Asegúrate de que las APIs de Google Sheets y Drive estén habilitadas para tu proyecto de Google Cloud. También, revisa tus credenciales de AWS S3 y Google Sheets en .streamlit/secrets.toml o en la interfaz de Streamlit Cloud."
+        )
+        st.stop()
 
 # Initialize clients globally
 try:
@@ -704,7 +723,9 @@ try:
         s3_client = get_s3_client()
     except gspread.exceptions.APIError as e:
         if "ACCESS_TOKEN_EXPIRED" in str(e) or "UNAUTHENTICATED" in str(e):
+            st.cache_resource.clear()
             st.warning("🔄 La sesión con Google Sheets expiró. Reconectando...")
+            time.sleep(1)
             g_spread_client = get_gspread_client(_credentials_json_dict=GSHEETS_CREDENTIALS)
             s3_client = get_s3_client()
         else:
@@ -732,17 +753,70 @@ except Exception as e:
 def get_raw_sheet_data(
     sheet_id: str,
     worksheet_name: str,
-    client: Optional[gspread.client.Client] = None
+    client: Optional[gspread.client.Client] = None,
 ) -> list[list[str]]:
-    """Obtiene todos los datos de la hoja como estaba originalmente."""
-
     gspread_client = client or g_spread_client
     if gspread_client is None:
         raise ValueError("No se proporcionó un cliente de gspread para obtener los datos.")
+    max_attempts = 3
+    base_delay = 1
+    for attempt in range(max_attempts):
+        wait_seconds = base_delay * (2 ** attempt)
+        try:
+            sheet = gspread_client.open_by_key(sheet_id)
+            worksheet = sheet.worksheet(worksheet_name)
+            return worksheet.get_all_values()
+        except gspread.exceptions.APIError as api_error:
+            # ℹ️ Solo limpiamos la caché de esta función para no reiniciar otros estados de la app.
+            get_raw_sheet_data.clear()
+            if _is_recoverable_auth_error(api_error) and attempt < max_attempts - 1:
+                st.warning(
+                    f"🔁 Error de autenticación con Google Sheets (intento {attempt + 1}/{max_attempts}). "
+                    f"Reintentando en {wait_seconds}s..."
+                )
+                time.sleep(wait_seconds)
+                continue
 
-    sheet = gspread_client.open_by_key(sheet_id)
-    worksheet = sheet.worksheet(worksheet_name)
-    return worksheet.get_all_values()
+            if attempt < max_attempts - 1:
+                st.warning(
+                    f"⚠️ Error de la API de Google Sheets (intento {attempt + 1}/{max_attempts}). "
+                    f"Reintentando en {wait_seconds}s..."
+                )
+                time.sleep(wait_seconds)
+                continue
+
+            if _is_recoverable_auth_error(api_error):
+                handle_auth_error(api_error)
+            else:
+                st.error(f"❌ Error de la API de Google Sheets: {api_error}")
+            raise
+        except RequestException as net_err:
+            get_raw_sheet_data.clear()
+            if attempt < max_attempts - 1:
+                st.warning(
+                    f"⚠️ Error de red al conectar con Google Sheets (intento {attempt + 1}/{max_attempts}). "
+                    f"Reintentando en {wait_seconds}s..."
+                )
+                time.sleep(wait_seconds)
+                continue
+
+            handle_auth_error(net_err)
+            raise
+        except Exception as e:
+            get_raw_sheet_data.clear()  # 🔁 Limpiar solo la caché de esta función en caso de error de token/API
+            if attempt < max_attempts - 1:
+                st.warning(
+                    f"⚠️ Error inesperado al conectar con Google Sheets (intento {attempt + 1}/{max_attempts}). "
+                    f"Reintentando en {wait_seconds}s..."
+                )
+                time.sleep(wait_seconds)
+                continue
+
+            st.error(
+                "❌ No se pudo conectar con Google Sheets después de varios intentos. "
+                "Verifica tu conectividad o tus credenciales de servicio."
+            )
+            raise
 
 
 def process_sheet_data(all_data: list[list[str]]) -> tuple[pd.DataFrame, list[str]]:
@@ -801,28 +875,81 @@ def process_sheet_data(all_data: list[list[str]]) -> tuple[pd.DataFrame, list[st
 
 
 def update_gsheet_cell(worksheet, headers, row_index, col_name, value):
-    """Actualiza una celda en Google Sheets sin reintentos bloqueantes en UI."""
+    """
+    Actualiza una celda específica en Google Sheets.
+    row_index es el índice de fila de gspread (base 1).
+    col_name es el nombre de la columna.
+    headers es la lista de encabezados obtenida previamente.
+    """
     if col_name not in headers:
         st.error(f"❌ Error: La columna '{col_name}' no se encontró en Google Sheets para la actualización. Verifica los encabezados.")
         return False
 
-    col_index = headers.index(col_name) + 1
+    col_index = headers.index(col_name) + 1  # Convertir a índice base 1 de gspread
 
-    try:
-        worksheet.update_cell(row_index, col_index, value)
-        return True
-    except gspread.exceptions.APIError as api_error:
-        if _is_recoverable_auth_error(api_error):
-            st.error("❌ Error de autenticación/cuota al actualizar Google Sheets.")
-        else:
-            st.error(f"❌ Error de la API de Google Sheets: {api_error}")
-        return False
-    except RequestException as net_err:
-        st.error(f"❌ Error de red al actualizar Google Sheets: {net_err}")
-        return False
-    except Exception as exc:
-        st.error(f"❌ Error inesperado al actualizar Google Sheets: {exc}")
-        return False
+    max_attempts = 3
+    base_delay = 1
+
+    for attempt in range(max_attempts):
+        wait_seconds = base_delay * (2 ** attempt)
+        try:
+            worksheet.update_cell(row_index, col_index, value)
+            # st.cache_data.clear() # Limpiar solo si hay un cambio que justifique una recarga completa
+            return True
+        except gspread.exceptions.APIError as api_error:
+            is_recoverable = _is_recoverable_auth_error(api_error)
+            if attempt < max_attempts - 1:
+                if is_recoverable:
+                    st.warning(
+                        f"🔁 Error de autenticación/cuota al actualizar Google Sheets "
+                        f"(intento {attempt + 1}/{max_attempts}). Reintentando en {wait_seconds}s..."
+                    )
+                else:
+                    st.warning(
+                        f"⚠️ Error de la API de Google Sheets al actualizar celdas "
+                        f"(intento {attempt + 1}/{max_attempts}). Reintentando en {wait_seconds}s..."
+                    )
+                time.sleep(wait_seconds)
+                continue
+
+            if is_recoverable:
+                st.error(
+                    "❌ No se pudo completar la actualización en Google Sheets por un error de autenticación/cuota "
+                    "después de varios intentos."
+                )
+                handle_auth_error(api_error)
+            else:
+                st.error(f"❌ Error definitivo de la API de Google Sheets: {api_error}")
+            break
+        except RequestException as net_err:
+            if attempt < max_attempts - 1:
+                st.warning(
+                    f"⚠️ Error de red al actualizar Google Sheets (intento {attempt + 1}/{max_attempts}). "
+                    f"Reintentando en {wait_seconds}s..."
+                )
+                time.sleep(wait_seconds)
+                continue
+
+            st.error(
+                "❌ No se pudo conectar con Google Sheets para actualizar los datos después de varios intentos. "
+                "Verifica tu conexión o credenciales."
+            )
+            handle_auth_error(net_err)
+            break
+        except Exception as exc:
+            if attempt < max_attempts - 1:
+                st.warning(
+                    f"⚠️ Error inesperado al actualizar Google Sheets (intento {attempt + 1}/{max_attempts}). "
+                    f"Reintentando en {wait_seconds}s..."
+                )
+                time.sleep(wait_seconds)
+                continue
+
+            st.error(f"❌ Error inesperado al actualizar Google Sheets: {exc}")
+            break
+
+    return False
+    
 def cargar_pedidos_desde_google_sheet(sheet_id, worksheet_name):
     """
     Carga los datos de una hoja de Google Sheets y devuelve un DataFrame y los encabezados.
@@ -843,35 +970,92 @@ def cargar_pedidos_desde_google_sheet(sheet_id, worksheet_name):
 
 
 def batch_update_gsheet_cells(worksheet, updates_list):
-    """Realiza actualización por lotes en una sola llamada, sin reintentos con espera."""
+    """
+    Realiza múltiples actualizaciones de celdas en una sola solicitud por lotes a Google Sheets
+    utilizando worksheet.update_cells().
+    updates_list: Lista de diccionarios, cada uno con las claves 'range' y 'values'.
+                  Ej: [{'range': 'A1', 'values': [['nuevo_valor']]}, ...]
+    """
     if not updates_list:
         return False
 
     cell_list = []
     for update_item in updates_list:
         range_str = update_item['range']
-        value = update_item['values'][0][0]
+        value = update_item['values'][0][0] # Asumiendo un único valor como [['valor']]
+
+        # Convertir la notación A1 (ej. 'A1') a índice de fila y columna (base 1)
         row, col = gspread.utils.a1_to_rowcol(range_str)
+        # Crear un objeto Cell y añadirlo a la lista
         cell_list.append(gspread.Cell(row=row, col=col, value=value))
 
     if not cell_list:
         return False
 
-    try:
-        worksheet.update_cells(cell_list)
-        return True
-    except gspread.exceptions.APIError as api_error:
-        if _is_recoverable_auth_error(api_error):
-            st.error("❌ Error de autenticación/cuota al actualizar Google Sheets.")
-        else:
-            st.error(f"❌ Error de la API de Google Sheets al actualizar celdas: {api_error}")
-        return False
-    except RequestException as net_err:
-        st.error(f"❌ Error de red al actualizar Google Sheets: {net_err}")
-        return False
-    except Exception as exc:
-        st.error(f"❌ Error inesperado al actualizar Google Sheets: {exc}")
-        return False
+    max_attempts = 3
+    base_delay = 1
+
+    for attempt in range(max_attempts):
+        wait_seconds = base_delay * (2 ** attempt)
+        try:
+            worksheet.update_cells(cell_list)  # Este es el método correcto para batch update en el worksheet
+            # st.cache_data.clear() # Limpiar solo si hay un cambio que justifique una recarga completa
+            return True
+        except gspread.exceptions.APIError as api_error:
+            is_recoverable = _is_recoverable_auth_error(api_error)
+            if attempt < max_attempts - 1:
+                if is_recoverable:
+                    st.warning(
+                        f"🔁 Error de autenticación/cuota al actualizar Google Sheets "
+                        f"(intento {attempt + 1}/{max_attempts}). Reintentando en {wait_seconds}s..."
+                    )
+                else:
+                    st.warning(
+                        f"⚠️ Error de la API de Google Sheets al actualizar celdas "
+                        f"(intento {attempt + 1}/{max_attempts}). Reintentando en {wait_seconds}s..."
+                    )
+                time.sleep(wait_seconds)
+                continue
+
+            if is_recoverable:
+                st.error(
+                    "❌ No se pudo completar la actualización en Google Sheets por un error de autenticación/cuota "
+                    "después de varios intentos."
+                )
+                handle_auth_error(api_error)
+            else:
+                st.error(f"❌ Error definitivo de la API de Google Sheets: {api_error}")
+            break
+        except RequestException as net_err:
+            if attempt < max_attempts - 1:
+                st.warning(
+                    f"⚠️ Error de red al actualizar Google Sheets (intento {attempt + 1}/{max_attempts}). "
+                    f"Reintentando en {wait_seconds}s..."
+                )
+                time.sleep(wait_seconds)
+                continue
+
+            st.error(
+                "❌ No se pudo conectar con Google Sheets para actualizar los datos después de varios intentos. "
+                "Verifica tu conexión o credenciales."
+            )
+            handle_auth_error(net_err)
+            break
+        except Exception as exc:
+            if attempt < max_attempts - 1:
+                st.warning(
+                    f"⚠️ Error inesperado al actualizar Google Sheets (intento {attempt + 1}/{max_attempts}). "
+                    f"Reintentando en {wait_seconds}s..."
+                )
+                time.sleep(wait_seconds)
+                continue
+
+            st.error(f"❌ Error inesperado al actualizar Google Sheets: {exc}")
+            break
+
+    return False
+
+
 def mirror_guide_value(
     worksheet,
     headers,
@@ -1369,6 +1553,7 @@ def completar_pedido(
     st.session_state["fecha_seleccionada"] = row.get("Fecha_Entrega", "")
     st.session_state["subtab_local"] = origen_tab
 
+    st.cache_data.clear()
 
     set_active_main_tab(st.session_state.get("active_main_tab_index", 0))
     st.session_state["active_subtab_local_index"] = st.session_state.get(
@@ -1386,7 +1571,7 @@ def completar_pedido(
         df["Fecha_Completado"] = pd.to_datetime(df["Fecha_Completado"], errors="coerce")
     except:
         pass
-    
+    st.rerun()
     return True
 
 
@@ -1600,7 +1785,7 @@ def handle_generic_upload_change(
         st.session_state["scroll_to_pedido_id"] = row_id
     preserve_tab_state()
     # El script se vuelve a ejecutar automáticamente después de este callback,
-    # así que evitamos una llamada explícita a .
+    # así que evitamos una llamada explícita a st.rerun().
 
 
 def render_guia_upload_feedback(
@@ -2228,8 +2413,9 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
                         st.session_state["active_date_tab_m_index"] = st.session_state.get("active_date_tab_m_index", 0)
                         st.session_state["active_date_tab_t_index"] = st.session_state.get("active_date_tab_t_index", 0)
                         
+                        st.cache_data.clear()
                         marcar_contexto_pedido(row["ID_Pedido"], origen_tab)
-                        
+                        st.rerun()
                     else:
                         st.error("❌ Falló la actualización del estado a 'En Proceso'.")
                         
@@ -2351,6 +2537,8 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
                                     "files": uploaded_entries,
                                     "timestamp": mx_now_str(),
                                 }
+                                st.cache_data.clear()
+                                st.cache_resource.clear()
                                 st.session_state["pedido_editado"] = row["ID_Pedido"]
                                 st.session_state["fecha_seleccionada"] = row.get(
                                     "Fecha_Entrega", ""
@@ -2426,8 +2614,9 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
                         if success:
                             row["Estado"] = "🔵 En Proceso"
                             st.success("✅ Cambios de surtido confirmados y pedido en '🔵 En Proceso'.")
+                            st.cache_data.clear()
                             marcar_contexto_pedido(row["ID_Pedido"], origen_tab)
-                            
+                            st.rerun()
                         else:
                             st.error("❌ No se pudo confirmar la modificación.")
                 
@@ -2474,8 +2663,9 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
                                 st.success(
                                     "✅ Cambios de surtido confirmados y pedido en '🔵 En Proceso'."
                                 )
+                                st.cache_data.clear()
                                 marcar_contexto_pedido(row["ID_Pedido"], origen_tab)
-                                
+                                st.rerun()
                             else:
                                 st.error("❌ No se pudo confirmar la modificación.")
 
@@ -2729,6 +2919,7 @@ def mostrar_pedido_solo_guia(df, idx, row, orden, origen_tab, current_main_tab_l
                             "files": uploaded_entries,
                             "timestamp": mx_now_str(),
                         }
+                        st.cache_data.clear()
                         marcar_contexto_pedido(row["ID_Pedido"], origen_tab)
                         preserve_tab_state()
                         render_guia_upload_feedback(
@@ -2853,7 +3044,6 @@ def _load_pedidos():
     )
     return process_sheet_data(raw)
 
-
 def _load_casos():
     raw = get_raw_sheet_data(
         sheet_id=GOOGLE_SHEET_ID,
@@ -2862,45 +3052,36 @@ def _load_casos():
     )
     return process_sheet_data(raw)
 
-
-def _load_data_to_session(force_reload: bool = False) -> None:
-    """Carga pedidos/casos una vez y reutiliza los DataFrames en session_state."""
-
-    has_cache = all(
-        key in st.session_state
-        for key in ("df_main", "headers_main", "df_casos", "headers_casos")
-    )
-    if has_cache and not force_reload:
-        return
-
+if st.session_state.get("need_compare"):
+    prev_pedidos = st.session_state.get("prev_pedidos_count", 0)
+    prev_casos = st.session_state.get("prev_casos_count", 0)
+    for attempt in range(3):
+        st.cache_data.clear()
+        df_main, headers_main = _load_pedidos()
+        df_casos, headers_casos = _load_casos()
+        new_pedidos = len(df_main)
+        new_casos = len(df_casos)
+        if (new_pedidos > prev_pedidos or new_casos > prev_casos) or attempt == 2:
+            break
+        time.sleep(1)
+    diff_ped = new_pedidos - prev_pedidos
+    diff_casos = new_casos - prev_casos
+    if diff_ped > 0:
+        st.toast(f"✅ Se encontraron {diff_ped} pedidos nuevos.")
+    else:
+        st.toast("🔄 Pedidos actualizados. No hay nuevos registros.")
+    if diff_casos > 0:
+        st.toast(f"✅ Se encontraron {diff_casos} casos nuevos en 'casos_especiales'.")
+    else:
+        st.toast("🔄 'casos_especiales' actualizado. No hay nuevos registros.")
+    st.session_state["last_pedidos_count"] = new_pedidos
+    st.session_state["last_casos_count"] = new_casos
+    st.session_state["need_compare"] = False
+else:
     df_main, headers_main = _load_pedidos()
     df_casos, headers_casos = _load_casos()
-
-    st.session_state["df_main"] = df_main
-    st.session_state["headers_main"] = headers_main
-    st.session_state["df_casos"] = df_casos
-    st.session_state["headers_casos"] = headers_casos
     st.session_state["last_pedidos_count"] = len(df_main)
     st.session_state["last_casos_count"] = len(df_casos)
-
-
-force_reload = bool(st.session_state.pop("reload_pedidos_soft", False))
-if force_reload:
-    prev_pedidos = st.session_state.get("last_pedidos_count", 0)
-    prev_casos = st.session_state.get("last_casos_count", 0)
-    get_raw_sheet_data.clear()
-    _load_data_to_session(force_reload=True)
-    diff_ped = len(st.session_state["df_main"]) - prev_pedidos
-    diff_casos = len(st.session_state["df_casos"]) - prev_casos
-    st.toast(f"🔄 Pedidos actualizados ({diff_ped:+d}).")
-    st.toast(f"🔄 Casos especiales actualizados ({diff_casos:+d}).")
-else:
-    _load_data_to_session(force_reload=False)
-
-df_main = st.session_state["df_main"]
-headers_main = st.session_state["headers_main"]
-df_casos = st.session_state["df_casos"]
-headers_casos = st.session_state["headers_casos"]
 
 # --- Asegura que existan físicamente las columnas que vas a ESCRIBIR en datos_pedidos ---
 required_cols_main = [
@@ -2920,13 +3101,14 @@ for col in required_cols_main:
 if not df_main.empty:
     df_main, changes_made_by_demorado_check = check_and_update_demorados(df_main, worksheet_main, headers_main)
     if changes_made_by_demorado_check:
+        st.cache_data.clear()
 
         set_active_main_tab(st.session_state.get("active_main_tab_index", 0))
         st.session_state["active_subtab_local_index"] = st.session_state.get("active_subtab_local_index", 0)
         st.session_state["active_date_tab_m_index"] = st.session_state.get("active_date_tab_m_index", 0)
         st.session_state["active_date_tab_t_index"] = st.session_state.get("active_date_tab_t_index", 0)
 
-        
+        st.rerun()
 
     # --- 🔔 Alerta de Modificación de Surtido ---
     mod_surtido_main_df = _pending_modificaciones(df_main)
@@ -2984,6 +3166,8 @@ if not df_main.empty:
         worksheet_casos = g_spread_client.open_by_key(GOOGLE_SHEET_ID).worksheet("casos_especiales")
     except gspread.exceptions.APIError as e:
         st.error(f"❌ Error al abrir 'casos_especiales': {e}")
+        st.cache_resource.clear()
+        time.sleep(1)
         g_spread_client = get_gspread_client(_credentials_json_dict=GSHEETS_CREDENTIALS)
         worksheet_casos = g_spread_client.open_by_key(GOOGLE_SHEET_ID).worksheet("casos_especiales")
 
@@ -4209,7 +4393,7 @@ with main_tabs[5]:
                                 row["Fecha_Entrega"] = fecha_sel_str
 
                                 st.toast("✅ Cambios aplicados.", icon="✅")
-                                # 🚫 Nada de  ni cambio de pestaña
+                                # 🚫 Nada de st.rerun() ni cambio de pestaña
                             else:
                                 st.error("❌ No se pudieron aplicar los cambios.")
                         else:
@@ -4352,7 +4536,8 @@ with main_tabs[5]:
                                     if ok:
                                         row["Estado"] = "🔵 En Proceso"
                                         st.success("✅ Cambios de surtido confirmados y pedido en '🔵 En Proceso'.")
-                                        
+                                        st.cache_data.clear()
+                                        st.rerun()
                                     else:
                                         st.error("❌ No se pudo confirmar la modificación.")
                             except Exception as e:
@@ -4483,6 +4668,8 @@ with main_tabs[5]:
                                         "files": uploaded_entries,
                                         "timestamp": mx_now_str(),
                                     }
+                                    st.cache_data.clear()
+                                    st.cache_resource.clear()
                                     marcar_contexto_pedido(row_key, "🔁 Devoluciones")
                                     render_guia_upload_feedback(
                                         success_placeholder,
@@ -4595,8 +4782,9 @@ with main_tabs[5]:
                                     "flash_msg"
                                 ] = "✅ Devolución completada correctamente."
                                 set_active_main_tab(5)
+                                st.cache_data.clear()
                                 del st.session_state[flag_key]
-                                
+                                st.rerun()
                             else:
                                 st.error("❌ No se pudo completar la devolución.")
                                 if flag_key in st.session_state:
@@ -5009,7 +5197,8 @@ with main_tabs[6]:  # 🛠 Garantías
                                     if ok:
                                         row["Estado"] = "🔵 En Proceso"
                                         st.success("✅ Cambios de surtido confirmados y pedido en '🔵 En Proceso'.")
-                                        
+                                        st.cache_data.clear()
+                                        st.rerun()
                                     else:
                                         st.error("❌ No se pudo confirmar la modificación.")
                             except Exception as e:
@@ -5147,6 +5336,8 @@ with main_tabs[6]:  # 🛠 Garantías
                                         "files": uploaded_entries,
                                         "timestamp": mx_now_str(),
                                     }
+                                    st.cache_data.clear()
+                                    st.cache_resource.clear()
                                     marcar_contexto_pedido(row_key, "🛠 Garantías")
                                     render_guia_upload_feedback(
                                         success_placeholder,
@@ -5259,8 +5450,9 @@ with main_tabs[6]:  # 🛠 Garantías
                                     "flash_msg"
                                 ] = "✅ Garantía completada correctamente."
                                 set_active_main_tab(6)
+                                st.cache_data.clear()
                                 del st.session_state[flag_key]
-                                
+                                st.rerun()
                             else:
                                 st.error("❌ No se pudo completar la garantía.")
                                 if flag_key in st.session_state:
@@ -5316,8 +5508,9 @@ with main_tabs[7]:  # ✅ Historial Completados/Cancelados
                     })
             if updates and batch_update_gsheet_cells(worksheet_main, updates):
                 st.success(f"✅ {len(updates)} pedidos marcados como limpiados.")
+                st.cache_data.clear()
                 set_active_main_tab(7)
-                
+                st.rerun()
 
     df_completados_historial["Fecha_Completado"] = pd.to_datetime(
         df_completados_historial["Fecha_Completado"],
@@ -5394,8 +5587,9 @@ with main_tabs[7]:  # ✅ Historial Completados/Cancelados
                         st.success(
                             f"✅ {len(updates)} pedidos completados/cancelados en {grupo} marcados como limpiados."
                         )
+                        st.cache_data.clear()
                         set_active_main_tab(7)
-                        
+                        st.rerun()
 
                 pedidos_grupo = df_completados_historial[
                     df_completados_historial["Grupo_Clave"] == grupo
@@ -5441,8 +5635,9 @@ with main_tabs[7]:  # ✅ Historial Completados/Cancelados
                     st.success(
                         f"✅ {len(updates)} pedidos foráneos completados/cancelados fueron marcados como limpiados."
                     )
+                    st.cache_data.clear()
                     set_active_main_tab(7)
-                    
+                    st.rerun()
 
             for orden, (idx, row) in enumerate(
                 completados_foraneos.iterrows(),
@@ -5553,8 +5748,9 @@ with main_tabs[7]:  # ✅ Historial Completados/Cancelados
                     ]
                     if updates and batch_update_gsheet_cells(worksheet_casos, updates):
                         st.success(f"✅ {len(updates)} devoluciones marcadas como limpiadas.")
+                        st.cache_data.clear()
                         set_active_main_tab(7)
-                        
+                        st.rerun()
                 comp_dev = comp_dev.sort_values(by="Fecha_Completado", ascending=False)
                 for _, row in comp_dev.iterrows():
                     with st.expander(f"🔁 {row.get('Folio_Factura', 'N/A')} – {row.get('Cliente', 'N/A')}"):
@@ -5575,8 +5771,9 @@ with main_tabs[7]:  # ✅ Historial Completados/Cancelados
                     ]
                     if updates and batch_update_gsheet_cells(worksheet_casos, updates):
                         st.success(f"✅ {len(updates)} garantías marcadas como limpiadas.")
+                        st.cache_data.clear()
                         set_active_main_tab(7)
-                        
+                        st.rerun()
                 comp_gar = comp_gar.sort_values(by="Fecha_Completado", ascending=False)
                 for _, row in comp_gar.iterrows():
                     with st.expander(f"🛠 {row.get('Folio_Factura', 'N/A')} – {row.get('Cliente', 'N/A')}"):
