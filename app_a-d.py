@@ -1573,6 +1573,17 @@ def es_tab_solicitudes_guia(origen_tab: Any) -> bool:
     }
 
 
+def _mark_skip_demorado_check_once() -> None:
+    """Evita el auto-cambio a Demorado en el rerun inmediato tras una acción manual."""
+
+    st.session_state["skip_demorado_check_once"] = True
+
+
+def _preserve_and_mark_skip_demorado() -> None:
+    preserve_tab_state()
+    _mark_skip_demorado_check_once()
+
+
 def completar_pedido(
     df: pd.DataFrame,
     idx: int,
@@ -2042,9 +2053,11 @@ def mostrar_pedido_detalle(
     col_print_btn,
 ):
     """Procesa el pedido: actualiza estado a 'En Proceso' sin alterar UI."""
+
     if col_print_btn.button(
         "⚙️ Procesar",
         key=f"procesar_{row['ID_Pedido']}_{origen_tab}",
+        on_click=_mark_skip_demorado_check_once,
     ):
         # Solo para marcar que ya se presionó (si se usa para estilos/toasts)
         st.session_state.setdefault("printed_items", {})
@@ -2432,6 +2445,7 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
                     "🟢 Completar",
                     key=f"complete_button_{row['ID_Pedido']}_{origen_tab}",
                     disabled=disabled_if_completed,
+                    on_click=_mark_skip_demorado_check_once,
                 ):
                     if not has_file:
                         st.error(
@@ -2452,6 +2466,7 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
                     "🟢 Completar",
                     key=f"complete_button_{row['ID_Pedido']}_{origen_tab}",
                     disabled=disabled_if_completed,
+                    on_click=_mark_skip_demorado_check_once,
                 ):
                     completar_pedido(
                         df,
@@ -2467,6 +2482,7 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
                     "🟢 Completar",
                     key=f"complete_button_{row['ID_Pedido']}_{origen_tab}",
                     disabled=disabled_if_completed,
+                    on_click=_mark_skip_demorado_check_once,
                 ):
                     completar_pedido(
                         df,
@@ -2483,6 +2499,7 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
                     "🟢 Completar",
                     key=f"complete_button_{row['ID_Pedido']}_{origen_tab}",
                     disabled=disabled_if_completed,
+                    on_click=_mark_skip_demorado_check_once,
                 ):
                     st.session_state[flag_key] = True
 
@@ -2502,6 +2519,7 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
                     if col2.button(
                         "🟢 Completar sin guía",
                         key=f"btn_force_complete_{row['ID_Pedido']}",
+                        on_click=_mark_skip_demorado_check_once,
                     ):
                         completar_pedido(
                             df,
@@ -3117,7 +3135,7 @@ def mostrar_pedido_solo_guia(df, idx, row, orden, origen_tab, current_main_tab_l
         if st.button(
             "🟢 Completar",
             key=f"btn_completar_only_{row['ID_Pedido']}",
-            on_click=preserve_tab_state,
+            on_click=_preserve_and_mark_skip_demorado,
         ):
             if is_tab_guias and not has_file:
                 st.error("⚠️ Debes subir la guía antes de completar este pedido.")
@@ -3176,7 +3194,7 @@ def mostrar_pedido_solo_guia(df, idx, row, orden, origen_tab, current_main_tab_l
             if col2.button(
                 "🟢 Completar sin guía",
                 key=f"btn_force_complete_{row['ID_Pedido']}",
-                on_click=preserve_tab_state,
+                on_click=_preserve_and_mark_skip_demorado,
             ):
                 completar_pedido(
                     df,
@@ -3273,18 +3291,20 @@ for col in required_cols_main:
     if col not in df_main.columns:
         df_main[col] = ""
 
+skip_demorado_check_once = st.session_state.pop("skip_demorado_check_once", False)
 
 if not df_main.empty:
-    df_main, changes_made_by_demorado_check = check_and_update_demorados(df_main, worksheet_main, headers_main)
-    if changes_made_by_demorado_check:
-        st.cache_data.clear()
+    if not skip_demorado_check_once:
+        df_main, changes_made_by_demorado_check = check_and_update_demorados(df_main, worksheet_main, headers_main)
+        if changes_made_by_demorado_check:
+            st.cache_data.clear()
 
-        set_active_main_tab(st.session_state.get("active_main_tab_index", 0))
-        st.session_state["active_subtab_local_index"] = st.session_state.get("active_subtab_local_index", 0)
-        st.session_state["active_date_tab_m_index"] = st.session_state.get("active_date_tab_m_index", 0)
-        st.session_state["active_date_tab_t_index"] = st.session_state.get("active_date_tab_t_index", 0)
+            set_active_main_tab(st.session_state.get("active_main_tab_index", 0))
+            st.session_state["active_subtab_local_index"] = st.session_state.get("active_subtab_local_index", 0)
+            st.session_state["active_date_tab_m_index"] = st.session_state.get("active_date_tab_m_index", 0)
+            st.session_state["active_date_tab_t_index"] = st.session_state.get("active_date_tab_t_index", 0)
 
-        st.rerun()
+            st.rerun()
 
     # --- 🔔 Alerta de Modificación de Surtido ---
     mod_surtido_main_df = _pending_modificaciones(df_main)
