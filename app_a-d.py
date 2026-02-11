@@ -1564,24 +1564,19 @@ def completar_pedido(
     # 🚀 OPTIMIZACIÓN 5: NO limpiar toda la caché - esto es la causa principal de lentitud
     # st.cache_data.clear()  # ❌ REMOVIDO
 
-    set_active_main_tab(st.session_state.get("active_main_tab_index", 0))
-    st.session_state["active_subtab_local_index"] = st.session_state.get(
-        "active_subtab_local_index", 0
-    )
-    st.session_state["active_date_tab_m_index"] = st.session_state.get(
-        "active_date_tab_m_index", 0
-    )
-    st.session_state["active_date_tab_t_index"] = st.session_state.get(
-        "active_date_tab_t_index", 0
-    )
-
     # 🚀 OPTIMIZACIÓN 6: Marcar contexto con scroll habilitado
-    marcar_contexto_pedido(row.get("ID_Pedido"), origen_tab, scroll=True)
+    marcar_contexto_pedido(row.get("ID_Pedido"), origen_tab, scroll=False)
     try:
         df["Fecha_Completado"] = pd.to_datetime(df["Fecha_Completado"], errors="coerce")
     except:
         pass
-    st.rerun()
+
+    # ✅ CLAVE: forzar que en el siguiente rerun automático se lea el estado nuevo
+    # (si no, por ttl=60 se queda mostrando el estado viejo)
+    get_raw_sheet_data.clear()
+
+    # Streamlit ya ejecuta de nuevo el script al hacer clic en el botón,
+    # por lo que evitamos un st.rerun() explícito para no duplicar trabajo.
     return True
 
 
@@ -1962,7 +1957,14 @@ def mostrar_pedido_detalle(
                     df.at[idx, "Estado"] = "🔵 En Proceso"
                     df.at[idx, "Hora_Proceso"] = now_str
                     row["Estado"] = "🔵 En Proceso"
-                    st.toast("📌 Pedido marcado como 'En Proceso'", icon="⚙️")
+                    row["Hora_Proceso"] = now_str
+                    st.toast("✅ Pedido marcado como 🔵 En Proceso", icon="✅")
+
+                    # Mantener vista/pestaña sin forzar salto de scroll
+                    marcar_contexto_pedido(row["ID_Pedido"], origen_tab, scroll=False)
+
+                    # Limpiar solo la caché de datos de Sheets (evitar recargas globales)
+                    get_raw_sheet_data.clear()
                 else:
                     st.error("❌ Falló la actualización del estado a 'En Proceso'.")
         else:
