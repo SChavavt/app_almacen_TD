@@ -1420,6 +1420,18 @@ def resolve_storage_url(s3_client_param, value):
     val = str(value).strip()
     scheme = urlparse(val).scheme
     if scheme in ("http", "https"):
+        parsed = urlparse(val)
+        s3_domains = (
+            ".amazonaws.com",
+            ".s3.amazonaws.com",
+        )
+        host = (parsed.netloc or "").lower()
+
+        # If the sheet stored a direct S3 URL, regenerate a pre-signed URL
+        # with inline headers so PDFs/images open in a browser tab.
+        if any(domain in host for domain in s3_domains):
+            return get_s3_file_download_url(s3_client_param, val)
+
         return val
     return get_s3_file_download_url(s3_client_param, val)
 
