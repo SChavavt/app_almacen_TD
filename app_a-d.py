@@ -575,8 +575,7 @@ if st.button(
     st.session_state["prev_casos_count"] = st.session_state.get("last_casos_count", 0)
     st.session_state["need_compare"] = True
     st.session_state["reload_pedidos_soft"] = True
-    st.cache_data.clear()
-    st.cache_resource.clear()
+    st.session_state["refresh_data_caches_pending"] = True
 
 
 _ensure_visual_state_defaults()
@@ -648,6 +647,7 @@ def get_gspread_client(_credentials_json_dict):
     return client
 
 
+@st.cache_resource
 def get_s3_client():
     """
     Inicializa y retorna un cliente de S3, usando credenciales globales.
@@ -749,7 +749,7 @@ except Exception as e:
 
 
 # --- Data Loading from Google Sheets (Cached) ---
-@st.cache_data(ttl=60, hash_funcs={gspread.client.Client: lambda _: None})
+@st.cache_data(ttl=300, hash_funcs={gspread.client.Client: lambda _: None})
 def get_raw_sheet_data(
     sheet_id: str,
     worksheet_name: str,
@@ -874,6 +874,84 @@ def process_sheet_data(all_data: list[list[str]]) -> tuple[pd.DataFrame, list[st
     return df, headers
 
 
+def _filter_relevant_pedidos(df: pd.DataFrame, headers: list[str], worksheet_name: str) -> pd.DataFrame:
+    """Modo de carga liviana: mantiene filas pendientes (Completados_Limpiado vacío)."""
+    if worksheet_name != GOOGLE_SHEET_WORKSHEET_NAME or df.empty:
+        return df
+
+    # Importante: filtrar solo si la columna viene del origen real de Sheets.
+    # Evita falsos positivos cuando la columna fue agregada localmente en runtime.
+    if "Completados_Limpiado" not in headers:
+        return df
+
+    serie = df.get("Completados_Limpiado", pd.Series([""] * len(df), index=df.index))
+    mask = serie.apply(_is_empty_text)
+    return df[mask].copy()
+
+
+@st.cache_data(ttl=300, hash_funcs={gspread.client.Client: lambda _: None})
+def get_filtered_sheet_dataframe(
+    sheet_id: str,
+    worksheet_name: str,
+    client: Optional[gspread.client.Client] = None,
+    *,
+    light_mode: bool = False,
+) -> tuple[pd.DataFrame, list[str]]:
+    raw = get_raw_sheet_data(sheet_id=sheet_id, worksheet_name=worksheet_name, client=client)
+    df, headers = process_sheet_data(raw)
+    if light_mode:
+        df = _filter_relevant_pedidos(df, headers, worksheet_name)
+    return df, headers
+
+
+def _record_local_sheet_update(worksheet_name: str, row_index: int, values: dict[str, Any]) -> None:
+    local_updates = st.session_state.setdefault("local_sheet_updates", {})
+    worksheet_updates = local_updates.setdefault(worksheet_name, {})
+    row_updates = worksheet_updates.setdefault(int(row_index), {})
+    row_updates.update(values)
+
+
+def _apply_local_sheet_updates(df: pd.DataFrame, worksheet_name: str) -> pd.DataFrame:
+    if df.empty:
+        return df
+
+    worksheet_updates = st.session_state.get("local_sheet_updates", {}).get(worksheet_name, {})
+    if not worksheet_updates:
+        return df
+
+    rows = pd.to_numeric(df.get("_gsheet_row_index", pd.Series(dtype=float)), errors="coerce")
+    for row_index, updates in worksheet_updates.items():
+        mask = rows == int(row_index)
+        if not mask.any():
+            continue
+        for col, value in updates.items():
+            if col not in df.columns:
+                df[col] = ""
+            df.loc[mask, col] = value
+    return df
+
+
+def _get_worksheet_name_safe(worksheet: Any) -> str:
+    return str(getattr(worksheet, "title", "") or "")
+
+
+def _updates_list_to_column_values(
+    headers: list[str],
+    updates_list: list[dict[str, Any]],
+    *,
+    target_row_index: int,
+) -> dict[str, Any]:
+    values: dict[str, Any] = {}
+    for item in updates_list:
+        row, col = gspread.utils.a1_to_rowcol(item["range"])
+        if int(row) != int(target_row_index):
+            continue
+        header_idx = int(col) - 1
+        if 0 <= header_idx < len(headers):
+            values[headers[header_idx]] = item["values"][0][0]
+    return values
+
+
 def update_gsheet_cell(worksheet, headers, row_index, col_name, value):
     """
     Actualiza una celda específica en Google Sheets.
@@ -894,6 +972,9 @@ def update_gsheet_cell(worksheet, headers, row_index, col_name, value):
         wait_seconds = base_delay * (2 ** attempt)
         try:
             worksheet.update_cell(row_index, col_index, value)
+            worksheet_name = _get_worksheet_name_safe(worksheet)
+            if worksheet_name:
+                _record_local_sheet_update(worksheet_name, int(row_index), {col_name: value})
             # st.cache_data.clear() # Limpiar solo si hay un cambio que justifique una recarga completa
             return True
         except gspread.exceptions.APIError as api_error:
@@ -969,7 +1050,7 @@ def cargar_pedidos_desde_google_sheet(sheet_id, worksheet_name):
         return pd.DataFrame(), []
 
 
-def batch_update_gsheet_cells(worksheet, updates_list):
+def batch_update_gsheet_cells(worksheet, updates_list, *, headers: Optional[list[str]] = None):
     """
     Realiza múltiples actualizaciones de celdas en una sola solicitud por lotes a Google Sheets
     utilizando worksheet.update_cells().
@@ -999,6 +1080,19 @@ def batch_update_gsheet_cells(worksheet, updates_list):
         wait_seconds = base_delay * (2 ** attempt)
         try:
             worksheet.update_cells(cell_list)  # Este es el método correcto para batch update en el worksheet
+            if headers:
+                worksheet_name = _get_worksheet_name_safe(worksheet)
+                if worksheet_name:
+                    updates_by_row: dict[int, dict[str, Any]] = {}
+                    for item in updates_list:
+                        row_idx, _ = gspread.utils.a1_to_rowcol(item["range"])
+                        row_values = updates_by_row.setdefault(int(row_idx), {})
+                        row_values.update(
+                            _updates_list_to_column_values(headers, [item], target_row_index=int(row_idx))
+                        )
+                    for row_idx, values in updates_by_row.items():
+                        if values:
+                            _record_local_sheet_update(worksheet_name, row_idx, values)
             # st.cache_data.clear() # Limpiar solo si hay un cambio que justifique una recarga completa
             return True
         except gspread.exceptions.APIError as api_error:
@@ -1540,7 +1634,7 @@ def completar_pedido(
         },
     ]
 
-    if not batch_update_gsheet_cells(worksheet, updates):
+    if not batch_update_gsheet_cells(worksheet, updates, headers=headers):
         st.error("❌ No se pudo completar el pedido.")
         return False
 
@@ -1616,6 +1710,40 @@ def ordenar_pedidos_custom(df_pedidos_filtrados):
 
     return df_sorted.drop(columns=['custom_sort_key', 'Hora_Registro_dt'])
 
+
+def _render_paginated_iterrows(df_source: pd.DataFrame, view_key: str):
+    """Limita el render por vista para evitar costos altos con miles de filas."""
+    if df_source.empty:
+        return []
+
+    default_page_size = int(st.session_state.get("pedidos_page_size", 100))
+    st.session_state["pedidos_page_size"] = default_page_size
+
+    limit_key = f"visible_limit_{view_key}"
+    if limit_key not in st.session_state:
+        st.session_state[limit_key] = default_page_size
+
+    total_rows = len(df_source)
+    visible_limit = max(default_page_size, int(st.session_state.get(limit_key, default_page_size)))
+    visible_limit = min(visible_limit, total_rows)
+
+    if total_rows > default_page_size:
+        st.caption(
+            f"Mostrando {visible_limit} de {total_rows} pedidos en esta vista. "
+            f"(límite base: {default_page_size})"
+        )
+
+    visible_df = df_source.head(visible_limit)
+    remaining = total_rows - visible_limit
+    if remaining > 0 and st.button(
+        f"Cargar más ({remaining} restantes)",
+        key=f"btn_load_more_{view_key}",
+    ):
+        st.session_state[limit_key] = min(total_rows, visible_limit + default_page_size)
+        st.rerun()
+
+    return enumerate(visible_df.iterrows(), start=1)
+
 def check_and_update_demorados(df_to_check, worksheet, headers):
     """
     Revisa pedidos en estado '🟡 Pendiente' que lleven más de 1 hora desde su registro
@@ -1651,7 +1779,7 @@ def check_and_update_demorados(df_to_check, worksheet, headers):
                 changes_made = True
 
     if updates_to_perform:
-        if batch_update_gsheet_cells(worksheet, updates_to_perform):
+        if batch_update_gsheet_cells(worksheet, updates_to_perform, headers=headers):
             st.toast(f"✅ Se actualizaron {len(updates_to_perform)} pedidos a 'Demorado'.", icon="✅")
             return df_to_check, changes_made
         else:
@@ -1949,7 +2077,7 @@ def mostrar_pedido_detalle(
                         "values": [[now_str]],
                     },
                 ]
-                if batch_update_gsheet_cells(worksheet, updates):
+                if batch_update_gsheet_cells(worksheet, updates, headers=headers):
                     df.at[idx, "Estado"] = "🔵 En Proceso"
                     df.at[idx, "Hora_Proceso"] = now_str
                     row["Estado"] = "🔵 En Proceso"
@@ -2132,7 +2260,7 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
                             )
 
                     if cambios:
-                        if batch_update_gsheet_cells(worksheet, cambios):
+                        if batch_update_gsheet_cells(worksheet, cambios, headers=headers):
                             if "Fecha_Entrega" in headers:
                                 df.at[idx, "Fecha_Entrega"] = nueva_fecha_str
                             if (
@@ -2409,7 +2537,7 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
                         {'range': gspread.utils.rowcol_to_a1(gsheet_row_index, estado_col_idx), 'values': [["🔵 En Proceso"]]}
                     ]
                     
-                    if batch_update_gsheet_cells(worksheet, updates):
+                    if batch_update_gsheet_cells(worksheet, updates, headers=headers):
                         # 🚀 OPTIMIZACIÓN 3: Actualizar DataFrame localmente
                         df.at[idx, "Estado"] = "🔵 En Proceso"
                         row["Estado"] = "🔵 En Proceso"
@@ -3068,32 +3196,43 @@ def mostrar_pedido_solo_guia(df, idx, row, orden, origen_tab, current_main_tab_l
 # --- Main Application Logic ---
 
 def _load_pedidos():
-    raw = get_raw_sheet_data(
+    df, headers = get_filtered_sheet_dataframe(
         sheet_id=GOOGLE_SHEET_ID,
         worksheet_name=GOOGLE_SHEET_WORKSHEET_NAME,
         client=g_spread_client,
+        light_mode=True,
     )
-    return process_sheet_data(raw)
+    df = _apply_local_sheet_updates(df, GOOGLE_SHEET_WORKSHEET_NAME)
+    # Re-filtrar después de aplicar updates locales para reflejar de inmediato
+    # cuando un pedido se marca como limpiado/completado en la sesión actual.
+    df = _filter_relevant_pedidos(df, headers, GOOGLE_SHEET_WORKSHEET_NAME)
+    return df, headers
 
 def _load_casos():
-    raw = get_raw_sheet_data(
+    df, headers = get_filtered_sheet_dataframe(
         sheet_id=GOOGLE_SHEET_ID,
         worksheet_name="casos_especiales",
         client=g_spread_client,
+        light_mode=False,
     )
-    return process_sheet_data(raw)
+    return _apply_local_sheet_updates(df, "casos_especiales"), headers
 
 
 # 🔁 Rerun ligero después de acciones (Procesar/Completar)
 if st.session_state.pop("reload_after_action", False):
-    # Solo invalidamos la lectura de Sheets (sin limpiar todo Streamlit)
+    # Mantenemos rerun ligero; los cambios ya se reflejan por actualización local en sesión.
+    pass
+
+if st.session_state.pop("refresh_data_caches_pending", False):
     get_raw_sheet_data.clear()
+    get_filtered_sheet_dataframe.clear()
 
 if st.session_state.get("need_compare"):
     prev_pedidos = st.session_state.get("prev_pedidos_count", 0)
     prev_casos = st.session_state.get("prev_casos_count", 0)
     for attempt in range(3):
-        st.cache_data.clear()
+        get_raw_sheet_data.clear()
+        get_filtered_sheet_dataframe.clear()
         df_main, headers_main = _load_pedidos()
         df_casos, headers_casos = _load_casos()
         new_pedidos = len(df_main)
@@ -3934,7 +4073,7 @@ if not df_main.empty:
             if not pedidos_b_display.empty:
                 pedidos_b_display = ordenar_pedidos_custom(pedidos_b_display)
                 st.markdown("#### 📦 Pedidos Locales - En Bodega")
-                for orden, (idx, row) in enumerate(pedidos_b_display.iterrows(), start=1):
+                for orden, (idx, row) in _render_paginated_iterrows(pedidos_b_display, "local_bodega"):
                     mostrar_pedido(
                         df_main,
                         idx,
@@ -3955,7 +4094,7 @@ if not df_main.empty:
         ].copy()
         if not pedidos_foraneos_display.empty:
             pedidos_foraneos_display = ordenar_pedidos_custom(pedidos_foraneos_display)
-            for orden, (idx, row) in enumerate(pedidos_foraneos_display.iterrows(), start=1):
+            for orden, (idx, row) in _render_paginated_iterrows(pedidos_foraneos_display, "foraneos"):
                 mostrar_pedido(
                     df_main,
                     idx,
@@ -3978,7 +4117,7 @@ if not df_main.empty:
         if not pedidos_cdmx_display.empty:
             pedidos_cdmx_display = ordenar_pedidos_custom(pedidos_cdmx_display)
             st.markdown("### 🏙️ Pedidos CDMX")
-            for orden, (idx, row) in enumerate(pedidos_cdmx_display.iterrows(), start=1):
+            for orden, (idx, row) in _render_paginated_iterrows(pedidos_cdmx_display, "cdmx"):
                 # Reutiliza el mismo render que Foráneo (con tus botones de imprimir/completar, etc.)
                 mostrar_pedido(
                     df_main,
@@ -4003,7 +4142,7 @@ if not df_main.empty:
             solicitudes_display = ordenar_pedidos_custom(solicitudes_display)
             st.markdown("### 📋 Solicitudes de Guía")
             st.info("En esta pestaña solo puedes **subir la(s) guía(s)**. Al subir se marca el pedido como **🟢 Completado**.")
-            for orden, (idx, row) in enumerate(solicitudes_display.iterrows(), start=1):
+            for orden, (idx, row) in _render_paginated_iterrows(solicitudes_display, "solicitudes_guia"):
                 # ✅ Render minimalista: solo guía + completar automático
                 mostrar_pedido_solo_guia(df_main, idx, row, orden, "Solicitudes", "📋 Solicitudes de Guía", worksheet_main, headers_main, s3_client)
         else:
@@ -4016,7 +4155,7 @@ if not df_main.empty:
         ].copy()
         if not pedidos_cursos_display.empty:
             pedidos_cursos_display = ordenar_pedidos_custom(pedidos_cursos_display)
-            for orden, (idx, row) in enumerate(pedidos_cursos_display.iterrows(), start=1):
+            for orden, (idx, row) in _render_paginated_iterrows(pedidos_cursos_display, "cursos_eventos"):
                 mostrar_pedido(
                     df_main,
                     idx,
@@ -4422,7 +4561,7 @@ with main_tabs[5]:
                             changed = True
 
                         if updates and changed:
-                            if batch_update_gsheet_cells(worksheet_casos, updates):
+                            if batch_update_gsheet_cells(worksheet_casos, updates, headers=headers_casos):
                                 # Reflejar en la UI sin recargar toda la app
                                 row["Tipo_Envio_Original"] = tipo_sel
                                 if tipo_sel == "📍 Pedido Local":
@@ -5099,7 +5238,7 @@ with main_tabs[6]:  # 🛠 Garantías
                             changed = True
 
                         if updates and changed:
-                            if batch_update_gsheet_cells(worksheet_casos, updates):
+                            if batch_update_gsheet_cells(worksheet_casos, updates, headers=headers_casos):
                                 # Reflejar
                                 row["Tipo_Envio_Original"] = tipo_sel
                                 if tipo_sel == "📍 Pedido Local":
@@ -5543,9 +5682,10 @@ with main_tabs[7]:  # ✅ Historial Completados/Cancelados
                         'range': gspread.utils.rowcol_to_a1(g_row, col_idx),
                         'values': [["sí"]]
                     })
-            if updates and batch_update_gsheet_cells(worksheet_main, updates):
+            if updates and batch_update_gsheet_cells(worksheet_main, updates, headers=headers_main):
                 st.success(f"✅ {len(updates)} pedidos marcados como limpiados.")
-                st.cache_data.clear()
+                get_raw_sheet_data.clear()
+                get_filtered_sheet_dataframe.clear()
                 set_active_main_tab(7)
                 st.rerun()
 
@@ -5620,11 +5760,12 @@ with main_tabs[7]:  # ✅ Historial Completados/Cancelados
                         }
                         for _, row in pedidos_a_limpiar.iterrows()
                     ]
-                    if updates and batch_update_gsheet_cells(worksheet_main, updates):
+                    if updates and batch_update_gsheet_cells(worksheet_main, updates, headers=headers_main):
                         st.success(
                             f"✅ {len(updates)} pedidos completados/cancelados en {grupo} marcados como limpiados."
                         )
-                        st.cache_data.clear()
+                        get_raw_sheet_data.clear()
+                        get_filtered_sheet_dataframe.clear()
                         set_active_main_tab(7)
                         st.rerun()
 
@@ -5668,11 +5809,12 @@ with main_tabs[7]:  # ✅ Historial Completados/Cancelados
                     }
                     for _, row in completados_foraneos.iterrows()
                 ]
-                if updates and batch_update_gsheet_cells(worksheet_main, updates):
+                if updates and batch_update_gsheet_cells(worksheet_main, updates, headers=headers_main):
                     st.success(
                         f"✅ {len(updates)} pedidos foráneos completados/cancelados fueron marcados como limpiados."
                     )
-                    st.cache_data.clear()
+                    get_raw_sheet_data.clear()
+                    get_filtered_sheet_dataframe.clear()
                     set_active_main_tab(7)
                     st.rerun()
 
@@ -5783,9 +5925,10 @@ with main_tabs[7]:  # ✅ Historial Completados/Cancelados
                         }
                         for _, row in comp_dev.iterrows()
                     ]
-                    if updates and batch_update_gsheet_cells(worksheet_casos, updates):
+                    if updates and batch_update_gsheet_cells(worksheet_casos, updates, headers=headers_casos):
                         st.success(f"✅ {len(updates)} devoluciones marcadas como limpiadas.")
-                        st.cache_data.clear()
+                        get_raw_sheet_data.clear()
+                        get_filtered_sheet_dataframe.clear()
                         set_active_main_tab(7)
                         st.rerun()
                 comp_dev = comp_dev.sort_values(by="Fecha_Completado", ascending=False)
@@ -5806,9 +5949,10 @@ with main_tabs[7]:  # ✅ Historial Completados/Cancelados
                         }
                         for _, row in comp_gar.iterrows()
                     ]
-                    if updates and batch_update_gsheet_cells(worksheet_casos, updates):
+                    if updates and batch_update_gsheet_cells(worksheet_casos, updates, headers=headers_casos):
                         st.success(f"✅ {len(updates)} garantías marcadas como limpiadas.")
-                        st.cache_data.clear()
+                        get_raw_sheet_data.clear()
+                        get_filtered_sheet_dataframe.clear()
                         set_active_main_tab(7)
                         st.rerun()
                 comp_gar = comp_gar.sort_values(by="Fecha_Completado", ascending=False)
@@ -5817,8 +5961,3 @@ with main_tabs[7]:  # ✅ Historial Completados/Cancelados
                         render_caso_especial_garantia_hist(row)
         else:
             st.info("No hay casos especiales completados/cancelados o ya fueron limpiados.")
-
-
-
-
-
