@@ -1056,6 +1056,48 @@ def batch_update_gsheet_cells(worksheet, updates_list):
     return False
 
 
+def escribir_en_reporte_guias(cliente, vendedor):
+    """
+    Escribe cliente y vendedor en la hoja "REPORTE GUÍAS".
+    Busca la primera fila disponible donde C (NOMBRE) y F (VENDEDOR)
+    estén vacías. Si no existe, agrega al final.
+    """
+    try:
+        client = get_gspread_client(_credentials_json_dict=GSHEETS_CREDENTIALS)
+        reporte_ws = client.open_by_key(GOOGLE_SHEET_ID).worksheet("REPORTE GUÍAS")
+
+        all_values = reporte_ws.get_all_values()
+        target_row = None
+
+        # Inicia desde la fila 2 para saltar encabezados
+        for row_idx, row_values in enumerate(all_values[1:], start=2):
+            nombre_val = row_values[2].strip() if len(row_values) > 2 else ""
+            vendedor_val = row_values[5].strip() if len(row_values) > 5 else ""
+
+            if nombre_val == "" and vendedor_val == "":
+                target_row = row_idx
+                break
+
+        if target_row is None:
+            target_row = len(all_values) + 1
+
+        updates = [
+            {
+                "range": gspread.utils.rowcol_to_a1(target_row, 3),
+                "values": [[cliente]],
+            },
+            {
+                "range": gspread.utils.rowcol_to_a1(target_row, 6),
+                "values": [[vendedor]],
+            },
+        ]
+
+        return batch_update_gsheet_cells(reporte_ws, updates)
+    except Exception as e:
+        st.error(f"❌ Error al escribir en 'REPORTE GUÍAS': {e}")
+        return False
+
+
 def mirror_guide_value(
     worksheet,
     headers,
@@ -1908,6 +1950,7 @@ def mostrar_pedido_detalle(
     idx,
     row,
     origen_tab,
+    current_main_tab_label,
     worksheet,
     headers,
     gsheet_row_index,
@@ -1954,6 +1997,13 @@ def mostrar_pedido_detalle(
                     df.at[idx, "Hora_Proceso"] = now_str
                     row["Estado"] = "🔵 En Proceso"
                     row["Hora_Proceso"] = now_str
+
+                    if "Foráneo" in str(current_main_tab_label):
+                        cliente = str(row.get("Cliente", "")).strip()
+                        vendedor = str(row.get("Vendedor_Registro", "")).strip()
+                        if cliente and vendedor:
+                            escribir_en_reporte_guias(cliente, vendedor)
+
                     st.toast("✅ Pedido marcado como 🔵 En Proceso", icon="✅")
 
                     # Mantener vista/pestaña sin forzar salto de scroll
@@ -2208,6 +2258,7 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
                 idx,
                 row,
                 origen_tab,
+                current_main_tab_label,
                 worksheet,
                 headers,
                 gsheet_row_index,
@@ -5817,8 +5868,6 @@ with main_tabs[7]:  # ✅ Historial Completados/Cancelados
                         render_caso_especial_garantia_hist(row)
         else:
             st.info("No hay casos especiales completados/cancelados o ya fueron limpiados.")
-
-
 
 
 
