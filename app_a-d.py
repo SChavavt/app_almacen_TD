@@ -1571,13 +1571,9 @@ def completar_pedido(
     except:
         pass
 
-    # ✅ CLAVE: forzar que en el siguiente rerun automático se lea el estado nuevo
-    # (si no, por ttl=60 se queda mostrando el estado viejo)
-    get_raw_sheet_data.clear()
-
-    # Streamlit ya ejecuta de nuevo el script al hacer clic en el botón,
-    # por lo que evitamos un st.rerun() explícito para no duplicar trabajo.
-    return True
+    preserve_tab_state()
+    st.session_state["reload_after_action"] = True
+    st.rerun()
 
 
 # --- Helper Functions (existing in app.py) ---
@@ -1963,8 +1959,9 @@ def mostrar_pedido_detalle(
                     # Mantener vista/pestaña sin forzar salto de scroll
                     marcar_contexto_pedido(row["ID_Pedido"], origen_tab, scroll=False)
 
-                    # Limpiar solo la caché de datos de Sheets (evitar recargas globales)
-                    get_raw_sheet_data.clear()
+                    preserve_tab_state()
+                    st.session_state["reload_after_action"] = True
+                    st.rerun()
                 else:
                     st.error("❌ Falló la actualización del estado a 'En Proceso'.")
         else:
@@ -2419,12 +2416,12 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
                         
                         # 🚀 OPTIMIZACIÓN 4: Usar toast para feedback rápido
                         st.toast("🔧 Modificación procesada - Estado actualizado a 'En Proceso'", icon="✅")
-                        
-                        # 🚀 OPTIMIZACIÓN 5: NO limpiar cache completo
-                        get_raw_sheet_data.clear()  # ✅ Solo limpia datos de sheets (más rápido que cache completo)
-                        
-                        # 🚀 OPTIMIZACIÓN 6: Marcar contexto con scroll
-                        marcar_contexto_pedido(row["ID_Pedido"], origen_tab, scroll=True)
+
+                        # 🚀 OPTIMIZACIÓN 6: Marcar contexto sin salto de scroll
+                        marcar_contexto_pedido(row["ID_Pedido"], origen_tab, scroll=False)
+
+                        preserve_tab_state()
+                        st.session_state["reload_after_action"] = True
                         st.rerun()
                     else:
                         st.error("❌ Falló la actualización del estado a 'En Proceso'.")
@@ -3085,6 +3082,12 @@ def _load_casos():
         client=g_spread_client,
     )
     return process_sheet_data(raw)
+
+
+# 🔁 Rerun ligero después de acciones (Procesar/Completar)
+if st.session_state.pop("reload_after_action", False):
+    # Solo invalidamos la lectura de Sheets (sin limpiar todo Streamlit)
+    get_raw_sheet_data.clear()
 
 if st.session_state.get("need_compare"):
     prev_pedidos = st.session_state.get("prev_pedidos_count", 0)
