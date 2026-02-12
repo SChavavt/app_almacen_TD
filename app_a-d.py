@@ -74,78 +74,6 @@ def _ensure_visual_state_defaults():
     state.setdefault("prev_pedidos_count", 0)
     state.setdefault("prev_casos_count", 0)
     state.setdefault("need_compare", False)
-    state.setdefault("bulk_complete_mode", False)
-    state.setdefault("bulk_selected_pedidos", set())
-
-
-def _get_bulk_selected_ids() -> set[str]:
-    selected = st.session_state.get("bulk_selected_pedidos", set())
-    if isinstance(selected, set):
-        return selected
-    if isinstance(selected, (list, tuple)):
-        return set(str(x).strip() for x in selected if str(x).strip())
-    return set()
-
-
-def _set_bulk_mode(enabled: bool) -> None:
-    st.session_state["bulk_complete_mode"] = bool(enabled)
-    if enabled:
-        return
-
-    st.session_state["bulk_selected_pedidos"] = set()
-    for key in list(st.session_state.keys()):
-        if key.startswith("bulk_chk_"):
-            del st.session_state[key]
-
-
-def _cleanup_bulk_selection(visible_ids: set[str]) -> None:
-    selected = _get_bulk_selected_ids()
-    if not visible_ids:
-        selected = set()
-    else:
-        selected = selected.intersection(visible_ids)
-
-    st.session_state["bulk_selected_pedidos"] = selected
-
-    for key in list(st.session_state.keys()):
-        if not key.startswith("bulk_chk_"):
-            continue
-        pedido_id = key.replace("bulk_chk_", "", 1)
-        if pedido_id not in visible_ids:
-            del st.session_state[key]
-
-
-def _render_bulk_selector(row: Any) -> None:
-    if not st.session_state.get("bulk_complete_mode", False):
-        return
-
-    if str(row.get("Estado", "")).strip() != "🔵 En Proceso":
-        return
-
-    pedido_id = str(row.get("ID_Pedido", "")).strip()
-    if not pedido_id:
-        return
-
-    selected = _get_bulk_selected_ids()
-    checkbox_key = f"bulk_chk_{pedido_id}"
-
-    if checkbox_key not in st.session_state:
-        st.session_state[checkbox_key] = pedido_id in selected
-
-    col_chk, col_txt = st.columns([0.07, 0.93])
-    checked = col_chk.checkbox(
-        "Seleccionar pedido",
-        key=checkbox_key,
-        label_visibility="collapsed",
-    )
-    col_txt.caption("Seleccionar este pedido para **Completar Pedidos**")
-
-    if checked:
-        selected.add(pedido_id)
-    else:
-        selected.discard(pedido_id)
-
-    st.session_state["bulk_selected_pedidos"] = selected
 
 
 _TAB_LABELS_BY_TIPO = {
@@ -1677,7 +1605,6 @@ def completar_pedido(
     gsheet_row_index: int,
     origen_tab: str,
     success_message: Optional[str] = None,
-    trigger_rerun: bool = True,
 ) -> bool:
     """Marca un pedido como completado y preserva el estado visual - OPTIMIZADO."""
 
@@ -1763,10 +1690,7 @@ def completar_pedido(
 
     preserve_tab_state()
     st.session_state["reload_after_action"] = True
-    if trigger_rerun:
-        st.rerun()
-
-    return True
+    st.rerun()
 
 
 # --- Helper Functions (existing in app.py) ---
@@ -2254,7 +2178,6 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
     folio = row.get("Folio_Factura", "").strip() or row['ID_Pedido']
     guia_marker = "📋 " if pedido_sin_guia(row) else ""
     st.markdown(f'<a name="pedido_{row["ID_Pedido"]}"></a>', unsafe_allow_html=True)
-    _render_bulk_selector(row)
     with st.expander(
         f"{guia_marker}{row['Estado']} - {folio} - {row['Cliente']}",
         expanded=st.session_state["expanded_pedidos"].get(row['ID_Pedido'], False),
@@ -3094,7 +3017,6 @@ def mostrar_pedido_solo_guia(df, idx, row, orden, origen_tab, current_main_tab_l
 
     folio = (row.get("Folio_Factura", "") or "").strip() or row['ID_Pedido']
     st.markdown(f'<a name="pedido_{row["ID_Pedido"]}"></a>', unsafe_allow_html=True)
-    _render_bulk_selector(row)
 
     # Expander simple con info básica (sin acciones extra)
     guia_marker = "📋 " if pedido_sin_guia(row) else ""
@@ -3467,7 +3389,6 @@ if not df_main.empty:
     # Limpieza preventiva de banderas de confirmación ligadas a pedidos que ya no están visibles
     _clear_offscreen_pedido_flags(st.session_state.get("pedidos_en_pantalla", set()))
     _clear_offscreen_guide_flags(st.session_state.get("pedidos_en_pantalla", set()))
-    _cleanup_bulk_selection(st.session_state.get("pedidos_en_pantalla", set()))
 
     df_demorados_activos = df_pendientes_proceso_demorado[
         df_pendientes_proceso_demorado["Estado"] == "🔴 Demorado"
@@ -3611,92 +3532,6 @@ if not df_main.empty:
         "🛠 Garantías",
         "✅ Historial Completados/Cancelados",
     ]
-
-    col_bulk_btn, col_bulk_info = st.columns([1.2, 2.8])
-    bulk_mode_active = st.session_state.get("bulk_complete_mode", False)
-    selected_bulk_ids = _get_bulk_selected_ids()
-    selected_bulk_count = len(selected_bulk_ids)
-    has_multiple_selected = selected_bulk_count > 1
-
-    if col_bulk_btn.button(
-        "🟢 Completar Pedidos" if bulk_mode_active else "✅ Completar Varios",
-        key="btn_toggle_bulk_complete_mode",
-        disabled=(bulk_mode_active and not has_multiple_selected),
-    ):
-        if not bulk_mode_active:
-            _set_bulk_mode(True)
-        else:
-            pedidos_lookup = (
-                df_pendientes_proceso_demorado
-                .set_index("ID_Pedido", drop=False)
-                if "ID_Pedido" in df_pendientes_proceso_demorado.columns
-                else pd.DataFrame()
-            )
-
-            pedidos_a_completar = []
-            for pedido_id in sorted(selected_bulk_ids):
-                if pedido_id not in pedidos_lookup.index:
-                    continue
-                row_to_complete = pedidos_lookup.loc[pedido_id]
-                if isinstance(row_to_complete, pd.DataFrame):
-                    row_to_complete = row_to_complete.iloc[0]
-                if str(row_to_complete.get("Estado", "")).strip() != "🔵 En Proceso":
-                    continue
-                pedidos_a_completar.append(row_to_complete)
-
-            if len(pedidos_a_completar) <= 1:
-                st.warning("⚠️ Selecciona más de un pedido en proceso para completar varios.")
-            else:
-                completados_ok = 0
-                preserve_tab_state()
-                _mark_skip_demorado_check_once()
-                for pedido_row in pedidos_a_completar:
-                    pedido_id = str(pedido_row.get("ID_Pedido", "")).strip()
-                    row_idx_list = df_main.index[
-                        df_main.get("ID_Pedido", pd.Series(dtype=str)).astype(str).str.strip() == pedido_id
-                    ].tolist()
-                    if not row_idx_list:
-                        continue
-                    df_idx = row_idx_list[0]
-                    gsheet_row_index = pedido_row.get("_gsheet_row_index")
-                    if gsheet_row_index is None:
-                        continue
-
-                    if completar_pedido(
-                        df_main,
-                        df_idx,
-                        pedido_row,
-                        worksheet_main,
-                        headers_main,
-                        gsheet_row_index,
-                        "bulk_multi",
-                        success_message=f"✅ Pedido {pedido_id} completado",
-                        trigger_rerun=False,
-                    ):
-                        completados_ok += 1
-
-                _set_bulk_mode(False)
-                if completados_ok > 0:
-                    st.success(f"✅ Se completaron {completados_ok} pedidos.")
-                    st.session_state["reload_after_action"] = True
-                    st.rerun()
-                else:
-                    st.warning("⚠️ No se completó ningún pedido seleccionado.")
-
-    if bulk_mode_active:
-        if has_multiple_selected:
-            col_bulk_info.success(
-                f"Modo múltiple activo: {selected_bulk_count} pedidos seleccionados en proceso."
-            )
-        else:
-            col_bulk_info.info(
-                "Selecciona más de un pedido en proceso para habilitar **Completar Pedidos**."
-            )
-    else:
-        col_bulk_info.caption(
-            "Activa **Completar Varios** para mostrar checks fuera del expander en pedidos en proceso."
-        )
-
     main_tabs = st.tabs(tab_options)
     components.html(f"""
     <script>
