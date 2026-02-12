@@ -584,6 +584,8 @@ _ensure_visual_state_defaults()
 # --- Google Sheets Constants (pueden venir de st.secrets si se prefiere) ---
 GOOGLE_SHEET_ID = '1aWkSelodaz0nWfQx7FZAysGnIYGQFJxAN7RO3YgCiZY'
 GOOGLE_SHEET_WORKSHEET_NAME = 'datos_pedidos'
+REPORTES_SHEET_ID = ''
+DEBUG_REPORTE_GUIAS = False
 
 # --- AWS S3 Configuration ---
 try:
@@ -695,6 +697,10 @@ try:
         st.stop()
 
     gsheets_secrets = st.secrets["gsheets"]
+
+    reportes_sheet_id_secret = str(gsheets_secrets.get("reportes_sheet_id", "")).strip()
+    if reportes_sheet_id_secret:
+        REPORTES_SHEET_ID = reportes_sheet_id_secret
 
     if "google_credentials" not in gsheets_secrets:
         st.error("❌ Las credenciales de Google Sheets están incompletas. Falta la clave 'google_credentials' en la sección [gsheets].")
@@ -1148,6 +1154,70 @@ def batch_update_gsheet_cells(worksheet, updates_list, *, headers: Optional[list
             break
 
     return False
+
+
+def escribir_en_reporte_guias(cliente: str, vendedor: str) -> bool:
+    """Escribe Cliente (col C) y Vendedor (col F) en la hoja REPORTE GUÍAS."""
+    try:
+        st.toast("🧪 DEBUG: escribir_en_reporte_guias() inició", icon="🧪")
+
+        client = globals().get("g_spread_client") or get_gspread_client(
+            _credentials_json_dict=GSHEETS_CREDENTIALS
+        )
+        st.toast("🧪 DEBUG: gspread client OK", icon="🧪")
+
+        reportes_sheet_id = str(REPORTES_SHEET_ID).strip()
+        if not reportes_sheet_id:
+            st.error("❌ DEBUG: REPORTES_SHEET_ID está vacío. Configura st.secrets['gsheets']['reportes_sheet_id'].")
+            return False
+
+        ss = client.open_by_key(reportes_sheet_id)
+        st.toast("🧪 DEBUG: open_by_key REPORTES_SHEET_ID OK", icon="🧪")
+
+        if DEBUG_REPORTE_GUIAS:
+            # DEBUG: lista hojas disponibles (para detectar si el nombre está mal)
+            try:
+                hojas = [ws.title for ws in ss.worksheets()]
+                st.info(f"🧪 DEBUG: Hojas disponibles: {hojas}")
+            except Exception as e_list:
+                st.warning(f"⚠️ DEBUG: No pude listar worksheets(): {e_list}")
+
+        ws = ss.worksheet("REPORTE GUÍAS")
+        st.toast("🧪 DEBUG: worksheet('REPORTE GUÍAS') OK", icon="🧪")
+
+        col_C_vals = ws.col_values(3)
+        col_F_vals = ws.col_values(6)
+        last_row_C = len(col_C_vals)
+        last_row_F = len(col_F_vals)
+
+        target_row_index = max(last_row_C, last_row_F) + 1
+        if target_row_index < 2:
+            target_row_index = 2
+
+        st.info(
+            f"🧪 DEBUG: last_row_C={last_row_C}, last_row_F={last_row_F}, "
+            f"target_row_index={target_row_index}"
+        )
+
+        updates = [
+            {"range": gspread.utils.rowcol_to_a1(target_row_index, 3), "values": [[cliente]]},
+            {"range": gspread.utils.rowcol_to_a1(target_row_index, 6), "values": [[vendedor]]},
+        ]
+
+        ok = batch_update_gsheet_cells(ws, updates)
+        st.info(f"🧪 DEBUG: batch_update_gsheet_cells ok={ok}")
+
+        if ok:
+            st.toast(f"✅ DEBUG: Escribí en REPORTE GUÍAS fila {target_row_index}", icon="✅")
+            return True
+
+        st.warning("⚠️ DEBUG: batch_update_gsheet_cells devolvió False (no escribió).")
+        return False
+
+    except Exception as e:
+        st.error(f"❌ DEBUG: Excepción en escribir_en_reporte_guias: {e}")
+        st.exception(e)  # <-- esto te imprime el traceback completo
+        return False
 
 
 def mirror_guide_value(
@@ -2107,6 +2177,28 @@ def mostrar_pedido_detalle(
                     df.at[idx, "Hora_Proceso"] = now_str
                     row["Estado"] = "🔵 En Proceso"
                     row["Hora_Proceso"] = now_str
+
+                    st.toast("🧪 DEBUG: Entré al handler de ⚙️ Procesar", icon="🧪")
+                    st.toast(f"🧪 DEBUG: ID={row.get('ID_Pedido','')} Estado={row.get('Estado','')}", icon="🧪")
+
+                    tipo_envio = str(row.get("Tipo_Envio", "")).strip()
+                    st.toast(f"🧪 DEBUG: Tipo_Envio='{tipo_envio}'", icon="🧪")
+
+                    tipo_envio_low = tipo_envio.lower()
+                    if ("foraneo" in tipo_envio_low) or ("foráneo" in tipo_envio_low):
+                        cliente = str(row.get("Cliente", "")).strip()
+                        vendedor = str(row.get("Vendedor_Registro", "")).strip()
+
+                        if not cliente or not vendedor:
+                            st.warning(f"⚠️ DEBUG: No escribí REPORTE GUÍAS porque cliente/vendedor vacío. Cliente='{cliente}' Vendedor='{vendedor}'")
+                        else:
+                            st.toast("🧪 DEBUG: Intentando escribir en REPORTE GUÍAS...", icon="🧪")
+                            ok_rep = escribir_en_reporte_guias(cliente, vendedor)
+                            if not ok_rep:
+                                st.warning("⚠️ DEBUG: Falló escribir_en_reporte_guias (devolvió False).")
+                    else:
+                        st.info("ℹ️ DEBUG: No es Foráneo, no escribo REPORTE GUÍAS.")
+
                     st.toast("✅ Pedido marcado como 🔵 En Proceso", icon="✅")
 
                     # Mantener vista/pestaña sin forzar salto de scroll
