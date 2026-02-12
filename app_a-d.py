@@ -1698,40 +1698,73 @@ def completar_pedido(
 def ordenar_pedidos_custom(df_pedidos_filtrados):
     """
     Ordena el DataFrame con:
-    1. Modificación de Surtido (sin importar hora)
+    1. Modificación de Surtido
     2. Demorados
-    3. Pendientes / En Proceso (los más viejos arriba)
+    3. Pendientes
+    4. En Proceso
+    En cada grupo se muestran primero los más antiguos y al final los más recientes.
     """
     if df_pedidos_filtrados.empty:
         return df_pedidos_filtrados
 
+    df_pedidos_filtrados = df_pedidos_filtrados.copy()
+
     # Asegurar datetime para ordenar por antigüedad
-    df_pedidos_filtrados['Hora_Registro_dt'] = pd.to_datetime(df_pedidos_filtrados['Hora_Registro'], errors='coerce')
+    if 'Hora_Registro' in df_pedidos_filtrados.columns:
+        df_pedidos_filtrados['Hora_Registro_dt'] = pd.to_datetime(
+            df_pedidos_filtrados['Hora_Registro'], errors='coerce'
+        )
+    else:
+        df_pedidos_filtrados['Hora_Registro_dt'] = pd.NaT
+
+    if 'Fecha_Registro' in df_pedidos_filtrados.columns:
+        df_pedidos_filtrados['Fecha_Registro_dt'] = pd.to_datetime(
+            df_pedidos_filtrados['Fecha_Registro'], errors='coerce'
+        )
+    else:
+        df_pedidos_filtrados['Fecha_Registro_dt'] = pd.NaT
+
+    df_pedidos_filtrados['Fecha_Orden_dt'] = df_pedidos_filtrados['Hora_Registro_dt'].combine_first(
+        df_pedidos_filtrados['Fecha_Registro_dt']
+    )
 
     def get_sort_key(row):
         mod_texto = str(row.get("Modificacion_Surtido", "")).strip()
         refact_tipo = str(row.get("Refacturacion_Tipo", "")).strip()
+        estado = str(row.get("Estado", "")).strip()
         tiene_modificacion_sin_confirmar = (
             mod_texto and
             not mod_texto.endswith("[✔CONFIRMADO]") and
             refact_tipo != "Datos Fiscales"
         )
 
+        fecha_orden = row.get('Fecha_Orden_dt')
+        if pd.isna(fecha_orden):
+            fecha_orden = pd.Timestamp.max
 
         if tiene_modificacion_sin_confirmar:
-            return (0, pd.Timestamp.min)  # Arriba del todo si no está confirmada
+            return (0, fecha_orden)
 
-        if row["Estado"] == "🔴 Demorado":
-            return (1, pd.Timestamp.min)  # Justo debajo
+        if estado == "🔴 Demorado":
+            return (1, fecha_orden)
 
-        return (2, row['Hora_Registro_dt'] if pd.notna(row['Hora_Registro_dt']) else pd.Timestamp.max)
+        if estado == "🟡 Pendiente":
+            return (2, fecha_orden)
+
+        if estado == "🔵 En Proceso":
+            return (3, fecha_orden)
+
+        return (4, fecha_orden)
 
 
     df_pedidos_filtrados['custom_sort_key'] = df_pedidos_filtrados.apply(get_sort_key, axis=1)
 
     df_sorted = df_pedidos_filtrados.sort_values(by='custom_sort_key', ascending=True)
 
-    return df_sorted.drop(columns=['custom_sort_key', 'Hora_Registro_dt'])
+    return df_sorted.drop(
+        columns=['custom_sort_key', 'Hora_Registro_dt', 'Fecha_Registro_dt', 'Fecha_Orden_dt'],
+        errors='ignore',
+    )
 
 
 def _render_paginated_iterrows(df_source: pd.DataFrame, view_key: str):
@@ -3487,64 +3520,6 @@ if not df_main.empty:
         st.warning(
             f"⚠️ Hay {lista_casos} en estado pendiente en Casos Especiales."
         )
-
-    solicitudes_guia_count = 0
-    solicitudes_por_adjuntos = 0
-    solicitudes_por_hoja_ruta = 0
-
-    if not df_main.empty:
-        estado_no_completado = (
-            df_main.get("Estado", pd.Series(dtype=str)).astype(str).str.strip() != "🟢 Completado"
-        )
-        completados_limpiado_vacio = df_main.get(
-            "Completados_Limpiado",
-            pd.Series(dtype=str),
-        ).apply(_is_empty_text)
-        solicitudes_main_mask = df_main.apply(pedido_requiere_guia, axis=1)
-        adjuntos_vacios_mask = df_main.get("Adjuntos_Guia", pd.Series(dtype=str)).apply(
-            _is_empty_text
-        )
-        solicitudes_por_adjuntos = len(
-            df_main[
-                estado_no_completado
-                & completados_limpiado_vacio
-                & solicitudes_main_mask
-                & adjuntos_vacios_mask
-            ]
-        )
-        solicitudes_guia_count += solicitudes_por_adjuntos
-
-    if not df_casos.empty:
-        estado_no_completado = (
-            df_casos.get("Estado", pd.Series(dtype=str)).astype(str).str.strip() != "🟢 Completado"
-        )
-        completados_limpiado_vacio = df_casos.get(
-            "Completados_Limpiado",
-            pd.Series(dtype=str),
-        ).apply(_is_empty_text)
-        solicitudes_casos_mask = df_casos.apply(pedido_requiere_guia, axis=1)
-        hoja_ruta_vacia_mask = df_casos.get(
-            "Hoja_Ruta_Mensajero",
-            pd.Series(dtype=str),
-        ).apply(_is_empty_text)
-        solicitudes_por_hoja_ruta = len(
-            df_casos[
-                estado_no_completado
-                & completados_limpiado_vacio
-                & solicitudes_casos_mask
-                & hoja_ruta_vacia_mask
-            ]
-        )
-        solicitudes_guia_count += solicitudes_por_hoja_ruta
-
-    if solicitudes_guia_count:
-        st.warning(
-            "⚠️ Hay "
-            f"{solicitudes_guia_count} solicitud"
-            f"{'es' if solicitudes_guia_count != 1 else ''} de guía "
-            "sin adjuntos de guía."
-        )
-
 
     # --- Implementación de Pestañas con st.tabs ---
     tab_options = [
