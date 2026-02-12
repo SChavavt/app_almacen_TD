@@ -3754,12 +3754,6 @@ if not df_main.empty:
     for col, (nombre_estado, cantidad) in zip(cols, estados_a_mostrar):
         col.metric(nombre_estado, int(cantidad))
 
-    st.caption(
-        "ℹ️ El contador de 🟡 Pendiente se calcula únicamente con la columna Estado "
-        "(todas las pestañas). Los íconos de seguimiento en Estado_Recepcion son informativos "
-        "y no suman al contador."
-    )
-
     # 🔔 Aviso de devoluciones/garantías con seguimiento pendiente
     tipo_casos_col = "Tipo_Caso" if "Tipo_Caso" in df_casos.columns else (
         "Tipo_Envio" if "Tipo_Envio" in df_casos.columns else None
