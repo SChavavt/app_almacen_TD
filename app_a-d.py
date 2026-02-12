@@ -44,6 +44,196 @@ def mx_today():
     return mx_now().date()
 
 
+def _to_bool(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    if value is None:
+        return False
+    return str(value).strip().lower() in {"1", "true", "t", "yes", "y", "on"}
+
+
+DEBUG_REPORTE_GUIAS = _to_bool(
+    st.secrets.get("DEBUG_REPORTE_GUIAS", os.getenv("DEBUG_REPORTE_GUIAS", False))
+)
+REPORTE_GUIAS_WORKSHEET_NAME = "REPORTE GUÍAS"
+REPORTE_GUIAS_START_ROW = 11163
+REPORTE_GUIAS_END_ROW = 13000
+
+
+def _log_reporte_guias(message: str) -> None:
+    logs = st.session_state.setdefault("debug_reporte_guias_logs", [])
+    timestamp = mx_now_str()
+    logs.append(f"[{timestamp}] {message}")
+    if len(logs) > 200:
+        del logs[:-200]
+
+
+def _truncate_vendedor(value: Any) -> str:
+    words = str(value or "").strip().split()
+    if not words:
+        return ""
+    if len(words) == 1:
+        return words[0]
+    return " ".join(words[:2])
+
+
+def _is_blank_cell(value: Any) -> bool:
+    # Incluye espacios normales y NBSP como vacíos para evitar falsos ocupados.
+    normalized = str(value or "").replace(" ", " ").strip()
+    return normalized == ""
+
+
+def _read_worksheet_range(worksheet, a1_range: str) -> list[list[Any]]:
+    """Lee un rango A1 tolerando diferencias de versión de gspread."""
+
+    if hasattr(worksheet, "get"):
+        values = worksheet.get(a1_range)
+        return values if isinstance(values, list) else []
+
+    if hasattr(worksheet, "batch_get"):
+        values = worksheet.batch_get([a1_range])
+        if isinstance(values, list) and values:
+            return values[0] if isinstance(values[0], list) else []
+        return []
+
+    if hasattr(worksheet, "get_values"):
+        values = worksheet.get_values(a1_range)
+        return values if isinstance(values, list) else []
+
+    raise AttributeError("La worksheet no soporta get/batch_get/get_values")
+
+
+def _get_reporte_guias_worksheet(reportes_sheet_id: str):
+    cache_key = "ws_reporte_guias_cache"
+    cached = st.session_state.get(cache_key)
+    if (
+        isinstance(cached, dict)
+        and cached.get("sheet_id") == reportes_sheet_id
+        and cached.get("worksheet") is not None
+    ):
+        return cached["worksheet"]
+
+    gspread_client = globals().get("g_spread_client")
+    if gspread_client is None:
+        return None
+
+    worksheet = gspread_client.open_by_key(reportes_sheet_id).worksheet(
+        REPORTE_GUIAS_WORKSHEET_NAME
+    )
+    st.session_state[cache_key] = {
+        "sheet_id": reportes_sheet_id,
+        "worksheet": worksheet,
+    }
+    return worksheet
+
+
+def _render_reporte_guias_debug() -> None:
+    persistent_error = st.session_state.get("reporte_guias_error", "")
+    if persistent_error:
+        st.error(f"❌ {persistent_error}")
+
+    if not DEBUG_REPORTE_GUIAS:
+        return
+
+    logs = st.session_state.get("debug_reporte_guias_logs", [])
+    with st.expander("DEBUG REPORTE GUÍAS", expanded=False):
+        if not logs:
+            st.caption("Sin logs todavía.")
+            return
+        for entry in logs[-25:]:
+            st.code(entry)
+
+
+def escribir_en_reporte_guias(cliente: str, vendedor: str) -> bool:
+    cliente_txt = str(cliente or "").strip()
+    vendedor_txt = _truncate_vendedor(vendedor)
+
+    gspread_client = globals().get("g_spread_client")
+    if gspread_client is None:
+        msg = "Cliente de Google Sheets no inicializado para escribir en REPORTE GUÍAS"
+        st.session_state["reporte_guias_error"] = msg
+        st.session_state.pop("ws_reporte_guias_cache", None)
+        _log_reporte_guias(msg)
+        return False
+
+    try:
+        reportes_sheet_id = st.secrets["gsheets"]["reportes_sheet_id"]
+    except Exception:
+        msg = (
+            "No se encontró st.secrets['gsheets']['reportes_sheet_id'] para escribir en "
+            "REPORTE GUÍAS"
+        )
+        st.session_state["reporte_guias_error"] = msg
+        _log_reporte_guias(msg)
+        return False
+
+    try:
+        reportes_ws = _get_reporte_guias_worksheet(reportes_sheet_id)
+        if reportes_ws is None:
+            msg = "No se pudo obtener la worksheet REPORTE GUÍAS"
+            st.session_state["reporte_guias_error"] = msg
+            _log_reporte_guias(msg)
+            return False
+
+        # Asegurar que el rango exista físicamente hasta REPORTE_GUIAS_END_ROW.
+        try:
+            if reportes_ws.row_count < REPORTE_GUIAS_END_ROW:
+                reportes_ws.add_rows(REPORTE_GUIAS_END_ROW - reportes_ws.row_count)
+        except Exception as exc:
+            msg = f"No se pudieron agregar filas en REPORTE GUÍAS: {exc}"
+            st.session_state["reporte_guias_error"] = msg
+            _log_reporte_guias(msg)
+            return False
+
+        read_range = f"C{REPORTE_GUIAS_START_ROW}:F{REPORTE_GUIAS_END_ROW}"
+        c_to_f_values = _read_worksheet_range(reportes_ws, read_range)
+        selected_row = None
+
+        total_rows = REPORTE_GUIAS_END_ROW - REPORTE_GUIAS_START_ROW + 1
+        for offset in range(total_rows - 1, -1, -1):
+            row_values = c_to_f_values[offset] if offset < len(c_to_f_values) else []
+            c_value = row_values[0] if len(row_values) > 0 else ""
+            f_value = row_values[3] if len(row_values) > 3 else ""
+            if _is_blank_cell(c_value) and _is_blank_cell(f_value):
+                selected_row = REPORTE_GUIAS_START_ROW + offset
+                break
+
+        if selected_row is None:
+            msg = (
+                "No hay filas disponibles (C y F vacías) en REPORTE GUÍAS "
+                f"entre {REPORTE_GUIAS_START_ROW} y {REPORTE_GUIAS_END_ROW}"
+            )
+            st.session_state["reporte_guias_error"] = msg
+            _log_reporte_guias(msg)
+            return False
+
+        _log_reporte_guias(
+            f"Fila elegida en REPORTE GUÍAS: {selected_row}. Cliente='{cliente_txt}'. "
+            f"Vendedor recortado='{vendedor_txt}'."
+        )
+
+        updates = [
+            {"range": f"C{selected_row}", "values": [[cliente_txt]]},
+            {"range": f"F{selected_row}", "values": [[vendedor_txt]]},
+        ]
+
+        if not batch_update_gsheet_cells(reportes_ws, updates):
+            msg = f"Falló la escritura en REPORTE GUÍAS para la fila {selected_row}."
+            st.session_state["reporte_guias_error"] = msg
+            _log_reporte_guias(msg)
+            return False
+
+        st.session_state.pop("reporte_guias_error", None)
+        _log_reporte_guias(f"Escritura exitosa en REPORTE GUÍAS (fila {selected_row}).")
+        return True
+    except Exception as exc:
+        st.session_state.pop("ws_reporte_guias_cache", None)
+        msg = f"Error al escribir en REPORTE GUÍAS: {exc}"
+        st.session_state["reporte_guias_error"] = msg
+        _log_reporte_guias(msg)
+        return False
+
+
 def _ensure_visual_state_defaults():
     """Ensure session_state has all UI control keys with safe defaults."""
 
@@ -652,6 +842,7 @@ st.title("📬 Bandeja de Pedidos TD")
 if "flash_msg" in st.session_state and st.session_state["flash_msg"]:
     st.success(st.session_state.pop("flash_msg"))
 
+_render_reporte_guias_debug()
 
 _ensure_visual_state_defaults()
 
@@ -2267,6 +2458,28 @@ def mostrar_pedido_detalle(
                     df.at[idx, "Hora_Proceso"] = now_str
                     row["Estado"] = "🔵 En Proceso"
                     row["Hora_Proceso"] = now_str
+
+                    tipo_envio = str(row.get("Tipo_Envio", "")).strip()
+                    es_foraneo = "Foráneo" in tipo_envio
+                    _log_reporte_guias(
+                        f"Procesar pedido {row.get('ID_Pedido','')} detectó Tipo_Envio='{tipo_envio}'."
+                    )
+                    if es_foraneo:
+                        cliente = str(row.get("Cliente", "")).strip()
+                        vendedor = str(row.get("Vendedor_Registro", "")).strip()
+                        if cliente or vendedor:
+                            _log_reporte_guias(
+                                f"Pedido {row.get('ID_Pedido','')} es Foráneo, se intentará escribir en REPORTE GUÍAS."
+                            )
+                            escribir_en_reporte_guias(
+                                cliente=cliente,
+                                vendedor=vendedor,
+                            )
+                        else:
+                            _log_reporte_guias(
+                                f"Pedido {row.get('ID_Pedido','')} Foráneo omitido en REPORTE GUÍAS por Cliente/Vendedor vacíos."
+                            )
+
                     st.toast("✅ Pedido marcado como 🔵 En Proceso", icon="✅")
 
                     # Mantener vista/pestaña sin forzar salto de scroll
