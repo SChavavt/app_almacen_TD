@@ -1150,6 +1150,44 @@ def batch_update_gsheet_cells(worksheet, updates_list, *, headers: Optional[list
     return False
 
 
+def escribir_en_reporte_guias(cliente: str, vendedor: str) -> bool:
+    """Escribe Cliente (col C) y Vendedor (col F) en la hoja REPORTE GUÍAS."""
+    try:
+        client = globals().get("g_spread_client") or get_gspread_client(_credentials_json_dict=GSHEETS_CREDENTIALS)
+        worksheet_reporte = client.open_by_key(GOOGLE_SHEET_ID).worksheet("REPORTE GUÍAS")
+
+        # Obtener todos los valores de las columnas C (3) y F (6)
+        col_C_vals = worksheet_reporte.col_values(3)
+        col_F_vals = worksheet_reporte.col_values(6)
+        # Calcular última fila con datos por longitud devuelta en cada columna
+        last_row_C = len(col_C_vals)
+        last_row_F = len(col_F_vals)
+        # Calcular la próxima fila vacía al final
+        target_row_index = max(last_row_C, last_row_F) + 1
+        if target_row_index < 2:
+            target_row_index = 2
+
+        # Preparar los rangos A1 para las celdas C# y F# de la fila destino
+        updates = [
+            {"range": gspread.utils.rowcol_to_a1(target_row_index, 3), "values": [[cliente]]},
+            {"range": gspread.utils.rowcol_to_a1(target_row_index, 6), "values": [[vendedor]]},
+        ]
+        ok = batch_update_gsheet_cells(worksheet_reporte, updates)
+        if ok:
+            st.toast(
+                f"✅ 'REPORTE GUÍAS' actualizado. Valores escritos en la fila {target_row_index}.",
+                icon="✅"
+            )
+            return True
+        else:
+            st.warning("⚠️ No se pudo actualizar 'REPORTE GUÍAS'.")
+            return False
+
+    except Exception as e:
+        st.error(f"❌ Error al escribir en 'REPORTE GUÍAS': {e}")
+        return False
+
+
 def mirror_guide_value(
     worksheet,
     headers,
@@ -2107,6 +2145,16 @@ def mostrar_pedido_detalle(
                     df.at[idx, "Hora_Proceso"] = now_str
                     row["Estado"] = "🔵 En Proceso"
                     row["Hora_Proceso"] = now_str
+
+                    tipo_envio = str(row.get("Tipo_Envio", "")).lower()
+                    if "foraneo" in tipo_envio or "foráneo" in tipo_envio:
+                        cliente = str(row.get("Cliente", "")).strip()
+                        vendedor = str(row.get("Vendedor_Registro", "")).strip()
+                        if cliente and vendedor:
+                            ok_rep = escribir_en_reporte_guias(cliente, vendedor)
+                            if not ok_rep:
+                                st.warning("⚠️ No se pudo registrar en REPORTE GUÍAS.")
+
                     st.toast("✅ Pedido marcado como 🔵 En Proceso", icon="✅")
 
                     # Mantener vista/pestaña sin forzar salto de scroll
