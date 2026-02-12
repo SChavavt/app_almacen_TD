@@ -584,6 +584,8 @@ _ensure_visual_state_defaults()
 # --- Google Sheets Constants (pueden venir de st.secrets si se prefiere) ---
 GOOGLE_SHEET_ID = '1aWkSelodaz0nWfQx7FZAysGnIYGQFJxAN7RO3YgCiZY'
 GOOGLE_SHEET_WORKSHEET_NAME = 'datos_pedidos'
+REPORTES_SHEET_ID = ''
+DEBUG_REPORTE_GUIAS = True
 
 # --- AWS S3 Configuration ---
 try:
@@ -695,6 +697,10 @@ try:
         st.stop()
 
     gsheets_secrets = st.secrets["gsheets"]
+
+    reportes_sheet_id_secret = str(gsheets_secrets.get("reportes_sheet_id", "")).strip()
+    if reportes_sheet_id_secret:
+        REPORTES_SHEET_ID = reportes_sheet_id_secret
 
     if "google_credentials" not in gsheets_secrets:
         st.error("❌ Las credenciales de Google Sheets están incompletas. Falta la clave 'google_credentials' en la sección [gsheets].")
@@ -1148,6 +1154,88 @@ def batch_update_gsheet_cells(worksheet, updates_list, *, headers: Optional[list
             break
 
     return False
+
+
+
+def _registrar_debug_reporte_guias(msg: str, level: str = "info", *, icon: str = "🧪") -> None:
+    """Guarda trazas persistentes de REPORTE GUÍAS en session_state."""
+    logs = st.session_state.setdefault("reporte_guias_debug_log", [])
+    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    logs.append({"ts": timestamp, "level": level, "msg": msg})
+    if len(logs) > 200:
+        del logs[:-200]
+
+    if level == "error":
+        st.error(msg)
+    elif level == "warning":
+        st.warning(msg)
+    else:
+        if DEBUG_REPORTE_GUIAS:
+            st.info(msg)
+
+
+def _mostrar_debug_reporte_guias_panel() -> None:
+    """Muestra últimas trazas persistentes en un expander (modo debug)."""
+    if not DEBUG_REPORTE_GUIAS:
+        return
+    logs = st.session_state.get("reporte_guias_debug_log", [])
+    if not logs:
+        return
+    with st.expander("🧪 DEBUG REPORTE GUÍAS (persistente)", expanded=False):
+        for entry in logs[-25:]:
+            st.caption(f"[{entry['ts']}] ({entry['level']}) {entry['msg']}")
+
+def escribir_en_reporte_guias(cliente: str, vendedor: str) -> bool:
+    """Escribe Cliente (col C) y Vendedor (col F) en la hoja REPORTE GUÍAS."""
+    try:
+        _registrar_debug_reporte_guias("🧪 DEBUG: escribir_en_reporte_guias() inició")
+
+        client = globals().get("g_spread_client") or get_gspread_client(
+            _credentials_json_dict=GSHEETS_CREDENTIALS
+        )
+        _registrar_debug_reporte_guias("🧪 DEBUG: gspread client OK")
+
+        reportes_sheet_id = str(REPORTES_SHEET_ID).strip()
+        if not reportes_sheet_id:
+            _registrar_debug_reporte_guias(
+                "❌ DEBUG: REPORTES_SHEET_ID está vacío. Configura st.secrets['gsheets']['reportes_sheet_id'].",
+                level="error",
+            )
+            return False
+
+        ss = client.open_by_key(reportes_sheet_id)
+        _registrar_debug_reporte_guias("🧪 DEBUG: open_by_key REPORTES_SHEET_ID OK")
+
+        if DEBUG_REPORTE_GUIAS:
+            # DEBUG: lista hojas disponibles (para detectar si el nombre está mal)
+            try:
+                hojas = [ws.title for ws in ss.worksheets()]
+                _registrar_debug_reporte_guias(f"🧪 DEBUG: Hojas disponibles: {hojas}")
+            except Exception as e_list:
+                _registrar_debug_reporte_guias(
+                    f"⚠️ DEBUG: No pude listar worksheets(): {e_list}",
+                    level="warning",
+                )
+
+        ws = ss.worksheet("REPORTE GUÍAS")
+        _registrar_debug_reporte_guias("🧪 DEBUG: worksheet('REPORTE GUÍAS') OK")
+
+        row_to_append = ["", "", cliente, "", "", vendedor]
+        append_resp = ws.append_row(row_to_append, value_input_option="USER_ENTERED")
+        _registrar_debug_reporte_guias("✅ DEBUG: append_row en REPORTE GUÍAS OK", icon="✅")
+
+        if DEBUG_REPORTE_GUIAS:
+            _registrar_debug_reporte_guias(f"🧪 DEBUG: append_row response={append_resp}")
+
+        return True
+
+    except Exception as e:
+        _registrar_debug_reporte_guias(
+            f"❌ DEBUG: Excepción en escribir_en_reporte_guias: {e}",
+            level="error",
+        )
+        st.exception(e)
+        return False
 
 
 def mirror_guide_value(
@@ -2066,6 +2154,8 @@ def mostrar_pedido_detalle(
 ):
     """Procesa el pedido: actualiza estado a 'En Proceso' sin alterar UI."""
 
+    _mostrar_debug_reporte_guias_panel()
+
     if col_print_btn.button(
         "⚙️ Procesar",
         key=f"procesar_{row['ID_Pedido']}_{origen_tab}",
@@ -2107,6 +2197,38 @@ def mostrar_pedido_detalle(
                     df.at[idx, "Hora_Proceso"] = now_str
                     row["Estado"] = "🔵 En Proceso"
                     row["Hora_Proceso"] = now_str
+
+                    _registrar_debug_reporte_guias("🧪 DEBUG: Entré al handler de ⚙️ Procesar")
+                    _registrar_debug_reporte_guias(
+                        f"🧪 DEBUG: ID={row.get('ID_Pedido','')} Estado={row.get('Estado','')}"
+                    )
+
+                    tipo_envio = str(row.get("Tipo_Envio", "")).strip()
+                    _registrar_debug_reporte_guias(f"🧪 DEBUG: Tipo_Envio='{tipo_envio}'")
+
+                    tipo_envio_low = tipo_envio.lower()
+                    if ("foraneo" in tipo_envio_low) or ("foráneo" in tipo_envio_low):
+                        cliente = str(row.get("Cliente", "")).strip()
+                        vendedor = str(row.get("Vendedor_Registro", "")).strip()
+
+                        if not cliente or not vendedor:
+                            _registrar_debug_reporte_guias(
+                                f"⚠️ DEBUG: No escribí REPORTE GUÍAS porque cliente/vendedor vacío. Cliente='{cliente}' Vendedor='{vendedor}'",
+                                level="warning",
+                            )
+                        else:
+                            _registrar_debug_reporte_guias("🧪 DEBUG: Intentando escribir en REPORTE GUÍAS...")
+                            ok_rep = escribir_en_reporte_guias(cliente, vendedor)
+                            if not ok_rep:
+                                _registrar_debug_reporte_guias(
+                                    "⚠️ DEBUG: Falló escribir_en_reporte_guias (devolvió False).",
+                                    level="warning",
+                                )
+                    else:
+                        _registrar_debug_reporte_guias(
+                            "ℹ️ DEBUG: No es Foráneo, no escribo REPORTE GUÍAS."
+                        )
+
                     st.toast("✅ Pedido marcado como 🔵 En Proceso", icon="✅")
 
                     # Mantener vista/pestaña sin forzar salto de scroll
