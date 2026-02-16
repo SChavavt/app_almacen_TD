@@ -45,34 +45,23 @@ def get_worksheet():
         "1aWkSelodaz0nWfQx7FZAysGnIYGQFJxAN7RO3YgCiZY"
     ).worksheet("datos_pedidos")
 
-
-PEDIDOS_SHEETS = ("datos_pedidos", "data_pedidos")
-PEDIDOS_COLUMNAS_MINIMAS = [
-    "ID_Pedido", "Hora_Registro", "Cliente", "Estado", "Vendedor_Registro", "Folio_Factura",
-    "Comentario", "Comentarios", "Modificacion_Surtido", "Adjuntos_Surtido", "Adjuntos_Guia",
-    "Adjuntos", "Direccion_Guia_Retorno", "Nota_Venta", "Tiene_Nota_Venta", "Motivo_NotaVenta",
-    "Refacturacion_Tipo", "Refacturacion_Subtipo", "Folio_Factura_Refacturada", "fecha_modificacion", "Fecha_Modificacion"
-]
-
-
-def cargar_hoja_pedidos(nombre_hoja):
-    """Carga una hoja de pedidos por nombre y garantiza columnas mínimas."""
-    sheet = gspread_client.open_by_key("1aWkSelodaz0nWfQx7FZAysGnIYGQFJxAN7RO3YgCiZY").worksheet(nombre_hoja)
-    data = sheet.get_all_records()
-    df = pd.DataFrame(data)
-    for c in PEDIDOS_COLUMNAS_MINIMAS:
-        if c not in df.columns:
-            df[c] = ""
-    return df
-
 # --- FUNCIONES ---
 @st.cache_data(ttl=300)
 def cargar_pedidos():
-    """Carga y combina pedidos desde datos_pedidos + data_pedidos."""
-    pedidos_frames = [cargar_hoja_pedidos(nombre_hoja) for nombre_hoja in PEDIDOS_SHEETS]
-    if not pedidos_frames:
-        return pd.DataFrame(columns=PEDIDOS_COLUMNAS_MINIMAS)
-    return pd.concat(pedidos_frames, ignore_index=True, sort=False)
+    sheet = gspread_client.open_by_key("1aWkSelodaz0nWfQx7FZAysGnIYGQFJxAN7RO3YgCiZY").worksheet("datos_pedidos")
+    data = sheet.get_all_records()
+    df = pd.DataFrame(data)
+    # columnas mínimas que usaremos (incluye modif. y refacturación)
+    needed = [
+        "ID_Pedido","Hora_Registro","Cliente","Estado","Vendedor_Registro","Folio_Factura",
+        "Comentario","Comentarios","Modificacion_Surtido","Adjuntos_Surtido","Adjuntos_Guia",
+        "Adjuntos","Direccion_Guia_Retorno","Nota_Venta","Tiene_Nota_Venta","Motivo_NotaVenta",
+        "Refacturacion_Tipo","Refacturacion_Subtipo","Folio_Factura_Refacturada","fecha_modificacion","Fecha_Modificacion"
+    ]
+    for c in needed:
+        if c not in df.columns:
+            df[c] = ""
+    return df
 @st.cache_data(ttl=300)
 def cargar_casos_especiales():
     """
@@ -105,8 +94,10 @@ def cargar_casos_especiales():
 
 @st.cache_data(ttl=300)
 def cargar_todos_los_pedidos():
-    """Carga todos los pedidos combinando datos_pedidos + data_pedidos."""
-    return cargar_pedidos().copy()
+    """Carga todos los pedidos desde la hoja de cálculo principal."""
+    sheet = get_worksheet()
+    data = sheet.get_all_records()
+    return pd.DataFrame(data)
 
 
 def partir_urls(value):
@@ -753,7 +744,11 @@ with tabs[0]:
                             "Facturas": [(f["Key"], get_s3_file_download_url(s3_client, f["Key"])) for f in facturas],
                             "Otros": [(f["Key"], get_s3_file_download_url(s3_client, f["Key"])) for f in otros],
                         })
-                        break  # detener búsqueda tras encontrar coincidencia dentro del pedido
+                        break  # detener búsqueda tras encontrar coincidencia
+                else:
+                    continue  # ningún PDF coincidió
+
+                break  # Solo un pedido en búsqueda por guía
 
         # ====== RENDER DE RESULTADOS ======
         st.markdown("---")
