@@ -706,7 +706,8 @@ if col_bulk_action.button(
 
 # --- Google Sheets Constants (pueden venir de st.secrets si se prefiere) ---
 GOOGLE_SHEET_ID = '1aWkSelodaz0nWfQx7FZAysGnIYGQFJxAN7RO3YgCiZY'
-GOOGLE_SHEET_WORKSHEET_NAME = 'datos_pedidos'
+GOOGLE_SHEET_WORKSHEET_NAME = 'data_pedidos'
+GOOGLE_SHEET_HISTORICAL_WORKSHEET_NAME = 'datos_pedidos'
 
 # --- AWS S3 Configuration ---
 try:
@@ -3400,6 +3401,155 @@ def _load_pedidos():
     df = _filter_relevant_pedidos(df, headers, GOOGLE_SHEET_WORKSHEET_NAME)
     return df, headers
 
+
+def _compress_row_indexes(row_indexes: list[int]) -> list[tuple[int, int]]:
+    """Agrupa índices consecutivos de filas en rangos [inicio, fin]."""
+    if not row_indexes:
+        return []
+    ordered = sorted({int(idx) for idx in row_indexes})
+    ranges: list[tuple[int, int]] = []
+    start = ordered[0]
+    end = ordered[0]
+    for idx in ordered[1:]:
+        if idx == end + 1:
+            end = idx
+        else:
+            ranges.append((start, end))
+            start = idx
+            end = idx
+    ranges.append((start, end))
+    return ranges
+
+
+def _delete_rows_by_indexes(worksheet, row_indexes: list[int]) -> None:
+    """Elimina filas físicas en lotes, de abajo hacia arriba, para evitar corrimientos."""
+    row_indexes = [int(idx) for idx in row_indexes if int(idx) > 1]
+    ranges = _compress_row_indexes(row_indexes)
+    if not ranges:
+        return
+
+    requests = []
+    sheet_id = worksheet.id
+    for start, end in sorted(ranges, key=lambda r: r[0], reverse=True):
+        requests.append(
+            {
+                "deleteDimension": {
+                    "range": {
+                        "sheetId": sheet_id,
+                        "dimension": "ROWS",
+                        "startIndex": int(start) - 1,
+                        "endIndex": int(end),
+                    }
+                }
+            }
+        )
+
+    worksheet.spreadsheet.batch_update({"requests": requests})
+
+
+def archive_and_clean_pedidos(
+    df_objetivo: pd.DataFrame,
+    worksheet_main,
+    headers_main,
+) -> tuple[bool, str, int]:
+    """Archiva pedidos en histórico y elimina de base operativa solo tras verificar integridad."""
+    progress_bar = st.progress(0)
+    status_slot = st.empty()
+    etapa = "inicio"
+    try:
+        etapa = "identificación"
+        status_slot.info("🔎 Identificando pedidos a limpiar...")
+        progress_bar.progress(15)
+
+        if df_objetivo.empty:
+            return False, "No hay pedidos para limpiar en la selección.", 0
+
+        pedidos_a_limpiar = df_objetivo.copy()
+        pedidos_a_limpiar["_gsheet_row_index"] = pd.to_numeric(
+            pedidos_a_limpiar["_gsheet_row_index"], errors="coerce"
+        )
+        pedidos_a_limpiar = pedidos_a_limpiar.dropna(subset=["_gsheet_row_index"])
+        if pedidos_a_limpiar.empty:
+            return False, "No se encontraron índices válidos para eliminar en base operativa.", 0
+
+        ids_limpiar = (
+            pedidos_a_limpiar.get("ID_Pedido", pd.Series(dtype=str))
+            .astype(str)
+            .str.strip()
+            .tolist()
+        )
+        if not ids_limpiar:
+            return False, "No se pudieron obtener los ID_Pedido a limpiar.", 0
+
+        etapa = "movimiento a histórico"
+        status_slot.info("📦 Moviendo pedidos al histórico...")
+        progress_bar.progress(45)
+
+        worksheet_historical = g_spread_client.open_by_key(GOOGLE_SHEET_ID).worksheet(
+            GOOGLE_SHEET_HISTORICAL_WORKSHEET_NAME
+        )
+        headers_hist = worksheet_historical.row_values(1)
+        headers_origen = headers_main
+        rows_to_append = []
+        for _, row in pedidos_a_limpiar.iterrows():
+            row_map = {col: row.get(col, "") for col in headers_origen}
+            rows_to_append.append([row_map.get(col, "") for col in headers_hist])
+
+        start_row = len(worksheet_historical.get_all_values()) + 1
+
+        chunk_size = 200
+        total_cols = max(len(headers_hist), 1)
+        last_col_letter = gspread.utils.rowcol_to_a1(1, total_cols)[:-1]
+        for i in range(0, len(rows_to_append), chunk_size):
+            chunk_rows = rows_to_append[i:i + chunk_size]
+            chunk_start_row = start_row + i
+            chunk_end_row = chunk_start_row + len(chunk_rows) - 1
+            chunk_range = f"A{chunk_start_row}:{last_col_letter}{chunk_end_row}"
+            worksheet_historical.update(
+                chunk_range,
+                chunk_rows,
+                value_input_option="RAW",
+            )
+
+        end_row = start_row + len(rows_to_append) - 1
+
+        etapa = "verificación"
+        status_slot.info("🔐 Verificando integridad de los datos...")
+        progress_bar.progress(70)
+
+        if "ID_Pedido" not in headers_hist:
+            raise ValueError("La hoja histórica no contiene la columna ID_Pedido.")
+
+        id_col_hist = headers_hist.index("ID_Pedido") + 1
+        col_letter = gspread.utils.rowcol_to_a1(1, id_col_hist)[:-1]
+        rango = f"{col_letter}{start_row}:{col_letter}{end_row}"
+        vals = worksheet_historical.get(rango)
+        ids_append = {str(r[0]).strip() for r in vals if r and str(r[0]).strip()}
+
+        faltantes = [pid for pid in ids_limpiar if pid not in ids_append]
+        if faltantes:
+            raise ValueError(
+                f"Verificación incompleta: faltan {len(faltantes)} ID_Pedido en histórico."
+            )
+
+        etapa = "eliminación operativa"
+        status_slot.info("🧹 Eliminando pedidos de la base operativa...")
+        progress_bar.progress(88)
+
+        row_indexes = pedidos_a_limpiar["_gsheet_row_index"].astype(int).tolist()
+        _delete_rows_by_indexes(worksheet_main, row_indexes)
+
+        progress_bar.progress(100)
+        status_slot.empty()
+        return True, "", len(row_indexes)
+
+    except Exception as e:
+        status_slot.empty()
+        return False, f"{etapa}: {e}", 0
+    finally:
+        time.sleep(0.2)
+        progress_bar.empty()
+
 def _load_casos():
     df, headers = get_filtered_sheet_dataframe(
         sheet_id=GOOGLE_SHEET_ID,
@@ -5955,21 +6105,17 @@ with main_tabs[7]:  # ✅ Historial Completados/Cancelados
         st.markdown("### Historial de Pedidos Completados/Cancelados")
     with col_btn:
         if not df_completados_historial.empty and st.button("🧹 Limpiar Todos los Completados/Cancelados"):
-            updates = []
-            col_idx = headers_main.index("Completados_Limpiado") + 1
-            for _, row in df_completados_historial.iterrows():
-                g_row = row.get("_gsheet_row_index")
-                if g_row:
-                    updates.append({
-                        'range': gspread.utils.rowcol_to_a1(g_row, col_idx),
-                        'values': [["sí"]]
-                    })
-            if updates and batch_update_gsheet_cells(worksheet_main, updates, headers=headers_main):
-                st.success(f"✅ {len(updates)} pedidos marcados como limpiados.")
+            ok, err, total_archivados = archive_and_clean_pedidos(df_completados_historial, worksheet_main, headers_main)
+            if ok:
+                st.success("✅ Limpieza completada correctamente.")
+                st.success(f"📊 Total de pedidos archivados: {total_archivados}")
                 get_raw_sheet_data.clear()
                 get_filtered_sheet_dataframe.clear()
                 set_active_main_tab(7)
                 st.rerun()
+            else:
+                st.error("❌ Error durante la limpieza. No se eliminaron pedidos.")
+                st.error(f"Etapa con fallo: {err}")
 
     df_completados_historial["Fecha_Completado"] = pd.to_datetime(
         df_completados_historial["Fecha_Completado"],
@@ -6032,24 +6178,17 @@ with main_tabs[7]:  # ✅ Historial Completados/Cancelados
                     pedidos_a_limpiar = df_completados_historial[
                         df_completados_historial["Grupo_Clave"] == grupo
                     ]
-                    col_idx = headers_main.index("Completados_Limpiado") + 1
-                    updates = [
-                        {
-                            "range": gspread.utils.rowcol_to_a1(
-                                int(row["_gsheet_row_index"]), col_idx
-                            ),
-                            "values": [["sí"]],
-                        }
-                        for _, row in pedidos_a_limpiar.iterrows()
-                    ]
-                    if updates and batch_update_gsheet_cells(worksheet_main, updates, headers=headers_main):
-                        st.success(
-                            f"✅ {len(updates)} pedidos completados/cancelados en {grupo} marcados como limpiados."
-                        )
+                    ok, err, total_archivados = archive_and_clean_pedidos(pedidos_a_limpiar, worksheet_main, headers_main)
+                    if ok:
+                        st.success("✅ Limpieza completada correctamente.")
+                        st.success(f"📊 Total de pedidos archivados: {total_archivados}")
                         get_raw_sheet_data.clear()
                         get_filtered_sheet_dataframe.clear()
                         set_active_main_tab(7)
                         st.rerun()
+                    else:
+                        st.error("❌ Error durante la limpieza. No se eliminaron pedidos.")
+                        st.error(f"Etapa con fallo: {err}")
 
                 pedidos_grupo = df_completados_historial[
                     df_completados_historial["Grupo_Clave"] == grupo
@@ -6081,24 +6220,17 @@ with main_tabs[7]:  # ✅ Historial Completados/Cancelados
         if not completados_foraneos.empty:
             st.markdown("### 🧹 Limpieza de Completados/Cancelados Foráneos")
             if st.button("🧹 Limpiar Foráneos Completados/Cancelados"):
-                col_idx = headers_main.index("Completados_Limpiado") + 1
-                updates = [
-                    {
-                        "range": gspread.utils.rowcol_to_a1(
-                            int(row["_gsheet_row_index"]), col_idx
-                        ),
-                        "values": [["sí"]],
-                    }
-                    for _, row in completados_foraneos.iterrows()
-                ]
-                if updates and batch_update_gsheet_cells(worksheet_main, updates, headers=headers_main):
-                    st.success(
-                        f"✅ {len(updates)} pedidos foráneos completados/cancelados fueron marcados como limpiados."
-                    )
+                ok, err, total_archivados = archive_and_clean_pedidos(completados_foraneos, worksheet_main, headers_main)
+                if ok:
+                    st.success("✅ Limpieza completada correctamente.")
+                    st.success(f"📊 Total de pedidos archivados: {total_archivados}")
                     get_raw_sheet_data.clear()
                     get_filtered_sheet_dataframe.clear()
                     set_active_main_tab(7)
                     st.rerun()
+                else:
+                    st.error("❌ Error durante la limpieza. No se eliminaron pedidos.")
+                    st.error(f"Etapa con fallo: {err}")
 
             for orden, (idx, row) in enumerate(
                 completados_foraneos.iterrows(),
