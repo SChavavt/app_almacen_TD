@@ -1597,15 +1597,38 @@ with tabs[2]:
 
         if tipo_envio == "📍 Pedido Local":
             nuevo_turno = st.selectbox("⏰ Turno", ["☀️ Local Mañana", "🌙 Local Tarde", "🌵 Saltillo", "📦 Pasa a Bodega"])
+            fecha_entrega_actual_raw = str(row.get("Fecha_Entrega", "") or "").strip()
+            fecha_entrega_actual_dt = pd.to_datetime(fecha_entrega_actual_raw, errors="coerce")
+            fecha_entrega_actual_mostrar = (
+                fecha_entrega_actual_dt.strftime("%d/%m/%Y")
+                if pd.notna(fecha_entrega_actual_dt)
+                else "Sin fecha"
+            )
+            st.markdown(f"**📅 Fecha de entrega actual:** {fecha_entrega_actual_mostrar}")
+
+            fecha_entrega_nueva = st.date_input(
+                "📅 Fecha de entrega",
+                value=(
+                    fecha_entrega_actual_dt.date()
+                    if pd.notna(fecha_entrega_actual_dt)
+                    else date.today()
+                ),
+                min_value=date.today(),
+                max_value=date.today() + timedelta(days=365),
+                format="DD/MM/YYYY",
+            )
+            fecha_entrega_nueva_str = fecha_entrega_nueva.strftime("%Y-%m-%d")
         else:
             nuevo_turno = ""
+            fecha_entrega_nueva_str = str(row.get("Fecha_Entrega", "") or "").strip()
 
         if st.button("📦 Guardar cambio de tipo de envío"):
             hoja.update_cell(gspread_row_idx, row_df.columns.get_loc("Tipo_Envio")+1, tipo_envio)
             hoja.update_cell(gspread_row_idx, row_df.columns.get_loc("Turno")+1, nuevo_turno)
+            hoja.update_cell(gspread_row_idx, row_df.columns.get_loc("Fecha_Entrega")+1, fecha_entrega_nueva_str)
             st.session_state["pedido_modificado"] = pedido_sel
             st.session_state["pedido_modificado_source"] = source_sel
-            st.session_state["mensaje_exito"] = "📦 Tipo de envío y turno actualizados correctamente."
+            st.session_state["mensaje_exito"] = "📦 Tipo de envío, turno y fecha de entrega actualizados correctamente."
             st.rerun()
 
 
