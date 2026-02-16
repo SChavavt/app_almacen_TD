@@ -1596,7 +1596,7 @@ with tabs[2]:
         tipo_envio = st.selectbox("➡️ Cambiar a:", [opcion_contraria])
 
         if tipo_envio == "📍 Pedido Local":
-            nuevo_turno = st.selectbox("⏰ Turno", ["☀ Local Mañana", "🌙 Local Tarde", "🌵 Saltillo", "📦 Pasa a Bodega"])
+            nuevo_turno = st.selectbox("⏰ Turno", ["☀️ Local Mañana", "🌙 Local Tarde", "🌵 Saltillo", "📦 Pasa a Bodega"])
         else:
             nuevo_turno = ""
 
@@ -1647,3 +1647,4 @@ with tabs[2]:
         st.session_state["pedido_modificado_source"] = source_sel
         st.session_state["mensaje_exito"] = "👁 Visibilidad en pantalla de producción actualizada."
         st.rerun()
+
