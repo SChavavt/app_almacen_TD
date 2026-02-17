@@ -3745,7 +3745,33 @@ if df_main is not None:
                     pid = str(row_match.get("ID_Pedido", "")).strip()
                     folio = str(row_match.get("Folio_Factura", "")).strip() or "Sin folio"
                     cliente = str(row_match.get("Cliente", "")).strip() or "Sin cliente"
-                    label = f"{folio} · {pid} · {cliente}"
+                    tipo_envio = str(row_match.get("Tipo_Envio", "")).strip()
+                    turno = str(row_match.get("Turno", "")).strip()
+
+                    tipo_badge = "🏷️"
+                    tipo_envio_lower = tipo_envio.lower()
+                    if "local" in tipo_envio_lower:
+                        tipo_badge = "📍"
+                    elif "for" in tipo_envio_lower:
+                        tipo_badge = "🚚"
+                    elif "cdmx" in tipo_envio_lower:
+                        tipo_badge = "🏙️"
+
+                    turno_badge = "🕐"
+                    turno_lower = turno.lower()
+                    if "mañana" in turno_lower:
+                        turno_badge = "🌅"
+                    elif "tarde" in turno_lower:
+                        turno_badge = "🌇"
+                    elif "saltillo" in turno_lower:
+                        turno_badge = "🌵"
+                    elif "bodega" in turno_lower:
+                        turno_badge = "📦"
+
+                    tipo_text = f"{tipo_badge} {tipo_envio}" if tipo_envio else "🏷️ Sin tipo"
+                    turno_text = f"{turno_badge} {turno}" if turno else "🕐 Sin turno"
+
+                    label = f"{folio} · {cliente} · {tipo_text} · {turno_text}"
                     opciones.append(label)
                     mapa[label] = pid
 
