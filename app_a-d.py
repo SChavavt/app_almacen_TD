@@ -662,7 +662,7 @@ if st.session_state.pop("bulk_mode_reset_requested", False):
 col_reload, col_bulk_mode, col_bulk_action, col_bulk_search = st.columns([1.25, 1.0, 1.35, 1.8])
 
 if col_reload.button(
-    "🔄 Recargar Pedidos (seguro)",
+    "🔄 Recargar Pedidos",
     help="Actualiza datos sin reiniciar pestañas ni scroll",
     key="btn_recargar_seguro",
 ):
