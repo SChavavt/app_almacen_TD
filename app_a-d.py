@@ -3745,7 +3745,13 @@ if df_main is not None:
                     pid = str(row_match.get("ID_Pedido", "")).strip()
                     folio = str(row_match.get("Folio_Factura", "")).strip() or "Sin folio"
                     cliente = str(row_match.get("Cliente", "")).strip() or "Sin cliente"
-                    label = f"{folio} · {pid} · {cliente}"
+                    tipo_envio = str(row_match.get("Tipo_Envio", "")).strip()
+                    turno = str(row_match.get("Turno", "")).strip()
+
+                    tipo_text = tipo_envio if tipo_envio else "Sin tipo"
+                    turno_text = turno if turno else "Sin turno"
+
+                    label = f"{folio} · {cliente} · {tipo_text} · {turno_text}"
                     opciones.append(label)
                     mapa[label] = pid
 
