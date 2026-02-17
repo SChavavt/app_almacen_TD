@@ -6395,8 +6395,8 @@ if df_main is not None:
                 # Devoluciones completadas/canceladas
                 comp_dev = df_casos_completados[df_casos_completados[tipo_casos_col].astype(str).str.contains("Devoluci", case=False, na=False)]
                 if not comp_dev.empty:
-                    st.markdown("### 🔁 Devoluciones Completadas/Canceladas")
-                    if st.button("🧹 Limpiar Devoluciones Completadas/Canceladas"):
+                    st.markdown("### 🔁 Devoluciones Completadas")
+                    if st.button("🧹 Limpiar Devoluciones Completadas"):
                         col_idx = headers_casos.index("Completados_Limpiado") + 1
                         updates = [
                             {
@@ -6419,8 +6419,8 @@ if df_main is not None:
                 # Garantías completadas/canceladas
                 comp_gar = df_casos_completados[df_casos_completados[tipo_casos_col].astype(str).str.contains("Garant", case=False, na=False)]
                 if not comp_gar.empty:
-                    st.markdown("### 🛠 Garantías Completadas/Canceladas")
-                    if st.button("🧹 Limpiar Garantías Completadas/Canceladas"):
+                    st.markdown("### 🛠 Garantías Completadas")
+                    if st.button("🧹 Limpiar Garantías Completadas"):
                         col_idx = headers_casos.index("Completados_Limpiado") + 1
                         updates = [
                             {
