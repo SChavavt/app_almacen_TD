@@ -4017,7 +4017,7 @@ if df_main is not None:
         "🎓 Cursos y Eventos",
         "🔁 Devoluciones",
         "🛠 Garantías",
-        "✅ Historial Completados/Cancelados",
+        "✅ Historial Completados",
     ]
 
     if st.session_state.get("bulk_complete_mode", False):
@@ -6168,9 +6168,9 @@ if df_main is not None:
     
         col_titulo, col_btn = st.columns([0.75, 0.25])
         with col_titulo:
-            st.markdown("### Historial de Pedidos Completados/Cancelados")
+            st.markdown("### Historial de Pedidos Completados")
         with col_btn:
-            if not df_completados_historial.empty and st.button("🧹 Limpiar Todos los Completados/Cancelados"):
+            if not df_completados_historial.empty and st.button("🧹 Limpiar Todos los Completados"):
                 ok, err, total_archivados = archive_and_clean_pedidos(df_completados_historial, worksheet_main, headers_main)
                 if ok:
                     st.success("✅ Limpieza completada correctamente.")
@@ -6216,7 +6216,7 @@ if df_main is not None:
         )
     
         if grupos_locales:
-            st.markdown("### 🧹 Limpieza Específica de Completados/Cancelados Locales")
+            st.markdown("### 🧹 Limpieza Específica de Completados Locales")
             for grupo in grupos_locales:
                 turno, fecha_str = grupo.split(" – ")
                 fecha_dt = (
@@ -6269,7 +6269,7 @@ if df_main is not None:
                             row,
                             orden,
                             "Historial",
-                            "✅ Historial Completados/Cancelados",
+                            "✅ Historial Completados",
                             worksheet_main,
                             headers_main,
                             s3_client,
@@ -6284,8 +6284,8 @@ if df_main is not None:
             ]
     
             if not completados_foraneos.empty:
-                st.markdown("### 🧹 Limpieza de Completados/Cancelados Foráneos")
-                if st.button("🧹 Limpiar Foráneos Completados/Cancelados"):
+                st.markdown("### 🧹 Limpieza de Completados Foráneos")
+                if st.button("🧹 Limpiar Foráneos Completados"):
                     ok, err, total_archivados = archive_and_clean_pedidos(completados_foraneos, worksheet_main, headers_main)
                     if ok:
                         st.success("✅ Limpieza completada correctamente.")
@@ -6308,7 +6308,7 @@ if df_main is not None:
                         row,
                         orden,
                         "Historial",
-                        "✅ Historial Completados/Cancelados",
+                        "✅ Historial Completados",
                         worksheet_main,
                         headers_main,
                         s3_client,
@@ -6328,13 +6328,13 @@ if df_main is not None:
                     row,
                     orden,
                     "Historial",
-                    "✅ Historial Completados/Cancelados",
+                    "✅ Historial Completados",
                     worksheet_main,
                     headers_main,
                     s3_client,
                 )
         else:
-            st.info("No hay pedidos completados/cancelados recientes o ya fueron limpiados.")
+            st.info("No hay pedidos completados recientes o ya fueron limpiados.")
     
         # === Casos Especiales Completados/Cancelados ===
         if tipo_casos_col:
@@ -6440,4 +6440,4 @@ if df_main is not None:
                         with st.expander(f"🛠 {row.get('Folio_Factura', 'N/A')} – {row.get('Cliente', 'N/A')}"):
                             render_caso_especial_garantia_hist(row)
             else:
-                st.info("No hay casos especiales completados/cancelados o ya fueron limpiados.")
+                st.info("No hay casos especiales completados o ya fueron limpiados.")
