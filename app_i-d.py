@@ -1210,7 +1210,6 @@ st.markdown(
 GOOGLE_SHEET_ID = "1aWkSelodaz0nWfQx7FZAysGnIYGQFJxAN7RO3YgCiZY"
 SHEET_PEDIDOS = "datos_pedidos"
 SHEET_CASOS = "casos_especiales"
-SHEET_CONFIRMADOS = "pedidos_confirmados"
 
 
 # --- Auth helpers ---
@@ -1458,74 +1457,6 @@ def load_casos_from_gsheets():
     else:
         df["Turno"] = ""
     return df
-
-
-@st.cache_data(ttl=600)
-def load_confirmados_from_gsheets(credentials_dict: dict, sheet_id: str, sheet_name: str):
-    client = get_gspread_client(_credentials_json_dict=credentials_dict)
-    spreadsheet = client.open_by_key(sheet_id)
-    ws = spreadsheet.worksheet(sheet_name)
-    data = _fetch_with_retry(ws, f"_cache_{sheet_name}")
-    if not data:
-        return pd.DataFrame()
-
-    headers = data[0]
-    df = pd.DataFrame(data[1:], columns=headers)
-
-    for col in [
-        "Cliente",
-        "Vendedor_Registro",
-        "Estado_Pago",
-        "Tipo_Envio",
-        "Comprobante_Confirmado",
-    ]:
-        if col not in df.columns:
-            df[col] = ""
-
-    if "Monto_Comprobante" in df.columns:
-        df["Monto_Comprobante"] = pd.to_numeric(
-            df["Monto_Comprobante"], errors="coerce"
-        ).fillna(0.0)
-    else:
-        df["Monto_Comprobante"] = 0.0
-
-    # Fecha real (cuando se registró el pedido)
-    if "Hora_Registro" in df.columns:
-        df["Hora_Registro"] = pd.to_datetime(df["Hora_Registro"], errors="coerce")
-        df["AñoMes"] = df["Hora_Registro"].dt.to_period("M").astype(str)
-        df["FechaDia"] = df["Hora_Registro"].dt.date.astype(str)
-    else:
-        df["Hora_Registro"] = pd.NaT
-        df["AñoMes"] = ""
-        df["FechaDia"] = ""
-
-    return df
-
-
-@st.cache_data(ttl=600)
-def compute_dashboard_base(df_conf: pd.DataFrame):
-    if df_conf.empty:
-        return {
-            "df": df_conf,
-            "ventas_mes": pd.Series(dtype=float),
-            "ventas_vendedor": pd.Series(dtype=float),
-            "pedidos_vendedor": pd.Series(dtype=int),
-        }
-
-    ventas_mes = df_conf.groupby("AñoMes")["Monto_Comprobante"].sum().sort_index()
-    ventas_vendedor = (
-        df_conf.groupby("Vendedor_Registro")["Monto_Comprobante"]
-        .sum()
-        .sort_values(ascending=False)
-    )
-    pedidos_vendedor = df_conf["Vendedor_Registro"].value_counts()
-
-    return {
-        "df": df_conf,
-        "ventas_mes": ventas_mes,
-        "ventas_vendedor": ventas_vendedor,
-        "pedidos_vendedor": pedidos_vendedor,
-    }
 
 
 # --- S3 helper (solo lectura presignada aquí) ---
@@ -1879,7 +1810,6 @@ tab_labels = [
     "⚙️ Auto Local",
     "🚚 Auto Foráneo",
     "🧑‍🔧 Surtidores",
-    "📈 Dashboard",
 ]
 
 # ---------------------------
@@ -2169,132 +2099,3 @@ if selected_tab == 2:
             st.dataframe(df_assign, use_container_width=True, height=300)
         else:
             st.info("Sin asignaciones registradas.")
-
-
-if selected_tab == 3:
-    st.markdown("## 📈 Dashboard Inteligente")
-    st.caption("Cálculos base cacheados (10 min) + filtros dinámicos en tiempo real.")
-
-    df_conf = load_confirmados_from_gsheets(GSHEETS_CREDENTIALS, GOOGLE_SHEET_ID, SHEET_CONFIRMADOS)
-    base = compute_dashboard_base(df_conf)
-
-    df = base["df"]
-    if df.empty:
-        st.info("No hay datos en pedidos_confirmados.")
-        st.stop()
-
-    total_pedidos = len(df)
-    total_ventas = float(df["Monto_Comprobante"].sum())
-    ticket_prom = float(df["Monto_Comprobante"].mean()) if total_pedidos else 0.0
-    mask_credito = df["Estado_Pago"].astype(str).str.contains("CREDITO", case=False, na=False)
-    pedidos_sin_monto_real = int(((df["Monto_Comprobante"] <= 0) & ~mask_credito).sum())
-
-    c1, c2, c3, c4 = st.columns(4)
-    c1.metric("📦 Pedidos confirmados", f"{total_pedidos:,}")
-    c2.metric("💰 Ventas confirmadas", f"${total_ventas:,.0f}")
-    c3.metric("🎟️ Ticket promedio", f"${ticket_prom:,.0f}")
-    c4.metric("🧾 Sin monto real", f"{pedidos_sin_monto_real:,}")
-
-    st.markdown("---")
-
-    min_dt = df["Hora_Registro"].min()
-    max_dt = df["Hora_Registro"].max()
-
-    default_start = min_dt.date() if pd.notna(min_dt) else datetime.now(TZ).date()
-    default_end = max_dt.date() if pd.notna(max_dt) else datetime.now(TZ).date()
-    if default_start > default_end:
-        default_start, default_end = default_end, default_start
-
-    colf0, colf1, colf2, colf3 = st.columns([0.35, 0.25, 0.2, 0.2])
-    with colf0:
-        rango = st.date_input(
-            "Rango (Hora_Registro)",
-            value=(default_start, default_end),
-        )
-    with colf1:
-        vendedor_sel = st.multiselect(
-            "Filtrar vendedor",
-            options=sorted(df["Vendedor_Registro"].dropna().astype(str).unique().tolist()),
-        )
-    with colf2:
-        envio_sel = st.multiselect(
-            "Tipo envío",
-            options=sorted(df["Tipo_Envio"].dropna().astype(str).unique().tolist()),
-        )
-    with colf3:
-        estado_pago_sel = st.multiselect(
-            "Estado pago",
-            options=sorted(df["Estado_Pago"].dropna().astype(str).unique().tolist()),
-        )
-
-    df_f = df.copy()
-    rango_default = (default_start, default_end)
-    if isinstance(rango, tuple) and len(rango) == 2:
-        d1, d2 = rango
-        df_f = df_f[pd.notna(df_f["Hora_Registro"])].copy()
-        df_f = df_f[
-            (df_f["Hora_Registro"].dt.date >= d1)
-            & (df_f["Hora_Registro"].dt.date <= d2)
-        ]
-    if vendedor_sel:
-        df_f = df_f[df_f["Vendedor_Registro"].isin(vendedor_sel)]
-    if envio_sel:
-        df_f = df_f[df_f["Tipo_Envio"].isin(envio_sel)]
-    if estado_pago_sel:
-        df_f = df_f[df_f["Estado_Pago"].isin(estado_pago_sel)]
-
-    has_filters = bool(vendedor_sel or envio_sel or estado_pago_sel or (rango != rango_default))
-
-    with st.expander("📆 Tendencia mensual (ventas)", expanded=True):
-        if has_filters:
-            ventas_mes = df_f.groupby("AñoMes")["Monto_Comprobante"].sum().sort_index()
-        else:
-            ventas_mes = base["ventas_mes"]
-        st.dataframe(ventas_mes.reset_index(name="Ventas"), use_container_width=True)
-
-        ventas_dia = (
-            df_f.groupby(df_f["Hora_Registro"].dt.date)["Monto_Comprobante"]
-            .sum()
-            .sort_index()
-        )
-        st.dataframe(ventas_dia.reset_index(name="Ventas"), use_container_width=True)
-
-    with st.expander("🧑‍💼 Ranking vendedores (dinero y pedidos)", expanded=True):
-        if has_filters:
-            money = (
-                df_f.groupby("Vendedor_Registro")["Monto_Comprobante"]
-                .sum()
-                .sort_values(ascending=False)
-            )
-            cnt = df_f["Vendedor_Registro"].value_counts()
-        else:
-            money = base["ventas_vendedor"]
-            cnt = base["pedidos_vendedor"]
-        out = pd.DataFrame({"Pedidos": cnt, "Ventas": money}).fillna(0)
-        out["Ticket_Prom"] = (out["Ventas"] / out["Pedidos"]).where(out["Pedidos"] > 0)
-        st.dataframe(
-            out.sort_values("Ventas", ascending=False),
-            use_container_width=True,
-            height=420,
-        )
-
-    with st.expander("🏥 Clientes: ranking + limpieza de nombre", expanded=True):
-        def _clean_name(x: str) -> str:
-            x = sanitize_text(x).upper()
-            x = unicodedata.normalize("NFKD", x)
-            x = "".join(ch for ch in x if not unicodedata.combining(ch))
-            x = x.replace(" ", " ")
-            x = "".join(ch if ch.isalnum() or ch.isspace() else " " for ch in x)
-            x = " ".join(x.split())
-            return x
-
-        df_c = df_f.copy()
-        df_c["Cliente_Limpio"] = df_c["Cliente"].astype(str).map(_clean_name)
-
-        top_clients = (
-            df_c.groupby("Cliente_Limpio")["Monto_Comprobante"]
-            .sum()
-            .sort_values(ascending=False)
-            .head(30)
-        )
-        st.dataframe(top_clients.reset_index(name="Ventas"), use_container_width=True)
