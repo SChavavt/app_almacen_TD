@@ -1517,10 +1517,6 @@ def _clean_cliente_name(x: str) -> str:
     return x
 
 
-def _normalize_vendedor_name(value) -> str:
-    return sanitize_text(value).casefold()
-
-
 @st.cache_data(ttl=600)
 def build_cliente_risk_table(df_conf: pd.DataFrame):
     """
@@ -2336,7 +2332,7 @@ if selected_tab == 3:
 
 if selected_tab == 0:
     st.markdown("## 📈 Dashboard Inteligente (Riesgo + Proyección)")
-    st.caption("Basado en Hora_Registro y patrón real por cliente.")
+    st.caption("Basado en Hora_Registro y patrón real por cliente (igual que tu notebook).")
 
     df_conf = load_confirmados_from_gsheets(
         GSHEETS_CREDENTIALS, GOOGLE_SHEET_ID, SHEET_CONFIRMADOS
@@ -2352,13 +2348,8 @@ if selected_tab == 0:
         )
         st.stop()
 
-    _vendedores = sorted(
-        [
-            v
-            for v in tabla_clientes["Vendedor"].dropna().astype(str).unique().tolist()
-            if sanitize_text(v)
-        ]
-    )
+    resumen_v = build_resumen_vendedor(tabla_clientes)
+    proy_total, proy_n, prox_df = compute_proyeccion_30(tabla_clientes, hoy)
 
     total_ventas = float(
         pd.to_numeric(df_conf.get("Monto_Comprobante", 0), errors="coerce").fillna(0).sum()
@@ -2388,7 +2379,8 @@ if selected_tab == 0:
     with colf1:
         vendedor_sel = st.selectbox(
             "Filtrar por vendedor (opcional)",
-            options=["(Todos)"] + _vendedores,
+            options=["(Todos)"]
+            + sorted(tabla_clientes["Vendedor"].dropna().astype(str).unique().tolist()),
         )
     with colf2:
         estado_sel = st.multiselect(
@@ -2399,86 +2391,77 @@ if selected_tab == 0:
 
     tc = tabla_clientes.copy()
     if vendedor_sel != "(Todos)":
-        tc = tc[
-            tc["Vendedor"].map(_normalize_vendedor_name)
-            == _normalize_vendedor_name(vendedor_sel)
-        ]
+        tc = tc[tc["Vendedor"].astype(str) == str(vendedor_sel)]
     if estado_sel:
         tc = tc[tc["Estado"].isin(estado_sel)]
 
-    resumen_v = build_resumen_vendedor(tc)
-    proy_total, proy_n, prox_df = compute_proyeccion_30(tc, hoy)
-
-    with st.expander("🧑‍💼 Salud de cartera por vendedor", expanded=False):
-        if resumen_v.empty:
-            st.info("No hay datos para el filtro seleccionado.")
-        else:
-            st.dataframe(
-                resumen_v[
-                    [
-                        "Vendedor",
-                        "Ventas",
-                        "Pedidos",
-                        "Ticket_Prom",
-                        "Activo",
-                        "Alerta",
-                        "Riesgo",
-                        "Nuevo/SinHistorial",
-                        "%Riesgo",
-                        "Total_Evaluado",
-                        "Total",
-                    ]
-                ].sort_values("%Riesgo", ascending=False),
-                use_container_width=True,
-                height=380,
-            )
+    st.markdown("### 🧑‍💼 Salud de cartera por vendedor")
+    st.dataframe(
+        resumen_v[
+            [
+                "Vendedor",
+                "Ventas",
+                "Pedidos",
+                "Ticket_Prom",
+                "Activo",
+                "Alerta",
+                "Riesgo",
+                "Nuevo/SinHistorial",
+                "%Riesgo",
+                "Total_Evaluado",
+                "Total",
+            ]
+        ].sort_values("%Riesgo", ascending=False),
+        use_container_width=True,
+        height=380,
+    )
 
     st.markdown("---")
 
-    with st.expander("🏥 Clientes (Top)", expanded=False):
-        col_a, col_b, col_c = st.columns(3)
+    st.markdown("### 🏥 Clientes (Top)")
+    col_a, col_b, col_c = st.columns(3)
 
-        with col_a:
-            st.caption("Top clientes por dinero total")
-            top_money = tc.sort_values("Ventas_Total", ascending=False).head(15)[
-                [
-                    "Cliente",
-                    "Ventas_Total",
-                    "Num_Pedidos",
-                    "Ticket_Promedio",
-                    "Estado",
-                    "Vendedor",
-                ]
+    with col_a:
+        st.caption("Top clientes por dinero total")
+        top_money = tc.sort_values("Ventas_Total", ascending=False).head(15)[
+            [
+                "Cliente",
+                "Ventas_Total",
+                "Num_Pedidos",
+                "Ticket_Promedio",
+                "Estado",
+                "Vendedor",
             ]
-            st.dataframe(top_money, use_container_width=True, height=420)
+        ]
+        st.dataframe(top_money, use_container_width=True, height=420)
 
-        with col_b:
-            st.caption("Clientes más recurrentes (más pedidos)")
-            top_freq = tc.sort_values("Num_Pedidos", ascending=False).head(15)[
-                [
-                    "Cliente",
-                    "Num_Pedidos",
-                    "Ventas_Total",
-                    "Ticket_Promedio",
-                    "Estado",
-                    "Vendedor",
-                ]
+    with col_b:
+        st.caption("Clientes más recurrentes (más pedidos)")
+        top_freq = tc.sort_values("Num_Pedidos", ascending=False).head(15)[
+            [
+                "Cliente",
+                "Num_Pedidos",
+                "Ventas_Total",
+                "Ticket_Promedio",
+                "Estado",
+                "Vendedor",
             ]
-            st.dataframe(top_freq, use_container_width=True, height=420)
+        ]
+        st.dataframe(top_freq, use_container_width=True, height=420)
 
-        with col_c:
-            st.caption("Ticket promedio más alto (perfil proyecto)")
-            top_ticket = tc.sort_values("Ticket_Promedio", ascending=False).head(15)[
-                [
-                    "Cliente",
-                    "Ticket_Promedio",
-                    "Ventas_Total",
-                    "Num_Pedidos",
-                    "Estado",
-                    "Vendedor",
-                ]
+    with col_c:
+        st.caption("Ticket promedio más alto (perfil proyecto)")
+        top_ticket = tc.sort_values("Ticket_Promedio", ascending=False).head(15)[
+            [
+                "Cliente",
+                "Ticket_Promedio",
+                "Ventas_Total",
+                "Num_Pedidos",
+                "Estado",
+                "Vendedor",
             ]
-            st.dataframe(top_ticket, use_container_width=True, height=420)
+        ]
+        st.dataframe(top_ticket, use_container_width=True, height=420)
 
     st.markdown("---")
 
@@ -2509,10 +2492,13 @@ if selected_tab == 0:
     st.markdown("---")
 
     st.markdown("### 🔮 Próximas compras estimadas (30 días)")
-    st.caption("Se excluyen clientes en Riesgo.")
+    st.caption("Se excluyen clientes en Riesgo, igual que tu notebook.")
     st.write(
         f"Clientes esperados: **{proy_n:,}** · Proyección total: **${proy_total:,.0f}**"
     )
+
+    if vendedor_sel != "(Todos)":
+        prox_df = prox_df[prox_df["Vendedor"].astype(str) == str(vendedor_sel)]
 
     st.dataframe(
         prox_df.sort_values("Proxima_Estimada", ascending=True)[
