@@ -1,5 +1,6 @@
 import streamlit as st
 import pandas as pd
+import numpy as np
 from datetime import datetime, timedelta
 import json
 import gspread
@@ -1210,6 +1211,7 @@ st.markdown(
 GOOGLE_SHEET_ID = "1aWkSelodaz0nWfQx7FZAysGnIYGQFJxAN7RO3YgCiZY"
 SHEET_PEDIDOS = "datos_pedidos"
 SHEET_CASOS = "casos_especiales"
+SHEET_CONFIRMADOS = "pedidos_confirmados"
 
 
 # --- Auth helpers ---
@@ -1457,6 +1459,229 @@ def load_casos_from_gsheets():
     else:
         df["Turno"] = ""
     return df
+
+
+@st.cache_data(ttl=600)
+def load_confirmados_from_gsheets(credentials_dict: dict, sheet_id: str, sheet_name: str):
+    client = get_gspread_client(_credentials_json_dict=credentials_dict)
+    spreadsheet = client.open_by_key(sheet_id)
+    ws = spreadsheet.worksheet(sheet_name)
+    data = _fetch_with_retry(ws, f"_cache_{sheet_name}")
+    if not data:
+        return pd.DataFrame()
+
+    headers = data[0]
+    df = pd.DataFrame(data[1:], columns=headers)
+
+    for col in [
+        "Cliente",
+        "Vendedor_Registro",
+        "Hora_Registro",
+        "Estado_Pago",
+        "Tipo_Envio",
+        "Comprobante_Confirmado",
+    ]:
+        if col not in df.columns:
+            df[col] = ""
+
+    if "Monto_Comprobante" in df.columns:
+        df["Monto_Comprobante"] = pd.to_numeric(
+            df["Monto_Comprobante"], errors="coerce"
+        ).fillna(0.0)
+    else:
+        df["Monto_Comprobante"] = 0.0
+
+    # Fecha real (cuando se registró el pedido)
+    if "Hora_Registro" in df.columns:
+        df["Hora_Registro"] = pd.to_datetime(df["Hora_Registro"], errors="coerce")
+        df["AñoMes"] = df["Hora_Registro"].dt.to_period("M").astype(str)
+        df["FechaDia"] = df["Hora_Registro"].dt.date.astype(str)
+    else:
+        df["Hora_Registro"] = pd.NaT
+        df["AñoMes"] = ""
+        df["FechaDia"] = ""
+
+    return df
+
+
+def _clean_cliente_name(x: str) -> str:
+    x = sanitize_text(str(x)).upper()
+    x = unicodedata.normalize("NFKD", x)
+    x = "".join(ch for ch in x if not unicodedata.combining(ch))
+    x = x.replace(" ", " ")
+    x = "".join(ch if ch.isalnum() or ch.isspace() else " " for ch in x)
+    x = " ".join(x.split())
+    return x
+
+
+@st.cache_data(ttl=600)
+def build_cliente_risk_table(df_conf: pd.DataFrame):
+    """
+    Replica el notebook:
+    - calcula Dias_Entre_Compras por cliente (diff)
+    - filtra intervalos > 7
+    - Promedio_Ciclo = mean(Dias_Entre_Compras)
+    - Dias_Desde_Ultima = hoy - ultima_compra
+    - Ratio y Estado (Activo/Alerta/Riesgo)
+    - Proxima_Estimada = ultima_compra + Promedio_Ciclo
+    - añade Ticket_Promedio, Ventas_Total, Num_Pedidos, Ultimo_Vendedor
+    """
+    if df_conf.empty:
+        return pd.DataFrame(), pd.Timestamp.now()
+
+    df = df_conf.copy()
+
+    df["Hora_Registro"] = pd.to_datetime(df["Hora_Registro"], errors="coerce")
+    df = df[pd.notna(df["Hora_Registro"])].copy()
+
+    if df.empty:
+        return pd.DataFrame(), pd.Timestamp.now()
+
+    if "Monto_Comprobante" not in df.columns:
+        df["Monto_Comprobante"] = 0.0
+    df["Monto_Comprobante"] = pd.to_numeric(df["Monto_Comprobante"], errors="coerce").fillna(0.0)
+
+    if "Cliente" not in df.columns:
+        df["Cliente"] = ""
+    df["Cliente_Limpio"] = df["Cliente"].astype(str).map(_clean_cliente_name)
+
+    hoy = df["Hora_Registro"].max()
+
+    df = df.sort_values("Hora_Registro")
+    df["Dias_Entre_Compras"] = df.groupby("Cliente_Limpio")["Hora_Registro"].diff().dt.days
+
+    df_valid = df[(df["Dias_Entre_Compras"].notna()) & (df["Dias_Entre_Compras"] > 7)].copy()
+
+    promedio_ciclo = df_valid.groupby("Cliente_Limpio")["Dias_Entre_Compras"].mean()
+    ultima_compra = df.groupby("Cliente_Limpio")["Hora_Registro"].max()
+    dias_desde_ultima = (hoy - ultima_compra).dt.days
+
+    tabla = pd.DataFrame(
+        {
+            "Promedio_Ciclo": promedio_ciclo,
+            "Ultima_Compra": ultima_compra,
+            "Dias_Desde_Ultima": dias_desde_ultima,
+        }
+    )
+
+    tabla["Promedio_Ciclo"] = pd.to_numeric(tabla["Promedio_Ciclo"], errors="coerce")
+    tabla["Proxima_Estimada"] = tabla["Ultima_Compra"] + pd.to_timedelta(
+        tabla["Promedio_Ciclo"], unit="D"
+    )
+
+    def clasificar(row):
+        ciclo = row["Promedio_Ciclo"]
+        if pd.isna(ciclo) or ciclo <= 0:
+            return "Nuevo/SinHistorial"
+        r = row["Dias_Desde_Ultima"] / ciclo
+        if r <= 1:
+            return "Activo"
+        elif r <= 1.5:
+            return "Alerta"
+        return "Riesgo"
+
+    tabla["Estado"] = tabla.apply(clasificar, axis=1)
+    tabla["Ratio"] = (tabla["Dias_Desde_Ultima"] / tabla["Promedio_Ciclo"]).where(
+        tabla["Promedio_Ciclo"] > 0
+    )
+
+    if "Vendedor_Registro" not in df.columns:
+        df["Vendedor_Registro"] = ""
+    ultimo_vendedor = df.groupby("Cliente_Limpio")["Vendedor_Registro"].last()
+    tabla["Vendedor"] = ultimo_vendedor
+
+    ticket_prom = df.groupby("Cliente_Limpio")["Monto_Comprobante"].mean()
+    ventas_total = df.groupby("Cliente_Limpio")["Monto_Comprobante"].sum()
+    num_pedidos = df.groupby("Cliente_Limpio")["Monto_Comprobante"].size()
+
+    tabla["Ticket_Promedio"] = ticket_prom
+    tabla["Ventas_Total"] = ventas_total
+    tabla["Num_Pedidos"] = num_pedidos
+
+    tabla = tabla.reset_index().rename(columns={"Cliente_Limpio": "Cliente"})
+    return tabla, hoy
+
+
+@st.cache_data(ttl=600)
+def build_resumen_vendedor(tabla_clientes: pd.DataFrame):
+    if tabla_clientes.empty:
+        return pd.DataFrame()
+
+    pivot = tabla_clientes.groupby(["Vendedor", "Estado"]).size().unstack(fill_value=0)
+
+    for col in ["Activo", "Alerta", "Riesgo", "Nuevo/SinHistorial"]:
+        if col not in pivot.columns:
+            pivot[col] = 0
+
+    pivot["Total"] = (
+        pivot["Activo"]
+        + pivot["Alerta"]
+        + pivot["Riesgo"]
+        + pivot["Nuevo/SinHistorial"]
+    )
+    pivot["Total_Evaluado"] = pivot["Activo"] + pivot["Alerta"] + pivot["Riesgo"]
+    pivot["%Riesgo"] = (
+        (pivot["Riesgo"] / pivot["Total_Evaluado"])
+        .replace([np.inf, -np.inf], np.nan)
+        .fillna(0.0)
+    )
+
+    ventas_vend = tabla_clientes.groupby("Vendedor")["Ventas_Total"].sum()
+    pedidos_vend = tabla_clientes.groupby("Vendedor")["Num_Pedidos"].sum()
+
+    pivot["Ventas"] = ventas_vend
+    pivot["Pedidos"] = pedidos_vend
+    pivot["Ticket_Prom"] = (
+        (pivot["Ventas"] / pivot["Pedidos"])
+        .replace([np.inf, -np.inf], np.nan)
+        .fillna(0.0)
+    )
+
+    pivot = pivot.reset_index().sort_values("%Riesgo", ascending=False)
+    return pivot
+
+
+@st.cache_data(ttl=600)
+def compute_proyeccion_30(tabla_clientes: pd.DataFrame, hoy: pd.Timestamp):
+    if tabla_clientes.empty:
+        return 0.0, 0, pd.DataFrame()
+
+    prox = tabla_clientes[
+        (pd.to_datetime(tabla_clientes["Proxima_Estimada"], errors="coerce") <= hoy + timedelta(days=30))
+        & (~tabla_clientes["Estado"].isin(["Riesgo", "Nuevo/SinHistorial"]))
+    ].copy()
+
+    prox["Ticket_Promedio"] = pd.to_numeric(prox["Ticket_Promedio"], errors="coerce").fillna(0.0)
+
+    total = float(prox["Ticket_Promedio"].sum())
+    n = int(len(prox))
+    return total, n, prox
+
+
+@st.cache_data(ttl=600)
+def compute_dashboard_base(df_conf: pd.DataFrame):
+    if df_conf.empty:
+        return {
+            "df": df_conf,
+            "ventas_mes": pd.Series(dtype=float),
+            "ventas_vendedor": pd.Series(dtype=float),
+            "pedidos_vendedor": pd.Series(dtype=int),
+        }
+
+    ventas_mes = df_conf.groupby("AñoMes")["Monto_Comprobante"].sum().sort_index()
+    ventas_vendedor = (
+        df_conf.groupby("Vendedor_Registro")["Monto_Comprobante"]
+        .sum()
+        .sort_values(ascending=False)
+    )
+    pedidos_vendedor = df_conf["Vendedor_Registro"].value_counts()
+
+    return {
+        "df": df_conf,
+        "ventas_mes": ventas_mes,
+        "ventas_vendedor": ventas_vendedor,
+        "pedidos_vendedor": pedidos_vendedor,
+    }
 
 
 # --- S3 helper (solo lectura presignada aquí) ---
@@ -1810,6 +2035,7 @@ tab_labels = [
     "⚙️ Auto Local",
     "🚚 Auto Foráneo",
     "🧑‍🔧 Surtidores",
+    "📈 Dashboard",
 ]
 
 # ---------------------------
@@ -2099,3 +2325,190 @@ if selected_tab == 2:
             st.dataframe(df_assign, use_container_width=True, height=300)
         else:
             st.info("Sin asignaciones registradas.")
+
+
+if selected_tab == 3:
+    st.markdown("## 📈 Dashboard Inteligente (Riesgo + Proyección)")
+    st.caption("Basado en Hora_Registro y patrón real por cliente (igual que tu notebook).")
+
+    df_conf = load_confirmados_from_gsheets(
+        GSHEETS_CREDENTIALS, GOOGLE_SHEET_ID, SHEET_CONFIRMADOS
+    )
+    if df_conf.empty:
+        st.info("No hay datos en pedidos_confirmados.")
+        st.stop()
+
+    tabla_clientes, hoy = build_cliente_risk_table(df_conf)
+    if tabla_clientes.empty:
+        st.warning(
+            "No se pudo construir tabla de clientes (revisa que Hora_Registro y Cliente tengan datos)."
+        )
+        st.stop()
+
+    resumen_v = build_resumen_vendedor(tabla_clientes)
+    proy_total, proy_n, prox_df = compute_proyeccion_30(tabla_clientes, hoy)
+
+    total_ventas = float(
+        pd.to_numeric(df_conf.get("Monto_Comprobante", 0), errors="coerce").fillna(0).sum()
+    )
+    total_pedidos = int(len(df_conf))
+    ticket_prom = float(total_ventas / total_pedidos) if total_pedidos else 0.0
+
+    evaluados = int(tabla_clientes["Estado"].isin(["Activo", "Alerta", "Riesgo"]).sum())
+    nuevos = int((tabla_clientes["Estado"] == "Nuevo/SinHistorial").sum())
+    activos = int((tabla_clientes["Estado"] == "Activo").sum())
+    riesgo = int((tabla_clientes["Estado"] == "Riesgo").sum())
+    pct_activo = (activos / evaluados) if evaluados else 0.0
+    pct_riesgo = (riesgo / evaluados) if evaluados else 0.0
+
+    c1, c2, c3, c4, c5, c6, c7 = st.columns(7)
+    c1.metric("💰 Ventas históricas", f"${total_ventas:,.0f}")
+    c2.metric("📦 Pedidos históricos", f"{total_pedidos:,}")
+    c3.metric("🎟️ Ticket prom (global)", f"${ticket_prom:,.0f}")
+    c4.metric("👥 Cartera evaluada", f"{evaluados:,}")
+    c5.metric("🆕 Nuevos/Sin historial", f"{nuevos:,}")
+    c6.metric("% cartera activa", f"{pct_activo * 100:.1f}%")
+    c7.metric("% cartera en riesgo", f"{pct_riesgo * 100:.1f}%")
+
+    st.markdown("---")
+
+    colf1, colf2 = st.columns([0.6, 0.4])
+    with colf1:
+        vendedor_sel = st.selectbox(
+            "Filtrar por vendedor (opcional)",
+            options=["(Todos)"]
+            + sorted(tabla_clientes["Vendedor"].dropna().astype(str).unique().tolist()),
+        )
+    with colf2:
+        estado_sel = st.multiselect(
+            "Estado cliente",
+            options=["Activo", "Alerta", "Riesgo", "Nuevo/SinHistorial"],
+            default=["Activo", "Alerta", "Riesgo", "Nuevo/SinHistorial"],
+        )
+
+    tc = tabla_clientes.copy()
+    if vendedor_sel != "(Todos)":
+        tc = tc[tc["Vendedor"].astype(str) == str(vendedor_sel)]
+    if estado_sel:
+        tc = tc[tc["Estado"].isin(estado_sel)]
+
+    st.markdown("### 🧑‍💼 Salud de cartera por vendedor")
+    st.dataframe(
+        resumen_v[
+            [
+                "Vendedor",
+                "Ventas",
+                "Pedidos",
+                "Ticket_Prom",
+                "Activo",
+                "Alerta",
+                "Riesgo",
+                "Nuevo/SinHistorial",
+                "%Riesgo",
+                "Total_Evaluado",
+                "Total",
+            ]
+        ].sort_values("%Riesgo", ascending=False),
+        use_container_width=True,
+        height=380,
+    )
+
+    st.markdown("---")
+
+    st.markdown("### 🏥 Clientes (Top)")
+    col_a, col_b, col_c = st.columns(3)
+
+    with col_a:
+        st.caption("Top clientes por dinero total")
+        top_money = tc.sort_values("Ventas_Total", ascending=False).head(15)[
+            [
+                "Cliente",
+                "Ventas_Total",
+                "Num_Pedidos",
+                "Ticket_Promedio",
+                "Estado",
+                "Vendedor",
+            ]
+        ]
+        st.dataframe(top_money, use_container_width=True, height=420)
+
+    with col_b:
+        st.caption("Clientes más recurrentes (más pedidos)")
+        top_freq = tc.sort_values("Num_Pedidos", ascending=False).head(15)[
+            [
+                "Cliente",
+                "Num_Pedidos",
+                "Ventas_Total",
+                "Ticket_Promedio",
+                "Estado",
+                "Vendedor",
+            ]
+        ]
+        st.dataframe(top_freq, use_container_width=True, height=420)
+
+    with col_c:
+        st.caption("Ticket promedio más alto (perfil proyecto)")
+        top_ticket = tc.sort_values("Ticket_Promedio", ascending=False).head(15)[
+            [
+                "Cliente",
+                "Ticket_Promedio",
+                "Ventas_Total",
+                "Num_Pedidos",
+                "Estado",
+                "Vendedor",
+            ]
+        ]
+        st.dataframe(top_ticket, use_container_width=True, height=420)
+
+    st.markdown("---")
+
+    st.markdown("### 🚨 Clientes en Alerta / Riesgo (prioridad)")
+    tc_r = tc[tc["Estado"].isin(["Alerta", "Riesgo"])].copy()
+    priority = {"Riesgo": 0, "Alerta": 1, "Activo": 2, "Nuevo/SinHistorial": 3}
+    tc_r["prio"] = tc_r["Estado"].map(priority).fillna(99)
+    tc_r = tc_r.sort_values(["prio", "Ventas_Total"], ascending=[True, False])
+    st.dataframe(
+        tc_r[
+            [
+                "Cliente",
+                "Estado",
+                "Dias_Desde_Ultima",
+                "Promedio_Ciclo",
+                "Ratio",
+                "Proxima_Estimada",
+                "Ticket_Promedio",
+                "Ventas_Total",
+                "Num_Pedidos",
+                "Vendedor",
+            ]
+        ].head(50),
+        use_container_width=True,
+        height=520,
+    )
+
+    st.markdown("---")
+
+    st.markdown("### 🔮 Próximas compras estimadas (30 días)")
+    st.caption("Se excluyen clientes en Riesgo, igual que tu notebook.")
+    st.write(
+        f"Clientes esperados: **{proy_n:,}** · Proyección total: **${proy_total:,.0f}**"
+    )
+
+    if vendedor_sel != "(Todos)":
+        prox_df = prox_df[prox_df["Vendedor"].astype(str) == str(vendedor_sel)]
+
+    st.dataframe(
+        prox_df.sort_values("Proxima_Estimada", ascending=True)[
+            [
+                "Cliente",
+                "Vendedor",
+                "Proxima_Estimada",
+                "Ticket_Promedio",
+                "Estado",
+                "Promedio_Ciclo",
+                "Dias_Desde_Ultima",
+            ]
+        ],
+        use_container_width=True,
+        height=420,
+    )
