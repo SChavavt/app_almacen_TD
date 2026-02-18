@@ -31,6 +31,9 @@ st.markdown(
     div[data-testid="stRadio"] > label { margin-bottom: 0; }
     div[data-testid="stRadio"] div[role="radiogroup"] { gap: 0.25rem; }
     div[data-testid="stRadio"] label { padding: 0.1rem 0.4rem; font-size: 0.8rem; }
+    div[data-testid="stRadio"] input[type="radio"] { display: none; }
+    div[data-testid="stRadio"] div[role="radiogroup"] > label { border: 1px solid rgba(255,255,255,.2); border-radius: .5rem; }
+    div[data-testid="stRadio"] div[role="radiogroup"] > label[data-checked="true"] { background: rgba(255,255,255,.14); border-color: rgba(255,255,255,.35); }
     </style>
     """,
     unsafe_allow_html=True,
@@ -1209,7 +1212,7 @@ st.markdown(
 
 # --- IDs de Sheets ---
 GOOGLE_SHEET_ID = "1aWkSelodaz0nWfQx7FZAysGnIYGQFJxAN7RO3YgCiZY"
-SHEET_PEDIDOS = "datos_pedidos"
+SHEET_PEDIDOS = "data_pedidos"
 SHEET_CASOS = "casos_especiales"
 SHEET_CONFIRMADOS = "pedidos_confirmados"
 
@@ -2032,10 +2035,10 @@ df_all = load_data_from_gsheets()
 
 # Tabs principales
 tab_labels = [
+    "📈 Dashboard",
     "⚙️ Auto Local",
     "🚚 Auto Foráneo",
     "🧑‍🔧 Surtidores",
-    "📈 Dashboard",
 ]
 
 # ---------------------------
@@ -2067,7 +2070,7 @@ tabs = [None] * len(tab_labels)
 # Entradas compartidas para numeración única entre Auto Local y Auto Foráneo
 auto_local_entries = []
 auto_foraneo_entries = []
-if selected_tab in (0, 1, 2):
+if selected_tab in (1, 2, 3):
     df_local_auto = get_local_orders(df_all)
     casos_local_auto, _ = get_case_envio_assignments(df_all)
     df_local_auto = drop_local_duplicates_for_cases(df_local_auto, casos_local_auto)
@@ -2092,9 +2095,9 @@ if selected_tab in (0, 1, 2):
     assign_display_numbers(auto_local_entries, auto_foraneo_entries, datetime.now(TZ).date())
 
 # ---------------------------
-# TAB 0: Auto Local (Casos asignados) — 2 columnas
+# TAB 1: Auto Local (Casos asignados) — 2 columnas
 # ---------------------------
-if selected_tab == 0:
+if selected_tab == 1:
     st_autorefresh(interval=60000, key="auto_refresh_local_casos")
 
     combined_entries = [
@@ -2148,9 +2151,9 @@ if selected_tab == 0:
                 )
 
 # ---------------------------
-# TAB 1: Auto Foráneo (Casos asignados) — 2 columnas
+# TAB 2: Auto Foráneo (Casos asignados) — 2 columnas
 # ---------------------------
-if selected_tab == 1:
+if selected_tab == 2:
     st_autorefresh(interval=60000, key="auto_refresh_foraneo_cdmx")
 
     hoy = datetime.now(TZ).date()
@@ -2202,9 +2205,9 @@ if selected_tab == 1:
         )
 
 # ---------------------------
-# TAB 2: Surtidores (Asignación)
+# TAB 3: Surtidores (Asignación)
 # ---------------------------
-if selected_tab == 2:
+if selected_tab == 3:
 
     st.markdown("### 🧑‍🔧 Asignación de surtidores")
     st.caption("Selecciona pedidos visibles y escribe tu nombre o inicial para asignarlos.")
@@ -2327,7 +2330,7 @@ if selected_tab == 2:
             st.info("Sin asignaciones registradas.")
 
 
-if selected_tab == 3:
+if selected_tab == 0:
     st.markdown("## 📈 Dashboard Inteligente (Riesgo + Proyección)")
     st.caption("Basado en Hora_Registro y patrón real por cliente (igual que tu notebook).")
 
