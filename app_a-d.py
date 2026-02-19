@@ -3499,15 +3499,7 @@ def archive_and_clean_pedidos(
             )
 
         if updates_limpiado:
-            marcado_ok = batch_update_gsheet_cells(
-                worksheet_main,
-                updates_limpiado,
-                headers=headers_main,
-            )
-            if not marcado_ok:
-                raise RuntimeError(
-                    "No se pudieron marcar los pedidos como limpiados en la hoja operativa."
-                )
+            worksheet_main.batch_update(updates_limpiado, value_input_option="USER_ENTERED")
 
         pedidos_a_limpiar["Completados_Limpiado"] = "sí"
 
