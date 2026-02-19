@@ -3447,22 +3447,6 @@ def _delete_rows_by_indexes(worksheet, row_indexes: list[int]) -> None:
     worksheet.spreadsheet.batch_update({"requests": requests})
 
 
-def _trim_spreadsheet_to_used_cells(spreadsheet, min_rows: int = 2, min_cols: int = 1) -> None:
-    """Recorta filas/columnas sobrantes por hoja para liberar celdas totales del workbook."""
-    for ws in spreadsheet.worksheets():
-        values = ws.get_all_values()
-        used_rows = max(len(values), min_rows)
-        used_cols = min_cols
-        if values:
-            used_cols = max(max((len(r) for r in values), default=min_cols), min_cols)
-
-        target_rows = max(used_rows, min_rows)
-        target_cols = max(used_cols, min_cols)
-
-        if ws.row_count != target_rows or ws.col_count != target_cols:
-            ws.resize(rows=target_rows, cols=target_cols)
-
-
 def archive_and_clean_pedidos(
     df_objetivo: pd.DataFrame,
     worksheet_main,
@@ -3530,48 +3514,34 @@ def archive_and_clean_pedidos(
         total_cols = max(len(headers_hist), 1)
         last_col_letter = gspread.utils.rowcol_to_a1(1, total_cols)[:-1]
 
-        def _append_rows_in_chunks() -> None:
-            if hasattr(worksheet_historical, "append_rows"):
-                for i in range(0, len(rows_to_append), chunk_size):
-                    chunk_rows = rows_to_append[i:i + chunk_size]
-                    worksheet_historical.append_rows(
-                        chunk_rows,
-                        value_input_option="RAW",
-                    )
-            elif hasattr(worksheet_historical, "update"):
-                for i in range(0, len(rows_to_append), chunk_size):
-                    chunk_rows = rows_to_append[i:i + chunk_size]
-                    chunk_start_row = start_row + i
-                    chunk_end_row = chunk_start_row + len(chunk_rows) - 1
-                    chunk_range = f"A{chunk_start_row}:{last_col_letter}{chunk_end_row}"
-                    worksheet_historical.update(
-                        chunk_range,
-                        chunk_rows,
-                        value_input_option="RAW",
-                    )
-            elif hasattr(worksheet_historical, "append_row"):
-                for row_values in rows_to_append:
-                    worksheet_historical.append_row(
-                        row_values,
-                        value_input_option="RAW",
-                    )
-            else:
-                raise AttributeError(
-                    "La hoja histórica no soporta métodos de escritura compatibles (append_rows/update/append_row)."
+        if hasattr(worksheet_historical, "append_rows"):
+            for i in range(0, len(rows_to_append), chunk_size):
+                chunk_rows = rows_to_append[i:i + chunk_size]
+                worksheet_historical.append_rows(
+                    chunk_rows,
+                    value_input_option="RAW",
                 )
-
-        try:
-            _append_rows_in_chunks()
-        except Exception as append_error:
-            error_text = str(append_error)
-            if "above the limit of 10000000 cells" not in error_text:
-                raise
-            status_slot.info("🧰 Liberando espacio de celdas en el workbook y reintentando...")
-            _trim_spreadsheet_to_used_cells(worksheet_historical.spreadsheet)
-            worksheet_historical = g_spread_client.open_by_key(GOOGLE_SHEET_ID).worksheet(
-                GOOGLE_SHEET_HISTORICAL_WORKSHEET_NAME
+        elif hasattr(worksheet_historical, "update"):
+            for i in range(0, len(rows_to_append), chunk_size):
+                chunk_rows = rows_to_append[i:i + chunk_size]
+                chunk_start_row = start_row + i
+                chunk_end_row = chunk_start_row + len(chunk_rows) - 1
+                chunk_range = f"A{chunk_start_row}:{last_col_letter}{chunk_end_row}"
+                worksheet_historical.update(
+                    chunk_range,
+                    chunk_rows,
+                    value_input_option="RAW",
+                )
+        elif hasattr(worksheet_historical, "append_row"):
+            for row_values in rows_to_append:
+                worksheet_historical.append_row(
+                    row_values,
+                    value_input_option="RAW",
+                )
+        else:
+            raise AttributeError(
+                "La hoja histórica no soporta métodos de escritura compatibles (append_rows/update/append_row)."
             )
-            _append_rows_in_chunks()
 
         end_row = start_row + len(rows_to_append) - 1
 
