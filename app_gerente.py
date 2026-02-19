@@ -254,7 +254,11 @@ def get_s3_file_download_url(s3_client_param, object_key_or_url, expires_in=6048
 
 
 def resolver_nombre_y_enlace(valor, etiqueta_fallback):
-    """Genera un nombre legible y una URL de descarga para cualquier valor almacenado en la hoja."""
+    """Genera nombre legible y URL usable para valores guardados en la hoja.
+
+    Si el valor es una URL S3/AWS, regenera una prefirmada para forzar
+    cabeceras inline en PDF/imágenes y evitar descargas automáticas.
+    """
     valor = str(valor).strip()
     if not valor:
         return None, None
@@ -266,7 +270,17 @@ def resolver_nombre_y_enlace(valor, etiqueta_fallback):
         nombre = etiqueta_fallback
 
     if parsed.scheme and parsed.netloc:
-        enlace = valor
+        host = (parsed.netloc or "").lower()
+        s3_domains = (
+            ".amazonaws.com",
+            ".s3.amazonaws.com",
+        )
+        if any(domain in host for domain in s3_domains):
+            enlace = get_s3_file_download_url(s3_client, valor)
+            if not enlace or enlace == "#":
+                enlace = valor
+        else:
+            enlace = valor
     else:
         enlace = get_s3_file_download_url(s3_client, valor)
         if not enlace or enlace == "#":
