@@ -3481,28 +3481,6 @@ def archive_and_clean_pedidos(
         if not ids_limpiar:
             return False, "No se pudieron obtener los ID_Pedido a limpiar.", 0
 
-        etapa = "marcado de limpieza"
-        status_slot.info("✍️ Marcando pedidos como limpiados...")
-        progress_bar.progress(30)
-
-        if "Completados_Limpiado" not in headers_main:
-            raise ValueError("La hoja operativa no contiene la columna Completados_Limpiado.")
-
-        col_limpiado_idx = headers_main.index("Completados_Limpiado") + 1
-        updates_limpiado = []
-        for row_idx in pedidos_a_limpiar["_gsheet_row_index"].astype(int).tolist():
-            updates_limpiado.append(
-                {
-                    "range": gspread.utils.rowcol_to_a1(row_idx, col_limpiado_idx),
-                    "values": [["sí"]],
-                }
-            )
-
-        if updates_limpiado:
-            worksheet_main.batch_update(updates_limpiado, value_input_option="USER_ENTERED")
-
-        pedidos_a_limpiar["Completados_Limpiado"] = "sí"
-
         etapa = "movimiento a histórico"
         status_slot.info("📦 Moviendo pedidos al histórico...")
         progress_bar.progress(45)
