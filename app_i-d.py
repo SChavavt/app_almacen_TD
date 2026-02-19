@@ -1560,18 +1560,24 @@ def build_cliente_risk_table(df_conf: pd.DataFrame):
     df_valid = df[(df["Dias_Entre_Compras"].notna()) & (df["Dias_Entre_Compras"] > 7)].copy()
 
     promedio_ciclo = df_valid.groupby("Cliente_Limpio")["Dias_Entre_Compras"].mean()
+    ciclo_min = df_valid.groupby("Cliente_Limpio")["Dias_Entre_Compras"].min()
+    ciclo_max = df_valid.groupby("Cliente_Limpio")["Dias_Entre_Compras"].max()
     ultima_compra = df.groupby("Cliente_Limpio")["Hora_Registro"].max()
     dias_desde_ultima = (hoy - ultima_compra).dt.days
 
     tabla = pd.DataFrame(
         {
             "Promedio_Ciclo": promedio_ciclo,
+            "Ciclo_Min_Dias": ciclo_min,
+            "Ciclo_Max_Dias": ciclo_max,
             "Ultima_Compra": ultima_compra,
             "Dias_Desde_Ultima": dias_desde_ultima,
         }
     )
 
     tabla["Promedio_Ciclo"] = pd.to_numeric(tabla["Promedio_Ciclo"], errors="coerce")
+    tabla["Ciclo_Min_Dias"] = pd.to_numeric(tabla["Ciclo_Min_Dias"], errors="coerce")
+    tabla["Ciclo_Max_Dias"] = pd.to_numeric(tabla["Ciclo_Max_Dias"], errors="coerce")
     tabla["Proxima_Estimada"] = tabla["Ultima_Compra"] + pd.to_timedelta(
         tabla["Promedio_Ciclo"], unit="D"
     )
@@ -2494,6 +2500,8 @@ if selected_tab == 0:
                     "Estado",
                     "Dias_Desde_Ultima",
                     "Promedio_Ciclo",
+                    "Ciclo_Min_Dias",
+                    "Ciclo_Max_Dias",
                     "Ratio",
                     "Proxima_Estimada",
                     "Ticket_Promedio",
@@ -2523,6 +2531,8 @@ if selected_tab == 0:
                     "Ticket_Promedio",
                     "Estado",
                     "Promedio_Ciclo",
+                    "Ciclo_Min_Dias",
+                    "Ciclo_Max_Dias",
                     "Dias_Desde_Ultima",
                 ]
             ],
