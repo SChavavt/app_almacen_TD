@@ -3444,7 +3444,43 @@ def _delete_rows_by_indexes(worksheet, row_indexes: list[int]) -> None:
             }
         )
 
-    worksheet.spreadsheet.batch_update({"requests": requests})
+    _run_gsheet_write_with_backoff(
+        lambda: worksheet.spreadsheet.batch_update({"requests": requests}),
+        operation_name="eliminación de filas",
+    )
+
+
+def _is_rate_limit_error(exc: Exception) -> bool:
+    """Detecta errores de cuota/límite de escritura de Google Sheets."""
+    text = str(exc)
+    signals = (
+        "429",
+        "RESOURCE_EXHAUSTED",
+        "RATE_LIMIT",
+        "Quota exceeded",
+        "quota metric",
+    )
+    return any(sig in text for sig in signals)
+
+
+def _run_gsheet_write_with_backoff(func, *, operation_name: str, max_retries: int = 5):
+    """Ejecuta una operación de escritura con backoff exponencial ante 429."""
+    wait_seconds = 1.2
+    last_error = None
+    for attempt in range(max_retries + 1):
+        try:
+            return func()
+        except Exception as exc:
+            last_error = exc
+            if attempt >= max_retries or not _is_rate_limit_error(exc):
+                raise
+            st.info(
+                f"⏳ Límite temporal de Google Sheets durante {operation_name}. "
+                f"Reintentando ({attempt + 1}/{max_retries})..."
+            )
+            time.sleep(wait_seconds)
+            wait_seconds = min(wait_seconds * 2, 12)
+    raise last_error
 
 
 def _trim_spreadsheet_to_used_cells(spreadsheet, min_rows: int = 2, min_cols: int = 1) -> None:
@@ -3508,6 +3544,16 @@ def archive_and_clean_pedidos(
         headers_hist = worksheet_historical.row_values(1)
         headers_origen = headers_main
 
+        if "ID_Pedido" not in headers_hist:
+            raise ValueError("La hoja histórica no contiene la columna ID_Pedido.")
+
+        id_col_hist = headers_hist.index("ID_Pedido") + 1
+        ids_existentes_hist = {
+            str(v).strip()
+            for v in worksheet_historical.col_values(id_col_hist)[1:]
+            if str(v).strip()
+        }
+
         def _normalize_gsheet_value(value):
             if pd.isna(value):
                 return ""
@@ -3519,6 +3565,10 @@ def archive_and_clean_pedidos(
 
         rows_to_append = []
         for _, row in pedidos_a_limpiar.iterrows():
+            pedido_id = str(row.get("ID_Pedido", "")).strip()
+            if pedido_id and pedido_id in ids_existentes_hist:
+                continue
+
             row_map = {col: row.get(col, "") for col in headers_origen}
             rows_to_append.append([
                 _normalize_gsheet_value(row_map.get(col, "")) for col in headers_hist
@@ -3535,9 +3585,12 @@ def archive_and_clean_pedidos(
             if hasattr(worksheet_historical, "append_rows"):
                 for i in range(0, len(rows_to_append), chunk_size):
                     chunk_rows = rows_to_append[i:i + chunk_size]
-                    worksheet_historical.append_rows(
-                        chunk_rows,
-                        value_input_option="RAW",
+                    _run_gsheet_write_with_backoff(
+                        lambda chunk=chunk_rows: worksheet_historical.append_rows(
+                            chunk,
+                            value_input_option="RAW",
+                        ),
+                        operation_name="archivo en histórico",
                     )
             elif hasattr(worksheet_historical, "update"):
                 for i in range(0, len(rows_to_append), chunk_size):
@@ -3545,16 +3598,22 @@ def archive_and_clean_pedidos(
                     chunk_start_row = start_row + i
                     chunk_end_row = chunk_start_row + len(chunk_rows) - 1
                     chunk_range = f"A{chunk_start_row}:{last_col_letter}{chunk_end_row}"
-                    worksheet_historical.update(
-                        chunk_range,
-                        chunk_rows,
-                        value_input_option="RAW",
+                    _run_gsheet_write_with_backoff(
+                        lambda r=chunk_range, chunk=chunk_rows: worksheet_historical.update(
+                            r,
+                            chunk,
+                            value_input_option="RAW",
+                        ),
+                        operation_name="archivo en histórico",
                     )
             elif hasattr(worksheet_historical, "append_row"):
                 for row_values in rows_to_append:
-                    worksheet_historical.append_row(
-                        row_values,
-                        value_input_option="RAW",
+                    _run_gsheet_write_with_backoff(
+                        lambda vals=row_values: worksheet_historical.append_row(
+                            vals,
+                            value_input_option="RAW",
+                        ),
+                        operation_name="archivo en histórico",
                     )
             else:
                 raise AttributeError(
@@ -3562,7 +3621,8 @@ def archive_and_clean_pedidos(
                 )
 
         try:
-            _append_rows_in_chunks()
+            if rows_to_append:
+                _append_rows_in_chunks()
         except Exception as append_error:
             error_text = str(append_error)
             if "above the limit of 10000000 cells" not in error_text:
@@ -3585,7 +3645,8 @@ def archive_and_clean_pedidos(
                 ya_eliminados_en_fallback = True
 
                 try:
-                    _append_rows_in_chunks()
+                    if rows_to_append:
+                        _append_rows_in_chunks()
                 except Exception:
                     # Mejor esfuerzo de recuperación para evitar pérdida de datos.
                     rows_restore = []
@@ -3598,31 +3659,22 @@ def archive_and_clean_pedidos(
                             for col in headers_main
                         ])
                     if rows_restore and hasattr(worksheet_main, "append_rows"):
-                        worksheet_main.append_rows(rows_restore, value_input_option="RAW")
+                        _run_gsheet_write_with_backoff(
+                            lambda: worksheet_main.append_rows(rows_restore, value_input_option="RAW"),
+                            operation_name="restauración de pedidos",
+                        )
                     raise
-
-        end_row = start_row + len(rows_to_append) - 1
 
         etapa = "verificación"
         status_slot.info("🔐 Verificando integridad de los datos...")
         progress_bar.progress(70)
 
-        if "ID_Pedido" not in headers_hist:
-            raise ValueError("La hoja histórica no contiene la columna ID_Pedido.")
-
-        id_col_hist = headers_hist.index("ID_Pedido") + 1
-        historical_values_after = worksheet_historical.get_all_values()
-        if len(historical_values_after) < end_row:
-            raise ValueError("Verificación incompleta: no se encontraron todas las filas archivadas en histórico.")
-
-        appended_rows = historical_values_after[start_row - 1:end_row]
-        ids_append = {
-            str(r[id_col_hist - 1]).strip()
-            for r in appended_rows
-            if len(r) >= id_col_hist and str(r[id_col_hist - 1]).strip()
+        ids_historial_actual = {
+            str(v).strip()
+            for v in worksheet_historical.col_values(id_col_hist)[1:]
+            if str(v).strip()
         }
-
-        faltantes = [pid for pid in ids_limpiar if pid not in ids_append]
+        faltantes = [pid for pid in ids_limpiar if pid and pid not in ids_historial_actual]
         if faltantes:
             raise ValueError(
                 f"Verificación incompleta: faltan {len(faltantes)} ID_Pedido en histórico."
