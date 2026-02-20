@@ -1697,6 +1697,47 @@ def compute_dashboard_base(df_conf: pd.DataFrame):
     }
 
 
+@st.cache_data(ttl=120)
+def build_ultimos_pedidos(df_pedidos: pd.DataFrame, vendedor: str):
+    if df_pedidos.empty:
+        return pd.DataFrame()
+
+    work = df_pedidos.copy()
+    if "Hora_Registro" not in work.columns:
+        work["Hora_Registro"] = pd.NaT
+    if "Vendedor_Registro" not in work.columns:
+        work["Vendedor_Registro"] = ""
+
+    if vendedor != "(Todos)":
+        vend_norm = _normalize_vendedor_name(vendedor)
+        work = work[
+            work["Vendedor_Registro"].map(_normalize_vendedor_name) == vend_norm
+        ]
+
+    work = work.sort_values("Hora_Registro", ascending=False)
+    limite = 10 if vendedor == "(Todos)" else 5
+    work = work.head(limite).copy()
+
+    columnas = [
+        "Hora_Registro",
+        "Cliente",
+        "Vendedor_Registro",
+        "Folio_Factura",
+        "Tipo_Envio",
+        "Estado",
+    ]
+    cols_exist = [c for c in columnas if c in work.columns]
+    if not cols_exist:
+        return pd.DataFrame()
+
+    vista = work[cols_exist].copy()
+    if "Hora_Registro" in vista.columns:
+        vista["Hora_Registro"] = pd.to_datetime(
+            vista["Hora_Registro"], errors="coerce"
+        ).dt.strftime("%d/%m/%Y %H:%M")
+    return vista
+
+
 # --- S3 helper (solo lectura presignada aquí) ---
 def get_s3_file_url(s3_object_key):
     if not s3_object_key:
@@ -2411,6 +2452,48 @@ if selected_tab == 0:
         ]
     if estado_sel:
         tc = tc[tc["Estado"].isin(estado_sel)]
+
+    df_metricas_v = df_conf.copy()
+    if vendedor_sel != "(Todos)":
+        df_metricas_v = df_metricas_v[
+            df_metricas_v["Vendedor_Registro"].map(_normalize_vendedor_name)
+            == _normalize_vendedor_name(vendedor_sel)
+        ]
+
+    ventas_v = float(
+        pd.to_numeric(df_metricas_v.get("Monto_Comprobante", 0), errors="coerce")
+        .fillna(0)
+        .sum()
+    )
+    pedidos_v = int(len(df_metricas_v))
+    ticket_v = float(ventas_v / pedidos_v) if pedidos_v else 0.0
+
+    vm1, vm2, vm3 = st.columns(3)
+    vm1.metric(
+        "💰 Ventas vendedor" if vendedor_sel != "(Todos)" else "💰 Ventas (todos)",
+        f"${ventas_v:,.0f}",
+    )
+    vm2.metric(
+        "📦 Pedidos vendedor" if vendedor_sel != "(Todos)" else "📦 Pedidos (todos)",
+        f"{pedidos_v:,}",
+    )
+    vm3.metric(
+        "🎟️ Ticket prom vendedor" if vendedor_sel != "(Todos)" else "🎟️ Ticket prom (todos)",
+        f"${ticket_v:,.0f}",
+    )
+
+    st.markdown("#### 📌 Últimos pedidos según filtro")
+    ultimos_filtrados = build_ultimos_pedidos(df_all, vendedor_sel)
+    if ultimos_filtrados.empty:
+        st.info("No hay pedidos recientes para el filtro seleccionado.")
+    else:
+        limite_msg = 10 if vendedor_sel == "(Todos)" else 5
+        st.caption(
+            f"Mostrando los últimos {limite_msg} pedidos de data_pedidos"
+            if vendedor_sel == "(Todos)"
+            else f"Mostrando los últimos {limite_msg} pedidos de {vendedor_sel} en data_pedidos"
+        )
+        st.dataframe(ultimos_filtrados, use_container_width=True, height=260)
 
     resumen_v = build_resumen_vendedor(tc)
     proy_total, proy_n, prox_df = compute_proyeccion_30(tc, hoy)
