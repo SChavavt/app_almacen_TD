@@ -2468,19 +2468,12 @@ if selected_tab == 0:
     pedidos_v = int(len(df_metricas_v))
     ticket_v = float(ventas_v / pedidos_v) if pedidos_v else 0.0
 
-    vm1, vm2, vm3 = st.columns(3)
-    vm1.metric(
-        "💰 Ventas vendedor" if vendedor_sel != "(Todos)" else "💰 Ventas (todos)",
-        f"${ventas_v:,.0f}",
-    )
-    vm2.metric(
-        "📦 Pedidos vendedor" if vendedor_sel != "(Todos)" else "📦 Pedidos (todos)",
-        f"{pedidos_v:,}",
-    )
-    vm3.metric(
-        "🎟️ Ticket prom vendedor" if vendedor_sel != "(Todos)" else "🎟️ Ticket prom (todos)",
-        f"${ticket_v:,.0f}",
-    )
+    resumen_v = build_resumen_vendedor(tc)
+    if vendedor_sel != "(Todos)":
+        vm1, vm2, vm3 = st.columns(3)
+        vm1.metric("💰 Ventas vendedor", f"${ventas_v:,.0f}")
+        vm2.metric("📦 Pedidos vendedor", f"{pedidos_v:,}")
+        vm3.metric("🎟️ Ticket prom vendedor", f"${ticket_v:,.0f}")
 
     st.markdown("#### 📌 Últimos pedidos según filtro")
     ultimos_filtrados = build_ultimos_pedidos(df_all, vendedor_sel)
@@ -2495,32 +2488,32 @@ if selected_tab == 0:
         )
         st.dataframe(ultimos_filtrados, use_container_width=True, height=260)
 
-    resumen_v = build_resumen_vendedor(tc)
     proy_total, proy_n, prox_df = compute_proyeccion_30(tc, hoy)
 
-    with st.expander("🧑‍💼 Salud de cartera por vendedor", expanded=False):
-        if resumen_v.empty:
-            st.info("No hay datos para el filtro seleccionado.")
-        else:
-            st.dataframe(
-                resumen_v[
-                    [
-                        "Vendedor",
-                        "Ventas",
-                        "Pedidos",
-                        "Ticket_Prom",
-                        "Activo",
-                        "Alerta",
-                        "Riesgo",
-                        "Nuevo/SinHistorial",
-                        "%Riesgo",
-                        "Total_Evaluado",
-                        "Total",
-                    ]
-                ].sort_values("%Riesgo", ascending=False),
-                use_container_width=True,
-                height=380,
-            )
+    if vendedor_sel == "(Todos)":
+        with st.expander("🧑‍💼 Salud de cartera por vendedor", expanded=False):
+            if resumen_v.empty:
+                st.info("No hay datos para el filtro seleccionado.")
+            else:
+                st.dataframe(
+                    resumen_v[
+                        [
+                            "Vendedor",
+                            "Ventas",
+                            "Pedidos",
+                            "Ticket_Prom",
+                            "Activo",
+                            "Alerta",
+                            "Riesgo",
+                            "Nuevo/SinHistorial",
+                            "%Riesgo",
+                            "Total_Evaluado",
+                            "Total",
+                        ]
+                    ].sort_values("%Riesgo", ascending=False),
+                    use_container_width=True,
+                    height=380,
+                )
 
     st.markdown("---")
 
