@@ -1603,17 +1603,11 @@ def build_cliente_risk_table(df_conf: pd.DataFrame):
     ultimo_vendedor = df.groupby("Cliente_Limpio")["Vendedor_Registro"].last()
     tabla["Vendedor"] = ultimo_vendedor
 
-    # Evita que montos vacíos/corruptos convertidos a 0 distorsionen el ticket promedio.
-    # Para ticket solo consideramos comprobantes con monto positivo.
-    ticket_prom = (
-        df[df["Monto_Comprobante"] > 0]
-        .groupby("Cliente_Limpio")["Monto_Comprobante"]
-        .mean()
-    )
+    ticket_prom = df.groupby("Cliente_Limpio")["Monto_Comprobante"].mean()
     ventas_total = df.groupby("Cliente_Limpio")["Monto_Comprobante"].sum()
     num_pedidos = df.groupby("Cliente_Limpio")["Monto_Comprobante"].size()
 
-    tabla["Ticket_Promedio"] = ticket_prom.fillna(0.0)
+    tabla["Ticket_Promedio"] = ticket_prom
     tabla["Ventas_Total"] = ventas_total
     tabla["Num_Pedidos"] = num_pedidos
 
