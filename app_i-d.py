@@ -2482,6 +2482,16 @@ if selected_tab == 0:
         f"${ticket_v:,.0f}",
     )
 
+    resumen_v = build_resumen_vendedor(tc)
+    if vendedor_sel != "(Todos)" and not resumen_v.empty:
+        fila_v = resumen_v.iloc[0]
+        sm1, sm2, sm3, sm4, sm5 = st.columns(5)
+        sm1.metric("👥 Cartera evaluada", f"{int(fila_v['Total_Evaluado']):,}")
+        sm2.metric("✅ Activo", f"{int(fila_v['Activo']):,}")
+        sm3.metric("⚠️ Alerta", f"{int(fila_v['Alerta']):,}")
+        sm4.metric("🚨 Riesgo", f"{int(fila_v['Riesgo']):,}")
+        sm5.metric("🆕 Nuevo/SinHistorial", f"{int(fila_v['Nuevo/SinHistorial']):,}")
+
     st.markdown("#### 📌 Últimos pedidos según filtro")
     ultimos_filtrados = build_ultimos_pedidos(df_all, vendedor_sel)
     if ultimos_filtrados.empty:
@@ -2495,32 +2505,32 @@ if selected_tab == 0:
         )
         st.dataframe(ultimos_filtrados, use_container_width=True, height=260)
 
-    resumen_v = build_resumen_vendedor(tc)
     proy_total, proy_n, prox_df = compute_proyeccion_30(tc, hoy)
 
-    with st.expander("🧑‍💼 Salud de cartera por vendedor", expanded=False):
-        if resumen_v.empty:
-            st.info("No hay datos para el filtro seleccionado.")
-        else:
-            st.dataframe(
-                resumen_v[
-                    [
-                        "Vendedor",
-                        "Ventas",
-                        "Pedidos",
-                        "Ticket_Prom",
-                        "Activo",
-                        "Alerta",
-                        "Riesgo",
-                        "Nuevo/SinHistorial",
-                        "%Riesgo",
-                        "Total_Evaluado",
-                        "Total",
-                    ]
-                ].sort_values("%Riesgo", ascending=False),
-                use_container_width=True,
-                height=380,
-            )
+    if vendedor_sel == "(Todos)":
+        with st.expander("🧑‍💼 Salud de cartera por vendedor", expanded=False):
+            if resumen_v.empty:
+                st.info("No hay datos para el filtro seleccionado.")
+            else:
+                st.dataframe(
+                    resumen_v[
+                        [
+                            "Vendedor",
+                            "Ventas",
+                            "Pedidos",
+                            "Ticket_Prom",
+                            "Activo",
+                            "Alerta",
+                            "Riesgo",
+                            "Nuevo/SinHistorial",
+                            "%Riesgo",
+                            "Total_Evaluado",
+                            "Total",
+                        ]
+                    ].sort_values("%Riesgo", ascending=False),
+                    use_container_width=True,
+                    height=380,
+                )
 
     st.markdown("---")
 
