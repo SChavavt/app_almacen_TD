@@ -2468,12 +2468,19 @@ if selected_tab == 0:
     pedidos_v = int(len(df_metricas_v))
     ticket_v = float(ventas_v / pedidos_v) if pedidos_v else 0.0
 
-    resumen_v = build_resumen_vendedor(tc)
-    if vendedor_sel != "(Todos)":
-        vm1, vm2, vm3 = st.columns(3)
-        vm1.metric("💰 Ventas vendedor", f"${ventas_v:,.0f}")
-        vm2.metric("📦 Pedidos vendedor", f"{pedidos_v:,}")
-        vm3.metric("🎟️ Ticket prom vendedor", f"${ticket_v:,.0f}")
+    vm1, vm2, vm3 = st.columns(3)
+    vm1.metric(
+        "💰 Ventas vendedor" if vendedor_sel != "(Todos)" else "💰 Ventas (todos)",
+        f"${ventas_v:,.0f}",
+    )
+    vm2.metric(
+        "📦 Pedidos vendedor" if vendedor_sel != "(Todos)" else "📦 Pedidos (todos)",
+        f"{pedidos_v:,}",
+    )
+    vm3.metric(
+        "🎟️ Ticket prom vendedor" if vendedor_sel != "(Todos)" else "🎟️ Ticket prom (todos)",
+        f"${ticket_v:,.0f}",
+    )
 
     resumen_v = build_resumen_vendedor(tc)
     if vendedor_sel != "(Todos)" and not resumen_v.empty:
