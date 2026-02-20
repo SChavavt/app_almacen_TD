@@ -2500,6 +2500,150 @@ if selected_tab == 0:
         sm4.metric("🚨 Riesgo", f"{int(fila_v['Riesgo']):,}")
         sm5.metric("🆕 Nuevo/SinHistorial", f"{int(fila_v['Nuevo/SinHistorial']):,}")
 
+    proy_total, proy_n, prox_df = compute_proyeccion_30(tc, hoy)
+
+    # Microinteracción de filtros
+    riesgo_filtrado = int((tc["Estado"] == "Riesgo").sum())
+    ticket_visible = float(tc["Ticket_Promedio"].mean()) if not tc.empty else 0.0
+    st.caption(
+        f"Mostrando **{len(tc):,}** clientes | **{riesgo_filtrado:,}** en riesgo | "
+        f"ticket promedio visible **${ticket_visible:,.0f}**"
+    )
+
+    # Insights ejecutivos rápidos
+    trend_df = df_metricas_v.copy()
+    trend_df["Fecha"] = pd.to_datetime(trend_df.get("Hora_Registro"), errors="coerce")
+    trend_df["Monto"] = pd.to_numeric(trend_df.get("Monto_Comprobante", 0), errors="coerce").fillna(0)
+    trend_df = trend_df.dropna(subset=["Fecha"])
+    week_delta_label = "Sin histórico semanal"
+    if not trend_df.empty:
+        trend_df["Semana"] = trend_df["Fecha"].dt.to_period("W").dt.start_time
+        weekly_counts = (
+            trend_df.groupby("Semana", as_index=False)
+            .size()
+            .rename(columns={"size": "Pedidos"})
+            .sort_values("Semana")
+        )
+        if len(weekly_counts) >= 2:
+            prev = float(weekly_counts.iloc[-2]["Pedidos"])
+            curr = float(weekly_counts.iloc[-1]["Pedidos"])
+            delta = ((curr - prev) / prev * 100) if prev else 0.0
+            week_delta_label = f"{delta:+.1f}% vs semana previa"
+
+    top_vendedor_riesgo = "N/D"
+    if not resumen_v.empty and "%Riesgo" in resumen_v.columns:
+        rv = resumen_v.copy()
+        rv["%Riesgo"] = pd.to_numeric(rv["%Riesgo"], errors="coerce").fillna(0)
+        if not rv.empty:
+            top_row = rv.sort_values("%Riesgo", ascending=False).iloc[0]
+            top_vendedor_riesgo = f"{top_row['Vendedor']} ({top_row['%Riesgo']:.1f}%)"
+
+    i1, i2, i3, i4 = st.columns(4)
+    i1.metric("⚠️ Riesgo semanal", f"{riesgo_filtrado:,} clientes", week_delta_label)
+    i2.metric("💰 Proyección 30 días", f"${proy_total:,.0f}", f"{proy_n:,} clientes")
+    i3.metric("👤 Mayor % riesgo", top_vendedor_riesgo)
+    i4.metric("🎯 Ticket filtrado", f"${ticket_visible:,.0f}")
+
+    st.markdown("### 🧭 Story flow del dashboard")
+    st.caption("Panorama general → Salud comercial → Riesgo y prioridades → Proyección")
+
+    st.markdown("#### 1) Panorama general")
+    view_col1, view_col2 = st.columns([0.48, 0.52])
+
+    with view_col1:
+        estado_order = ["Activo", "Alerta", "Riesgo", "Nuevo/SinHistorial"]
+        estado_colors = {
+            "Activo": "#22c55e",
+            "Alerta": "#f59e0b",
+            "Riesgo": "#ef4444",
+            "Nuevo/SinHistorial": "#60a5fa",
+        }
+        estado_counts = tc["Estado"].value_counts().reindex(estado_order, fill_value=0).reset_index()
+        estado_counts.columns = ["Estado", "Clientes"]
+        st.caption("Distribución de clientes por estado")
+        st.vega_lite_chart(
+            estado_counts,
+            {
+                "mark": {"type": "arc", "innerRadius": 55},
+                "encoding": {
+                    "theta": {"field": "Clientes", "type": "quantitative"},
+                    "color": {
+                        "field": "Estado",
+                        "type": "nominal",
+                        "scale": {
+                            "domain": list(estado_colors.keys()),
+                            "range": list(estado_colors.values()),
+                        },
+                    },
+                    "tooltip": [
+                        {"field": "Estado", "type": "nominal"},
+                        {"field": "Clientes", "type": "quantitative"},
+                    ],
+                },
+            },
+            use_container_width=True,
+        )
+
+    with view_col2:
+        st.caption("Riesgo por vendedor (%Riesgo y Ventas)")
+        if resumen_v.empty:
+            st.info("Sin datos de vendedores para el filtro actual.")
+        else:
+            riesgo_v = resumen_v[["Vendedor", "%Riesgo", "Ventas"]].copy()
+            riesgo_v["%Riesgo"] = pd.to_numeric(riesgo_v["%Riesgo"], errors="coerce").fillna(0)
+            riesgo_v["Ventas"] = pd.to_numeric(riesgo_v["Ventas"], errors="coerce").fillna(0)
+            riesgo_v = riesgo_v.sort_values("%Riesgo", ascending=False).head(8)
+            st.bar_chart(riesgo_v.set_index("Vendedor")[["%Riesgo", "Ventas"]], height=240)
+
+    st.markdown("#### 2) Salud comercial")
+    trend_col1, trend_col2 = st.columns([0.7, 0.3])
+    with trend_col1:
+        st.caption("Tendencia semanal de pedidos y ventas")
+        if trend_df.empty:
+            st.info("No hay fechas válidas para graficar tendencia.")
+        else:
+            trend_df["Semana"] = trend_df["Fecha"].dt.to_period("W").dt.start_time
+            weekly = (
+                trend_df.groupby("Semana", as_index=False)
+                .agg(Ventas=("Monto", "sum"), Pedidos=("Monto", "size"))
+                .sort_values("Semana")
+                .tail(10)
+            )
+            st.line_chart(weekly.set_index("Semana")[["Ventas", "Pedidos"]], height=230)
+    with trend_col2:
+        st.caption("Distribución de días desde última compra")
+        if tc.empty:
+            st.info("Sin clientes para el histograma.")
+        else:
+            dias_hist = pd.to_numeric(tc["Dias_Desde_Ultima"], errors="coerce").dropna()
+            if dias_hist.empty:
+                st.info("No hay datos de días para graficar.")
+            else:
+                hist_df = pd.DataFrame({"Dias_Desde_Ultima": dias_hist})
+                st.vega_lite_chart(
+                    hist_df,
+                    {
+                        "mark": "bar",
+                        "encoding": {
+                            "x": {"field": "Dias_Desde_Ultima", "bin": True, "type": "quantitative", "title": "Días"},
+                            "y": {"aggregate": "count", "type": "quantitative", "title": "Clientes"},
+                            "tooltip": [{"aggregate": "count", "type": "quantitative", "title": "Clientes"}],
+                        },
+                    },
+                    use_container_width=True,
+                )
+
+    st.markdown("#### 3) Qué hacer hoy")
+    act1, act2, act3 = st.columns(3)
+    llamar_hoy = tc[(tc["Estado"] == "Riesgo") & (tc["Ticket_Promedio"] >= tc["Ticket_Promedio"].median())]
+    recuperar = tc[(tc["Estado"] == "Alerta") & (pd.to_numeric(tc["Dias_Desde_Ultima"], errors="coerce") > pd.to_numeric(tc["Promedio_Ciclo"], errors="coerce"))]
+    upsell = tc[(tc["Estado"] == "Activo") & (tc["Ticket_Promedio"] >= tc["Ticket_Promedio"].quantile(0.75))]
+    act1.info(f"**☎️ Llamar hoy**\n\n{len(llamar_hoy):,} clientes Riesgo con ticket alto.")
+    act2.info(f"**📈 Upsell**\n\n{len(upsell):,} clientes Activos con ticket alto.")
+    act3.info(f"**♻️ Recuperar**\n\n{len(recuperar):,} clientes Alerta por encima de su ciclo.")
+
+    st.markdown("---")
+
     st.markdown("#### 📌 Últimos pedidos según filtro")
     ultimos_filtrados = build_ultimos_pedidos(df_all, vendedor_sel)
     if ultimos_filtrados.empty:
@@ -2512,8 +2656,6 @@ if selected_tab == 0:
             else f"Mostrando los últimos {limite_msg} pedidos de {vendedor_sel} en data_pedidos"
         )
         st.dataframe(ultimos_filtrados, use_container_width=True, height=260)
-
-    proy_total, proy_n, prox_df = compute_proyeccion_30(tc, hoy)
 
     if vendedor_sel == "(Todos)":
         with st.expander("🧑‍💼 Salud de cartera por vendedor", expanded=False):
@@ -2539,8 +2681,6 @@ if selected_tab == 0:
                     use_container_width=True,
                     height=380,
                 )
-
-    st.markdown("---")
 
     with st.expander("🏥 Clientes (Top)", expanded=False):
         col_a, col_b, col_c = st.columns(3)
@@ -2589,34 +2729,106 @@ if selected_tab == 0:
 
     st.markdown("---")
 
+    priority = {"Riesgo": 0, "Alerta": 1, "Activo": 2, "Nuevo/SinHistorial": 3}
+    tc_priority = tc.copy()
+    tc_priority["prio"] = tc_priority["Estado"].map(priority).fillna(99)
+    tc_priority = tc_priority.sort_values(["prio", "Ventas_Total"], ascending=[True, False])
+
+    with st.expander("🎯 Recomendaciones de acción (Top 5)", expanded=False):
+        acciones = tc_priority[tc_priority["Estado"].isin(["Riesgo", "Alerta"])].head(5).copy()
+        if acciones.empty:
+            st.success("No hay clientes en riesgo/alerta con el filtro actual.")
+        else:
+            acciones["Acción sugerida"] = np.where(
+                acciones["Estado"].eq("Riesgo"),
+                "Llamada hoy + propuesta de recompra",
+                "Seguimiento comercial en 24h",
+            )
+            st.dataframe(
+                acciones[
+                    [
+                        "Cliente",
+                        "Estado",
+                        "Dias_Desde_Ultima",
+                        "Ticket_Promedio",
+                        "Vendedor",
+                        "Acción sugerida",
+                    ]
+                ],
+                use_container_width=True,
+                height=220,
+            )
+
+    st.markdown("#### 4) Riesgo y prioridades")
     with st.expander("🚨 Clientes en Alerta / Riesgo (prioridad)", expanded=False):
-        tc_r = tc[tc["Estado"].isin(["Alerta", "Riesgo"])].copy()
-        priority = {"Riesgo": 0, "Alerta": 1, "Activo": 2, "Nuevo/SinHistorial": 3}
-        tc_r["prio"] = tc_r["Estado"].map(priority).fillna(99)
-        tc_r = tc_r.sort_values(["prio", "Ventas_Total"], ascending=[True, False])
-        st.dataframe(
-            tc_r[
-                [
-                    "Cliente",
-                    "Estado",
-                    "Dias_Desde_Ultima",
-                    "Promedio_Ciclo",
-                    "Ciclo_Min_Dias",
-                    "Ciclo_Max_Dias",
-                    "Ratio",
-                    "Proxima_Estimada",
-                    "Ticket_Promedio",
-                    "Ventas_Total",
-                    "Num_Pedidos",
-                    "Vendedor",
-                ]
-            ].head(50),
-            use_container_width=True,
-            height=520,
+        tc_r = tc_priority[tc_priority["Estado"].isin(["Alerta", "Riesgo"])].copy().head(50)
+        vis_cols = [
+            "Cliente",
+            "Estado",
+            "Dias_Desde_Ultima",
+            "Promedio_Ciclo",
+            "Ciclo_Min_Dias",
+            "Ciclo_Max_Dias",
+            "Ratio",
+            "Proxima_Estimada",
+            "Ticket_Promedio",
+            "Ventas_Total",
+            "Num_Pedidos",
+            "Vendedor",
+        ]
+        tc_r["Proxima_Estimada"] = pd.to_datetime(tc_r["Proxima_Estimada"], errors="coerce")
+
+        def _row_styles(row):
+            styles = []
+            for col in vis_cols:
+                style = ""
+                if col == "Estado":
+                    if row["Estado"] == "Riesgo":
+                        style = "background-color: rgba(239, 68, 68, 0.30); color: #fff;"
+                    else:
+                        style = "background-color: rgba(245, 158, 11, 0.30); color: #fff;"
+                if col == "Ratio":
+                    ratio = pd.to_numeric(row.get("Ratio"), errors="coerce")
+                    if pd.notna(ratio):
+                        if ratio >= 1.2:
+                            style = "background-color: rgba(239, 68, 68, 0.25);"
+                        elif ratio >= 1.0:
+                            style = "background-color: rgba(245, 158, 11, 0.25);"
+                        else:
+                            style = "background-color: rgba(34, 197, 94, 0.18);"
+                if col == "Proxima_Estimada":
+                    prox = row.get("Proxima_Estimada")
+                    if pd.notna(prox):
+                        if prox <= (hoy + timedelta(hours=72)):
+                            style = "background-color: rgba(59, 130, 246, 0.25);"
+                styles.append(style)
+            return styles
+
+        styled_tc_r = (
+            tc_r[vis_cols]
+            .style.apply(_row_styles, axis=1)
+            .apply(
+                lambda col: [
+                    (
+                        "background-color: rgba(239, 68, 68, 0.30);"
+                        if pd.notna(v) and float(v) >= 45
+                        else "background-color: rgba(245, 158, 11, 0.25);"
+                        if pd.notna(v) and float(v) >= 25
+                        else "background-color: rgba(34, 197, 94, 0.18);"
+                        if pd.notna(v)
+                        else ""
+                    )
+                    for v in col
+                ],
+                subset=["Dias_Desde_Ultima"],
+            )
+            .format({"Ratio": "{:.2f}", "Ticket_Promedio": "${:,.0f}", "Ventas_Total": "${:,.0f}", "Proxima_Estimada": lambda v: "" if pd.isna(v) else v.strftime("%Y-%m-%d")})
         )
+        st.dataframe(styled_tc_r, use_container_width=True, height=520)
 
     st.markdown("---")
 
+    st.markdown("#### 5) Proyección")
     with st.expander("🔮 Próximas compras estimadas (30 días)", expanded=False):
         st.caption("Se excluyen clientes en Riesgo.")
         st.write(
