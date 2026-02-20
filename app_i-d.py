@@ -1603,11 +1603,18 @@ def build_cliente_risk_table(df_conf: pd.DataFrame):
     ultimo_vendedor = df.groupby("Cliente_Limpio")["Vendedor_Registro"].last()
     tabla["Vendedor"] = ultimo_vendedor
 
-    ticket_prom = df.groupby("Cliente_Limpio")["Monto_Comprobante"].mean()
+    # Evita que montos vacíos/corruptos convertidos a 0 distorsionen el ticket promedio.
+    # Para ticket solo consideramos comprobantes con monto positivo.
+    ticket_prom = (
+        df[df["Monto_Comprobante"] > 0]
+        .groupby("Cliente_Limpio")["Monto_Comprobante"]
+        .mean()
+    )
     ventas_total = df.groupby("Cliente_Limpio")["Monto_Comprobante"].sum()
     num_pedidos = df.groupby("Cliente_Limpio")["Monto_Comprobante"].size()
 
     tabla["Ticket_Promedio"] = ticket_prom
+    tabla["Ticket_Promedio"] = pd.to_numeric(tabla["Ticket_Promedio"], errors="coerce").fillna(0.0)
     tabla["Ventas_Total"] = ventas_total
     tabla["Num_Pedidos"] = num_pedidos
 
@@ -1665,6 +1672,7 @@ def compute_proyeccion_30(tabla_clientes: pd.DataFrame, hoy: pd.Timestamp):
     ].copy()
 
     prox["Ticket_Promedio"] = pd.to_numeric(prox["Ticket_Promedio"], errors="coerce").fillna(0.0)
+    prox = prox[prox["Ticket_Promedio"] > 0].copy()
 
     total = float(prox["Ticket_Promedio"].sum())
     n = int(len(prox))
@@ -2457,6 +2465,9 @@ if selected_tab == 0:
     if estado_sel:
         tc = tc[tc["Estado"].isin(estado_sel)]
 
+    tc["Ticket_Promedio"] = pd.to_numeric(tc["Ticket_Promedio"], errors="coerce").fillna(0.0)
+    tc_top = tc[tc["Ticket_Promedio"] > 0].copy()
+
     df_metricas_v = df_conf.copy()
     if vendedor_sel != "(Todos)":
         df_metricas_v = df_metricas_v[
@@ -2536,7 +2547,7 @@ if selected_tab == 0:
 
         with col_a:
             st.caption("Top clientes por dinero total")
-            top_money = tc.sort_values("Ventas_Total", ascending=False).head(15)[
+            top_money = tc_top.sort_values("Ventas_Total", ascending=False).head(15)[
                 [
                     "Cliente",
                     "Ventas_Total",
@@ -2550,7 +2561,7 @@ if selected_tab == 0:
 
         with col_b:
             st.caption("Clientes más recurrentes (más pedidos)")
-            top_freq = tc.sort_values("Num_Pedidos", ascending=False).head(15)[
+            top_freq = tc_top.sort_values("Num_Pedidos", ascending=False).head(15)[
                 [
                     "Cliente",
                     "Num_Pedidos",
@@ -2564,7 +2575,7 @@ if selected_tab == 0:
 
         with col_c:
             st.caption("Ticket promedio más alto (perfil proyecto)")
-            top_ticket = tc.sort_values("Ticket_Promedio", ascending=False).head(15)[
+            top_ticket = tc_top.sort_values("Ticket_Promedio", ascending=False).head(15)[
                 [
                     "Cliente",
                     "Ticket_Promedio",
