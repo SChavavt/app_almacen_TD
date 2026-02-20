@@ -2468,19 +2468,23 @@ if selected_tab == 0:
     pedidos_v = int(len(df_metricas_v))
     ticket_v = float(ventas_v / pedidos_v) if pedidos_v else 0.0
 
-    vm1, vm2, vm3 = st.columns(3)
-    vm1.metric(
-        "💰 Ventas vendedor" if vendedor_sel != "(Todos)" else "💰 Ventas (todos)",
-        f"${ventas_v:,.0f}",
-    )
-    vm2.metric(
-        "📦 Pedidos vendedor" if vendedor_sel != "(Todos)" else "📦 Pedidos (todos)",
-        f"{pedidos_v:,}",
-    )
-    vm3.metric(
-        "🎟️ Ticket prom vendedor" if vendedor_sel != "(Todos)" else "🎟️ Ticket prom (todos)",
-        f"${ticket_v:,.0f}",
-    )
+    resumen_v = build_resumen_vendedor(tc)
+    if vendedor_sel != "(Todos)" and not resumen_v.empty:
+        fila_v = resumen_v.iloc[0]
+        vm1, vm2, vm3, vm4, vm5, vm6, vm7, vm8 = st.columns(8)
+        vm1.metric("💰 Ventas vendedor", f"${ventas_v:,.0f}")
+        vm2.metric("📦 Pedidos vendedor", f"{pedidos_v:,}")
+        vm3.metric("🎟️ Ticket prom vendedor", f"${ticket_v:,.0f}")
+        vm4.metric("👥 Cartera evaluada", f"{int(fila_v['Total_Evaluado']):,}")
+        vm5.metric("✅ Activo", f"{int(fila_v['Activo']):,}")
+        vm6.metric("⚠️ Alerta", f"{int(fila_v['Alerta']):,}")
+        vm7.metric("🚨 Riesgo", f"{int(fila_v['Riesgo']):,}")
+        vm8.metric("🆕 Nuevo/SinHistorial", f"{int(fila_v['Nuevo/SinHistorial']):,}")
+    else:
+        vm1, vm2, vm3 = st.columns(3)
+        vm1.metric("💰 Ventas (todos)", f"${ventas_v:,.0f}")
+        vm2.metric("📦 Pedidos (todos)", f"{pedidos_v:,}")
+        vm3.metric("🎟️ Ticket prom (todos)", f"${ticket_v:,.0f}")
 
     resumen_v = build_resumen_vendedor(tc)
     if vendedor_sel != "(Todos)" and not resumen_v.empty:
