@@ -2421,15 +2421,17 @@ if selected_tab == 0:
     pct_activo = (activos / evaluados) if evaluados else 0.0
     pct_riesgo = (riesgo / evaluados) if evaluados else 0.0
 
-    c1, c2, c3, c4, c5, c6, c7, c8 = st.columns(8)
-    c1.metric("💰 Ventas históricas", f"${total_ventas:,.0f}")
-    c2.metric("📦 Pedidos históricos", f"{total_pedidos:,}")
-    c3.metric("🎟️ Ticket prom (global)", f"${ticket_prom:,.0f}")
-    c4.metric("👥 Clientes con historial", f"{evaluados:,}")
-    c5.metric("🆕 Nuevos/Sin historial", f"{nuevos:,}")
-    c6.metric("👥 Clientes totales actuales", f"{total_clientes_actuales:,}")
-    c7.metric("% cartera activa", f"{pct_activo * 100:.1f}%")
-    c8.metric("% cartera en riesgo", f"{pct_riesgo * 100:.1f}%")
+    row1_col1, row1_col2, row1_col3, row1_col4 = st.columns(4)
+    row1_col1.metric("💰 Ventas históricas", f"${total_ventas:,.0f}")
+    row1_col2.metric("📦 Pedidos históricos", f"{total_pedidos:,}")
+    row1_col3.metric("% cartera activa", f"{pct_activo * 100:.1f}%")
+    row1_col4.metric("% cartera en riesgo", f"{pct_riesgo * 100:.1f}%")
+
+    row2_col1, row2_col2, row2_col3, row2_col4 = st.columns(4)
+    row2_col1.metric("👥 Clientes con historial", f"{evaluados:,}")
+    row2_col2.metric("🆕 Nuevos/Sin historial", f"{nuevos:,}")
+    row2_col3.metric("👥 Clientes totales actuales", f"{total_clientes_actuales:,}")
+    row2_col4.metric("🎟️ Ticket prom (global)", f"${ticket_prom:,.0f}")
 
     st.markdown("---")
 
