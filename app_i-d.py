@@ -2483,7 +2483,7 @@ if selected_tab == 0:
     if vendedor_sel != "(Todos)" and not resumen_v.empty:
         fila_v = resumen_v.iloc[0]
         sm1, sm2, sm3, sm4, sm5 = st.columns(5)
-        sm1.metric("👥 Cartera evaluada", f"{int(fila_v['Total_Evaluado']):,}")
+        sm1.metric("👥 Clientes con historial", f"{int(fila_v['Total_Evaluado']):,}")
         sm2.metric("✅ Activo", f"{int(fila_v['Activo']):,}")
         sm3.metric("⚠️ Alerta", f"{int(fila_v['Alerta']):,}")
         sm4.metric("🚨 Riesgo", f"{int(fila_v['Riesgo']):,}")
