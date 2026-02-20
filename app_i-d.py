@@ -2415,19 +2415,21 @@ if selected_tab == 0:
 
     evaluados = int(tabla_clientes["Estado"].isin(["Activo", "Alerta", "Riesgo"]).sum())
     nuevos = int((tabla_clientes["Estado"] == "Nuevo/SinHistorial").sum())
+    total_clientes_actuales = evaluados + nuevos
     activos = int((tabla_clientes["Estado"] == "Activo").sum())
     riesgo = int((tabla_clientes["Estado"] == "Riesgo").sum())
     pct_activo = (activos / evaluados) if evaluados else 0.0
     pct_riesgo = (riesgo / evaluados) if evaluados else 0.0
 
-    c1, c2, c3, c4, c5, c6, c7 = st.columns(7)
+    c1, c2, c3, c4, c5, c6, c7, c8 = st.columns(8)
     c1.metric("💰 Ventas históricas", f"${total_ventas:,.0f}")
     c2.metric("📦 Pedidos históricos", f"{total_pedidos:,}")
     c3.metric("🎟️ Ticket prom (global)", f"${ticket_prom:,.0f}")
-    c4.metric("👥 Cartera evaluada", f"{evaluados:,}")
+    c4.metric("👥 Clientes con historial", f"{evaluados:,}")
     c5.metric("🆕 Nuevos/Sin historial", f"{nuevos:,}")
-    c6.metric("% cartera activa", f"{pct_activo * 100:.1f}%")
-    c7.metric("% cartera en riesgo", f"{pct_riesgo * 100:.1f}%")
+    c6.metric("👥 Clientes totales actuales", f"{total_clientes_actuales:,}")
+    c7.metric("% cartera activa", f"{pct_activo * 100:.1f}%")
+    c8.metric("% cartera en riesgo", f"{pct_riesgo * 100:.1f}%")
 
     st.markdown("---")
 
@@ -2468,19 +2470,12 @@ if selected_tab == 0:
     pedidos_v = int(len(df_metricas_v))
     ticket_v = float(ventas_v / pedidos_v) if pedidos_v else 0.0
 
-    vm1, vm2, vm3 = st.columns(3)
-    vm1.metric(
-        "💰 Ventas vendedor" if vendedor_sel != "(Todos)" else "💰 Ventas (todos)",
-        f"${ventas_v:,.0f}",
-    )
-    vm2.metric(
-        "📦 Pedidos vendedor" if vendedor_sel != "(Todos)" else "📦 Pedidos (todos)",
-        f"{pedidos_v:,}",
-    )
-    vm3.metric(
-        "🎟️ Ticket prom vendedor" if vendedor_sel != "(Todos)" else "🎟️ Ticket prom (todos)",
-        f"${ticket_v:,.0f}",
-    )
+    resumen_v = build_resumen_vendedor(tc)
+    if vendedor_sel != "(Todos)":
+        vm1, vm2, vm3 = st.columns(3)
+        vm1.metric("💰 Ventas vendedor", f"${ventas_v:,.0f}")
+        vm2.metric("📦 Pedidos vendedor", f"{pedidos_v:,}")
+        vm3.metric("🎟️ Ticket prom vendedor", f"${ticket_v:,.0f}")
 
     resumen_v = build_resumen_vendedor(tc)
     if vendedor_sel != "(Todos)" and not resumen_v.empty:
