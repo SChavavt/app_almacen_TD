@@ -164,6 +164,54 @@ def construir_descarga_completados_sin_limpieza():
     return salida
 
 
+def construir_descarga_flujo_por_categoria():
+    """Construye pedidos en flujo separados por Locales, Foráneos y Casos especiales.
+
+    En cada bloque se muestra primero el registro más reciente (última fila de la hoja),
+    pero se conserva la numeración natural para que el más reciente tenga el número mayor.
+    """
+    columnas_salida = [
+        "#", "Vendedor_Registro", "Folio_Factura", "Cliente", "Hora_Registro",
+        "Tipo_Envio", "Turno", "Fecha_Entrega", "Estado"
+    ]
+
+    df_data = cargar_hoja_pedidos("data_pedidos").copy()
+    df_casos = cargar_casos_especiales().copy()
+
+    if "Completados_Limpiado" not in df_casos.columns:
+        df_casos["Completados_Limpiado"] = ""
+    df_casos = df_casos[df_casos["Completados_Limpiado"].astype(str).str.strip() == ""]
+
+    for col in columnas_salida[1:]:
+        if col not in df_data.columns:
+            df_data[col] = ""
+        if col not in df_casos.columns:
+            df_casos[col] = ""
+
+    tipos_normalizados = df_data["Tipo_Envio"].astype(str).map(normalizar)
+    mask_foraneos = tipos_normalizados.str.contains("foraneo", na=False)
+
+    df_foraneos = df_data[mask_foraneos].copy().reset_index(drop=True)
+    df_locales = df_data[~mask_foraneos].copy().reset_index(drop=True)
+    df_casos = df_casos.reset_index(drop=True)
+
+    # Numeración en orden natural de captura (de arriba a abajo en la hoja)
+    df_locales["#"] = (df_locales.index + 1).map(lambda n: f"{n:02d}")
+    df_foraneos["#"] = (df_foraneos.index + 101).astype(str)
+    df_casos["#"] = (df_casos.index + 1).map(lambda n: f"{n:03d}")
+
+    # Orden visual: más reciente primero (última fila capturada)
+    df_locales = df_locales.iloc[::-1].reset_index(drop=True)
+    df_foraneos = df_foraneos.iloc[::-1].reset_index(drop=True)
+    df_casos = df_casos.iloc[::-1].reset_index(drop=True)
+
+    return {
+        "locales": df_locales[columnas_salida],
+        "foraneos": df_foraneos[columnas_salida],
+        "casos": df_casos[columnas_salida],
+    }
+
+
 def construir_descarga_solo_completados():
     """
     Construye el DataFrame para la vista "🟢 Solo pedidos completados".
@@ -192,7 +240,7 @@ def construir_descarga_solo_completados():
     return pd.concat([df_data, df_casos], ignore_index=True, sort=False)
 
 
-def render_descarga_tabla(df_base, key_prefix, permitir_filtros=True, ordenar_por_id=True):
+def render_descarga_tabla(df_base, key_prefix, permitir_filtros=True, ordenar_por_id=True, mostrar_descarga=True):
     """Renderiza una tabla de descarga con filtros y botón de exportación."""
     df = df_base.copy()
 
@@ -247,18 +295,31 @@ def render_descarga_tabla(df_base, key_prefix, permitir_filtros=True, ordenar_po
     st.markdown(f"{len(filtrado)} registros encontrados")
     st.dataframe(filtrado, hide_index=True)
 
+    if mostrar_descarga:
+        buffer = BytesIO()
+        with pd.ExcelWriter(buffer, engine="xlsxwriter") as writer:
+            filtrado.to_excel(writer, index=False, sheet_name="Pedidos")
+        buffer.seek(0)
+
+        st.download_button(
+            label="⬇️ Descargar Excel",
+            data=buffer.getvalue(),
+            file_name="pedidos_filtrados.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            key=f"{key_prefix}_download_excel",
+        )
+
+
+def construir_excel_flujo_unificado(flujo_data):
+    """Genera un Excel con 3 hojas (Locales, Foráneos y Casos especiales)."""
     buffer = BytesIO()
     with pd.ExcelWriter(buffer, engine="xlsxwriter") as writer:
-        filtrado.to_excel(writer, index=False, sheet_name="Pedidos")
+        for hoja, key in (("Locales", "locales"), ("Foraneos", "foraneos"), ("Casos_especiales", "casos")):
+            df_hoja = flujo_data.get(key, pd.DataFrame()).copy()
+            df_hoja = df_hoja.drop(columns=["ID_Pedido"], errors="ignore")
+            df_hoja.to_excel(writer, index=False, sheet_name=hoja)
     buffer.seek(0)
-
-    st.download_button(
-        label="⬇️ Descargar Excel",
-        data=buffer.getvalue(),
-        file_name="pedidos_filtrados.xlsx",
-        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        key=f"{key_prefix}_download_excel",
-    )
+    return buffer
 
 
 def partir_urls(value):
@@ -1156,12 +1217,46 @@ with tabs[1]:
     ])
 
     with sub_tabs[0]:
-        df_flujo = construir_descarga_completados_sin_limpieza()
-        render_descarga_tabla(
-            df_base=df_flujo,
-            key_prefix="descarga_flujo",
-            permitir_filtros=False,
-            ordenar_por_id=False,
+        flujo_data = construir_descarga_flujo_por_categoria()
+        col_locales, col_foraneos, col_casos = st.columns(3)
+
+        with col_locales:
+            st.markdown("#### 🏙️ Locales")
+            render_descarga_tabla(
+                df_base=flujo_data["locales"],
+                key_prefix="descarga_flujo_locales",
+                permitir_filtros=False,
+                ordenar_por_id=False,
+                mostrar_descarga=False,
+            )
+
+        with col_foraneos:
+            st.markdown("#### 🚚 Foráneos")
+            render_descarga_tabla(
+                df_base=flujo_data["foraneos"],
+                key_prefix="descarga_flujo_foraneos",
+                permitir_filtros=False,
+                ordenar_por_id=False,
+                mostrar_descarga=False,
+            )
+
+        with col_casos:
+            st.markdown("#### 🧾 Casos especiales")
+            render_descarga_tabla(
+                df_base=flujo_data["casos"],
+                key_prefix="descarga_flujo_casos",
+                permitir_filtros=False,
+                ordenar_por_id=False,
+                mostrar_descarga=False,
+            )
+
+        excel_flujo_buffer = construir_excel_flujo_unificado(flujo_data)
+        st.download_button(
+            label="⬇️ Descargar Excel unificado (Locales + Foráneos + Casos especiales)",
+            data=excel_flujo_buffer.getvalue(),
+            file_name="pedidos_en_flujo_unificado.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            key="descarga_flujo_unificado",
         )
 
     with sub_tabs[1]:
