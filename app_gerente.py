@@ -164,6 +164,104 @@ def construir_descarga_completados_sin_limpieza():
     return salida
 
 
+def construir_descarga_solo_completados():
+    """
+    Construye el DataFrame para la vista "🟢 Solo pedidos completados".
+
+    Incluye:
+    - Pedidos completados de data_pedidos.
+    - Casos especiales completados con Completados_Limpiado vacío.
+    """
+    df_data = cargar_hoja_pedidos("data_pedidos").copy()
+    df_casos = cargar_casos_especiales().copy()
+
+    if "Estado" not in df_data.columns:
+        df_data["Estado"] = ""
+    if "Estado" not in df_casos.columns:
+        df_casos["Estado"] = ""
+    if "Completados_Limpiado" not in df_casos.columns:
+        df_casos["Completados_Limpiado"] = ""
+
+    mask_data_completados = df_data["Estado"].astype(str).str.lower().str.contains("complet", na=False)
+    df_data = df_data[mask_data_completados]
+
+    mask_casos_completados = df_casos["Estado"].astype(str).str.lower().str.contains("complet", na=False)
+    mask_casos_no_limpiados = df_casos["Completados_Limpiado"].astype(str).str.strip() == ""
+    df_casos = df_casos[mask_casos_completados & mask_casos_no_limpiados]
+
+    return pd.concat([df_data, df_casos], ignore_index=True, sort=False)
+
+
+def render_descarga_tabla(df_base, key_prefix, permitir_filtros=True, ordenar_por_id=True):
+    """Renderiza una tabla de descarga con filtros y botón de exportación."""
+    df = df_base.copy()
+
+    if df.empty:
+        st.info("No hay datos disponibles para descargar.")
+        return
+
+    if "Hora_Registro" in df.columns:
+        df["Hora_Registro"] = pd.to_datetime(df["Hora_Registro"], errors="coerce")
+
+    if ordenar_por_id and "ID_Pedido" in df.columns:
+        df["ID_Pedido"] = pd.to_numeric(df["ID_Pedido"], errors="coerce")
+        df = df.sort_values(by="ID_Pedido", ascending=True)
+
+    filtrado = df
+
+    if permitir_filtros:
+        rango_tiempo = st.selectbox(
+            "Rango de tiempo",
+            ["12 horas", "24 horas", "7 días", "Todos"],
+            key=f"{key_prefix}_rango_tiempo",
+        )
+        estados_sel = st.multiselect(
+            "Estado",
+            sorted(df["Estado"].dropna().unique()) if "Estado" in df.columns else [],
+            key=f"{key_prefix}_estado",
+        )
+        tipos_sel = st.multiselect(
+            "Tipo de envío",
+            sorted(df["Tipo_Envio"].dropna().unique()) if "Tipo_Envio" in df.columns else [],
+            key=f"{key_prefix}_tipo_envio",
+        )
+
+        delta = None
+        if rango_tiempo == "12 horas":
+            delta = timedelta(hours=12)
+        elif rango_tiempo == "24 horas":
+            delta = timedelta(hours=24)
+        elif rango_tiempo == "7 días":
+            delta = timedelta(days=7)
+
+        if delta is not None and "Hora_Registro" in filtrado.columns:
+            filtrado = filtrado[filtrado["Hora_Registro"] >= datetime.now() - delta]
+        if estados_sel and "Estado" in filtrado.columns:
+            filtrado = filtrado[filtrado["Estado"].isin(estados_sel)]
+        if tipos_sel and "Tipo_Envio" in filtrado.columns:
+            filtrado = filtrado[filtrado["Tipo_Envio"].isin(tipos_sel)]
+
+    filtrado = filtrado.drop(columns=["ID_Pedido"], errors="ignore")
+    filtrado = filtrado.reset_index(drop=True)
+    filtrado.index = filtrado.index + 1
+
+    st.markdown(f"{len(filtrado)} registros encontrados")
+    st.dataframe(filtrado)
+
+    buffer = BytesIO()
+    with pd.ExcelWriter(buffer, engine="xlsxwriter") as writer:
+        filtrado.to_excel(writer, index=False, sheet_name="Pedidos")
+    buffer.seek(0)
+
+    st.download_button(
+        label="⬇️ Descargar Excel",
+        data=buffer.getvalue(),
+        file_name="pedidos_filtrados.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        key=f"{key_prefix}_download_excel",
+    )
+
+
 def partir_urls(value):
     """
     Devuelve una lista de URLs limpia a partir de un string que puede venir
@@ -1051,76 +1149,45 @@ with tabs[1]:
     df_todos = cargar_todos_los_pedidos()
     df_casos = cargar_casos_especiales()
 
-    if "mostrar_casos" not in st.session_state:
-        st.session_state.mostrar_casos = False
-    if "solo_completados_sin_limpieza" not in st.session_state:
-        st.session_state.solo_completados_sin_limpieza = False
+    sub_tabs = st.tabs([
+        "🚚 Pedidos en Flujo",
+        "📦 Pedidos Históricos",
+        "🧾 Casos especiales",
+        "🟢 Solo pedidos completados",
+    ])
 
-    mostrar_casos = st.checkbox("Mostrar solo casos especiales", key="mostrar_casos")
-    solo_completados_sin_limpieza = st.checkbox(
-        "Solo pedidos 🟢 Completados sin limpiar",
-        help="Muestra todos los pedidos de data_pedidos y, además, casos_especiales con Completados_Limpiado vacío.",
-        key="solo_completados_sin_limpieza",
-    )
+    with sub_tabs[0]:
+        df_flujo = construir_descarga_completados_sin_limpieza()
+        render_descarga_tabla(
+            df_base=df_flujo,
+            key_prefix="descarga_flujo",
+            permitir_filtros=False,
+            ordenar_por_id=False,
+        )
 
-    if solo_completados_sin_limpieza:
-        df = construir_descarga_completados_sin_limpieza()
-    else:
-        df = df_casos if mostrar_casos else df_todos
+    with sub_tabs[1]:
+        render_descarga_tabla(
+            df_base=df_todos,
+            key_prefix="descarga_historicos",
+            permitir_filtros=True,
+            ordenar_por_id=True,
+        )
 
-    if df.empty:
-        st.info("No hay datos disponibles para descargar.")
-    else:
-        df["Hora_Registro"] = pd.to_datetime(df["Hora_Registro"], errors="coerce")
+    with sub_tabs[2]:
+        render_descarga_tabla(
+            df_base=df_casos,
+            key_prefix="descarga_casos",
+            permitir_filtros=True,
+            ordenar_por_id=True,
+        )
 
-        if not solo_completados_sin_limpieza:
-            df["ID_Pedido"] = pd.to_numeric(df["ID_Pedido"], errors="coerce")
-            df = df.sort_values(by="ID_Pedido", ascending=True)
-
-        if solo_completados_sin_limpieza:
-            filtrado = df
-        else:
-            rango_tiempo = st.selectbox(
-                "Rango de tiempo",
-                ["12 horas", "24 horas", "7 días", "Todos"],
-            )
-            estados_sel = st.multiselect("Estado", sorted(df["Estado"].dropna().unique()))
-            tipos_sel = st.multiselect("Tipo de envío", sorted(df["Tipo_Envio"].dropna().unique()))
-
-            filtrado = df
-            delta = None
-            if rango_tiempo == "12 horas":
-                delta = timedelta(hours=12)
-            elif rango_tiempo == "24 horas":
-                delta = timedelta(hours=24)
-            elif rango_tiempo == "7 días":
-                delta = timedelta(days=7)
-
-            if delta is not None:
-                filtrado = filtrado[filtrado["Hora_Registro"] >= datetime.now() - delta]
-            if estados_sel:
-                filtrado = filtrado[filtrado["Estado"].isin(estados_sel)]
-            if tipos_sel:
-                filtrado = filtrado[filtrado["Tipo_Envio"].isin(tipos_sel)]
-
-        filtrado = filtrado.drop(columns=["ID_Pedido"], errors="ignore")
-        filtrado = filtrado.reset_index(drop=True)
-        filtrado.index = filtrado.index + 1
-
-        st.markdown(f"{len(filtrado)} registros encontrados")
-        # Show all rows that match the selected filters without truncating
-        st.dataframe(filtrado)
-
-        buffer = BytesIO()
-        with pd.ExcelWriter(buffer, engine="xlsxwriter") as writer:
-            filtrado.to_excel(writer, index=False, sheet_name="Pedidos")
-        buffer.seek(0)
-
-        st.download_button(
-            label="⬇️ Descargar Excel",
-            data=buffer.getvalue(),
-            file_name="pedidos_filtrados.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    with sub_tabs[3]:
+        df_solo_completados = construir_descarga_solo_completados()
+        render_descarga_tabla(
+            df_base=df_solo_completados,
+            key_prefix="descarga_solo_completados",
+            permitir_filtros=False,
+            ordenar_por_id=True,
         )
 
 CONTRASENA_ADMIN = "Ceci"  # puedes cambiar esta contraseña si lo deseas
