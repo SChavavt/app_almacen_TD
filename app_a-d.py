@@ -88,9 +88,6 @@ def _recortar_vendedor_para_reporte(vendedor: Any) -> str:
 def escribir_en_reporte_guias(cliente: Any, vendedor: Any, tipo_envio: Any) -> bool:
     tipo_envio_str = str(tipo_envio or "")
     if "Foráneo" not in tipo_envio_str:
-        _set_reporte_guias_status(
-            f"ℹ️ REPORTE GUÍAS omitido: Tipo_Envio='{tipo_envio_str}' no es Foráneo."
-        )
         return True
 
     _set_reporte_guias_status(
@@ -2391,11 +2388,12 @@ def mostrar_pedido_detalle(
                     row["Estado"] = "🔵 En Proceso"
                     row["Hora_Proceso"] = now_str
 
-                    escribir_en_reporte_guias(
-                        cliente=row.get("Cliente", ""),
-                        vendedor=row.get("Vendedor_Registro", ""),
-                        tipo_envio=row.get("Tipo_Envio", ""),
-                    )
+                    if origen_tab == "Foráneo":
+                        escribir_en_reporte_guias(
+                            cliente=row.get("Cliente", ""),
+                            vendedor=row.get("Vendedor_Registro", ""),
+                            tipo_envio=row.get("Tipo_Envio", ""),
+                        )
 
                     st.toast("✅ Pedido marcado como 🔵 En Proceso", icon="✅")
 
@@ -5335,11 +5333,6 @@ if df_main is not None:
                                     # Reflejo inmediato local sin recargar
                                     row["Estado"] = "🔵 En Proceso"
                                     row["Hora_Proceso"] = now_str
-                                    escribir_en_reporte_guias(
-                                        cliente=row.get("Cliente", ""),
-                                        vendedor=row.get("Vendedor_Registro", row.get("Vendedor", "")),
-                                        tipo_envio=row.get("Tipo_Envio", row.get("Tipo_Envio_Original", "")),
-                                    )
                                     st.toast("✅ Caso marcado como '🔵 En Proceso'.", icon="✅")
                                 else:
                                     st.error("❌ No se pudo actualizar a 'En Proceso'.")
@@ -6008,11 +6001,6 @@ if df_main is not None:
                                 if ok:
                                     row["Estado"] = "🔵 En Proceso"
                                     row["Hora_Proceso"] = now_str
-                                    escribir_en_reporte_guias(
-                                        cliente=row.get("Cliente", ""),
-                                        vendedor=row.get("Vendedor_Registro", row.get("Vendedor", "")),
-                                        tipo_envio=row.get("Tipo_Envio", row.get("Tipo_Envio_Original", "")),
-                                    )
                                     st.toast("✅ Caso marcado como '🔵 En Proceso'.", icon="✅")
                                 else:
                                     st.error("❌ No se pudo actualizar a 'En Proceso'.")
