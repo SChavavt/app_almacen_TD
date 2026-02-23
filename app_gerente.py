@@ -1249,7 +1249,7 @@ with tabs[1]:
         excel_flujo_buffer = construir_excel_flujo_unificado(flujo_data)
         fecha_hoy = datetime.now().strftime("%d-%m-%Y")
         st.download_button(
-            label="⬇️ Descargar Excel unificado (Locales + Foráneos + Casos especiales)",
+            label="⬇️ Descargar Excel unificado",
             data=excel_flujo_buffer.getvalue(),
             file_name=f"pedidos_en_flujo_{fecha_hoy}.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
