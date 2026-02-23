@@ -29,6 +29,11 @@ _RECOVERABLE_AUTH_PATTERNS = (
     "429",
 )
 
+DEBUG_REPORTE_GUIAS = True
+REPORTE_GUIAS_SHEET_NAME = "REPORTE GUÍAS"
+REPORTE_GUIAS_ROW_START = 11163
+REPORTE_GUIAS_ROW_END = 13000
+
 
 def _is_recoverable_auth_error(exc: Exception) -> bool:
     err_text = str(exc)
@@ -42,6 +47,117 @@ def mx_now_str():
 
 def mx_today():
     return mx_now().date()
+
+
+def _debug_reporte_guias_log(message: str) -> None:
+    logs = st.session_state.setdefault("debug_reporte_guias_logs", [])
+    ts = mx_now().strftime("%Y-%m-%d %H:%M:%S")
+    logs.append(f"[{ts}] {message}")
+    if len(logs) > 250:
+        del logs[:-250]
+
+
+
+
+def _set_reporte_guias_status(message: str) -> None:
+    st.session_state["reporte_guias_status_msg"] = message
+    _debug_reporte_guias_log(message)
+
+def _render_debug_reporte_guias_panel() -> None:
+    if not DEBUG_REPORTE_GUIAS:
+        return
+
+    logs = st.session_state.get("debug_reporte_guias_logs", [])
+    with st.expander("DEBUG REPORTE GUÍAS", expanded=False):
+        if not logs:
+            st.caption("Sin logs todavía.")
+            return
+        for line in logs[-25:]:
+            st.code(line)
+
+
+def _recortar_vendedor_para_reporte(vendedor: Any) -> str:
+    palabras = [p for p in str(vendedor or "").strip().split() if p]
+    if not palabras:
+        return ""
+    if len(palabras) == 1:
+        return palabras[0]
+    return " ".join(palabras[:2])
+
+
+def escribir_en_reporte_guias(cliente: Any, vendedor: Any, tipo_envio: Any) -> bool:
+    tipo_envio_str = str(tipo_envio or "")
+    if "Foráneo" not in tipo_envio_str:
+        _set_reporte_guias_status(
+            f"ℹ️ REPORTE GUÍAS omitido: Tipo_Envio='{tipo_envio_str}' no es Foráneo."
+        )
+        return True
+
+    _set_reporte_guias_status(
+        f"🚚 Foráneo detectado. Iniciando escritura en hoja '{REPORTE_GUIAS_SHEET_NAME}'."
+    )
+
+    reportes_sheet_id = str(
+        st.secrets.get("gsheets", {}).get("reportes_sheet_id", "")
+    ).strip()
+    if not reportes_sheet_id:
+        msg = "No se encontró st.secrets['gsheets']['reportes_sheet_id']."
+        st.session_state["reporte_guias_error_msg"] = msg
+        _set_reporte_guias_status(f"❌ {msg}")
+        st.error(f"❌ {msg}")
+        return False
+
+    try:
+        client = get_gspread_client(_credentials_json_dict=GSHEETS_CREDENTIALS)
+        ws_reporte = client.open_by_key(reportes_sheet_id).worksheet(REPORTE_GUIAS_SHEET_NAME)
+
+        rango_lectura = f"C{REPORTE_GUIAS_ROW_START}:F{REPORTE_GUIAS_ROW_END}"
+        valores = ws_reporte.get(rango_lectura)
+
+        total_rows = REPORTE_GUIAS_ROW_END - REPORTE_GUIAS_ROW_START + 1
+        if len(valores) < total_rows:
+            valores.extend([[] for _ in range(total_rows - len(valores))])
+
+        fila_destino = None
+        for i in range(total_rows - 1, -1, -1):
+            fila = valores[i] if i < len(valores) else []
+            c_val = str(fila[0]).strip() if len(fila) >= 1 else ""
+            f_val = str(fila[3]).strip() if len(fila) >= 4 else ""
+            if c_val == "" and f_val == "":
+                fila_destino = REPORTE_GUIAS_ROW_START + i
+                break
+
+        if fila_destino is None:
+            msg = (
+                f"No hay filas disponibles (C y F vacías) en {REPORTE_GUIAS_SHEET_NAME} "
+                f"entre {REPORTE_GUIAS_ROW_START} y {REPORTE_GUIAS_ROW_END}"
+            )
+            st.session_state["reporte_guias_error_msg"] = msg
+            _set_reporte_guias_status(f"❌ {msg}")
+            st.error(f"❌ {msg}")
+            return False
+
+        vendedor_recortado = _recortar_vendedor_para_reporte(vendedor)
+        cliente_str = str(cliente or "").strip()
+
+        ws_reporte.batch_update(
+            [
+                {"range": f"C{fila_destino}", "values": [[cliente_str]]},
+                {"range": f"F{fila_destino}", "values": [[vendedor_recortado]]},
+            ]
+        )
+
+        st.session_state.pop("reporte_guias_error_msg", None)
+        _set_reporte_guias_status(
+            f"✅ REPORTE GUÍAS OK | Hoja: {REPORTE_GUIAS_SHEET_NAME} | Fila: {fila_destino} | C{fila_destino}='{cliente_str}' | F{fila_destino}='{vendedor_recortado}'"
+        )
+        return True
+    except Exception as e:
+        msg = f"Error al escribir en REPORTE GUÍAS: {e}"
+        st.session_state["reporte_guias_error_msg"] = msg
+        _set_reporte_guias_status(f"❌ {msg}")
+        st.error(f"❌ {msg}")
+        return False
 
 
 def _ensure_visual_state_defaults():
@@ -652,8 +768,14 @@ st.title("📬 Bandeja de Pedidos TD")
 if "flash_msg" in st.session_state and st.session_state["flash_msg"]:
     st.success(st.session_state.pop("flash_msg"))
 
+if st.session_state.get("reporte_guias_error_msg"):
+    st.error(f"❌ {st.session_state['reporte_guias_error_msg']}")
+
+if st.session_state.get("reporte_guias_status_msg"):
+    st.info(st.session_state["reporte_guias_status_msg"])
 
 _ensure_visual_state_defaults()
+_render_debug_reporte_guias_panel()
 
 # ✅ Controles superiores: recarga y completado múltiple
 if st.session_state.pop("bulk_mode_reset_requested", False):
@@ -2268,6 +2390,13 @@ def mostrar_pedido_detalle(
                     df.at[idx, "Hora_Proceso"] = now_str
                     row["Estado"] = "🔵 En Proceso"
                     row["Hora_Proceso"] = now_str
+
+                    escribir_en_reporte_guias(
+                        cliente=row.get("Cliente", ""),
+                        vendedor=row.get("Vendedor_Registro", ""),
+                        tipo_envio=row.get("Tipo_Envio", ""),
+                    )
+
                     st.toast("✅ Pedido marcado como 🔵 En Proceso", icon="✅")
 
                     # Mantener vista/pestaña sin forzar salto de scroll
@@ -5206,6 +5335,11 @@ if df_main is not None:
                                     # Reflejo inmediato local sin recargar
                                     row["Estado"] = "🔵 En Proceso"
                                     row["Hora_Proceso"] = now_str
+                                    escribir_en_reporte_guias(
+                                        cliente=row.get("Cliente", ""),
+                                        vendedor=row.get("Vendedor_Registro", row.get("Vendedor", "")),
+                                        tipo_envio=row.get("Tipo_Envio", row.get("Tipo_Envio_Original", "")),
+                                    )
                                     st.toast("✅ Caso marcado como '🔵 En Proceso'.", icon="✅")
                                 else:
                                     st.error("❌ No se pudo actualizar a 'En Proceso'.")
@@ -5874,6 +6008,11 @@ if df_main is not None:
                                 if ok:
                                     row["Estado"] = "🔵 En Proceso"
                                     row["Hora_Proceso"] = now_str
+                                    escribir_en_reporte_guias(
+                                        cliente=row.get("Cliente", ""),
+                                        vendedor=row.get("Vendedor_Registro", row.get("Vendedor", "")),
+                                        tipo_envio=row.get("Tipo_Envio", row.get("Tipo_Envio_Original", "")),
+                                    )
                                     st.toast("✅ Caso marcado como '🔵 En Proceso'.", icon="✅")
                                 else:
                                     st.error("❌ No se pudo actualizar a 'En Proceso'.")
