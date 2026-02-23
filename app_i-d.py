@@ -217,75 +217,77 @@ def assign_shared_numbers(entries_local, entries_foraneo):
 _AUTO_LIST_COUNTER = count(1)
 
 
+def _flow_match_key(value) -> str:
+    return sanitize_text(value).lower()
+
+
+def _build_flow_number_maps(df_all: pd.DataFrame) -> tuple[dict[str, str], dict[str, str]]:
+    if df_all.empty:
+        return {}, {}
+
+    work = df_all.copy()
+    if "Tipo_Envio" not in work.columns:
+        work["Tipo_Envio"] = ""
+    if "ID_Pedido" not in work.columns:
+        work["ID_Pedido"] = ""
+    if "Folio_Factura" not in work.columns:
+        work["Folio_Factura"] = ""
+
+    tipo_norm = work["Tipo_Envio"].astype(str).apply(_normalize_envio_original)
+    mask_foraneo = tipo_norm.str.contains("foraneo", na=False)
+
+    df_foraneo = work[mask_foraneo].reset_index(drop=True)
+    df_local = work[~mask_foraneo].reset_index(drop=True)
+
+    def build_map(df_src: pd.DataFrame, formatter) -> dict[str, str]:
+        out: dict[str, str] = {}
+        for idx, row in df_src.iterrows():
+            numero = formatter(idx)
+            for raw_key in (row.get("ID_Pedido", ""), row.get("Folio_Factura", "")):
+                key = _flow_match_key(raw_key)
+                if key and key not in out:
+                    out[key] = numero
+        return out
+
+    local_map = build_map(df_local, lambda idx: f"{idx + 1:02d}")
+    foraneo_map = build_map(df_foraneo, lambda idx: str(idx + 101))
+    return local_map, foraneo_map
+
+
+def assign_flow_numbers(entries_local, entries_foraneo, df_all: pd.DataFrame) -> None:
+    local_map, foraneo_map = _build_flow_number_maps(df_all)
+
+    def assign(entries, primary_map: dict[str, str], fallback_map: dict[str, str]) -> None:
+        for entry in entries:
+            keys = [
+                _flow_match_key(entry.get("id_pedido", "")),
+                _flow_match_key(entry.get("folio", "")),
+            ]
+            number = None
+            for key in keys:
+                if key and key in primary_map:
+                    number = primary_map[key]
+                    break
+            if number is None:
+                for key in keys:
+                    if key and key in fallback_map:
+                        number = fallback_map[key]
+                        break
+            entry["numero"] = number or "?"
+
+    assign(entries_local, local_map, foraneo_map)
+    assign(entries_foraneo, foraneo_map, local_map)
+
+
 def assign_display_numbers(auto_local_entries, auto_foraneo_entries, today_date) -> None:
+    _ = today_date
     for entry in auto_local_entries + auto_foraneo_entries:
         entry.pop("display_num", None)
-
-    combined_local = [e for e in auto_local_entries if _is_visible_auto_entry(e)]
-    turno_priority = [
-        "☀️ Local Mañana",
-        "🌙 Local Tarde",
-        "🌵 Saltillo",
-        "📦 Pasa a Bodega",
-        "📍 Local (sin turno)",
-    ]
-    grouped_local: dict[str, list] = {label: [] for label in turno_priority}
-    for entry in combined_local:
-        turno = normalize_turno_label(entry.get("turno", ""))
-        if not turno:
-            turno = "📍 Local (sin turno)"
-        if turno not in grouped_local:
-            grouped_local[turno] = []
-        grouped_local[turno].append(entry)
-
-    ordered_labels = [
-        label for label in turno_priority if label in grouped_local and grouped_local[label]
-    ]
-    extra_labels = sorted(
-        [
-            label
-            for label in grouped_local.keys()
-            if label not in turno_priority and grouped_local[label]
-        ]
-    )
-    ordered_labels.extend(extra_labels)
-
-    next_number = 1
-    for label in ordered_labels:
-        entries = sort_entries_by_delivery(grouped_local[label])
-        visible_entries = entries[:140]
-        for offset, entry in enumerate(visible_entries, start=next_number):
-            entry["display_num"] = offset
-        next_number += len(visible_entries)
-
-    combined_foraneo = list(auto_foraneo_entries)
-    ant = filter_entries_before_date(combined_foraneo, today_date)
-    ant = [e for e in ant if _is_visible_auto_entry(e)]
-    ant = sort_entries_by_delivery(ant)
-    visible_ant = ant[:140]
-    for offset, entry in enumerate(visible_ant, start=1):
-        entry["display_num"] = offset
-
-    next_number = 1 + len(visible_ant)
-    hoy_entries = filter_entries_on_or_after(combined_foraneo, today_date)
-    sin_fecha = filter_entries_no_entrega_date(combined_foraneo)
-
-    seen = set()
-    merged = []
-    for entry in (hoy_entries + sin_fecha):
-        key = sanitize_text(entry.get("id_pedido", "")) or (
-            sanitize_text(entry.get("cliente", "")) + "|" + sanitize_text(entry.get("hora", ""))
-        )
-        if key in seen:
+        numero_raw = sanitize_text(entry.get("numero", ""))
+        try:
+            entry["display_num"] = int(numero_raw)
+        except Exception:
             continue
-        seen.add(key)
-        merged.append(entry)
-
-    merged = [e for e in merged if _is_visible_auto_entry(e)]
-    merged = sort_entries_by_delivery(merged)
-    visible_merged = merged[:140]
-    for offset, entry in enumerate(visible_merged, start=next_number):
-        entry["display_num"] = offset
 
 _TURNOS_CANONICAL = {
     "☀ local manana": "☀️ Local Mañana",
@@ -507,7 +509,8 @@ def render_auto_list(
     visible = indexed_entries[:max_rows]
 
     rows_html = []
-    for display_number, e in visible:
+    for fallback_number, e in visible:
+        display_number = e.get("display_num", fallback_number)
         chips = []
 
         # Chips principales (máx 3)
@@ -761,6 +764,19 @@ def sort_entries_by_delivery(entries):
         return (dt, e.get("sort_key", pd.Timestamp.max))
 
     return sorted(entries, key=_key)
+
+
+def sort_entries_by_flow_number_desc(entries):
+    """Ordena por número de flujo descendente (más reciente arriba)."""
+
+    def _num(entry):
+        raw = sanitize_text(entry.get("numero", ""))
+        try:
+            return int(raw)
+        except Exception:
+            return -1
+
+    return sorted(entries, key=lambda e: (_num(e), e.get("sort_key", pd.Timestamp.min)), reverse=True)
 
 
 def _normalize_match_value(value: str) -> str:
@@ -2145,7 +2161,7 @@ if selected_tab in (1, 2, 3):
     auto_local_entries.sort(key=lambda e: e.get("sort_key", pd.Timestamp.max))
     auto_foraneo_entries.sort(key=lambda e: e.get("sort_key", pd.Timestamp.max))
 
-    assign_shared_numbers(auto_local_entries, auto_foraneo_entries)
+    assign_flow_numbers(auto_local_entries, auto_foraneo_entries, df_all)
 
     if "surtidor_assignments" not in st.session_state:
         st.session_state.surtidor_assignments = {}
@@ -2196,7 +2212,7 @@ if selected_tab == 1:
 
         for idx, label in enumerate(ordered_labels):
             target_col = columns[idx % 2]
-            entries = sort_entries_by_delivery(grouped[label])
+            entries = sort_entries_by_flow_number_desc(grouped[label])
             with target_col:
                 next_number = render_auto_list(
                     entries,
@@ -2228,7 +2244,7 @@ if selected_tab == 2:
     with col_left:
         ant = filter_entries_before_date(combined_entries, hoy)
         ant = [e for e in ant if _is_visible_auto_entry(e)]
-        ant = sort_entries_by_delivery(ant)
+        ant = sort_entries_by_flow_number_desc(ant)
 
         next_number = render_auto_list(
             ant,
@@ -2254,7 +2270,7 @@ if selected_tab == 2:
             merged.append(e)
 
         merged = [e for e in merged if _is_visible_auto_entry(e)]
-        merged = sort_entries_by_delivery(merged)
+        merged = sort_entries_by_flow_number_desc(merged)
         render_auto_list(
             merged,
             title=f"🚚 FORÁNEOS • HOY ({hoy.strftime('%d/%m')})",
