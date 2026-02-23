@@ -164,6 +164,48 @@ def construir_descarga_completados_sin_limpieza():
     return salida
 
 
+def construir_descarga_flujo_por_categoria():
+    """Construye pedidos en flujo separados por Locales, Foráneos y Casos especiales.
+
+    El orden en cada categoría se invierte para mostrar primero el registro más reciente
+    en la hoja (última fila capturada).
+    """
+    columnas_salida = [
+        "#", "Vendedor_Registro", "Folio_Factura", "Cliente", "Hora_Registro",
+        "Tipo_Envio", "Turno", "Fecha_Entrega", "Estado"
+    ]
+
+    df_data = cargar_hoja_pedidos("data_pedidos").copy()
+    df_casos = cargar_casos_especiales().copy()
+
+    if "Completados_Limpiado" not in df_casos.columns:
+        df_casos["Completados_Limpiado"] = ""
+    df_casos = df_casos[df_casos["Completados_Limpiado"].astype(str).str.strip() == ""]
+
+    for col in columnas_salida[1:]:
+        if col not in df_data.columns:
+            df_data[col] = ""
+        if col not in df_casos.columns:
+            df_casos[col] = ""
+
+    tipos_normalizados = df_data["Tipo_Envio"].astype(str).map(normalizar)
+    mask_foraneos = tipos_normalizados.str.contains("foraneo", na=False)
+
+    df_foraneos = df_data[mask_foraneos].copy().iloc[::-1].reset_index(drop=True)
+    df_locales = df_data[~mask_foraneos].copy().iloc[::-1].reset_index(drop=True)
+    df_casos = df_casos.iloc[::-1].reset_index(drop=True)
+
+    df_locales["#"] = (df_locales.index + 1).map(lambda n: f"{n:02d}")
+    df_foraneos["#"] = (df_foraneos.index + 101).astype(str)
+    df_casos["#"] = (df_casos.index + 1).map(lambda n: f"{n:03d}")
+
+    return {
+        "locales": df_locales[columnas_salida],
+        "foraneos": df_foraneos[columnas_salida],
+        "casos": df_casos[columnas_salida],
+    }
+
+
 def construir_descarga_solo_completados():
     """
     Construye el DataFrame para la vista "🟢 Solo pedidos completados".
@@ -1156,13 +1198,30 @@ with tabs[1]:
     ])
 
     with sub_tabs[0]:
-        df_flujo = construir_descarga_completados_sin_limpieza()
-        render_descarga_tabla(
-            df_base=df_flujo,
-            key_prefix="descarga_flujo",
-            permitir_filtros=False,
-            ordenar_por_id=False,
-        )
+        flujo_tabs = st.tabs(["🏙️ Locales", "🚚 Foráneos", "🧾 Casos especiales"])
+        flujo_data = construir_descarga_flujo_por_categoria()
+
+        with flujo_tabs[0]:
+            render_descarga_tabla(
+                df_base=flujo_data["locales"],
+                key_prefix="descarga_flujo_locales",
+                permitir_filtros=False,
+                ordenar_por_id=False,
+            )
+        with flujo_tabs[1]:
+            render_descarga_tabla(
+                df_base=flujo_data["foraneos"],
+                key_prefix="descarga_flujo_foraneos",
+                permitir_filtros=False,
+                ordenar_por_id=False,
+            )
+        with flujo_tabs[2]:
+            render_descarga_tabla(
+                df_base=flujo_data["casos"],
+                key_prefix="descarga_flujo_casos",
+                permitir_filtros=False,
+                ordenar_por_id=False,
+            )
 
     with sub_tabs[1]:
         render_descarga_tabla(
