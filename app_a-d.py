@@ -29,6 +29,11 @@ _RECOVERABLE_AUTH_PATTERNS = (
     "429",
 )
 
+DEBUG_REPORTE_GUIAS = True
+REPORTE_GUIAS_SHEET_NAME = "REPORTE GUÍAS"
+REPORTE_GUIAS_ROW_START = 11163
+REPORTE_GUIAS_ROW_END = 13000
+
 
 def _is_recoverable_auth_error(exc: Exception) -> bool:
     err_text = str(exc)
@@ -42,6 +47,183 @@ def mx_now_str():
 
 def mx_today():
     return mx_now().date()
+
+
+def _debug_reporte_guias_log(message: str) -> None:
+    logs = st.session_state.setdefault("debug_reporte_guias_logs", [])
+    ts = mx_now().strftime("%Y-%m-%d %H:%M:%S")
+    logs.append(f"[{ts}] {message}")
+    if len(logs) > 250:
+        del logs[:-250]
+
+
+
+
+def _set_reporte_guias_status(message: str) -> None:
+    st.session_state["reporte_guias_status_msg"] = message
+    _debug_reporte_guias_log(message)
+
+def _render_debug_reporte_guias_panel() -> None:
+    if not DEBUG_REPORTE_GUIAS:
+        return
+
+    logs = st.session_state.get("debug_reporte_guias_logs", [])
+    with st.expander("DEBUG REPORTE GUÍAS", expanded=False):
+        if not logs:
+            st.caption("Sin logs todavía.")
+            return
+        for line in logs[-25:]:
+            st.code(line)
+
+
+def _recortar_vendedor_para_reporte(vendedor: Any) -> str:
+    palabras = [p for p in str(vendedor or "").strip().split() if p]
+    if not palabras:
+        return ""
+    if len(palabras) == 1:
+        return palabras[0]
+    return " ".join(palabras[:2])
+
+
+def _leer_rango_reporte_guias(ws: Any, rango_a1: str) -> list[list[Any]]:
+    """Lee un rango A1 con compatibilidad entre versiones de gspread."""
+    if hasattr(ws, "get"):
+        return ws.get(rango_a1)
+
+    if hasattr(ws, "get_values"):
+        return ws.get_values(rango_a1)
+
+    if hasattr(ws, "batch_get"):
+        values = ws.batch_get([rango_a1])
+        if isinstance(values, list) and values:
+            first = values[0]
+            if isinstance(first, list):
+                return first
+        return []
+
+    # Fallback universal: worksheet.range("A1:D10") suele existir en versiones viejas.
+    if hasattr(ws, "range"):
+        # Parseo simple de rango A1 tipo C11163:F13000.
+        if ":" in rango_a1:
+            a1_start, a1_end = rango_a1.split(":", 1)
+        else:
+            a1_start = a1_end = rango_a1
+
+        row_start, col_start = gspread.utils.a1_to_rowcol(a1_start)
+        row_end, col_end = gspread.utils.a1_to_rowcol(a1_end)
+        cols_count = col_end - col_start + 1
+        cells = ws.range(rango_a1)
+        if not cells:
+            return []
+
+        matrix: list[list[Any]] = []
+        for i in range(0, len(cells), cols_count):
+            chunk = cells[i:i + cols_count]
+            matrix.append([c.value for c in chunk])
+
+        # Asegurar tamaño esperado de filas para el cálculo posterior.
+        expected_rows = row_end - row_start + 1
+        if len(matrix) < expected_rows:
+            matrix.extend([[] for _ in range(expected_rows - len(matrix))])
+        return matrix
+
+    raise AttributeError(
+        "La versión de gspread actual no soporta métodos de lectura de rango en Worksheet"
+    )
+
+
+def _escribir_reporte_guias_c_f(ws: Any, fila_destino: int, cliente_str: str, vendedor_recortado: str) -> None:
+    """Escribe C/F con compatibilidad entre versiones de gspread."""
+    payload = [
+        {"range": f"C{fila_destino}", "values": [[cliente_str]]},
+        {"range": f"F{fila_destino}", "values": [[vendedor_recortado]]},
+    ]
+
+    if hasattr(ws, "batch_update"):
+        ws.batch_update(payload)
+        return
+
+    # Fallback para versiones antiguas sin batch_update en Worksheet.
+    c_col = gspread.utils.a1_to_rowcol(f"C{fila_destino}")[1]
+    f_col = gspread.utils.a1_to_rowcol(f"F{fila_destino}")[1]
+    cells = [
+        gspread.Cell(row=fila_destino, col=c_col, value=cliente_str),
+        gspread.Cell(row=fila_destino, col=f_col, value=vendedor_recortado),
+    ]
+    ws.update_cells(cells)
+
+
+def escribir_en_reporte_guias(cliente: Any, vendedor: Any, tipo_envio: Any) -> bool:
+    tipo_envio_str = str(tipo_envio or "")
+    if "Foráneo" not in tipo_envio_str:
+        return True
+
+    _set_reporte_guias_status(
+        f"🚚 Foráneo detectado. Iniciando escritura (primera fila disponible) en hoja '{REPORTE_GUIAS_SHEET_NAME}'."
+    )
+
+    reportes_sheet_id = str(
+        st.secrets.get("gsheets", {}).get("reportes_sheet_id", "")
+    ).strip()
+    if not reportes_sheet_id:
+        msg = "No se encontró st.secrets['gsheets']['reportes_sheet_id']."
+        st.session_state["reporte_guias_error_msg"] = msg
+        _set_reporte_guias_status(f"❌ {msg}")
+        st.error(f"❌ {msg}")
+        return False
+
+    try:
+        client = get_gspread_client(_credentials_json_dict=GSHEETS_CREDENTIALS)
+        ws_reporte = client.open_by_key(reportes_sheet_id).worksheet(REPORTE_GUIAS_SHEET_NAME)
+
+        rango_lectura = f"C{REPORTE_GUIAS_ROW_START}:F{REPORTE_GUIAS_ROW_END}"
+        valores = _leer_rango_reporte_guias(ws_reporte, rango_lectura)
+
+        total_rows = REPORTE_GUIAS_ROW_END - REPORTE_GUIAS_ROW_START + 1
+        if len(valores) < total_rows:
+            valores.extend([[] for _ in range(total_rows - len(valores))])
+
+        fila_destino = None
+        # Elegir la primera fila disponible desde el inicio del bloque (sin brincos).
+        for i in range(0, total_rows):
+            fila = valores[i] if i < len(valores) else []
+            c_val = str(fila[0]).strip() if len(fila) >= 1 else ""
+            f_val = str(fila[3]).strip() if len(fila) >= 4 else ""
+            if c_val == "" and f_val == "":
+                fila_destino = REPORTE_GUIAS_ROW_START + i
+                break
+
+        if fila_destino is None:
+            msg = (
+                f"No hay filas disponibles (C y F vacías) en {REPORTE_GUIAS_SHEET_NAME} "
+                f"entre {REPORTE_GUIAS_ROW_START} y {REPORTE_GUIAS_ROW_END}"
+            )
+            st.session_state["reporte_guias_error_msg"] = msg
+            _set_reporte_guias_status(f"❌ {msg}")
+            st.error(f"❌ {msg}")
+            return False
+
+        vendedor_recortado = _recortar_vendedor_para_reporte(vendedor)
+        cliente_str = str(cliente or "").strip()
+
+        _escribir_reporte_guias_c_f(
+            ws_reporte,
+            fila_destino=fila_destino,
+            cliente_str=cliente_str,
+            vendedor_recortado=vendedor_recortado,
+        )
+
+        st.session_state.pop("reporte_guias_error_msg", None)
+        _set_reporte_guias_status(
+            f"✅ REPORTE GUÍAS OK | Hoja: {REPORTE_GUIAS_SHEET_NAME} | Fila: {fila_destino} | C{fila_destino}='{cliente_str}' | F{fila_destino}='{vendedor_recortado}'"
+        )
+        return True
+    except Exception as e:
+        msg = f"Error al escribir en REPORTE GUÍAS: {e}"
+        st.session_state["reporte_guias_error_msg"] = msg
+        _set_reporte_guias_status(f"❌ {msg}")
+        st.error(f"❌ {msg}")
+        return False
 
 
 def _ensure_visual_state_defaults():
@@ -652,8 +834,14 @@ st.title("📬 Bandeja de Pedidos TD")
 if "flash_msg" in st.session_state and st.session_state["flash_msg"]:
     st.success(st.session_state.pop("flash_msg"))
 
+if st.session_state.get("reporte_guias_error_msg"):
+    st.error(f"❌ {st.session_state['reporte_guias_error_msg']}")
+
+if st.session_state.get("reporte_guias_status_msg"):
+    st.info(st.session_state["reporte_guias_status_msg"])
 
 _ensure_visual_state_defaults()
+_render_debug_reporte_guias_panel()
 
 # ✅ Controles superiores: recarga y completado múltiple
 if st.session_state.pop("bulk_mode_reset_requested", False):
@@ -2268,6 +2456,14 @@ def mostrar_pedido_detalle(
                     df.at[idx, "Hora_Proceso"] = now_str
                     row["Estado"] = "🔵 En Proceso"
                     row["Hora_Proceso"] = now_str
+
+                    if origen_tab == "Foráneo":
+                        escribir_en_reporte_guias(
+                            cliente=row.get("Cliente", ""),
+                            vendedor=row.get("Vendedor_Registro", ""),
+                            tipo_envio=row.get("Tipo_Envio", ""),
+                        )
+
                     st.toast("✅ Pedido marcado como 🔵 En Proceso", icon="✅")
 
                     # Mantener vista/pestaña sin forzar salto de scroll
