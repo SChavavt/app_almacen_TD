@@ -2606,7 +2606,7 @@ if selected_tab == 0:
             if vendedor_sel == "(Todos)"
             else f"Mostrando los últimos {limite_msg} pedidos de {vendedor_sel} en data_pedidos"
         )
-        st.dataframe(ultimos_filtrados, use_container_width=True, height=260)
+        st.dataframe(ultimos_filtrados, use_container_width=True, height=260, hide_index=True)
 
     proy_total, proy_n, prox_df = compute_proyeccion_30(tc, hoy)
 
@@ -2633,6 +2633,7 @@ if selected_tab == 0:
                     ].sort_values("%Riesgo", ascending=False),
                     use_container_width=True,
                     height=380,
+                    hide_index=True,
                 )
 
     with st.expander("🏥 Clientes (Top)", expanded=False):
@@ -2644,13 +2645,11 @@ if selected_tab == 0:
                 [
                     "Cliente",
                     "Ventas_Total",
-                    "Num_Pedidos",
-                    "Ticket_Promedio",
                     "Estado",
                     "Vendedor",
                 ]
             ]
-            st.dataframe(top_money, use_container_width=True, height=420)
+            st.dataframe(top_money, use_container_width=True, height=420, hide_index=True)
 
         with col_b:
             st.caption("Clientes más recurrentes (más pedidos)")
@@ -2658,13 +2657,11 @@ if selected_tab == 0:
                 [
                     "Cliente",
                     "Num_Pedidos",
-                    "Ventas_Total",
-                    "Ticket_Promedio",
                     "Estado",
                     "Vendedor",
                 ]
             ]
-            st.dataframe(top_freq, use_container_width=True, height=420)
+            st.dataframe(top_freq, use_container_width=True, height=420, hide_index=True)
 
         with col_c:
             st.caption("Ticket promedio más alto (perfil proyecto)")
@@ -2672,13 +2669,11 @@ if selected_tab == 0:
                 [
                     "Cliente",
                     "Ticket_Promedio",
-                    "Ventas_Total",
-                    "Num_Pedidos",
                     "Estado",
                     "Vendedor",
                 ]
             ]
-            st.dataframe(top_ticket, use_container_width=True, height=420)
+            st.dataframe(top_ticket, use_container_width=True, height=420, hide_index=True)
 
     st.markdown("---")
 
@@ -2710,6 +2705,7 @@ if selected_tab == 0:
                 ],
                 use_container_width=True,
                 height=220,
+                hide_index=True,
             )
 
     with st.expander("🚨 Clientes en Alerta / Riesgo (prioridad)", expanded=False):
@@ -2741,7 +2737,7 @@ if selected_tab == 0:
             ],
             axis=1,
         )
-        st.dataframe(styled_tc_r, use_container_width=True, height=520)
+        st.dataframe(styled_tc_r, use_container_width=True, height=520, hide_index=True)
 
     st.markdown("---")
 
@@ -2767,4 +2763,5 @@ if selected_tab == 0:
             ],
             use_container_width=True,
             height=420,
+            hide_index=True,
         )
