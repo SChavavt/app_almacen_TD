@@ -1228,7 +1228,7 @@ with tabs[1]:
             mostrar_descarga=False,
         )
 
-        st.markdown("#### 🏙️ Locales")
+        st.markdown("#### 📍 Locales")
         render_descarga_tabla(
             df_base=flujo_data["locales"],
             key_prefix="descarga_flujo_locales",
