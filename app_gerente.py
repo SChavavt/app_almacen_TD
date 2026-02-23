@@ -1149,7 +1149,7 @@ with tabs[1]:
     df_casos = cargar_casos_especiales()
 
     sub_tabs = st.tabs([
-        "🔄 Pedidos en Flujo",
+        "⚙️ Pedidos en Flujo",
         "📦 Pedidos Históricos",
         "🧾 Casos especiales",
         "🟢 Solo pedidos completados",
@@ -1801,5 +1801,6 @@ with tabs[2]:
         st.session_state["pedido_modificado_source"] = source_sel
         st.session_state["mensaje_exito"] = "👁 Visibilidad en pantalla de producción actualizada."
         st.rerun()
+
 
 
