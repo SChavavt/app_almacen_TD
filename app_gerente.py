@@ -311,10 +311,10 @@ def render_descarga_tabla(df_base, key_prefix, permitir_filtros=True, ordenar_po
 
 
 def construir_excel_flujo_unificado(flujo_data):
-    """Genera un Excel con 3 hojas (Locales, Foráneos y Casos especiales)."""
+    """Genera un Excel con 3 hojas (Foráneos, Locales y Casos especiales)."""
     buffer = BytesIO()
     with pd.ExcelWriter(buffer, engine="xlsxwriter") as writer:
-        for hoja, key in (("Locales", "locales"), ("Foraneos", "foraneos"), ("Casos_especiales", "casos")):
+        for hoja, key in (("Foraneos", "foraneos"), ("Locales", "locales"), ("Casos_especiales", "casos")):
             df_hoja = flujo_data.get(key, pd.DataFrame()).copy()
             df_hoja = df_hoja.drop(columns=["ID_Pedido"], errors="ignore")
             df_hoja.to_excel(writer, index=False, sheet_name=hoja)
@@ -1893,5 +1893,4 @@ with tabs[2]:
         st.session_state["pedido_modificado_source"] = source_sel
         st.session_state["mensaje_exito"] = "👁 Visibilidad en pantalla de producción actualizada."
         st.rerun()
-
 
