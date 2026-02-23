@@ -243,10 +243,9 @@ def render_descarga_tabla(df_base, key_prefix, permitir_filtros=True, ordenar_po
 
     filtrado = filtrado.drop(columns=["ID_Pedido"], errors="ignore")
     filtrado = filtrado.reset_index(drop=True)
-    filtrado.index = filtrado.index + 1
 
     st.markdown(f"{len(filtrado)} registros encontrados")
-    st.dataframe(filtrado)
+    st.dataframe(filtrado, hide_index=True)
 
     buffer = BytesIO()
     with pd.ExcelWriter(buffer, engine="xlsxwriter") as writer:
@@ -1150,7 +1149,7 @@ with tabs[1]:
     df_casos = cargar_casos_especiales()
 
     sub_tabs = st.tabs([
-        "🚚 Pedidos en Flujo",
+        "📦 Pedidos en Flujo",
         "📦 Pedidos Históricos",
         "🧾 Casos especiales",
         "🟢 Solo pedidos completados",
