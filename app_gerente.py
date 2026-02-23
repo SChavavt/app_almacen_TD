@@ -109,6 +109,61 @@ def cargar_todos_los_pedidos():
     return cargar_pedidos().copy()
 
 
+def construir_descarga_completados_sin_limpieza():
+    """
+    Construye el DataFrame para la descarga "Solo pedidos 🟢 Completados sin limpiar".
+
+    Incluye:
+    - Todos los pedidos de la hoja data_pedidos.
+    - Solo pedidos de casos_especiales con Completados_Limpiado vacío.
+
+    También crea la columna '#' con numeración única según tipo de registro:
+    - Locales (data_pedidos): 01, 02, ..., 10, 11, ...
+    - Foráneos (data_pedidos): 101, 102, 103, ...
+    - Casos especiales sin limpiar: 001, 002, 003, ...
+    """
+    columnas_salida = [
+        "#", "Vendedor_Registro", "Folio_Factura", "Cliente", "Hora_Registro",
+        "Tipo_Envio", "Turno", "Fecha_Entrega", "Estado"
+    ]
+
+    df_data = cargar_hoja_pedidos("data_pedidos").copy()
+    df_casos = cargar_casos_especiales().copy()
+
+    if "Completados_Limpiado" not in df_casos.columns:
+        df_casos["Completados_Limpiado"] = ""
+    df_casos = df_casos[df_casos["Completados_Limpiado"].astype(str).str.strip() == ""]
+
+    for col in columnas_salida[1:]:
+        if col not in df_data.columns:
+            df_data[col] = ""
+        if col not in df_casos.columns:
+            df_casos[col] = ""
+
+    local_count = 1
+    foraneo_count = 101
+    ids_data = []
+    for _, row in df_data.iterrows():
+        tipo_envio = normalizar(str(row.get("Tipo_Envio", "") or ""))
+        if "foraneo" in tipo_envio:
+            ids_data.append(str(foraneo_count))
+            foraneo_count += 1
+        else:
+            ids_data.append(f"{local_count:02d}")
+            local_count += 1
+    df_data["#"] = ids_data
+
+    df_casos = df_casos.reset_index(drop=True)
+    df_casos["#"] = (df_casos.index + 1).map(lambda n: f"{n:03d}")
+
+    salida = pd.concat(
+        [df_data[columnas_salida], df_casos[columnas_salida]],
+        ignore_index=True,
+        sort=False,
+    )
+    return salida
+
+
 def partir_urls(value):
     """
     Devuelve una lista de URLs limpia a partir de un string que puede venir
@@ -1004,18 +1059,12 @@ with tabs[1]:
     mostrar_casos = st.checkbox("Mostrar solo casos especiales", key="mostrar_casos")
     solo_completados_sin_limpieza = st.checkbox(
         "Solo pedidos 🟢 Completados sin limpiar",
-        help="Muestra únicamente pedidos con Estado 🟢 Completado y Completados_Limpiado vacío.",
+        help="Muestra todos los pedidos de data_pedidos y, además, casos_especiales con Completados_Limpiado vacío.",
         key="solo_completados_sin_limpieza",
     )
 
     if solo_completados_sin_limpieza:
-        df = df_todos
-        if "Completados_Limpiado" not in df.columns:
-            df["Completados_Limpiado"] = ""
-        df = df[
-            (df["Estado"].astype(str).str.strip() == "🟢 Completado")
-            & (df["Completados_Limpiado"].astype(str).str.strip() == "")
-        ]
+        df = construir_descarga_completados_sin_limpieza()
     else:
         df = df_casos if mostrar_casos else df_todos
 
@@ -1023,8 +1072,10 @@ with tabs[1]:
         st.info("No hay datos disponibles para descargar.")
     else:
         df["Hora_Registro"] = pd.to_datetime(df["Hora_Registro"], errors="coerce")
-        df["ID_Pedido"] = pd.to_numeric(df["ID_Pedido"], errors="coerce")
-        df = df.sort_values(by="ID_Pedido", ascending=True)
+
+        if not solo_completados_sin_limpieza:
+            df["ID_Pedido"] = pd.to_numeric(df["ID_Pedido"], errors="coerce")
+            df = df.sort_values(by="ID_Pedido", ascending=True)
 
         if solo_completados_sin_limpieza:
             filtrado = df
