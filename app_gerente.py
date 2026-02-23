@@ -293,7 +293,7 @@ def render_descarga_tabla(df_base, key_prefix, permitir_filtros=True, ordenar_po
     filtrado = filtrado.reset_index(drop=True)
 
     st.markdown(f"{len(filtrado)} registros encontrados")
-    st.dataframe(filtrado, hide_index=True)
+    st.dataframe(filtrado, hide_index=True, use_container_width=True)
 
     if mostrar_descarga:
         buffer = BytesIO()
@@ -1218,37 +1218,33 @@ with tabs[1]:
 
     with sub_tabs[0]:
         flujo_data = construir_descarga_flujo_por_categoria()
-        col_locales, col_foraneos, col_casos = st.columns(3)
 
-        with col_locales:
-            st.markdown("#### 🏙️ Locales")
-            render_descarga_tabla(
-                df_base=flujo_data["locales"],
-                key_prefix="descarga_flujo_locales",
-                permitir_filtros=False,
-                ordenar_por_id=False,
-                mostrar_descarga=False,
-            )
+        st.markdown("#### 🚚 Foráneos")
+        render_descarga_tabla(
+            df_base=flujo_data["foraneos"],
+            key_prefix="descarga_flujo_foraneos",
+            permitir_filtros=False,
+            ordenar_por_id=False,
+            mostrar_descarga=False,
+        )
 
-        with col_foraneos:
-            st.markdown("#### 🚚 Foráneos")
-            render_descarga_tabla(
-                df_base=flujo_data["foraneos"],
-                key_prefix="descarga_flujo_foraneos",
-                permitir_filtros=False,
-                ordenar_por_id=False,
-                mostrar_descarga=False,
-            )
+        st.markdown("#### 🏙️ Locales")
+        render_descarga_tabla(
+            df_base=flujo_data["locales"],
+            key_prefix="descarga_flujo_locales",
+            permitir_filtros=False,
+            ordenar_por_id=False,
+            mostrar_descarga=False,
+        )
 
-        with col_casos:
-            st.markdown("#### 🧾 Casos especiales")
-            render_descarga_tabla(
-                df_base=flujo_data["casos"],
-                key_prefix="descarga_flujo_casos",
-                permitir_filtros=False,
-                ordenar_por_id=False,
-                mostrar_descarga=False,
-            )
+        st.markdown("#### 🧾 Casos especiales")
+        render_descarga_tabla(
+            df_base=flujo_data["casos"],
+            key_prefix="descarga_flujo_casos",
+            permitir_filtros=False,
+            ordenar_por_id=False,
+            mostrar_descarga=False,
+        )
 
         excel_flujo_buffer = construir_excel_flujo_unificado(flujo_data)
         fecha_hoy = datetime.now().strftime("%d-%m-%Y")
@@ -1897,6 +1893,5 @@ with tabs[2]:
         st.session_state["pedido_modificado_source"] = source_sel
         st.session_state["mensaje_exito"] = "👁 Visibilidad en pantalla de producción actualizada."
         st.rerun()
-
 
 
