@@ -1218,23 +1218,23 @@ with tabs[1]:
 
     with sub_tabs[0]:
         flujo_data = construir_descarga_flujo_por_categoria()
-        col_locales, col_foraneos, col_casos = st.columns(3)
-
-        with col_locales:
-            st.markdown("#### 🏙️ Locales")
-            render_descarga_tabla(
-                df_base=flujo_data["locales"],
-                key_prefix="descarga_flujo_locales",
-                permitir_filtros=False,
-                ordenar_por_id=False,
-                mostrar_descarga=False,
-            )
+        col_foraneos, col_locales, col_casos = st.columns(3)
 
         with col_foraneos:
             st.markdown("#### 🚚 Foráneos")
             render_descarga_tabla(
                 df_base=flujo_data["foraneos"],
                 key_prefix="descarga_flujo_foraneos",
+                permitir_filtros=False,
+                ordenar_por_id=False,
+                mostrar_descarga=False,
+            )
+
+        with col_locales:
+            st.markdown("#### 🏙️ Locales")
+            render_descarga_tabla(
+                df_base=flujo_data["locales"],
+                key_prefix="descarga_flujo_locales",
                 permitir_filtros=False,
                 ordenar_por_id=False,
                 mostrar_descarga=False,
@@ -1897,6 +1897,5 @@ with tabs[2]:
         st.session_state["pedido_modificado_source"] = source_sel
         st.session_state["mensaje_exito"] = "👁 Visibilidad en pantalla de producción actualizada."
         st.rerun()
-
 
 
