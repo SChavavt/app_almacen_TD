@@ -15,10 +15,6 @@ from datetime import datetime, timedelta, date
 st.set_page_config(page_title="🔍 Buscador de Guías y Descargas", layout="wide")
 st.title("🔍 Buscador de Pedidos por Guía o Cliente")
 
-# ===== SPREADSHEETS =====
-SPREADSHEET_ID_MAIN = "1aWkSelodaz0nWfQx7FZAysGnIYGQFJxAN7RO3YgCiZY"
-SPREADSHEET_ID_ALEJANDRO = "1lWZEL228boUMH_tAdQ3_ZGkYHZZuEkfv"
-
 # --- CREDENCIALES DESDE SECRETS ---
 try:
     credentials_dict = json.loads(st.secrets["gsheets"]["google_credentials"])
@@ -46,7 +42,7 @@ except Exception as e:
 def get_worksheet():
     """Obtiene la hoja de cálculo principal de pedidos."""
     return gspread_client.open_by_key(
-        SPREADSHEET_ID_MAIN
+        "1aWkSelodaz0nWfQx7FZAysGnIYGQFJxAN7RO3YgCiZY"
     ).worksheet("datos_pedidos")
 
 
@@ -58,75 +54,16 @@ PEDIDOS_COLUMNAS_MINIMAS = [
     "Refacturacion_Tipo", "Refacturacion_Subtipo", "Folio_Factura_Refacturada", "fecha_modificacion", "Fecha_Modificacion"
 ]
 
-# ===== ALEJANDRO DATA (Organizador) =====
-ALE_SHEETS = (
-    "CONFIG",
-    "CITAS",
-    "TAREAS",
-    "COTIZACIONES",
-    "CHECKLIST_TEMPLATE",
-    "CHECKLIST_DAILY",
-    "EVENT_LOG",
-)
-
-ALE_COLUMNAS = {
-    "CONFIG": ["Key", "Value", "Descripcion", "Updated_At", "Updated_By"],
-
-    "CITAS": [
-        "Cita_ID","Created_At","Created_By","Fecha_Inicio","Fecha_Fin","Cliente_Persona","Empresa_Clinica",
-        "Tipo","Prioridad","Estatus","Notas","Lugar","Telefono","Correo","Reminder_Minutes_Before",
-        "Reminder_Status","Last_Updated_At","Last_Updated_By","Is_Deleted"
-    ],
-
-    "TAREAS": [
-        "Tarea_ID","Created_At","Created_By","Titulo","Descripcion","Fecha_Limite","Prioridad","Estatus",
-        "Cliente_Relacionado","Cotizacion_Folio_Relacionado","Tipo","Fecha_Completado","Notas_Resultado",
-        "Last_Updated_At","Last_Updated_By","Is_Deleted"
-    ],
-
-    "COTIZACIONES": [
-        "Cotizacion_ID","Folio","Created_At","Created_By","Fecha_Cotizacion","Cliente","Monto","Vendedor",
-        "Estatus","Fecha_Proximo_Seguimiento","Ultimo_Seguimiento_Fecha","Dias_Sin_Seguimiento","Notas",
-        "Resultado_Cierre","Convertida_A_Tarea_ID","Convertida_A_Cita_ID","Last_Updated_At","Last_Updated_By","Is_Deleted"
-    ],
-
-    "CHECKLIST_TEMPLATE": ["Item_ID","Orden","Item","Activo"],
-
-    "CHECKLIST_DAILY": ["Fecha","Item_ID","Item","Completado","Completado_At","Completado_By","Notas"],
-
-    "EVENT_LOG": ["Event_ID","Created_At","User","Modulo","Accion","Entidad_ID","Detalle"],
-}
-
 
 def cargar_hoja_pedidos(nombre_hoja):
     """Carga una hoja de pedidos por nombre y garantiza columnas mínimas."""
-    sheet = gspread_client.open_by_key(SPREADSHEET_ID_MAIN).worksheet(nombre_hoja)
+    sheet = gspread_client.open_by_key("1aWkSelodaz0nWfQx7FZAysGnIYGQFJxAN7RO3YgCiZY").worksheet(nombre_hoja)
     data = sheet.get_all_records()
     df = pd.DataFrame(data)
     for c in PEDIDOS_COLUMNAS_MINIMAS:
         if c not in df.columns:
             df[c] = ""
     return df
-
-def get_alejandro_worksheet(nombre_hoja: str):
-    """Abre una worksheet del spreadsheet alejandro_data por nombre."""
-    return gspread_client.open_by_key(SPREADSHEET_ID_ALEJANDRO).worksheet(nombre_hoja)
-
-
-def cargar_alejandro_hoja(nombre_hoja: str) -> pd.DataFrame:
-    """Carga una hoja de alejandro_data y garantiza columnas mínimas."""
-    sheet = get_alejandro_worksheet(nombre_hoja)
-    data = sheet.get_all_records()
-    df = pd.DataFrame(data)
-
-    cols_min = ALE_COLUMNAS.get(nombre_hoja, [])
-    for c in cols_min:
-        if c not in df.columns:
-            df[c] = ""
-
-    return df
-
-
 
 # --- FUNCIONES ---
 @st.cache_data(ttl=300)
@@ -142,7 +79,7 @@ def cargar_casos_especiales():
     Lee la hoja 'casos_especiales' y regresa un DataFrame.
     Si faltan columnas del ejemplo, las crea vacías para evitar KeyError.
     """
-    sheet = gspread_client.open_by_key(SPREADSHEET_ID_MAIN).worksheet("casos_especiales")
+    sheet = gspread_client.open_by_key("1aWkSelodaz0nWfQx7FZAysGnIYGQFJxAN7RO3YgCiZY").worksheet("casos_especiales")
     data = sheet.get_all_records()
     df = pd.DataFrame(data)
 
@@ -794,7 +731,6 @@ tabs = st.tabs([
     "🔍 Buscar Pedido",
     "⬇️ Descargar Datos",
     "✏️ Modificar Pedido",
-    "🗂️ Organizador (Alejandro)",
 ])
 with tabs[0]:
     modo_busqueda = st.radio("Selecciona el modo de búsqueda:", ["🔢 Por número de guía", "🧑 Por cliente/factura"], key="modo_busqueda_radio")
@@ -1732,7 +1668,7 @@ with tabs[2]:
 
     # Definir la hoja de Google Sheets para modificación
     hoja_nombre = "datos_pedidos" if source_sel == "pedidos" else "casos_especiales"
-    hoja = gspread_client.open_by_key(SPREADSHEET_ID_MAIN).worksheet(hoja_nombre)
+    hoja = gspread_client.open_by_key("1aWkSelodaz0nWfQx7FZAysGnIYGQFJxAN7RO3YgCiZY").worksheet(hoja_nombre)
 
     st.markdown(
         f"📦 **Cliente:** {row['Cliente']} &nbsp;&nbsp;&nbsp;&nbsp; 🧾 **Folio Factura:** {row.get('Folio_Factura', 'N/A')}"
@@ -1958,85 +1894,3 @@ with tabs[2]:
         st.session_state["mensaje_exito"] = "👁 Visibilidad en pantalla de producción actualizada."
         st.rerun()
 
-# ===== ORGANIZADOR ALEJANDRO (CON CONTRASEÑA) =====
-CONTRASENA_ALEJANDRO = "Ceci"  # puedes cambiarla (o usar otra)
-
-with tabs[3]:
-    st.header("🗂️ Organizador (Alejandro)")
-
-    if "acceso_alejandro" not in st.session_state:
-        st.session_state.acceso_alejandro = False
-
-    if not st.session_state.acceso_alejandro:
-        pw = st.text_input("🔑 Ingresa la contraseña:", type="password", key="pw_alejandro")
-        if st.button("🔓 Entrar", key="btn_pw_alejandro"):
-            if pw == CONTRASENA_ALEJANDRO:
-                st.session_state.acceso_alejandro = True
-                st.success("✅ Acceso concedido.")
-                st.rerun()
-            else:
-                st.error("❌ Contraseña incorrecta.")
-        st.stop()
-
-    if st.button("🔄 Refrescar Organizador", key="refresh_alejandro"):
-        st.rerun()
-
-    # --- Subpestañas internas del organizador ---
-    sub = st.tabs(["Hoy", "Agenda", "Tareas", "Cotizaciones", "Checklist", "Config"])
-
-    try:
-        df_citas = cargar_alejandro_hoja("CITAS")
-    except Exception:
-        df_citas = pd.DataFrame(columns=ALE_COLUMNAS.get("CITAS", []))
-
-    try:
-        df_tareas = cargar_alejandro_hoja("TAREAS")
-    except Exception:
-        df_tareas = pd.DataFrame(columns=ALE_COLUMNAS.get("TAREAS", []))
-
-    try:
-        df_cot = cargar_alejandro_hoja("COTIZACIONES")
-    except Exception:
-        df_cot = pd.DataFrame(columns=ALE_COLUMNAS.get("COTIZACIONES", []))
-
-    try:
-        df_checklist_daily = cargar_alejandro_hoja("CHECKLIST_DAILY")
-    except Exception:
-        df_checklist_daily = pd.DataFrame(columns=ALE_COLUMNAS.get("CHECKLIST_DAILY", []))
-
-    try:
-        df_config = cargar_alejandro_hoja("CONFIG")
-    except Exception:
-        df_config = pd.DataFrame(columns=ALE_COLUMNAS.get("CONFIG", []))
-
-    with sub[0]:
-        st.subheader("📌 Hoy")
-
-        st.markdown("### 📅 Citas")
-        st.dataframe(df_citas, use_container_width=True)
-
-        st.markdown("### ✅ Tareas")
-        st.dataframe(df_tareas, use_container_width=True)
-
-        st.markdown("### 💰 Cotizaciones")
-        st.dataframe(df_cot, use_container_width=True)
-
-    with sub[1]:
-        st.subheader("📅 Agenda")
-        st.dataframe(df_citas, use_container_width=True)
-
-    with sub[2]:
-        st.subheader("✅ Tareas")
-        st.dataframe(df_tareas, use_container_width=True)
-
-    with sub[3]:
-        st.subheader("💰 Cotizaciones")
-        st.dataframe(df_cot, use_container_width=True)
-
-    with sub[4]:
-        st.subheader("🧾 Checklist")
-        st.dataframe(df_checklist_daily, use_container_width=True)
-
-    with sub[5]:
-        st.subheader("⚙️ Config")
-        st.dataframe(df_config, use_container_width=True)
