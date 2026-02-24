@@ -10,9 +10,6 @@ from io import BytesIO
 from oauth2client.service_account import ServiceAccountCredentials
 from urllib.parse import urlparse, unquote
 from datetime import datetime, timedelta, date
-import uuid
-import urllib.parse
-import urllib.request
 
 # --- CONFIGURACIÓN DE STREAMLIT ---
 st.set_page_config(page_title="🔍 Buscador de Guías y Descargas", layout="wide")
@@ -21,7 +18,6 @@ st.title("🔍 Buscador de Pedidos por Guía o Cliente")
 # ===== SPREADSHEETS =====
 SPREADSHEET_ID_MAIN = "1aWkSelodaz0nWfQx7FZAysGnIYGQFJxAN7RO3YgCiZY"
 SPREADSHEET_ID_ALEJANDRO = "1lWZEL228boUMH_tAdQ3_ZGkYHZZuEkfv"
-_ALE_ID_CACHE = {}
 
 # --- CREDENCIALES DESDE SECRETS ---
 try:
@@ -112,119 +108,9 @@ def cargar_hoja_pedidos(nombre_hoja):
             df[c] = ""
     return df
 
-def _extract_sheet_id(value: str) -> str:
-    """Extrae el spreadsheet_id si viene URL completa, si no devuelve el valor limpio."""
-    raw = str(value or "").strip()
-    if not raw:
-        return ""
-    m = re.search(r"/spreadsheets/d/([a-zA-Z0-9-_]+)", raw)
-    if m:
-        return m.group(1)
-    return raw
-
-
-def _drive_api_get_file_meta(file_id: str) -> dict:
-    """Consulta metadata de Drive sin googleapiclient."""
-    token = creds.get_access_token().access_token
-    params = urllib.parse.urlencode({
-        "fields": "id,name,mimeType,shortcutDetails/targetId,shortcutDetails/targetMimeType",
-        "supportsAllDrives": "true",
-    })
-    url = f"https://www.googleapis.com/drive/v3/files/{file_id}?{params}"
-    req = urllib.request.Request(url, headers={"Authorization": f"Bearer {token}"})
-    with urllib.request.urlopen(req, timeout=15) as resp:
-        return json.loads(resp.read().decode("utf-8"))
-
-
-def _drive_api_copy_as_gsheet(file_id: str, original_name: str = "") -> dict:
-    """Copia un archivo de Drive convirtiéndolo a Google Sheet nativo."""
-    token = creds.get_access_token().access_token
-    new_name = (original_name or "alejandro_data")
-    if new_name.lower().endswith('.xlsx'):
-        new_name = new_name[:-5]
-    body = {
-        "name": f"{new_name} (AUTO-CONVERTED TD)",
-        "mimeType": "application/vnd.google-apps.spreadsheet",
-    }
-    params = urllib.parse.urlencode({
-        "supportsAllDrives": "true",
-        "fields": "id,name,mimeType",
-    })
-    url = f"https://www.googleapis.com/drive/v3/files/{file_id}/copy?{params}"
-    req = urllib.request.Request(
-        url,
-        data=json.dumps(body).encode("utf-8"),
-        headers={
-            "Authorization": f"Bearer {token}",
-            "Content-Type": "application/json",
-        },
-        method="POST",
-    )
-    with urllib.request.urlopen(req, timeout=20) as resp:
-        return json.loads(resp.read().decode("utf-8"))
-
-
-def _resolve_alejandro_file_id(file_id: str) -> tuple[str, dict]:
-    """Resuelve shortcut->target y, si viene Excel, intenta auto-convertir a Google Sheet."""
-    if file_id in _ALE_ID_CACHE:
-        return _ALE_ID_CACHE[file_id]
-
-    meta = _drive_api_get_file_meta(file_id)
-    mime = str(meta.get("mimeType", ""))
-
-    if mime == "application/vnd.google-apps.shortcut":
-        target_id = meta.get("shortcutDetails", {}).get("targetId", "")
-        target_meta = _drive_api_get_file_meta(target_id) if target_id else {}
-        target_mime = str(target_meta.get("mimeType", ""))
-        if target_id and target_mime == "application/vnd.google-apps.spreadsheet":
-            _ALE_ID_CACHE[file_id] = (target_id, target_meta)
-            return target_id, target_meta
-        raise Exception(
-            f"Shortcut no apunta a Google Sheet. shortcut={file_id}, target={target_id or 'N/A'}, target_mime={target_mime or 'N/A'}"
-        )
-
-    if mime == "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet":
-        try:
-            converted = _drive_api_copy_as_gsheet(file_id, meta.get("name", "alejandro_data"))
-            converted_id = str(converted.get("id", "")).strip()
-            if not converted_id:
-                raise Exception("Drive no devolvió id al convertir el archivo")
-            conv_meta = _drive_api_get_file_meta(converted_id)
-            _ALE_ID_CACHE[file_id] = (converted_id, conv_meta)
-            return converted_id, conv_meta
-        except Exception as conv_err:
-            raise Exception(
-                "El archivo configurado es Excel (.xlsx) y no se pudo auto-convertir a Google Sheet con la service account. "
-                f"name={meta.get('name','N/A')}, fileId={file_id}, detalle={conv_err}"
-            )
-
-    if mime != "application/vnd.google-apps.spreadsheet":
-        raise Exception(
-            "El archivo configurado no es Google Sheet nativo. "
-            f"name={meta.get('name','N/A')}, mimeType={mime or 'N/A'}, fileId={file_id}."
-        )
-
-    _ALE_ID_CACHE[file_id] = (file_id, meta)
-    return file_id, meta
-
-
-def get_alejandro_spreadsheet_id() -> str:
-    """Obtiene y valida el ID de Alejandro (resuelve shortcuts vía Drive API HTTP)."""
-    gs = st.secrets.get("gsheets", {})
-    candidate = (
-        gs.get("spreadsheet_id_alejandro")
-        or gs.get("SPREADSHEET_ID_ALEJANDRO")
-        or SPREADSHEET_ID_ALEJANDRO
-    )
-    configured = _extract_sheet_id(candidate)
-    resolved, _ = _resolve_alejandro_file_id(configured)
-    return resolved
-
-
 def get_alejandro_worksheet(nombre_hoja: str):
     """Abre una worksheet del spreadsheet alejandro_data por nombre."""
-    spreadsheet_id = get_alejandro_spreadsheet_id()
-    return gspread_client.open_by_key(spreadsheet_id).worksheet(nombre_hoja)
+    return gspread_client.open_by_key(SPREADSHEET_ID_ALEJANDRO).worksheet(nombre_hoja)
 
 
 def cargar_alejandro_hoja(nombre_hoja: str) -> pd.DataFrame:
@@ -239,124 +125,6 @@ def cargar_alejandro_hoja(nombre_hoja: str) -> pd.DataFrame:
             df[c] = ""
 
     return df
-
-
-def now_iso():
-    return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-
-
-def new_id(prefix: str) -> str:
-    # Ej: CITA-20260224-AB12CD34
-    return f"{prefix}-{datetime.now().strftime('%Y%m%d')}-{uuid.uuid4().hex[:8].upper()}"
-
-
-def ensure_headers(sheet, nombre_hoja: str):
-    """Asegura que la fila 1 tenga headers esperados."""
-    expected = ALE_COLUMNAS.get(nombre_hoja, [])
-    if not expected:
-        return
-
-    current = sheet.row_values(1)
-    current = [c.strip() for c in current if str(c).strip()]
-
-    if not current:
-        # hoja vacía -> ponemos headers sin usar update(A1), que falla en algunos documentos
-        try:
-            sheet.append_row(expected, value_input_option="USER_ENTERED")
-        except Exception:
-            # fallback por si append no está permitido en esa hoja/documento
-            sheet.insert_row(expected, index=1, value_input_option="USER_ENTERED")
-        return
-
-    # Si ya hay headers, pero faltan columnas, NO reescribimos (para no romper nada)
-    faltan = [c for c in expected if c not in current]
-    if faltan:
-        # Solo avisamos (no rompemos), y trabajamos con expected para append
-        # Nota: si quieres, luego hacemos "migración" de headers. Por ahora MVP.
-        pass
-
-
-def safe_append(nombre_hoja: str, row_dict: dict):
-    """Append seguro por orden de ALE_COLUMNAS."""
-    sheet = get_alejandro_worksheet(nombre_hoja)
-    try:
-        ensure_headers(sheet, nombre_hoja)
-    except Exception:
-        # No bloqueamos el alta si falla la validación/creación de headers
-        pass
-
-    cols = ALE_COLUMNAS.get(nombre_hoja, [])
-    if not cols:
-        raise Exception(f"No hay columnas definidas para {nombre_hoja}")
-
-    row = [row_dict.get(c, "") for c in cols]
-    try:
-        sheet.append_row(row, value_input_option="USER_ENTERED")
-    except Exception as e:
-        msg = str(e)
-        if "not supported for this document" in msg.lower():
-            raise Exception(
-                "Google API rechazó la escritura: ese ID apunta a un archivo no compatible (normalmente Excel en Drive sin convertir) "
-                "o a un objeto que no es Google Sheet. Convierte el archivo a Google Sheets y usa su ID nativo en "
-                "gsheets.spreadsheet_id_alejandro o gsheets.SPREADSHEET_ID_ALEJANDRO."
-            ) from e
-        raise
-
-
-def debug_alejandro_documento() -> dict:
-    """Diagnóstico de alejandro_data con metadata real de Drive + gspread."""
-    gs = st.secrets.get("gsheets", {})
-    configured_raw = (
-        gs.get("spreadsheet_id_alejandro")
-        or gs.get("SPREADSHEET_ID_ALEJANDRO")
-        or SPREADSHEET_ID_ALEJANDRO
-    )
-    configured_id = _extract_sheet_id(configured_raw)
-
-    out = {
-        "spreadsheet_id": configured_id,
-        "configured_raw": str(configured_raw),
-        "resolved_spreadsheet_id": "",
-        "drive_name": "",
-        "drive_mimeType": "",
-        "auto_converted": False,
-        "open_ok": False,
-        "title": "",
-        "url": "",
-        "worksheets": [],
-        "missing_expected_sheets": [],
-    }
-
-    try:
-        resolved_id, meta = _resolve_alejandro_file_id(configured_id)
-        out["resolved_spreadsheet_id"] = resolved_id
-        out["drive_name"] = meta.get("name", "")
-        out["drive_mimeType"] = meta.get("mimeType", "")
-        out["url"] = f"https://docs.google.com/spreadsheets/d/{resolved_id}"
-        out["auto_converted"] = (resolved_id != configured_id)
-
-        ss = gspread_client.open_by_key(resolved_id)
-        out["open_ok"] = True
-        out["title"] = ss.title
-
-        ws = ss.worksheets()
-        names = []
-        for w in ws:
-            props = getattr(w, "_properties", {}) or {}
-            names.append(w.title)
-            out["worksheets"].append({
-                "title": w.title,
-                "id": props.get("sheetId"),
-                "sheetType": props.get("sheetType", "UNKNOWN"),
-                "rows": props.get("gridProperties", {}).get("rowCount"),
-                "cols": props.get("gridProperties", {}).get("columnCount"),
-            })
-        out["missing_expected_sheets"] = [s for s in ALE_SHEETS if s not in names]
-
-    except Exception as e:
-        out["error"] = str(e)
-
-    return out
 
 
 
@@ -2228,40 +1996,30 @@ with tabs[3]:
     # --- Subpestañas internas del organizador ---
     sub = st.tabs(["Hoy", "Agenda", "Tareas", "Cotizaciones", "Checklist", "Config"])
 
-    errores_alejandro = []
-
     try:
         df_citas = cargar_alejandro_hoja("CITAS")
-    except Exception as e:
-        errores_alejandro.append(f"CITAS: {e}")
+    except Exception:
         df_citas = pd.DataFrame(columns=ALE_COLUMNAS.get("CITAS", []))
 
     try:
         df_tareas = cargar_alejandro_hoja("TAREAS")
-    except Exception as e:
-        errores_alejandro.append(f"TAREAS: {e}")
+    except Exception:
         df_tareas = pd.DataFrame(columns=ALE_COLUMNAS.get("TAREAS", []))
 
     try:
         df_cot = cargar_alejandro_hoja("COTIZACIONES")
-    except Exception as e:
-        errores_alejandro.append(f"COTIZACIONES: {e}")
+    except Exception:
         df_cot = pd.DataFrame(columns=ALE_COLUMNAS.get("COTIZACIONES", []))
 
     try:
         df_checklist_daily = cargar_alejandro_hoja("CHECKLIST_DAILY")
-    except Exception as e:
-        errores_alejandro.append(f"CHECKLIST_DAILY: {e}")
+    except Exception:
         df_checklist_daily = pd.DataFrame(columns=ALE_COLUMNAS.get("CHECKLIST_DAILY", []))
 
     try:
         df_config = cargar_alejandro_hoja("CONFIG")
-    except Exception as e:
-        errores_alejandro.append(f"CONFIG: {e}")
+    except Exception:
         df_config = pd.DataFrame(columns=ALE_COLUMNAS.get("CONFIG", []))
-
-    if errores_alejandro:
-        st.warning("⚠️ Hay errores leyendo alejandro_data. Ve a Config > Diagnóstico para detalle.")
 
     with sub[0]:
         st.subheader("📌 Hoy")
@@ -2367,186 +2125,14 @@ with tabs[3]:
 
     with sub[1]:
         st.subheader("📅 Agenda")
-
-        with st.form("form_nueva_cita", clear_on_submit=True):
-            st.markdown("### ➕ Nueva cita")
-
-            col1, col2 = st.columns(2)
-            with col1:
-                fecha = st.date_input("Fecha", value=date.today(), format="DD/MM/YYYY")
-            with col2:
-                hora = st.time_input("Hora", value=datetime.now().time().replace(second=0, microsecond=0))
-
-            col3, col4 = st.columns(2)
-            with col3:
-                duracion_min = st.number_input("Duración (min)", min_value=15, max_value=480, value=60, step=15)
-            with col4:
-                prioridad = st.selectbox("Prioridad", ["Alta", "Media", "Baja"], index=1)
-
-            cliente_persona = st.text_input("Cliente / persona")
-            empresa = st.text_input("Empresa o clínica (opcional)")
-
-            tipo = st.selectbox("Tipo", ["Visita", "Llamada", "Junta", "Seguimiento"], index=2)
-            estatus = st.selectbox("Estatus", ["Programada", "Realizada", "Reprogramada", "Cancelada"], index=0)
-            notas = st.text_area("Notas (opcional)", height=90)
-
-            reminder = st.number_input("Recordatorio (min antes)", min_value=0, max_value=240, value=30, step=5)
-
-            submitted_cita = st.form_submit_button("✅ Crear cita")
-
-        if submitted_cita:
-            if not cliente_persona.strip():
-                st.error("❌ Cliente/persona es obligatorio.")
-            else:
-                try:
-                    start_dt = datetime.combine(fecha, hora)
-                    end_dt = start_dt + timedelta(minutes=int(duracion_min))
-
-                    cita_id = new_id("CITA")
-                    payload = {
-                        "Cita_ID": cita_id,
-                        "Created_At": now_iso(),
-                        "Created_By": "ALEJANDRO",
-                        "Fecha_Inicio": start_dt.strftime("%Y-%m-%d %H:%M:%S"),
-                        "Fecha_Fin": end_dt.strftime("%Y-%m-%d %H:%M:%S"),
-                        "Cliente_Persona": cliente_persona.strip(),
-                        "Empresa_Clinica": empresa.strip(),
-                        "Tipo": tipo,
-                        "Prioridad": prioridad,
-                        "Estatus": estatus,
-                        "Notas": notas.strip(),
-                        "Lugar": "",
-                        "Telefono": "",
-                        "Correo": "",
-                        "Reminder_Minutes_Before": str(int(reminder)),
-                        "Reminder_Status": "Pendiente" if int(reminder) > 0 else "N/A",
-                        "Last_Updated_At": now_iso(),
-                        "Last_Updated_By": "ALEJANDRO",
-                        "Is_Deleted": "0",
-                    }
-                    safe_append("CITAS", payload)
-                    st.success(f"🎈 Cita creada: {cita_id}")
-                    st.rerun()
-                except Exception as e:
-                    st.error(f"❌ Error creando cita: {e}")
-
-        st.markdown("### 📋 Agenda")
         st.dataframe(df_citas, use_container_width=True)
 
     with sub[2]:
         st.subheader("✅ Tareas")
-
-        # ===== Alta rápida =====
-        with st.form("form_nueva_tarea", clear_on_submit=True):
-            st.markdown("### ➕ Nueva tarea")
-            titulo = st.text_input("Título", placeholder="Ej. Llamar a cliente X")
-            descripcion = st.text_area("Descripción", placeholder="Detalles…", height=90)
-
-            col1, col2, col3 = st.columns(3)
-            with col1:
-                fecha_limite = st.date_input("Fecha límite", value=date.today(), format="DD/MM/YYYY")
-            with col2:
-                prioridad = st.selectbox("Prioridad", ["Alta", "Media", "Baja"], index=1)
-            with col3:
-                estatus = st.selectbox("Estatus", ["Pendiente", "Completada"], index=0)
-
-            col4, col5 = st.columns(2)
-            with col4:
-                cliente_rel = st.text_input("Cliente relacionado (opcional)")
-            with col5:
-                folio_cot = st.text_input("Folio cotización (opcional)")
-
-            submitted = st.form_submit_button("✅ Crear tarea")
-
-        if submitted:
-            if not titulo.strip():
-                st.error("❌ El título es obligatorio.")
-            else:
-                try:
-                    tarea_id = new_id("TAREA")
-                    payload = {
-                        "Tarea_ID": tarea_id,
-                        "Created_At": now_iso(),
-                        "Created_By": "ALEJANDRO",
-                        "Titulo": titulo.strip(),
-                        "Descripcion": descripcion.strip(),
-                        "Fecha_Limite": fecha_limite.strftime("%Y-%m-%d"),
-                        "Prioridad": prioridad,
-                        "Estatus": estatus,
-                        "Cliente_Relacionado": cliente_rel.strip(),
-                        "Cotizacion_Folio_Relacionado": folio_cot.strip(),
-                        "Tipo": "Tarea",
-                        "Fecha_Completado": now_iso() if estatus.lower() == "completada" else "",
-                        "Notas_Resultado": "",
-                        "Last_Updated_At": now_iso(),
-                        "Last_Updated_By": "ALEJANDRO",
-                        "Is_Deleted": "0",
-                    }
-                    safe_append("TAREAS", payload)
-                    st.success(f"🎈 Tarea creada: {tarea_id}")
-                    st.rerun()
-                except Exception as e:
-                    st.error(f"❌ Error creando tarea: {e}")
-
-        st.markdown("### 📋 Lista")
         st.dataframe(df_tareas, use_container_width=True)
 
     with sub[3]:
         st.subheader("💰 Cotizaciones")
-
-        with st.form("form_nueva_cot", clear_on_submit=True):
-            st.markdown("### ➕ Nueva cotización")
-            folio = st.text_input("Folio", placeholder="Ej. COT-12345")
-            fecha_cot = st.date_input("Fecha", value=date.today(), format="DD/MM/YYYY")
-            cliente = st.text_input("Cliente")
-            monto = st.number_input("Monto", min_value=0.0, value=0.0, step=100.0)
-            vendedor = st.text_input("Vendedor (opcional)", placeholder="Alejandro")
-
-            estatus = st.selectbox(
-                "Estatus",
-                ["Enviada", "En seguimiento", "Cerrada – Ganada", "Cerrada – Perdida"],
-                index=0
-            )
-
-            prox_seg = st.date_input("Próximo seguimiento", value=date.today(), format="DD/MM/YYYY")
-            notas = st.text_area("Notas (opcional)", height=90)
-
-            submitted_cot = st.form_submit_button("✅ Crear cotización")
-
-        if submitted_cot:
-            if not folio.strip() or not cliente.strip():
-                st.error("❌ Folio y Cliente son obligatorios.")
-            else:
-                try:
-                    cot_id = new_id("COT")
-                    payload = {
-                        "Cotizacion_ID": cot_id,
-                        "Folio": folio.strip(),
-                        "Created_At": now_iso(),
-                        "Created_By": "ALEJANDRO",
-                        "Fecha_Cotizacion": fecha_cot.strftime("%Y-%m-%d"),
-                        "Cliente": cliente.strip(),
-                        "Monto": float(monto),
-                        "Vendedor": vendedor.strip(),
-                        "Estatus": estatus,
-                        "Fecha_Proximo_Seguimiento": prox_seg.strftime("%Y-%m-%d"),
-                        "Ultimo_Seguimiento_Fecha": "",
-                        "Dias_Sin_Seguimiento": "",
-                        "Notas": notas.strip(),
-                        "Resultado_Cierre": "",
-                        "Convertida_A_Tarea_ID": "",
-                        "Convertida_A_Cita_ID": "",
-                        "Last_Updated_At": now_iso(),
-                        "Last_Updated_By": "ALEJANDRO",
-                        "Is_Deleted": "0",
-                    }
-                    safe_append("COTIZACIONES", payload)
-                    st.success(f"🎈 Cotización creada: {cot_id}")
-                    st.rerun()
-                except Exception as e:
-                    st.error(f"❌ Error creando cotización: {e}")
-
-        st.markdown("### 📋 Lista")
         st.dataframe(df_cot, use_container_width=True)
 
     with sub[4]:
@@ -2556,32 +2142,3 @@ with tabs[3]:
     with sub[5]:
         st.subheader("⚙️ Config")
         st.dataframe(df_config, use_container_width=True)
-
-        st.markdown("---")
-        st.markdown("### 🧪 Diagnóstico alejandro_data")
-
-        if errores_alejandro:
-            st.error("Errores detectados al leer hojas:")
-            for err in errores_alejandro:
-                st.code(err)
-
-        if st.button("Ejecutar diagnóstico", key="diag_alejandro_doc"):
-            diag = debug_alejandro_documento()
-            st.json(diag)
-            if diag.get("auto_converted"):
-                st.success(
-                    "Se detectó Excel y se convirtió automáticamente a Google Sheet para esta sesión. "
-                    "Copia el resolved_spreadsheet_id y guárdalo en secrets para hacerlo permanente."
-                )
-
-            err = str(diag.get("error", ""))
-            mime = str(diag.get("drive_mimeType", ""))
-            if ("not supported for this document" in err.lower()) or (
-                mime and mime != "application/vnd.google-apps.spreadsheet"
-            ):
-                st.error(
-                    "El archivo configurado no es Google Sheet nativo. En Drive: Abrir con > Hojas de cálculo de Google "
-                    "(convierte), y después usa el ID del documento convertido en secrets."
-                )
-            elif diag.get("open_ok") and diag.get("missing_expected_sheets"):
-                st.warning("Faltan hojas esperadas: " + ", ".join(diag.get("missing_expected_sheets", [])))
