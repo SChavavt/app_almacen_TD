@@ -15,6 +15,10 @@ from datetime import datetime, timedelta, date
 st.set_page_config(page_title="🔍 Buscador de Guías y Descargas", layout="wide")
 st.title("🔍 Buscador de Pedidos por Guía o Cliente")
 
+# ===== SPREADSHEETS =====
+SPREADSHEET_ID_MAIN = "1aWkSelodaz0nWfQx7FZAysGnIYGQFJxAN7RO3YgCiZY"
+SPREADSHEET_ID_ALEJANDRO = "1lWZEL228boUMH_tAdQ3_ZGkYHZZuEkfv"
+
 # --- CREDENCIALES DESDE SECRETS ---
 try:
     credentials_dict = json.loads(st.secrets["gsheets"]["google_credentials"])
@@ -42,7 +46,7 @@ except Exception as e:
 def get_worksheet():
     """Obtiene la hoja de cálculo principal de pedidos."""
     return gspread_client.open_by_key(
-        "1aWkSelodaz0nWfQx7FZAysGnIYGQFJxAN7RO3YgCiZY"
+        SPREADSHEET_ID_MAIN
     ).worksheet("datos_pedidos")
 
 
@@ -54,16 +58,75 @@ PEDIDOS_COLUMNAS_MINIMAS = [
     "Refacturacion_Tipo", "Refacturacion_Subtipo", "Folio_Factura_Refacturada", "fecha_modificacion", "Fecha_Modificacion"
 ]
 
+# ===== ALEJANDRO DATA (Organizador) =====
+ALE_SHEETS = (
+    "CONFIG",
+    "CITAS",
+    "TAREAS",
+    "COTIZACIONES",
+    "CHECKLIST_TEMPLATE",
+    "CHECKLIST_DAILY",
+    "EVENT_LOG",
+)
+
+ALE_COLUMNAS = {
+    "CONFIG": ["Key", "Value", "Descripcion", "Updated_At", "Updated_By"],
+
+    "CITAS": [
+        "Cita_ID","Created_At","Created_By","Fecha_Inicio","Fecha_Fin","Cliente_Persona","Empresa_Clinica",
+        "Tipo","Prioridad","Estatus","Notas","Lugar","Telefono","Correo","Reminder_Minutes_Before",
+        "Reminder_Status","Last_Updated_At","Last_Updated_By","Is_Deleted"
+    ],
+
+    "TAREAS": [
+        "Tarea_ID","Created_At","Created_By","Titulo","Descripcion","Fecha_Limite","Prioridad","Estatus",
+        "Cliente_Relacionado","Cotizacion_Folio_Relacionado","Tipo","Fecha_Completado","Notas_Resultado",
+        "Last_Updated_At","Last_Updated_By","Is_Deleted"
+    ],
+
+    "COTIZACIONES": [
+        "Cotizacion_ID","Folio","Created_At","Created_By","Fecha_Cotizacion","Cliente","Monto","Vendedor",
+        "Estatus","Fecha_Proximo_Seguimiento","Ultimo_Seguimiento_Fecha","Dias_Sin_Seguimiento","Notas",
+        "Resultado_Cierre","Convertida_A_Tarea_ID","Convertida_A_Cita_ID","Last_Updated_At","Last_Updated_By","Is_Deleted"
+    ],
+
+    "CHECKLIST_TEMPLATE": ["Item_ID","Orden","Item","Activo"],
+
+    "CHECKLIST_DAILY": ["Fecha","Item_ID","Item","Completado","Completado_At","Completado_By","Notas"],
+
+    "EVENT_LOG": ["Event_ID","Created_At","User","Modulo","Accion","Entidad_ID","Detalle"],
+}
+
 
 def cargar_hoja_pedidos(nombre_hoja):
     """Carga una hoja de pedidos por nombre y garantiza columnas mínimas."""
-    sheet = gspread_client.open_by_key("1aWkSelodaz0nWfQx7FZAysGnIYGQFJxAN7RO3YgCiZY").worksheet(nombre_hoja)
+    sheet = gspread_client.open_by_key(SPREADSHEET_ID_MAIN).worksheet(nombre_hoja)
     data = sheet.get_all_records()
     df = pd.DataFrame(data)
     for c in PEDIDOS_COLUMNAS_MINIMAS:
         if c not in df.columns:
             df[c] = ""
     return df
+
+def get_alejandro_worksheet(nombre_hoja: str):
+    """Abre una worksheet del spreadsheet alejandro_data por nombre."""
+    return gspread_client.open_by_key(SPREADSHEET_ID_ALEJANDRO).worksheet(nombre_hoja)
+
+
+def cargar_alejandro_hoja(nombre_hoja: str) -> pd.DataFrame:
+    """Carga una hoja de alejandro_data y garantiza columnas mínimas."""
+    sheet = get_alejandro_worksheet(nombre_hoja)
+    data = sheet.get_all_records()
+    df = pd.DataFrame(data)
+
+    cols_min = ALE_COLUMNAS.get(nombre_hoja, [])
+    for c in cols_min:
+        if c not in df.columns:
+            df[c] = ""
+
+    return df
+
+
 
 # --- FUNCIONES ---
 @st.cache_data(ttl=300)
@@ -79,7 +142,7 @@ def cargar_casos_especiales():
     Lee la hoja 'casos_especiales' y regresa un DataFrame.
     Si faltan columnas del ejemplo, las crea vacías para evitar KeyError.
     """
-    sheet = gspread_client.open_by_key("1aWkSelodaz0nWfQx7FZAysGnIYGQFJxAN7RO3YgCiZY").worksheet("casos_especiales")
+    sheet = gspread_client.open_by_key(SPREADSHEET_ID_MAIN).worksheet("casos_especiales")
     data = sheet.get_all_records()
     df = pd.DataFrame(data)
 
@@ -731,6 +794,7 @@ tabs = st.tabs([
     "🔍 Buscar Pedido",
     "⬇️ Descargar Datos",
     "✏️ Modificar Pedido",
+    "🗂️ Organizador (Alejandro)",
 ])
 with tabs[0]:
     modo_busqueda = st.radio("Selecciona el modo de búsqueda:", ["🔢 Por número de guía", "🧑 Por cliente/factura"], key="modo_busqueda_radio")
@@ -880,29 +944,29 @@ with tabs[0]:
                 })
 
             # 2.2) Buscar en casos_especiales (mostrar campos de la hoja + links de Adjuntos y Hoja_Ruta_Mensajero)
-            df_casos = cargar_casos_especiales()
-            # Ordenar por Hora_Registro si existe
-            if "Hora_Registro" in df_casos.columns:
-                df_casos["Hora_Registro"] = pd.to_datetime(df_casos["Hora_Registro"], errors="coerce")
-                df_casos = df_casos.sort_values(by="Hora_Registro", ascending=not recientes_primero)
-                if filtro_fechas_activo:
-                    mask_validas_casos = df_casos["Hora_Registro"].notna()
-                    df_casos = df_casos[mask_validas_casos & df_casos["Hora_Registro"].between(fecha_inicio_dt, fecha_fin_dt)]
-                df_casos = df_casos.reset_index(drop=True)
+                df_casos = cargar_casos_especiales()
+                # Ordenar por Hora_Registro si existe
+                if "Hora_Registro" in df_casos.columns:
+                    df_casos["Hora_Registro"] = pd.to_datetime(df_casos["Hora_Registro"], errors="coerce")
+                    df_casos = df_casos.sort_values(by="Hora_Registro", ascending=not recientes_primero)
+                    if filtro_fechas_activo:
+                        mask_validas_casos = df_casos["Hora_Registro"].notna()
+                        df_casos = df_casos[mask_validas_casos & df_casos["Hora_Registro"].between(fecha_inicio_dt, fecha_fin_dt)]
+                    df_casos = df_casos.reset_index(drop=True)
 
-            for _, row in df_casos.iterrows():
-                nombre = str(row.get("Cliente", "")).strip()
-                folio = str(row.get("Folio_Factura", "")).strip()
+                for _, row in df_casos.iterrows():
+                    nombre = str(row.get("Cliente", "")).strip()
+                    folio = str(row.get("Folio_Factura", "")).strip()
 
-                nombre_normalizado = normalizar(nombre) if nombre else ""
-                folio_normalizado = normalizar_folio(folio)
+                    nombre_normalizado = normalizar(nombre) if nombre else ""
+                    folio_normalizado = normalizar_folio(folio)
 
-                coincide_cliente = bool(nombre) and keyword_cliente_normalizado in nombre_normalizado
-                coincide_folio = bool(folio_normalizado) and keyword_folio_normalizado == folio_normalizado
+                    coincide_cliente = bool(nombre) and keyword_cliente_normalizado in nombre_normalizado
+                    coincide_folio = bool(folio_normalizado) and keyword_folio_normalizado == folio_normalizado
 
-                if not coincide_cliente and not coincide_folio:
-                    continue
-                resultados.append(preparar_resultado_caso(row))
+                    if not coincide_cliente and not coincide_folio:
+                        continue
+                    resultados.append(preparar_resultado_caso(row))
 
 
         # ====== BÚSQUEDA POR NÚMERO DE GUÍA (tu flujo original sobre datos_pedidos + S3) ======
@@ -1299,598 +1363,680 @@ with tabs[2]:
                 st.rerun()
             else:
                 st.error("❌ Contraseña incorrecta.")
-        st.stop()
 
-    df_pedidos = cargar_pedidos()
-    df_casos = cargar_casos_especiales()
+    if st.session_state.acceso_modificacion:
+        df_pedidos = cargar_pedidos()
+        df_casos = cargar_casos_especiales()
 
-    def es_devol_o_garant(row):
-        for col in ("Tipo_Envio", "Tipo_Caso"):
-            valor = str(row.get(col, ""))
-            if valor and ("devolu" in normalizar(valor) or "garant" in normalizar(valor)):
-                return True
-        return False
+        def es_devol_o_garant(row):
+            for col in ("Tipo_Envio", "Tipo_Caso"):
+                valor = str(row.get(col, ""))
+                if valor and ("devolu" in normalizar(valor) or "garant" in normalizar(valor)):
+                    return True
+            return False
 
-    df_casos = df_casos[df_casos.apply(es_devol_o_garant, axis=1)]
+        df_casos = df_casos[df_casos.apply(es_devol_o_garant, axis=1)]
 
-    for d in (df_pedidos, df_casos):
-        d["Hora_Registro"] = pd.to_datetime(d["Hora_Registro"], errors="coerce")
+        for d in (df_pedidos, df_casos):
+            d["Hora_Registro"] = pd.to_datetime(d["Hora_Registro"], errors="coerce")
 
-    df_pedidos["__source"] = "pedidos"
-    df_casos["__source"] = "casos"
-    df = pd.concat([df_pedidos, df_casos], ignore_index=True, sort=False)
-    df = df[df["ID_Pedido"].notna()]
-    df = df.sort_values(by="Hora_Registro", ascending=False)
+        df_pedidos["__source"] = "pedidos"
+        df_casos["__source"] = "casos"
+        df = pd.concat([df_pedidos, df_casos], ignore_index=True, sort=False)
+        df = df[df["ID_Pedido"].notna()]
+        df = df.sort_values(by="Hora_Registro", ascending=False)
 
-    pedido_sel = None
-    source_sel = None
+        pedido_sel = None
+        source_sel = None
 
-    def es_garantia(row):
-        """Determina si un caso corresponde a una garantía."""
-        for col in ("Tipo_Envio", "Tipo_Caso"):
-            valor = normalizar(str(row.get(col, "")))
-            if valor and "garant" in valor:
-                return True
-        return False
+        def es_garantia(row):
+            """Determina si un caso corresponde a una garantía."""
+            for col in ("Tipo_Envio", "Tipo_Caso"):
+                valor = normalizar(str(row.get(col, "")))
+                if valor and "garant" in valor:
+                    return True
+            return False
 
-    df_garantias = df_casos[df_casos.apply(es_garantia, axis=1)].copy()
+        df_garantias = df_casos[df_casos.apply(es_garantia, axis=1)].copy()
 
-    mostrar_garantias = st.checkbox(
-        "🔘 Mostrar sección de garantías",
-        help="Activa esta opción para consultar únicamente la información de garantías.",
-    )
-
-    if mostrar_garantias:
-        st.markdown("### 🛡️ Garantías registradas")
-        termino_busqueda_garantia = st.text_input(
-            "Buscar por cliente o folio",
-            key="busqueda_garantias",
-            placeholder="Cliente o folio",
+        mostrar_garantias = st.checkbox(
+            "🔘 Mostrar sección de garantías",
+            help="Activa esta opción para consultar únicamente la información de garantías.",
         )
 
-        termino_normalizado = normalizar(termino_busqueda_garantia or "")
-        termino_folio = (
-            normalizar_folio(termino_busqueda_garantia)
-            if termino_busqueda_garantia
-            else ""
-        )
-
-        if termino_normalizado:
-
-            def coincide_garantia(row):
-                cliente = normalizar(str(row.get("Cliente", "")))
-                folio = normalizar_folio(
-                    row.get("Folio_Factura") or row.get("Folio") or ""
-                )
-                return termino_normalizado in cliente or (
-                    termino_folio and termino_folio in folio
-                )
-
-            df_garantias_filtrado = df_garantias[
-                df_garantias.apply(coincide_garantia, axis=1)
-            ]
-        else:
-            df_garantias_filtrado = df_garantias
-
-        if df_garantias_filtrado.empty:
-            st.info(
-                "No se encontraron garantías con el criterio de búsqueda proporcionado."
-            )
-            st.stop()
-        else:
-
-            def formatear_fecha(valor, formato):
-                if pd.isna(valor):
-                    return ""
-                if isinstance(valor, pd.Timestamp):
-                    return valor.strftime(formato)
-                try:
-                    fecha = pd.to_datetime(valor)
-                    if pd.isna(fecha):
-                        return ""
-                    return fecha.strftime(formato)
-                except Exception:
-                    return str(valor)
-
-            columnas_tabla = {
-                "ID_Pedido": "Pedido",
-                "Hora_Registro": "Hora Registro",
-                "Vendedor_Registro": "Vendedor Registro",
-                "Cliente": "Cliente",
-                "Folio_Factura": "Folio / Factura",
-                "Numero_Serie": "Número Serie",
-                "Fecha_Compra": "Fecha Compra",
-                "Tipo_Envio": "Tipo Envío",
-                "Estado": "Estado",
-                "Estado_Caso": "Estado Caso",
-                "Seguimiento": "Seguimiento",
-            }
-
-            tabla_garantias = df_garantias_filtrado[list(columnas_tabla.keys())].copy()
-            tabla_garantias["Hora_Registro"] = tabla_garantias["Hora_Registro"].apply(
-                lambda v: formatear_fecha(v, "%d/%m/%Y %H:%M")
-            )
-            tabla_garantias["Fecha_Compra"] = tabla_garantias["Fecha_Compra"].apply(
-                lambda v: formatear_fecha(v, "%d/%m/%Y") if str(v).strip() else ""
+        if mostrar_garantias:
+            st.markdown("### 🛡️ Garantías registradas")
+            termino_busqueda_garantia = st.text_input(
+                "Buscar por cliente o folio",
+                key="busqueda_garantias",
+                placeholder="Cliente o folio",
             )
 
-            tabla_garantias = tabla_garantias.rename(columns=columnas_tabla)
-            st.dataframe(tabla_garantias, use_container_width=True)
-
-            opciones_select = [None] + df_garantias_filtrado.index.tolist()
-
-            def format_garantia(idx):
-                if idx is None:
-                    return "Selecciona una garantía"
-                row = df_garantias_filtrado.loc[idx]
-                hora = formatear_fecha(row.get("Hora_Registro"), "%d/%m/%Y %H:%M")
-                estado = row.get("Estado_Caso") or row.get("Estado") or ""
-                return (
-                    f"📦 {row.get('ID_Pedido', '')} | 🧾 {row.get('Folio_Factura', '')} | "
-                    f"👤 {row.get('Cliente', '')} | 🚚 {row.get('Tipo_Envio', '')} | "
-                    f"🔍 {estado} | 🕒 {hora}"
-                )
-
-            idx_garantia = st.selectbox(
-                "Selecciona una garantía para ver detalles o modificarla:",
-                opciones_select,
-                format_func=format_garantia,
-                key="select_garantia",
+            termino_normalizado = normalizar(termino_busqueda_garantia or "")
+            termino_folio = (
+                normalizar_folio(termino_busqueda_garantia)
+                if termino_busqueda_garantia
+                else ""
             )
 
-            if idx_garantia is not None and idx_garantia in df_garantias_filtrado.index:
-                row_garantia = df_garantias_filtrado.loc[idx_garantia]
-                pedido_sel = row_garantia.get("ID_Pedido")
-                source_sel = "casos"
-                st.markdown("#### 📘 Detalles de la garantía seleccionada")
+            if termino_normalizado:
 
-                def limpiar(valor):
-                    if valor is None:
-                        return ""
-                    if isinstance(valor, str):
-                        return "" if not valor.strip() or valor.strip().lower() == "nan" else valor.strip()
-                    try:
-                        if pd.isna(valor):
-                            return ""
-                    except Exception:
-                        pass
-                    return valor
+                def coincide_garantia(row):
+                    cliente = normalizar(str(row.get("Cliente", "")))
+                    folio = normalizar_folio(
+                        row.get("Folio_Factura") or row.get("Folio") or ""
+                    )
+                    return termino_normalizado in cliente or (
+                        termino_folio and termino_folio in folio
+                    )
 
-                def formatear_monto(valor):
-                    try:
-                        if valor is None or str(valor).strip() == "":
-                            return ""
-                        valor_float = float(valor)
-                        valor_formateado = f"{valor_float:,.2f}"
-                        valor_formateado = (
-                            valor_formateado.replace(",", "_")
-                            .replace(".", ",")
-                            .replace("_", ".")
-                        )
-                        return f"${valor_formateado}"
-                    except Exception:
-                        valor_limpio = limpiar(valor)
-                        return f"${valor_limpio}" if valor_limpio else ""
-
-                col_izq, col_der = st.columns(2)
-
-                detalles_izq = [
-                    ("📦 Pedido", row_garantia.get("ID_Pedido", "")),
-                    ("👤 Cliente", row_garantia.get("Cliente", "")),
-                    ("🧾 Folio / Factura", row_garantia.get("Folio_Factura", "")),
-                    ("🚚 Tipo de envío", row_garantia.get("Tipo_Envio", "")),
-                    ("📊 Estado", row_garantia.get("Estado", "")),
-                    ("🧮 Estado del caso", row_garantia.get("Estado_Caso", "")),
-                    ("🕵️ Seguimiento", row_garantia.get("Seguimiento", "")),
-                    ("🧑‍💼 Vendedor", row_garantia.get("Vendedor_Registro", "")),
-                    (
-                        "🕒 Hora de registro",
-                        formatear_fecha(row_garantia.get("Hora_Registro"), "%d/%m/%Y %H:%M"),
-                    ),
+                df_garantias_filtrado = df_garantias[
+                    df_garantias.apply(coincide_garantia, axis=1)
                 ]
+            else:
+                df_garantias_filtrado = df_garantias
 
-                detalles_der = [
-                    ("🔢 Número de serie", row_garantia.get("Numero_Serie", "")),
-                    (
-                        "🗓️ Fecha de compra",
-                        formatear_fecha(row_garantia.get("Fecha_Compra"), "%d/%m/%Y"),
-                    ),
-                    ("🎯 Resultado esperado", row_garantia.get("Resultado_Esperado", "")),
-                    ("📦 Material devuelto", row_garantia.get("Material_Devuelto", "")),
-                    ("💵 Monto devuelto", formatear_monto(row_garantia.get("Monto_Devuelto", ""))),
-                    ("📝 Motivo detallado", row_garantia.get("Motivo_Detallado", "")),
-                    ("🏢 Área responsable", row_garantia.get("Area_Responsable", "")),
-                    ("👥 Responsable", row_garantia.get("Nombre_Responsable", "")),
-                    ("🧾 Nota de venta", row_garantia.get("Nota_Venta", "")),
-                    ("❓ ¿Tiene nota de venta?", row_garantia.get("Tiene_Nota_Venta", "")),
-                    ("🧾 Motivo nota de venta", row_garantia.get("Motivo_NotaVenta", "")),
-                    ("📍 Dirección guía retorno", row_garantia.get("Direccion_Guia_Retorno", "")),
-                ]
+            if df_garantias_filtrado.empty:
+                st.info(
+                    "No se encontraron garantías con el criterio de búsqueda proporcionado."
+                )
+                st.stop()
+            else:
 
-                etiquetas_resaltadas = {"🕵️ Seguimiento", "📝 Motivo detallado"}
+                def formatear_fecha(valor, formato):
+                    if pd.isna(valor):
+                        return ""
+                    if isinstance(valor, pd.Timestamp):
+                        return valor.strftime(formato)
+                    try:
+                        fecha = pd.to_datetime(valor)
+                        if pd.isna(fecha):
+                            return ""
+                        return fecha.strftime(formato)
+                    except Exception:
+                        return str(valor)
 
-                for columna, items in ((col_izq, detalles_izq), (col_der, detalles_der)):
-                    for etiqueta, valor in items:
-                        valor_limpio = limpiar(valor)
-                        if not valor_limpio:
-                            continue
-                        if etiqueta in etiquetas_resaltadas:
-                            columna.info(f"{etiqueta}: {valor_limpio}")
-                        else:
-                            columna.markdown(f"**{etiqueta}:** {valor_limpio}")
+                columnas_tabla = {
+                    "ID_Pedido": "Pedido",
+                    "Hora_Registro": "Hora Registro",
+                    "Vendedor_Registro": "Vendedor Registro",
+                    "Cliente": "Cliente",
+                    "Folio_Factura": "Folio / Factura",
+                    "Numero_Serie": "Número Serie",
+                    "Fecha_Compra": "Fecha Compra",
+                    "Tipo_Envio": "Tipo Envío",
+                    "Estado": "Estado",
+                    "Estado_Caso": "Estado Caso",
+                    "Seguimiento": "Seguimiento",
+                }
 
-                comentarios = str(row_garantia.get("Comentario", "")).strip()
-                comentarios_adicionales = str(row_garantia.get("Comentarios", "")).strip()
-                if comentarios or comentarios_adicionales:
-                    st.markdown("#### 💬 Comentarios")
-                    if comentarios:
-                        st.info(comentarios)
-                    if comentarios_adicionales:
-                        st.info(comentarios_adicionales)
+                tabla_garantias = df_garantias_filtrado[list(columnas_tabla.keys())].copy()
+                tabla_garantias["Hora_Registro"] = tabla_garantias["Hora_Registro"].apply(
+                    lambda v: formatear_fecha(v, "%d/%m/%Y %H:%M")
+                )
+                tabla_garantias["Fecha_Compra"] = tabla_garantias["Fecha_Compra"].apply(
+                    lambda v: formatear_fecha(v, "%d/%m/%Y") if str(v).strip() else ""
+                )
 
-                secciones_adjuntos = []
+                tabla_garantias = tabla_garantias.rename(columns=columnas_tabla)
+                st.dataframe(tabla_garantias, use_container_width=True)
 
-                def agregar_adjuntos(titulo, valores):
-                    urls = partir_urls(valores)
-                    urls_limpias = []
-                    for u in urls:
-                        url_limpio = limpiar(u)
-                        if url_limpio:
-                            urls_limpias.append(url_limpio)
-                    if urls_limpias:
-                        secciones_adjuntos.append((titulo, urls_limpias))
+                opciones_select = [None] + df_garantias_filtrado.index.tolist()
 
-                agregar_adjuntos("📎 Archivos adjuntos", row_garantia.get("Adjuntos", ""))
-                agregar_adjuntos("🧾 Guías asociadas", row_garantia.get("Adjuntos_Guia", ""))
-                agregar_adjuntos("📬 Hoja de ruta", row_garantia.get("Hoja_Ruta_Mensajero", ""))
-                agregar_adjuntos("🛠 Archivos de surtido", row_garantia.get("Adjuntos_Surtido", ""))
-                agregar_adjuntos("💳 Notas de crédito", row_garantia.get("Nota_Credito_URL", ""))
-                agregar_adjuntos("📄 Documentos adicionales", row_garantia.get("Documento_Adicional_URL", ""))
+                def format_garantia(idx):
+                    if idx is None:
+                        return "Selecciona una garantía"
+                    row = df_garantias_filtrado.loc[idx]
+                    hora = formatear_fecha(row.get("Hora_Registro"), "%d/%m/%Y %H:%M")
+                    estado = row.get("Estado_Caso") or row.get("Estado") or ""
+                    return (
+                        f"📦 {row.get('ID_Pedido', '')} | 🧾 {row.get('Folio_Factura', '')} | "
+                        f"👤 {row.get('Cliente', '')} | 🚚 {row.get('Tipo_Envio', '')} | "
+                        f"🔍 {estado} | 🕒 {hora}"
+                    )
 
-                if secciones_adjuntos:
-                    st.markdown("#### 🗂️ Archivos de la garantía")
-                    for titulo, urls in secciones_adjuntos:
-                        st.markdown(f"**{titulo}:**")
-                        for idx, raw_url in enumerate(urls, start=1):
-                            nombre, enlace = resolver_nombre_y_enlace(raw_url, f"{titulo} #{idx}")
-                            if not enlace:
-                                continue
-                            st.markdown(
-                                f'- <a href="{enlace}" target="_blank">{nombre}</a>',
-                                unsafe_allow_html=True,
+                idx_garantia = st.selectbox(
+                    "Selecciona una garantía para ver detalles o modificarla:",
+                    opciones_select,
+                    format_func=format_garantia,
+                    key="select_garantia",
+                )
+
+                if idx_garantia is not None and idx_garantia in df_garantias_filtrado.index:
+                    row_garantia = df_garantias_filtrado.loc[idx_garantia]
+                    pedido_sel = row_garantia.get("ID_Pedido")
+                    source_sel = "casos"
+                    st.markdown("#### 📘 Detalles de la garantía seleccionada")
+
+                    def limpiar(valor):
+                        if valor is None:
+                            return ""
+                        if isinstance(valor, str):
+                            return "" if not valor.strip() or valor.strip().lower() == "nan" else valor.strip()
+                        try:
+                            if pd.isna(valor):
+                                return ""
+                        except Exception:
+                            pass
+                        return valor
+
+                    def formatear_monto(valor):
+                        try:
+                            if valor is None or str(valor).strip() == "":
+                                return ""
+                            valor_float = float(valor)
+                            valor_formateado = f"{valor_float:,.2f}"
+                            valor_formateado = (
+                                valor_formateado.replace(",", "_")
+                                .replace(".", ",")
+                                .replace("_", ".")
                             )
+                            return f"${valor_formateado}"
+                        except Exception:
+                            valor_limpio = limpiar(valor)
+                            return f"${valor_limpio}" if valor_limpio else ""
+
+                    col_izq, col_der = st.columns(2)
+
+                    detalles_izq = [
+                        ("📦 Pedido", row_garantia.get("ID_Pedido", "")),
+                        ("👤 Cliente", row_garantia.get("Cliente", "")),
+                        ("🧾 Folio / Factura", row_garantia.get("Folio_Factura", "")),
+                        ("🚚 Tipo de envío", row_garantia.get("Tipo_Envio", "")),
+                        ("📊 Estado", row_garantia.get("Estado", "")),
+                        ("🧮 Estado del caso", row_garantia.get("Estado_Caso", "")),
+                        ("🕵️ Seguimiento", row_garantia.get("Seguimiento", "")),
+                        ("🧑‍💼 Vendedor", row_garantia.get("Vendedor_Registro", "")),
+                        (
+                            "🕒 Hora de registro",
+                            formatear_fecha(row_garantia.get("Hora_Registro"), "%d/%m/%Y %H:%M"),
+                        ),
+                    ]
+
+                    detalles_der = [
+                        ("🔢 Número de serie", row_garantia.get("Numero_Serie", "")),
+                        (
+                            "🗓️ Fecha de compra",
+                            formatear_fecha(row_garantia.get("Fecha_Compra"), "%d/%m/%Y"),
+                        ),
+                        ("🎯 Resultado esperado", row_garantia.get("Resultado_Esperado", "")),
+                        ("📦 Material devuelto", row_garantia.get("Material_Devuelto", "")),
+                        ("💵 Monto devuelto", formatear_monto(row_garantia.get("Monto_Devuelto", ""))),
+                        ("📝 Motivo detallado", row_garantia.get("Motivo_Detallado", "")),
+                        ("🏢 Área responsable", row_garantia.get("Area_Responsable", "")),
+                        ("👥 Responsable", row_garantia.get("Nombre_Responsable", "")),
+                        ("🧾 Nota de venta", row_garantia.get("Nota_Venta", "")),
+                        ("❓ ¿Tiene nota de venta?", row_garantia.get("Tiene_Nota_Venta", "")),
+                        ("🧾 Motivo nota de venta", row_garantia.get("Motivo_NotaVenta", "")),
+                        ("📍 Dirección guía retorno", row_garantia.get("Direccion_Guia_Retorno", "")),
+                    ]
+
+                    etiquetas_resaltadas = {"🕵️ Seguimiento", "📝 Motivo detallado"}
+
+                    for columna, items in ((col_izq, detalles_izq), (col_der, detalles_der)):
+                        for etiqueta, valor in items:
+                            valor_limpio = limpiar(valor)
+                            if not valor_limpio:
+                                continue
+                            if etiqueta in etiquetas_resaltadas:
+                                columna.info(f"{etiqueta}: {valor_limpio}")
+                            else:
+                                columna.markdown(f"**{etiqueta}:** {valor_limpio}")
+
+                    comentarios = str(row_garantia.get("Comentario", "")).strip()
+                    comentarios_adicionales = str(row_garantia.get("Comentarios", "")).strip()
+                    if comentarios or comentarios_adicionales:
+                        st.markdown("#### 💬 Comentarios")
+                        if comentarios:
+                            st.info(comentarios)
+                        if comentarios_adicionales:
+                            st.info(comentarios_adicionales)
+
+                    secciones_adjuntos = []
+
+                    def agregar_adjuntos(titulo, valores):
+                        urls = partir_urls(valores)
+                        urls_limpias = []
+                        for u in urls:
+                            url_limpio = limpiar(u)
+                            if url_limpio:
+                                urls_limpias.append(url_limpio)
+                        if urls_limpias:
+                            secciones_adjuntos.append((titulo, urls_limpias))
+
+                    agregar_adjuntos("📎 Archivos adjuntos", row_garantia.get("Adjuntos", ""))
+                    agregar_adjuntos("🧾 Guías asociadas", row_garantia.get("Adjuntos_Guia", ""))
+                    agregar_adjuntos("📬 Hoja de ruta", row_garantia.get("Hoja_Ruta_Mensajero", ""))
+                    agregar_adjuntos("🛠 Archivos de surtido", row_garantia.get("Adjuntos_Surtido", ""))
+                    agregar_adjuntos("💳 Notas de crédito", row_garantia.get("Nota_Credito_URL", ""))
+                    agregar_adjuntos("📄 Documentos adicionales", row_garantia.get("Documento_Adicional_URL", ""))
+
+                    if secciones_adjuntos:
+                        st.markdown("#### 🗂️ Archivos de la garantía")
+                        for titulo, urls in secciones_adjuntos:
+                            st.markdown(f"**{titulo}:**")
+                            for idx, raw_url in enumerate(urls, start=1):
+                                nombre, enlace = resolver_nombre_y_enlace(raw_url, f"{titulo} #{idx}")
+                                if not enlace:
+                                    continue
+                                st.markdown(
+                                    f'- <a href="{enlace}" target="_blank">{nombre}</a>',
+                                    unsafe_allow_html=True,
+                                )
+                else:
+                    pedido_sel = None
+                    source_sel = None
+                    st.info("Selecciona una garantía para ver detalles o modificarla.")
+                    st.stop()
+
+
+        if "pedido_modificado" in st.session_state:
+            pedido_sel = st.session_state["pedido_modificado"]
+            source_sel = st.session_state.get(
+                "pedido_modificado_source", source_sel or "pedidos"
+            )
+            del st.session_state["pedido_modificado"]  # ✅ limpia la variable tras usarla
+            if "pedido_modificado_source" in st.session_state:
+                del st.session_state["pedido_modificado_source"]
+
+
+        usar_busqueda = False
+        if pedido_sel is None:
+            usar_busqueda = st.checkbox(
+                "🔍 Buscar por nombre de cliente (activar para ocultar los últimos 10 pedidos)"
+            )
+
+        if pedido_sel is None:
+            if usar_busqueda:
+                st.markdown("### 🔍 Buscar Pedido por Cliente")
+                cliente_buscado = st.text_input("👤 Escribe el nombre del cliente:")
+                cliente_normalizado = normalizar(cliente_buscado)
+                coincidencias = []
+
+                if cliente_buscado:
+                    for _, row_ in df.iterrows():
+                        cliente_row = row_.get("Cliente", "").strip()
+                        if not cliente_row:
+                            continue
+                        cliente_row_normalizado = normalizar(cliente_row)
+                        if cliente_normalizado in cliente_row_normalizado:
+                            coincidencias.append(row_)
+
+                if not coincidencias:
+                    st.warning("⚠️ No se encontraron pedidos para ese cliente.")
+                    st.stop()
+                else:
+                    st.success(
+                        f"✅ Se encontraron {len(coincidencias)} coincidencia(s) para este cliente."
+                    )
+
+                    if len(coincidencias) == 1:
+                        pedido_sel = coincidencias[0]["ID_Pedido"]
+                        source_sel = coincidencias[0]["__source"]
+                        row = coincidencias[0]
+                        st.markdown(
+                            f"🧾 {row.get('Folio_Factura', row.get('Folio',''))} – 🚚 {row.get('Tipo_Envio','')} – 👤 {row['Cliente']} – 🔍 {row.get('Estado', row.get('Estado_Caso',''))} – 🧑‍💼 {row.get('Vendedor_Registro','')} – 🕒 {row['Hora_Registro'].strftime('%d/%m %H:%M')}"
+                        )
+
+                    else:
+                        opciones = []
+                        for r in coincidencias:
+                            folio = r.get('Folio_Factura', r.get('Folio',''))
+                            tipo_envio = r.get('Tipo_Envio','')
+                            display = (
+                                f"{folio} – 🚚 {tipo_envio} – 👤 {r['Cliente']} – 🔍 {r.get('Estado', r.get('Estado_Caso',''))} "
+                                f"– 🧑‍💼 {r.get('Vendedor_Registro','')} – 🕒 {r['Hora_Registro'].strftime('%d/%m %H:%M')}"
+                            )
+                            opciones.append(display)
+                        seleccion = st.selectbox(
+                            "👥 Se encontraron múltiples pedidos, selecciona uno:", opciones
+                        )
+                        idx = opciones.index(seleccion)
+                        pedido_sel = coincidencias[idx]["ID_Pedido"]
+                        source_sel = coincidencias[idx]["__source"]
+
             else:
-                pedido_sel = None
-                source_sel = None
-                st.info("Selecciona una garantía para ver detalles o modificarla.")
-                st.stop()
-    
+                ultimos_10 = df.head(10)
+                st.markdown("### 🕒 Últimos 10 Pedidos Registrados")
+                ultimos_10["display"] = ultimos_10.apply(
+                    lambda row: (
+                        f"{row.get('Folio_Factura', row.get('Folio',''))} – {row.get('Tipo_Envio','')} – 👤 {row['Cliente']} "
+                        f"– 🔍 {row.get('Estado', row.get('Estado_Caso',''))} – 🧑‍💼 {row.get('Vendedor_Registro','')} "
+                        f"– 🕒 {row['Hora_Registro'].strftime('%d/%m %H:%M')}"
+                    ),
+                    axis=1
+                )
+                idx_seleccion = st.selectbox(
+                    "⬇️ Selecciona uno de los pedidos recientes:",
+                    ultimos_10.index,
+                    format_func=lambda i: ultimos_10.loc[i, "display"]
+                )
+                pedido_sel = ultimos_10.loc[idx_seleccion, "ID_Pedido"]
+                source_sel = ultimos_10.loc[idx_seleccion, "__source"]
 
-    if "pedido_modificado" in st.session_state:
-        pedido_sel = st.session_state["pedido_modificado"]
-        source_sel = st.session_state.get(
-            "pedido_modificado_source", source_sel or "pedidos"
+
+        # --- Cargar datos del pedido seleccionado ---
+        st.markdown("---")
+
+        if pedido_sel is None:
+            st.warning("⚠️ No se ha seleccionado ningún pedido válido.")
+            st.stop()
+
+        row_df = df_pedidos if source_sel == "pedidos" else df_casos
+        row = row_df[row_df["ID_Pedido"].astype(str) == str(pedido_sel)].iloc[0]
+        gspread_row_idx = row_df[row_df["ID_Pedido"].astype(str) == str(pedido_sel)].index[0] + 2  # índice real en hoja
+        if "mensaje_exito" in st.session_state:
+            st.success(st.session_state["mensaje_exito"])
+            del st.session_state["mensaje_exito"]  # ✅ eliminar para que no se repita
+
+
+        # Definir la hoja de Google Sheets para modificación
+        hoja_nombre = "datos_pedidos" if source_sel == "pedidos" else "casos_especiales"
+        hoja = gspread_client.open_by_key(SPREADSHEET_ID_MAIN).worksheet(hoja_nombre)
+
+        st.markdown(
+            f"📦 **Cliente:** {row['Cliente']} &nbsp;&nbsp;&nbsp;&nbsp; 🧾 **Folio Factura:** {row.get('Folio_Factura', 'N/A')}"
         )
-        del st.session_state["pedido_modificado"]  # ✅ limpia la variable tras usarla
-        if "pedido_modificado_source" in st.session_state:
-            del st.session_state["pedido_modificado_source"]
+
+        st.markdown("### 📎 Adjuntar Archivos")
+        col_guias = "Adjuntos_Guia" if source_sel == "pedidos" else "Hoja_Ruta_Mensajero"
+        existentes_guias = partir_urls(row.get(col_guias, ""))
+        existentes_otros = partir_urls(row.get("Adjuntos", ""))
+
+        if existentes_guias or existentes_otros:
+            with st.expander("📥 Archivos existentes", expanded=False):
+                if existentes_guias:
+                    st.markdown("**Guías:**")
+                    for u in existentes_guias:
+                        tmp = get_s3_file_download_url(s3_client, u)
+                        nombre = extract_s3_key(u).split("/")[-1]
+                        st.markdown(f'- <a href="{tmp}" target="_blank">{nombre}</a>', unsafe_allow_html=True)
+                if existentes_otros:
+                    st.markdown("**Otros:**")
+                    for u in existentes_otros:
+                        tmp = get_s3_file_download_url(s3_client, u)
+                        nombre = extract_s3_key(u).split("/")[-1]
+                        st.markdown(f'- <a href="{tmp}" target="_blank">{nombre}</a>', unsafe_allow_html=True)
+
+        uploaded_guias = st.file_uploader("📄 Guías", accept_multiple_files=True)
+        uploaded_otros = st.file_uploader("📁 Otros", accept_multiple_files=True)
+
+        if st.button("⬆️ Subir archivos"):
+            nuevas_guias_urls, nuevas_otros_urls = [], []
+            for file in uploaded_guias or []:
+                key = f"adjuntos_pedidos/{pedido_sel}/{file.name}"
+                success, url_subida = upload_file_to_s3(s3_client, S3_BUCKET, file, key)
+                if success:
+                    nuevas_guias_urls.append(url_subida)
+            for file in uploaded_otros or []:
+                key = f"adjuntos_pedidos/{pedido_sel}/{file.name}"
+                success, url_subida = upload_file_to_s3(s3_client, S3_BUCKET, file, key)
+                if success:
+                    nuevas_otros_urls.append(url_subida)
+
+            if nuevas_guias_urls:
+                existente = row.get(col_guias, "")
+                nuevo_valor = combinar_urls_existentes(existente, nuevas_guias_urls)
+                hoja.update_cell(gspread_row_idx, row_df.columns.get_loc(col_guias)+1, nuevo_valor)
+            if nuevas_otros_urls:
+                existente = row.get("Adjuntos", "")
+                nuevo_valor = combinar_urls_existentes(existente, nuevas_otros_urls)
+                hoja.update_cell(gspread_row_idx, row_df.columns.get_loc("Adjuntos")+1, nuevo_valor)
+
+            st.session_state["pedido_modificado"] = pedido_sel
+            st.session_state["pedido_modificado_source"] = source_sel
+            st.session_state["mensaje_exito"] = "📎 Archivos subidos correctamente."
+            st.rerun()
 
 
-    usar_busqueda = False
-    if pedido_sel is None:
-        usar_busqueda = st.checkbox(
-            "🔍 Buscar por nombre de cliente (activar para ocultar los últimos 10 pedidos)"
-        )
+        # --- CAMPOS MODIFICABLES ---
+        if source_sel == "casos":
+            tipo_envio_val = str(row.get("Tipo_Envio", "") or "")
+            tipo_caso_val = str(row.get("Tipo_Caso", "") or "")
+            es_garantia = any("garant" in valor.lower() for valor in (tipo_envio_val, tipo_caso_val))
 
-    if pedido_sel is None:
-        if usar_busqueda:
-            st.markdown("### 🔍 Buscar Pedido por Cliente")
-            cliente_buscado = st.text_input("👤 Escribe el nombre del cliente:")
-            cliente_normalizado = normalizar(cliente_buscado)
-            coincidencias = []
+            if es_garantia:
+                opciones_seguimiento = [
+                    "llegó el material",
+                    "en prueba",
+                    "aprobada",
+                    "rechazada",
+                ]
+                seguimiento_actual = str(row.get("Seguimiento", "") or "").strip()
+                try:
+                    index_preseleccion = next(
+                        i for i, opcion in enumerate(opciones_seguimiento) if opcion.lower() == seguimiento_actual.lower()
+                    )
+                except StopIteration:
+                    index_preseleccion = 0
 
-            if cliente_buscado:
-                for _, row_ in df.iterrows():
-                    cliente_row = row_.get("Cliente", "").strip()
-                    if not cliente_row:
-                        continue
-                    cliente_row_normalizado = normalizar(cliente_row)
-                    if cliente_normalizado in cliente_row_normalizado:
-                        coincidencias.append(row_)
-
-            if not coincidencias:
-                st.warning("⚠️ No se encontraron pedidos para ese cliente.")
-                st.stop()
-            else:
-                st.success(
-                    f"✅ Se encontraron {len(coincidencias)} coincidencia(s) para este cliente."
+                seguimiento_sel = st.selectbox(
+                    "Seguimiento de garantía",
+                    opciones_seguimiento,
+                    index=index_preseleccion,
                 )
 
-                if len(coincidencias) == 1:
-                    pedido_sel = coincidencias[0]["ID_Pedido"]
-                    source_sel = coincidencias[0]["__source"]
-                    row = coincidencias[0]
-                    st.markdown(
-                        f"🧾 {row.get('Folio_Factura', row.get('Folio',''))} – 🚚 {row.get('Tipo_Envio','')} – 👤 {row['Cliente']} – 🔍 {row.get('Estado', row.get('Estado_Caso',''))} – 🧑‍💼 {row.get('Vendedor_Registro','')} – 🕒 {row['Hora_Registro'].strftime('%d/%m %H:%M')}"
+                if st.button("Guardar seguimiento"):
+                    hoja.update_cell(
+                        gspread_row_idx,
+                        row_df.columns.get_loc("Seguimiento") + 1,
+                        seguimiento_sel,
                     )
+                    st.session_state["pedido_modificado"] = pedido_sel
+                    st.session_state["pedido_modificado_source"] = source_sel
+                    st.session_state["mensaje_exito"] = "🔄 Seguimiento de garantía guardado correctamente."
+                    st.rerun()
 
+        comentario_usuario = st.text_area("📝 Comentario desde almacén", key="comentario_almacen")
+        if st.button("Guardar comentario"):
+            comentario_limpio = comentario_usuario.strip()
+            if not comentario_limpio:
+                st.warning("⚠️ Debes ingresar un comentario antes de guardarlo.")
+            else:
+                existente = str(row.get("Comentario", "") or "")
+                nuevo_comentario = f"[ALMACÉN 🏷️] {comentario_limpio}"
+                if existente.strip():
+                    valor_final = f"{existente.rstrip()}\n{nuevo_comentario}"
                 else:
-                    opciones = []
-                    for r in coincidencias:
-                        folio = r.get('Folio_Factura', r.get('Folio',''))
-                        tipo_envio = r.get('Tipo_Envio','')
-                        display = (
-                            f"{folio} – 🚚 {tipo_envio} – 👤 {r['Cliente']} – 🔍 {r.get('Estado', r.get('Estado_Caso',''))} "
-                            f"– 🧑‍💼 {r.get('Vendedor_Registro','')} – 🕒 {r['Hora_Registro'].strftime('%d/%m %H:%M')}"
-                        )
-                        opciones.append(display)
-                    seleccion = st.selectbox(
-                        "👥 Se encontraron múltiples pedidos, selecciona uno:", opciones
-                    )
-                    idx = opciones.index(seleccion)
-                    pedido_sel = coincidencias[idx]["ID_Pedido"]
-                    source_sel = coincidencias[idx]["__source"]
+                    valor_final = nuevo_comentario
+                hoja.update_cell(gspread_row_idx, row_df.columns.get_loc("Comentario") + 1, valor_final)
+                st.session_state["comentario_almacen"] = ""
+                st.session_state["pedido_modificado"] = pedido_sel
+                st.session_state["pedido_modificado_source"] = source_sel
+                st.session_state["mensaje_exito"] = "📝 Comentario guardado correctamente."
+                st.rerun()
 
+        vendedores = [
+            "ALEJANDRO RODRIGUEZ",
+            "ANA KAREN ORTEGA MAHUAD",
+            "DANIELA LOPEZ RAMIREZ",
+            "EDGAR ORLANDO GOMEZ VILLAGRAN",
+            "GLORIA MICHELLE GARCIA TORRES",
+            "GRISELDA CAROLINA SANCHEZ GARCIA",
+            "HECTOR DEL ANGEL AREVALO ALCALA",
+            "JOSELIN TRUJILLO PATRACA",
+            "NORA ALEJANDRA MARTINEZ MORENO",
+            "PAULINA TREJO"
+        ]
+        vendedor_actual = row.get("Vendedor_Registro", "").strip()
+
+        st.markdown("### 🧑‍💼 Cambio de Vendedor")
+        st.markdown(f"**Actual:** {vendedor_actual}")
+
+        vendedores_opciones = [v for v in vendedores if v != vendedor_actual] or [vendedor_actual]
+        nuevo_vendedor = st.selectbox("➡️ Cambiar a:", vendedores_opciones)
+
+        if st.button("🧑‍💼 Guardar cambio de vendedor"):
+            hoja.update_cell(gspread_row_idx, row_df.columns.get_loc("Vendedor_Registro")+1, nuevo_vendedor)
+            st.session_state["pedido_modificado"] = pedido_sel
+            st.session_state["pedido_modificado_source"] = source_sel
+            st.session_state["mensaje_exito"] = "🎈 Vendedor actualizado correctamente."
+            st.rerun()
+
+
+        if source_sel == "pedidos":
+            tipo_envio_actual = row["Tipo_Envio"].strip()
+            st.markdown("### 🚚 Cambio de Tipo de Envío")
+            st.markdown(f"**Actual:** {tipo_envio_actual}")
+
+            opcion_contraria = "📍 Pedido Local" if "Foráneo" in tipo_envio_actual else "🚚 Pedido Foráneo"
+            tipo_envio = st.selectbox("➡️ Cambiar a:", [opcion_contraria])
+
+            if tipo_envio == "📍 Pedido Local":
+                nuevo_turno = st.selectbox("⏰ Turno", ["☀️ Local Mañana", "🌙 Local Tarde", "🌵 Saltillo", "📦 Pasa a Bodega"])
+                fecha_entrega_actual_raw = str(row.get("Fecha_Entrega", "") or "").strip()
+                fecha_entrega_actual_dt = pd.to_datetime(fecha_entrega_actual_raw, errors="coerce")
+                fecha_entrega_actual_mostrar = (
+                    fecha_entrega_actual_dt.strftime("%d/%m/%Y")
+                    if pd.notna(fecha_entrega_actual_dt)
+                    else "Sin fecha"
+                )
+                st.markdown(f"**📅 Fecha de entrega actual:** {fecha_entrega_actual_mostrar}")
+
+                fecha_entrega_nueva = st.date_input(
+                    "📅 Fecha de entrega",
+                    value=(
+                        fecha_entrega_actual_dt.date()
+                        if pd.notna(fecha_entrega_actual_dt)
+                        else date.today()
+                    ),
+                    min_value=date.today(),
+                    max_value=date.today() + timedelta(days=365),
+                    format="DD/MM/YYYY",
+                )
+                fecha_entrega_nueva_str = fecha_entrega_nueva.strftime("%Y-%m-%d")
+            else:
+                nuevo_turno = ""
+                fecha_entrega_nueva_str = str(row.get("Fecha_Entrega", "") or "").strip()
+
+            if st.button("📦 Guardar cambio de tipo de envío"):
+                hoja.update_cell(gspread_row_idx, row_df.columns.get_loc("Tipo_Envio")+1, tipo_envio)
+                hoja.update_cell(gspread_row_idx, row_df.columns.get_loc("Turno")+1, nuevo_turno)
+                hoja.update_cell(gspread_row_idx, row_df.columns.get_loc("Fecha_Entrega")+1, fecha_entrega_nueva_str)
+                st.session_state["pedido_modificado"] = pedido_sel
+                st.session_state["pedido_modificado_source"] = source_sel
+                st.session_state["mensaje_exito"] = "📦 Tipo de envío, turno y fecha de entrega actualizados correctamente."
+                st.rerun()
+
+
+        # --- NUEVO: CAMBIO DE ESTADO A CANCELADO ---
+        estado_actual = row.get("Estado", "").strip()
+        st.markdown("### 🟣 Cancelar Pedido")
+        st.markdown(f"**Estado Actual:** {estado_actual}")
+
+        # Solo mostrar la opción de cancelar si el pedido no está ya cancelado
+        if "Cancelado" not in estado_actual:
+            if st.button("🟣 Cambiar Estado a CANCELADO"):
+                try:
+                    # Actualizar el estado en la hoja de cálculo
+                    nuevo_estado = "🟣 Cancelado"
+                    hoja.update_cell(gspread_row_idx, row_df.columns.get_loc("Estado")+1, nuevo_estado)
+                    # Usar el mismo sistema que las otras secciones
+                    st.session_state["pedido_modificado"] = pedido_sel
+                    st.session_state["pedido_modificado_source"] = source_sel
+                    st.session_state["mensaje_exito"] = "🟣 Pedido marcado como CANCELADO correctamente."
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"❌ Error al cancelar el pedido: {str(e)}")
         else:
-            ultimos_10 = df.head(10)
-            st.markdown("### 🕒 Últimos 10 Pedidos Registrados")
-            ultimos_10["display"] = ultimos_10.apply(
-                lambda row: (
-                    f"{row.get('Folio_Factura', row.get('Folio',''))} – {row.get('Tipo_Envio','')} – 👤 {row['Cliente']} "
-                    f"– 🔍 {row.get('Estado', row.get('Estado_Caso',''))} – 🧑‍💼 {row.get('Vendedor_Registro','')} "
-                    f"– 🕒 {row['Hora_Registro'].strftime('%d/%m %H:%M')}"
-                ),
-                axis=1
-            )
-            idx_seleccion = st.selectbox(
-                "⬇️ Selecciona uno de los pedidos recientes:",
-                ultimos_10.index,
-                format_func=lambda i: ultimos_10.loc[i, "display"]
-            )
-            pedido_sel = ultimos_10.loc[idx_seleccion, "ID_Pedido"]
-            source_sel = ultimos_10.loc[idx_seleccion, "__source"]
+            st.info("ℹ️ Este pedido ya está marcado como CANCELADO.")
 
 
-    # --- Cargar datos del pedido seleccionado ---
-    st.markdown("---")
+        completado = row.get("Completados_Limpiado", "")
+        st.markdown("### 👁 Visibilidad en Pantalla de Producción")
+        opciones_visibilidad = {"Sí": "", "No": "sí"}
+        valor_actual = completado.strip().lower()
+        valor_preseleccionado = "No" if valor_actual == "sí" else "Sí"
+        seleccion = st.selectbox("¿Mostrar este pedido en el Panel?", list(opciones_visibilidad.keys()), index=list(opciones_visibilidad.keys()).index(valor_preseleccionado))
+        nuevo_valor_completado = opciones_visibilidad[seleccion]
 
-    if pedido_sel is None:
-        st.warning("⚠️ No se ha seleccionado ningún pedido válido.")
+
+        if st.button("👁 Guardar visibilidad en Panel"):
+            hoja.update_cell(gspread_row_idx, row_df.columns.get_loc("Completados_Limpiado")+1, nuevo_valor_completado)
+            st.session_state["pedido_modificado"] = pedido_sel
+            st.session_state["pedido_modificado_source"] = source_sel
+            st.session_state["mensaje_exito"] = "👁 Visibilidad en pantalla de producción actualizada."
+            st.rerun()
+
+# ===== ORGANIZADOR ALEJANDRO (CON CONTRASEÑA) =====
+CONTRASENA_ALEJANDRO = "Ceci"  # puedes cambiarla (o usar otra)
+
+with tabs[3]:
+    st.header("🗂️ Organizador (Alejandro)")
+
+    if "acceso_alejandro" not in st.session_state:
+        st.session_state.acceso_alejandro = False
+
+    if not st.session_state.acceso_alejandro:
+        pw = st.text_input("🔑 Ingresa la contraseña:", type="password", key="pw_alejandro")
+        if st.button("🔓 Entrar", key="btn_pw_alejandro"):
+            if pw == CONTRASENA_ALEJANDRO:
+                st.session_state.acceso_alejandro = True
+                st.success("✅ Acceso concedido.")
+                st.rerun()
+            else:
+                st.error("❌ Contraseña incorrecta.")
         st.stop()
 
-    row_df = df_pedidos if source_sel == "pedidos" else df_casos
-    row = row_df[row_df["ID_Pedido"].astype(str) == str(pedido_sel)].iloc[0]
-    gspread_row_idx = row_df[row_df["ID_Pedido"].astype(str) == str(pedido_sel)].index[0] + 2  # índice real en hoja
-    if "mensaje_exito" in st.session_state:
-        st.success(st.session_state["mensaje_exito"])
-        del st.session_state["mensaje_exito"]  # ✅ eliminar para que no se repita
-
-
-    # Definir la hoja de Google Sheets para modificación
-    hoja_nombre = "datos_pedidos" if source_sel == "pedidos" else "casos_especiales"
-    hoja = gspread_client.open_by_key("1aWkSelodaz0nWfQx7FZAysGnIYGQFJxAN7RO3YgCiZY").worksheet(hoja_nombre)
-
-    st.markdown(
-        f"📦 **Cliente:** {row['Cliente']} &nbsp;&nbsp;&nbsp;&nbsp; 🧾 **Folio Factura:** {row.get('Folio_Factura', 'N/A')}"
-    )
-
-    st.markdown("### 📎 Adjuntar Archivos")
-    col_guias = "Adjuntos_Guia" if source_sel == "pedidos" else "Hoja_Ruta_Mensajero"
-    existentes_guias = partir_urls(row.get(col_guias, ""))
-    existentes_otros = partir_urls(row.get("Adjuntos", ""))
-
-    if existentes_guias or existentes_otros:
-        with st.expander("📥 Archivos existentes", expanded=False):
-            if existentes_guias:
-                st.markdown("**Guías:**")
-                for u in existentes_guias:
-                    tmp = get_s3_file_download_url(s3_client, u)
-                    nombre = extract_s3_key(u).split("/")[-1]
-                    st.markdown(f'- <a href="{tmp}" target="_blank">{nombre}</a>', unsafe_allow_html=True)
-            if existentes_otros:
-                st.markdown("**Otros:**")
-                for u in existentes_otros:
-                    tmp = get_s3_file_download_url(s3_client, u)
-                    nombre = extract_s3_key(u).split("/")[-1]
-                    st.markdown(f'- <a href="{tmp}" target="_blank">{nombre}</a>', unsafe_allow_html=True)
-
-    uploaded_guias = st.file_uploader("📄 Guías", accept_multiple_files=True)
-    uploaded_otros = st.file_uploader("📁 Otros", accept_multiple_files=True)
-
-    if st.button("⬆️ Subir archivos"):
-        nuevas_guias_urls, nuevas_otros_urls = [], []
-        for file in uploaded_guias or []:
-            key = f"adjuntos_pedidos/{pedido_sel}/{file.name}"
-            success, url_subida = upload_file_to_s3(s3_client, S3_BUCKET, file, key)
-            if success:
-                nuevas_guias_urls.append(url_subida)
-        for file in uploaded_otros or []:
-            key = f"adjuntos_pedidos/{pedido_sel}/{file.name}"
-            success, url_subida = upload_file_to_s3(s3_client, S3_BUCKET, file, key)
-            if success:
-                nuevas_otros_urls.append(url_subida)
-
-        if nuevas_guias_urls:
-            existente = row.get(col_guias, "")
-            nuevo_valor = combinar_urls_existentes(existente, nuevas_guias_urls)
-            hoja.update_cell(gspread_row_idx, row_df.columns.get_loc(col_guias)+1, nuevo_valor)
-        if nuevas_otros_urls:
-            existente = row.get("Adjuntos", "")
-            nuevo_valor = combinar_urls_existentes(existente, nuevas_otros_urls)
-            hoja.update_cell(gspread_row_idx, row_df.columns.get_loc("Adjuntos")+1, nuevo_valor)
-
-        st.session_state["pedido_modificado"] = pedido_sel
-        st.session_state["pedido_modificado_source"] = source_sel
-        st.session_state["mensaje_exito"] = "📎 Archivos subidos correctamente."
+    if st.button("🔄 Refrescar Organizador", key="refresh_alejandro"):
         st.rerun()
 
+    # --- Subpestañas internas del organizador ---
+    sub = st.tabs(["Hoy", "Agenda", "Tareas", "Cotizaciones", "Checklist", "Config"])
 
-    # --- CAMPOS MODIFICABLES ---
-    if source_sel == "casos":
-        tipo_envio_val = str(row.get("Tipo_Envio", "") or "")
-        tipo_caso_val = str(row.get("Tipo_Caso", "") or "")
-        es_garantia = any("garant" in valor.lower() for valor in (tipo_envio_val, tipo_caso_val))
+    try:
+        df_citas = cargar_alejandro_hoja("CITAS")
+    except Exception:
+        df_citas = pd.DataFrame(columns=ALE_COLUMNAS.get("CITAS", []))
 
-        if es_garantia:
-            opciones_seguimiento = [
-                "llegó el material",
-                "en prueba",
-                "aprobada",
-                "rechazada",
-            ]
-            seguimiento_actual = str(row.get("Seguimiento", "") or "").strip()
-            try:
-                index_preseleccion = next(
-                    i for i, opcion in enumerate(opciones_seguimiento) if opcion.lower() == seguimiento_actual.lower()
-                )
-            except StopIteration:
-                index_preseleccion = 0
+    try:
+        df_tareas = cargar_alejandro_hoja("TAREAS")
+    except Exception:
+        df_tareas = pd.DataFrame(columns=ALE_COLUMNAS.get("TAREAS", []))
 
-            seguimiento_sel = st.selectbox(
-                "Seguimiento de garantía",
-                opciones_seguimiento,
-                index=index_preseleccion,
-            )
+    try:
+        df_cot = cargar_alejandro_hoja("COTIZACIONES")
+    except Exception:
+        df_cot = pd.DataFrame(columns=ALE_COLUMNAS.get("COTIZACIONES", []))
 
-            if st.button("Guardar seguimiento"):
-                hoja.update_cell(
-                    gspread_row_idx,
-                    row_df.columns.get_loc("Seguimiento") + 1,
-                    seguimiento_sel,
-                )
-                st.session_state["pedido_modificado"] = pedido_sel
-                st.session_state["pedido_modificado_source"] = source_sel
-                st.session_state["mensaje_exito"] = "🔄 Seguimiento de garantía guardado correctamente."
-                st.rerun()
+    try:
+        df_checklist_daily = cargar_alejandro_hoja("CHECKLIST_DAILY")
+    except Exception:
+        df_checklist_daily = pd.DataFrame(columns=ALE_COLUMNAS.get("CHECKLIST_DAILY", []))
 
-    comentario_usuario = st.text_area("📝 Comentario desde almacén", key="comentario_almacen")
-    if st.button("Guardar comentario"):
-        comentario_limpio = comentario_usuario.strip()
-        if not comentario_limpio:
-            st.warning("⚠️ Debes ingresar un comentario antes de guardarlo.")
-        else:
-            existente = str(row.get("Comentario", "") or "")
-            nuevo_comentario = f"[ALMACÉN 🏷️] {comentario_limpio}"
-            if existente.strip():
-                valor_final = f"{existente.rstrip()}\n{nuevo_comentario}"
-            else:
-                valor_final = nuevo_comentario
-            hoja.update_cell(gspread_row_idx, row_df.columns.get_loc("Comentario") + 1, valor_final)
-            st.session_state["comentario_almacen"] = ""
-            st.session_state["pedido_modificado"] = pedido_sel
-            st.session_state["pedido_modificado_source"] = source_sel
-            st.session_state["mensaje_exito"] = "📝 Comentario guardado correctamente."
-            st.rerun()
+    try:
+        df_config = cargar_alejandro_hoja("CONFIG")
+    except Exception:
+        df_config = pd.DataFrame(columns=ALE_COLUMNAS.get("CONFIG", []))
 
-    vendedores = [
-        "ALEJANDRO RODRIGUEZ",
-        "ANA KAREN ORTEGA MAHUAD",
-        "DANIELA LOPEZ RAMIREZ",
-        "EDGAR ORLANDO GOMEZ VILLAGRAN",
-        "GLORIA MICHELLE GARCIA TORRES",
-        "GRISELDA CAROLINA SANCHEZ GARCIA",
-        "HECTOR DEL ANGEL AREVALO ALCALA",
-        "JOSELIN TRUJILLO PATRACA",
-        "NORA ALEJANDRA MARTINEZ MORENO",
-        "PAULINA TREJO"
-    ]
-    vendedor_actual = row.get("Vendedor_Registro", "").strip()
+    with sub[0]:
+        st.subheader("📌 Hoy")
 
-    st.markdown("### 🧑‍💼 Cambio de Vendedor")
-    st.markdown(f"**Actual:** {vendedor_actual}")
+        st.markdown("### 📅 Citas")
+        st.dataframe(df_citas, use_container_width=True)
 
-    vendedores_opciones = [v for v in vendedores if v != vendedor_actual] or [vendedor_actual]
-    nuevo_vendedor = st.selectbox("➡️ Cambiar a:", vendedores_opciones)
+        st.markdown("### ✅ Tareas")
+        st.dataframe(df_tareas, use_container_width=True)
 
-    if st.button("🧑‍💼 Guardar cambio de vendedor"):
-        hoja.update_cell(gspread_row_idx, row_df.columns.get_loc("Vendedor_Registro")+1, nuevo_vendedor)
-        st.session_state["pedido_modificado"] = pedido_sel
-        st.session_state["pedido_modificado_source"] = source_sel
-        st.session_state["mensaje_exito"] = "🎈 Vendedor actualizado correctamente."
-        st.rerun()
+        st.markdown("### 💰 Cotizaciones")
+        st.dataframe(df_cot, use_container_width=True)
 
+    with sub[1]:
+        st.subheader("📅 Agenda")
+        st.dataframe(df_citas, use_container_width=True)
 
-    if source_sel == "pedidos":
-        tipo_envio_actual = row["Tipo_Envio"].strip()
-        st.markdown("### 🚚 Cambio de Tipo de Envío")
-        st.markdown(f"**Actual:** {tipo_envio_actual}")
+    with sub[2]:
+        st.subheader("✅ Tareas")
+        st.dataframe(df_tareas, use_container_width=True)
 
-        opcion_contraria = "📍 Pedido Local" if "Foráneo" in tipo_envio_actual else "🚚 Pedido Foráneo"
-        tipo_envio = st.selectbox("➡️ Cambiar a:", [opcion_contraria])
+    with sub[3]:
+        st.subheader("💰 Cotizaciones")
+        st.dataframe(df_cot, use_container_width=True)
 
-        if tipo_envio == "📍 Pedido Local":
-            nuevo_turno = st.selectbox("⏰ Turno", ["☀️ Local Mañana", "🌙 Local Tarde", "🌵 Saltillo", "📦 Pasa a Bodega"])
-            fecha_entrega_actual_raw = str(row.get("Fecha_Entrega", "") or "").strip()
-            fecha_entrega_actual_dt = pd.to_datetime(fecha_entrega_actual_raw, errors="coerce")
-            fecha_entrega_actual_mostrar = (
-                fecha_entrega_actual_dt.strftime("%d/%m/%Y")
-                if pd.notna(fecha_entrega_actual_dt)
-                else "Sin fecha"
-            )
-            st.markdown(f"**📅 Fecha de entrega actual:** {fecha_entrega_actual_mostrar}")
+    with sub[4]:
+        st.subheader("🧾 Checklist")
+        st.dataframe(df_checklist_daily, use_container_width=True)
 
-            fecha_entrega_nueva = st.date_input(
-                "📅 Fecha de entrega",
-                value=(
-                    fecha_entrega_actual_dt.date()
-                    if pd.notna(fecha_entrega_actual_dt)
-                    else date.today()
-                ),
-                min_value=date.today(),
-                max_value=date.today() + timedelta(days=365),
-                format="DD/MM/YYYY",
-            )
-            fecha_entrega_nueva_str = fecha_entrega_nueva.strftime("%Y-%m-%d")
-        else:
-            nuevo_turno = ""
-            fecha_entrega_nueva_str = str(row.get("Fecha_Entrega", "") or "").strip()
-
-        if st.button("📦 Guardar cambio de tipo de envío"):
-            hoja.update_cell(gspread_row_idx, row_df.columns.get_loc("Tipo_Envio")+1, tipo_envio)
-            hoja.update_cell(gspread_row_idx, row_df.columns.get_loc("Turno")+1, nuevo_turno)
-            hoja.update_cell(gspread_row_idx, row_df.columns.get_loc("Fecha_Entrega")+1, fecha_entrega_nueva_str)
-            st.session_state["pedido_modificado"] = pedido_sel
-            st.session_state["pedido_modificado_source"] = source_sel
-            st.session_state["mensaje_exito"] = "📦 Tipo de envío, turno y fecha de entrega actualizados correctamente."
-            st.rerun()
-
-
-    # --- NUEVO: CAMBIO DE ESTADO A CANCELADO ---
-    estado_actual = row.get("Estado", "").strip()
-    st.markdown("### 🟣 Cancelar Pedido")
-    st.markdown(f"**Estado Actual:** {estado_actual}")
-    
-    # Solo mostrar la opción de cancelar si el pedido no está ya cancelado
-    if "Cancelado" not in estado_actual:
-        if st.button("🟣 Cambiar Estado a CANCELADO"):
-            try:
-                # Actualizar el estado en la hoja de cálculo
-                nuevo_estado = "🟣 Cancelado"
-                hoja.update_cell(gspread_row_idx, row_df.columns.get_loc("Estado")+1, nuevo_estado)
-                # Usar el mismo sistema que las otras secciones
-                st.session_state["pedido_modificado"] = pedido_sel
-                st.session_state["pedido_modificado_source"] = source_sel
-                st.session_state["mensaje_exito"] = "🟣 Pedido marcado como CANCELADO correctamente."
-                st.rerun()
-            except Exception as e:
-                st.error(f"❌ Error al cancelar el pedido: {str(e)}")
-    else:
-        st.info("ℹ️ Este pedido ya está marcado como CANCELADO.")
-
-
-    completado = row.get("Completados_Limpiado", "")
-    st.markdown("### 👁 Visibilidad en Pantalla de Producción")
-    opciones_visibilidad = {"Sí": "", "No": "sí"}
-    valor_actual = completado.strip().lower()
-    valor_preseleccionado = "No" if valor_actual == "sí" else "Sí"
-    seleccion = st.selectbox("¿Mostrar este pedido en el Panel?", list(opciones_visibilidad.keys()), index=list(opciones_visibilidad.keys()).index(valor_preseleccionado))
-    nuevo_valor_completado = opciones_visibilidad[seleccion]
-
-
-    if st.button("👁 Guardar visibilidad en Panel"):
-        hoja.update_cell(gspread_row_idx, row_df.columns.get_loc("Completados_Limpiado")+1, nuevo_valor_completado)
-        st.session_state["pedido_modificado"] = pedido_sel
-        st.session_state["pedido_modificado_source"] = source_sel
-        st.session_state["mensaje_exito"] = "👁 Visibilidad en pantalla de producción actualizada."
-        st.rerun()
-
+    with sub[5]:
+        st.subheader("⚙️ Config")
+        st.dataframe(df_config, use_container_width=True)
