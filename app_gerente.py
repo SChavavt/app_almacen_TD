@@ -2767,6 +2767,264 @@ with tabs[3]:
                 except Exception as e:
                     st.error(f"❌ Error creando cotización: {e}")
 
+        st.markdown("---")
+        st.markdown("### 🔁 Convertir cotización a tarea")
+
+        # Normalizar DF por si viene vacío o con tipos raros
+        df_cot["_id"] = df_cot.get("Cotizacion_ID", "").astype(str)
+        df_cot["_folio"] = df_cot.get("Folio", "").astype(str)
+        df_cot["_cliente"] = df_cot.get("Cliente", "").astype(str)
+        df_cot["_monto"] = df_cot.get("Monto", "").astype(str)
+        df_cot["_estatus"] = df_cot.get("Estatus", "").astype(str)
+        df_cot["_prox"] = df_cot.get("Fecha_Proximo_Seguimiento", "").astype(str)
+        df_cot["_notas"] = df_cot.get("Notas", "").astype(str)
+
+        # Opcional: filtrar no borradas
+        if "Is_Deleted" in df_cot.columns:
+            df_cot = df_cot[df_cot["Is_Deleted"].astype(str).fillna("") != "1"]
+
+        # Ordenar: vencidas primero (prox_seg < hoy), luego por fecha de seguimiento
+        try:
+            df_cot["_prox_dt"] = pd.to_datetime(df_cot["_prox"], errors="coerce")
+        except Exception:
+            df_cot["_prox_dt"] = pd.NaT
+
+        hoy_dt = pd.to_datetime(date.today())
+        df_cot_view = df_cot.copy()
+        df_cot_view["_vencida"] = df_cot_view["_prox_dt"].notna() & (df_cot_view["_prox_dt"] < hoy_dt)
+        df_cot_view = df_cot_view.sort_values(by=["_vencida", "_prox_dt"], ascending=[False, True])
+
+        opciones_cot = df_cot_view["_id"].tolist()
+
+        def format_cot(cid):
+            r = df_cot_view[df_cot_view["_id"] == cid].iloc[0]
+            fol = r.get("_folio", "")
+            cli = r.get("_cliente", "")
+            est = r.get("_estatus", "")
+            prox = r.get("_prox", "")
+            mon = r.get("_monto", "")
+            return f"{fol} | {cli} | {est} | seg: {prox} | ${mon}"
+
+        cot_sel = st.selectbox(
+            "Selecciona una cotización:",
+            opciones_cot,
+            format_func=format_cot,
+            key="cot_sel_convert"
+        )
+
+        if cot_sel:
+            row_cot = df_cot_view[df_cot_view["_id"] == cot_sel].iloc[0]
+            folio = str(row_cot.get("_folio", "")).strip()
+            cliente = str(row_cot.get("_cliente", "")).strip()
+            estatus = str(row_cot.get("_estatus", "")).strip()
+            prox = str(row_cot.get("_prox", "")).strip()
+            notas = str(row_cot.get("_notas", "")).strip()
+
+            colA, colB = st.columns([2, 1])
+
+            with colA:
+                titulo_sugerido = st.text_input(
+                    "Título de la tarea (editable):",
+                    value=f"Seguimiento cotización {folio} - {cliente}",
+                    key="titulo_tarea_desde_cot"
+                )
+                desc_sugerida = st.text_area(
+                    "Descripción (opcional):",
+                    value=(f"Estatus cotización: {estatus}\n"
+                           f"Próx. seguimiento: {prox}\n"
+                           f"Notas: {notas}").strip(),
+                    height=90,
+                    key="desc_tarea_desde_cot"
+                )
+
+            with colB:
+                # Fecha límite por defecto = fecha de próximo seguimiento, si es válida; si no, hoy
+                try:
+                    prox_dt = pd.to_datetime(prox, errors="coerce")
+                    fecha_limite_default = prox_dt.date() if pd.notna(prox_dt) else date.today()
+                except Exception:
+                    fecha_limite_default = date.today()
+
+                fecha_limite = st.date_input(
+                    "Fecha límite",
+                    value=fecha_limite_default,
+                    format="DD/MM/YYYY",
+                    key="fecha_limite_tarea_desde_cot"
+                )
+                prioridad = st.selectbox(
+                    "Prioridad",
+                    ["Alta", "Media", "Baja"],
+                    index=1,
+                    key="prioridad_tarea_desde_cot"
+                )
+
+            st.markdown("#### ➜ Tipo de conversión")
+            tipo_conv = st.radio(
+                "¿Qué quieres crear?",
+                ["🧩 Tarea", "📅 Cita"],
+                horizontal=True,
+                key="tipo_conversion_cot"
+            )
+
+            if tipo_conv == "🧩 Tarea":
+                if st.button("🧩 Convertir a TAREA", key="btn_convertir_a_tarea", use_container_width=True):
+                    if not titulo_sugerido.strip():
+                        st.error("❌ El título de la tarea no puede ir vacío.")
+                    else:
+                        try:
+                            tarea_id = new_id("TAREA")
+                            payload = {
+                                "Tarea_ID": tarea_id,
+                                "Created_At": now_iso(),
+                                "Created_By": "ALEJANDRO",
+                                "Titulo": titulo_sugerido.strip(),
+                                "Descripcion": desc_sugerida.strip(),
+                                "Fecha_Limite": fecha_limite.strftime("%Y-%m-%d"),
+                                "Prioridad": prioridad,
+                                "Estatus": "Pendiente",
+                                "Cliente_Relacionado": cliente,
+                                "Cotizacion_Folio_Relacionado": folio,
+                                "Tipo": "Seguimiento Cotización",
+                                "Fecha_Completado": "",
+                                "Notas_Resultado": "",
+                                "Last_Updated_At": now_iso(),
+                                "Last_Updated_By": "ALEJANDRO",
+                                "Is_Deleted": "0",
+                            }
+                            safe_append("TAREAS", payload)
+
+                            # Guardar vínculo en cotización (si existe columna)
+                            try:
+                                safe_update_by_id(
+                                    "COTIZACIONES",
+                                    id_col="Cotizacion_ID",
+                                    id_value=cot_sel,
+                                    updates={
+                                        "Convertida_A_Tarea_ID": tarea_id,
+                                        "Last_Updated_At": now_iso(),
+                                        "Last_Updated_By": "ALEJANDRO",
+                                    }
+                                )
+                            except Exception:
+                                pass
+
+                            st.success(f"🎈 Tarea creada desde cotización: {tarea_id}")
+                            st.rerun()
+                        except Exception as e:
+                            st.error(f"❌ Error al convertir a tarea: {e}")
+
+            else:
+                st.markdown("#### 📅 Configurar cita")
+                colx, coly = st.columns(2)
+                with colx:
+                    fecha_cita = st.date_input("Fecha cita", value=date.today(), format="DD/MM/YYYY", key="fecha_cita_desde_cot")
+                with coly:
+                    hora_cita = st.time_input(
+                        "Hora cita",
+                        value=datetime.now().time().replace(second=0, microsecond=0),
+                        key="hora_cita_desde_cot"
+                    )
+
+                colx2, coly2 = st.columns(2)
+                with colx2:
+                    duracion_min = st.number_input(
+                        "Duración (min)",
+                        min_value=15,
+                        max_value=480,
+                        value=30,
+                        step=15,
+                        key="dur_cita_desde_cot"
+                    )
+                with coly2:
+                    prioridad_cita = st.selectbox(
+                        "Prioridad",
+                        ["Alta", "Media", "Baja"],
+                        index=1,
+                        key="prioridad_cita_desde_cot"
+                    )
+
+                tipo_cita = st.selectbox(
+                    "Tipo de cita",
+                    ["Visita", "Llamada", "Junta", "Seguimiento"],
+                    index=3,
+                    key="tipo_cita_desde_cot"
+                )
+                estatus_cita = st.selectbox(
+                    "Estatus",
+                    ["Programada", "Realizada", "Reprogramada", "Cancelada"],
+                    index=0,
+                    key="estatus_cita_desde_cot"
+                )
+                reminder_cita = st.number_input(
+                    "Recordatorio (min antes)",
+                    min_value=0,
+                    max_value=240,
+                    value=30,
+                    step=5,
+                    key="reminder_cita_desde_cot"
+                )
+
+                # Usamos título/desc sugeridos para notas
+                notas_cita = st.text_area(
+                    "Notas de la cita",
+                    value=(f"Seguimiento cotización {folio}\n"
+                           f"Estatus: {estatus}\n"
+                           f"Próx. seguimiento: {prox}\n"
+                           f"Notas cotización: {notas}").strip(),
+                    height=100,
+                    key="notas_cita_desde_cot"
+                )
+
+                if st.button("📅 Convertir a CITA", key="btn_convertir_a_cita", use_container_width=True):
+                    try:
+                        start_dt = datetime.combine(fecha_cita, hora_cita)
+                        end_dt = start_dt + timedelta(minutes=int(duracion_min))
+
+                        cita_id = new_id("CITA")
+                        payload_cita = {
+                            "Cita_ID": cita_id,
+                            "Created_At": now_iso(),
+                            "Created_By": "ALEJANDRO",
+                            "Fecha_Inicio": start_dt.strftime("%Y-%m-%d %H:%M:%S"),
+                            "Fecha_Fin": end_dt.strftime("%Y-%m-%d %H:%M:%S"),
+                            "Cliente_Persona": cliente,
+                            "Empresa_Clinica": "",
+                            "Tipo": tipo_cita,
+                            "Prioridad": prioridad_cita,
+                            "Estatus": estatus_cita,
+                            "Notas": notas_cita.strip(),
+                            "Lugar": "",
+                            "Telefono": "",
+                            "Correo": "",
+                            "Reminder_Minutes_Before": str(int(reminder_cita)),
+                            "Reminder_Status": "Pendiente" if int(reminder_cita) > 0 else "N/A",
+                            "Last_Updated_At": now_iso(),
+                            "Last_Updated_By": "ALEJANDRO",
+                            "Is_Deleted": "0",
+                        }
+                        safe_append("CITAS", payload_cita)
+
+                        # Guardar vínculo en cotización (si existe columna)
+                        try:
+                            safe_update_by_id(
+                                "COTIZACIONES",
+                                id_col="Cotizacion_ID",
+                                id_value=cot_sel,
+                                updates={
+                                    "Convertida_A_Cita_ID": cita_id,
+                                    "Last_Updated_At": now_iso(),
+                                    "Last_Updated_By": "ALEJANDRO",
+                                }
+                            )
+                        except Exception:
+                            pass
+
+                        st.success(f"🎈 Cita creada desde cotización: {cita_id}")
+                        st.rerun()
+
+                    except Exception as e:
+                        st.error(f"❌ Error al convertir a cita: {e}")
+
         st.markdown("### 📋 Lista")
         st.dataframe(df_cot, use_container_width=True)
 
