@@ -399,6 +399,46 @@ def safe_append(nombre_hoja: str, row_dict: dict):
         raise
 
 
+def safe_update_by_id(nombre_hoja: str, id_col: str, id_value: str, updates: dict):
+    """
+    Actualiza una fila en alejandro_data buscando por id_col == id_value.
+    updates = {"Estatus": "Completada", "Fecha_Completado": "...", ...}
+    """
+    sheet = get_alejandro_worksheet(nombre_hoja)
+    ensure_headers(sheet, nombre_hoja)
+
+    headers = sheet.row_values(1)
+    headers = [h.strip() for h in headers]
+
+    if id_col not in headers:
+        raise Exception(f"No existe la columna '{id_col}' en {nombre_hoja}")
+
+    id_idx = headers.index(id_col) + 1  # 1-based
+
+    # leer columna de IDs (desde fila 2)
+    col_vals = sheet.col_values(id_idx)[1:]  # sin header
+    try:
+        pos0 = next(i for i, v in enumerate(col_vals) if str(v).strip() == str(id_value).strip())
+    except StopIteration:
+        raise Exception(f"No se encontró {id_col}={id_value} en {nombre_hoja}")
+
+    row_number = pos0 + 2  # +2 porque col_vals arranca en fila 2
+
+    # update en una sola llamada compatible con versiones viejas de gspread
+    cells = []
+    for k, v in updates.items():
+        if k not in headers:
+            continue
+        col = headers.index(k) + 1
+        cells.append(gspread.Cell(row=row_number, col=col, value=v))
+
+    if not cells:
+        return False
+
+    sheet.update_cells(cells, value_input_option="USER_ENTERED")
+    return True
+
+
 def debug_alejandro_documento() -> dict:
     """Diagnóstico de alejandro_data con metadata real de Drive + gspread."""
     gs = st.secrets.get("gsheets", {})
@@ -2587,6 +2627,87 @@ with tabs[3]:
                     st.rerun()
                 except Exception as e:
                     st.error(f"❌ Error creando tarea: {e}")
+
+        st.markdown("---")
+        st.markdown("### ✅ Completar / Reabrir tarea")
+
+        # Normaliza columnas básicas por si vienen vacías
+        df_tareas["_id"] = df_tareas.get("Tarea_ID", "").astype(str)
+        df_tareas["_titulo"] = df_tareas.get("Titulo", "").astype(str)
+        df_tareas["_estatus"] = df_tareas.get("Estatus", "").astype(str)
+        df_tareas["_fecha_limite"] = df_tareas.get("Fecha_Limite", "").astype(str)
+
+        # Opcional: filtrar no borradas
+        if "Is_Deleted" in df_tareas.columns:
+            df_tareas = df_tareas[df_tareas["Is_Deleted"].astype(str).fillna("") != "1"]
+
+        # Lista ordenada: pendientes primero, luego por fecha límite
+        try:
+            df_tareas["_fecha_dt"] = pd.to_datetime(df_tareas["_fecha_limite"], errors="coerce")
+        except Exception:
+            df_tareas["_fecha_dt"] = pd.NaT
+
+        df_tareas_view = df_tareas.copy()
+        df_tareas_view["_pend"] = df_tareas_view["_estatus"].str.lower().ne("completada")
+        df_tareas_view = df_tareas_view.sort_values(by=["_pend", "_fecha_dt"], ascending=[False, True])
+
+        opciones = [o for o in df_tareas_view["_id"].tolist() if str(o).strip()]
+
+        def format_tarea(tid):
+            r = df_tareas_view[df_tareas_view["_id"] == tid].iloc[0]
+            est = r.get("_estatus", "")
+            fec = r.get("_fecha_limite", "")
+            tit = r.get("_titulo", "")
+            return f"{tid} | {est} | {fec} | {tit}"
+
+        if not opciones:
+            st.info("No hay tareas disponibles para actualizar.")
+            tarea_sel = None
+        else:
+            tarea_sel = st.selectbox("Selecciona una tarea:", opciones, format_func=format_tarea, key="tarea_sel_update")
+
+        if tarea_sel:
+            colA, colB = st.columns(2)
+
+            with colA:
+                if st.button("✅ Marcar como COMPLETADA", use_container_width=True):
+                    try:
+                        ok = safe_update_by_id(
+                            "TAREAS",
+                            id_col="Tarea_ID",
+                            id_value=tarea_sel,
+                            updates={
+                                "Estatus": "Completada",
+                                "Fecha_Completado": now_iso(),
+                                "Last_Updated_At": now_iso(),
+                                "Last_Updated_By": "ALEJANDRO",
+                            }
+                        )
+                        if ok:
+                            st.success("🎈 Tarea marcada como completada.")
+                            st.rerun()
+                    except Exception as e:
+                        st.error(f"❌ Error actualizando tarea: {e}")
+
+            with colB:
+                if st.button("↩️ Reabrir (PENDIENTE)", use_container_width=True):
+                    try:
+                        ok = safe_update_by_id(
+                            "TAREAS",
+                            id_col="Tarea_ID",
+                            id_value=tarea_sel,
+                            updates={
+                                "Estatus": "Pendiente",
+                                "Fecha_Completado": "",
+                                "Last_Updated_At": now_iso(),
+                                "Last_Updated_By": "ALEJANDRO",
+                            }
+                        )
+                        if ok:
+                            st.success("🎈 Tarea reabierta (Pendiente).")
+                            st.rerun()
+                    except Exception as e:
+                        st.error(f"❌ Error reabriendo tarea: {e}")
 
         st.markdown("### 📋 Lista")
         st.dataframe(df_tareas, use_container_width=True)
