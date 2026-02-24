@@ -15,10 +15,6 @@ from datetime import datetime, timedelta, date
 st.set_page_config(page_title="🔍 Buscador de Guías y Descargas", layout="wide")
 st.title("🔍 Buscador de Pedidos por Guía o Cliente")
 
-# ===== SPREADSHEETS =====
-SPREADSHEET_ID_MAIN = "1aWkSelodaz0nWfQx7FZAysGnIYGQFJxAN7RO3YgCiZY"
-SPREADSHEET_ID_ALEJANDRO = "1lWZEL228boUMH_tAdQ3_ZGkYHZZuEkfv"
-
 # --- CREDENCIALES DESDE SECRETS ---
 try:
     credentials_dict = json.loads(st.secrets["gsheets"]["google_credentials"])
@@ -46,7 +42,7 @@ except Exception as e:
 def get_worksheet():
     """Obtiene la hoja de cálculo principal de pedidos."""
     return gspread_client.open_by_key(
-        SPREADSHEET_ID_MAIN
+        "1aWkSelodaz0nWfQx7FZAysGnIYGQFJxAN7RO3YgCiZY"
     ).worksheet("datos_pedidos")
 
 
@@ -61,7 +57,7 @@ PEDIDOS_COLUMNAS_MINIMAS = [
 
 def cargar_hoja_pedidos(nombre_hoja):
     """Carga una hoja de pedidos por nombre y garantiza columnas mínimas."""
-    sheet = gspread_client.open_by_key(SPREADSHEET_ID_MAIN).worksheet(nombre_hoja)
+    sheet = gspread_client.open_by_key("1aWkSelodaz0nWfQx7FZAysGnIYGQFJxAN7RO3YgCiZY").worksheet(nombre_hoja)
     data = sheet.get_all_records()
     df = pd.DataFrame(data)
     for c in PEDIDOS_COLUMNAS_MINIMAS:
@@ -83,7 +79,7 @@ def cargar_casos_especiales():
     Lee la hoja 'casos_especiales' y regresa un DataFrame.
     Si faltan columnas del ejemplo, las crea vacías para evitar KeyError.
     """
-    sheet = gspread_client.open_by_key(SPREADSHEET_ID_MAIN).worksheet("casos_especiales")
+    sheet = gspread_client.open_by_key("1aWkSelodaz0nWfQx7FZAysGnIYGQFJxAN7RO3YgCiZY").worksheet("casos_especiales")
     data = sheet.get_all_records()
     df = pd.DataFrame(data)
 
@@ -105,10 +101,6 @@ def cargar_casos_especiales():
         if c not in df.columns:
             df[c] = ""
     return df
-
-
-def get_alejandro_spreadsheet():
-    return gspread_client.open_by_key(SPREADSHEET_ID_ALEJANDRO)
 
 
 @st.cache_data(ttl=300)
@@ -739,7 +731,6 @@ tabs = st.tabs([
     "🔍 Buscar Pedido",
     "⬇️ Descargar Datos",
     "✏️ Modificar Pedido",
-    "🗂️ Organizador (Alejandro)",
 ])
 with tabs[0]:
     modo_busqueda = st.radio("Selecciona el modo de búsqueda:", ["🔢 Por número de guía", "🧑 Por cliente/factura"], key="modo_busqueda_radio")
@@ -1903,49 +1894,3 @@ with tabs[2]:
         st.session_state["mensaje_exito"] = "👁 Visibilidad en pantalla de producción actualizada."
         st.rerun()
 
-# ===== ORGANIZADOR ALEJANDRO (CON CONTRASEÑA) =====
-CONTRASENA_ALEJANDRO = "Ceci"  # puedes cambiarla (o usar otra)
-
-with tabs[3]:
-    st.header("🗂️ Organizador (Alejandro)")
-
-    if "acceso_alejandro" not in st.session_state:
-        st.session_state.acceso_alejandro = False
-
-    if not st.session_state.acceso_alejandro:
-        pw = st.text_input("🔑 Ingresa la contraseña:", type="password", key="pw_alejandro")
-        if st.button("🔓 Entrar", key="btn_pw_alejandro"):
-            if pw == CONTRASENA_ALEJANDRO:
-                st.session_state.acceso_alejandro = True
-                st.success("✅ Acceso concedido.")
-                st.rerun()
-            else:
-                st.error("❌ Contraseña incorrecta.")
-        st.stop()
-
-    # --- Subpestañas internas del organizador ---
-    sub = st.tabs(["Hoy", "Agenda", "Tareas", "Cotizaciones", "Checklist", "Config"])
-
-    with sub[0]:
-        st.subheader("📌 Hoy")
-        st.info("Aquí irá el dashboard: citas del día, tareas del día, seguimientos, cotizaciones pendientes y % cumplimiento.")
-
-    with sub[1]:
-        st.subheader("📅 Agenda")
-        st.info("Aquí irá vista diaria/semanal + alta/edición de citas.")
-
-    with sub[2]:
-        st.subheader("✅ Tareas")
-        st.info("Aquí irá: Hoy / Vencidas / Próximas + alta/edición/completar.")
-
-    with sub[3]:
-        st.subheader("💰 Cotizaciones")
-        st.info("Aquí irá: pendientes, vencidas, pipeline y alertas por seguimiento.")
-
-    with sub[4]:
-        st.subheader("🧾 Checklist")
-        st.info("Aquí irá el checklist recurrente + % del día.")
-
-    with sub[5]:
-        st.subheader("⚙️ Config")
-        st.info("Aquí irán parámetros como X días sin seguimiento, minutos recordatorio, etc.")
