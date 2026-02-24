@@ -1739,8 +1739,7 @@ def build_ultimos_pedidos(df_pedidos: pd.DataFrame, vendedor: str):
         ]
 
     work = work.sort_values("Hora_Registro", ascending=False)
-    limite = 10 if vendedor == "(Todos)" else 5
-    work = work.head(limite).copy()
+    work = work.copy()
 
     columnas = [
         "Hora_Registro",
@@ -2406,6 +2405,8 @@ if selected_tab == 3:
 
 
 if selected_tab == 0:
+    st_autorefresh(interval=60000, key="auto_refresh_dashboard")
+
     st.markdown("## 📈 Dashboard Inteligente (Riesgo + Proyección)")
     st.caption("Basado en Hora_Registro y patrón real por cliente.")
 
@@ -2461,9 +2462,16 @@ if selected_tab == 0:
 
     colf1, colf2 = st.columns([0.6, 0.4])
     with colf1:
+        vendedor_options = ["(Todos)"] + _vendedores
+        vendedor_state_key = "dashboard_vendedor_sel"
+        if vendedor_state_key not in st.session_state:
+            st.session_state[vendedor_state_key] = "(Todos)"
+        if st.session_state[vendedor_state_key] not in vendedor_options:
+            st.session_state[vendedor_state_key] = "(Todos)"
         vendedor_sel = st.selectbox(
             "Filtrar por vendedor (opcional)",
-            options=["(Todos)"] + _vendedores,
+            options=vendedor_options,
+            key=vendedor_state_key,
         )
     with colf2:
         estado_sel = st.multiselect(
@@ -2480,6 +2488,31 @@ if selected_tab == 0:
         ]
     if estado_sel:
         tc = tc[tc["Estado"].isin(estado_sel)]
+
+    st.markdown("#### 📌 Últimos pedidos según filtro")
+    update_col, button_col = st.columns([0.75, 0.25])
+    with update_col:
+        st.caption(
+            f"🕒 Última actualización: {datetime.now(TZ).strftime('%d/%m %H:%M:%S')} · Auto-actualización cada 60 s"
+        )
+    with button_col:
+        if st.button("🔄 Actualizar lista", key="manual_refresh_ultimos_pedidos", use_container_width=True):
+            st.cache_data.clear()
+            st.cache_resource.clear()
+            st.rerun()
+
+    ultimos_filtrados = build_ultimos_pedidos(df_all, vendedor_sel)
+    if ultimos_filtrados.empty:
+        st.info("No hay pedidos recientes para el filtro seleccionado.")
+    else:
+        st.caption(
+            "Mostrando todos los pedidos de data_pedidos"
+            if vendedor_sel == "(Todos)"
+            else f"Mostrando todos los pedidos de {vendedor_sel} en data_pedidos"
+        )
+        st.dataframe(ultimos_filtrados, use_container_width=True, height=260, hide_index=True)
+
+    st.markdown("---")
 
     tc["Ticket_Promedio"] = pd.to_numeric(tc["Ticket_Promedio"], errors="coerce").fillna(0.0)
     tc_top = tc[tc["Ticket_Promedio"] > 0].copy()
@@ -2592,21 +2625,6 @@ if selected_tab == 0:
                 ]
             )
         )
-
-    st.markdown("---")
-
-    st.markdown("#### 📌 Últimos pedidos según filtro")
-    ultimos_filtrados = build_ultimos_pedidos(df_all, vendedor_sel)
-    if ultimos_filtrados.empty:
-        st.info("No hay pedidos recientes para el filtro seleccionado.")
-    else:
-        limite_msg = 10 if vendedor_sel == "(Todos)" else 5
-        st.caption(
-            f"Mostrando los últimos {limite_msg} pedidos de data_pedidos"
-            if vendedor_sel == "(Todos)"
-            else f"Mostrando los últimos {limite_msg} pedidos de {vendedor_sel} en data_pedidos"
-        )
-        st.dataframe(ultimos_filtrados, use_container_width=True, height=260, hide_index=True)
 
     proy_total, proy_n, prox_df = compute_proyeccion_30(tc, hoy)
 
