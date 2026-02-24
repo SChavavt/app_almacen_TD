@@ -10,7 +10,6 @@ from io import BytesIO
 from oauth2client.service_account import ServiceAccountCredentials
 from urllib.parse import urlparse, unquote
 from datetime import datetime, timedelta, date
-import uuid
 
 # --- CONFIGURACIÓN DE STREAMLIT ---
 st.set_page_config(page_title="🔍 Buscador de Guías y Descargas", layout="wide")
@@ -126,50 +125,6 @@ def cargar_alejandro_hoja(nombre_hoja: str) -> pd.DataFrame:
             df[c] = ""
 
     return df
-
-
-def now_iso():
-    return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-
-
-def new_id(prefix: str) -> str:
-    # Ej: CITA-20260224-AB12CD34
-    return f"{prefix}-{datetime.now().strftime('%Y%m%d')}-{uuid.uuid4().hex[:8].upper()}"
-
-
-def ensure_headers(sheet, nombre_hoja: str):
-    """Asegura que la fila 1 tenga headers esperados."""
-    expected = ALE_COLUMNAS.get(nombre_hoja, [])
-    if not expected:
-        return
-
-    current = sheet.row_values(1)
-    current = [c.strip() for c in current if str(c).strip()]
-
-    if not current:
-        # hoja vacía -> ponemos headers
-        sheet.update("A1", [expected])
-        return
-
-    # Si ya hay headers, pero faltan columnas, NO reescribimos (para no romper nada)
-    faltan = [c for c in expected if c not in current]
-    if faltan:
-        # Solo avisamos (no rompemos), y trabajamos con expected para append
-        # Nota: si quieres, luego hacemos "migración" de headers. Por ahora MVP.
-        pass
-
-
-def safe_append(nombre_hoja: str, row_dict: dict):
-    """Append seguro por orden de ALE_COLUMNAS."""
-    sheet = get_alejandro_worksheet(nombre_hoja)
-    ensure_headers(sheet, nombre_hoja)
-
-    cols = ALE_COLUMNAS.get(nombre_hoja, [])
-    if not cols:
-        raise Exception(f"No hay columnas definidas para {nombre_hoja}")
-
-    row = [row_dict.get(c, "") for c in cols]
-    sheet.append_row(row, value_input_option="USER_ENTERED")
 
 
 
@@ -2170,186 +2125,14 @@ with tabs[3]:
 
     with sub[1]:
         st.subheader("📅 Agenda")
-
-        with st.form("form_nueva_cita", clear_on_submit=True):
-            st.markdown("### ➕ Nueva cita")
-
-            col1, col2 = st.columns(2)
-            with col1:
-                fecha = st.date_input("Fecha", value=date.today(), format="DD/MM/YYYY")
-            with col2:
-                hora = st.time_input("Hora", value=datetime.now().time().replace(second=0, microsecond=0))
-
-            col3, col4 = st.columns(2)
-            with col3:
-                duracion_min = st.number_input("Duración (min)", min_value=15, max_value=480, value=60, step=15)
-            with col4:
-                prioridad = st.selectbox("Prioridad", ["Alta", "Media", "Baja"], index=1)
-
-            cliente_persona = st.text_input("Cliente / persona")
-            empresa = st.text_input("Empresa o clínica (opcional)")
-
-            tipo = st.selectbox("Tipo", ["Visita", "Llamada", "Junta", "Seguimiento"], index=2)
-            estatus = st.selectbox("Estatus", ["Programada", "Realizada", "Reprogramada", "Cancelada"], index=0)
-            notas = st.text_area("Notas (opcional)", height=90)
-
-            reminder = st.number_input("Recordatorio (min antes)", min_value=0, max_value=240, value=30, step=5)
-
-            submitted_cita = st.form_submit_button("✅ Crear cita")
-
-        if submitted_cita:
-            if not cliente_persona.strip():
-                st.error("❌ Cliente/persona es obligatorio.")
-            else:
-                try:
-                    start_dt = datetime.combine(fecha, hora)
-                    end_dt = start_dt + timedelta(minutes=int(duracion_min))
-
-                    cita_id = new_id("CITA")
-                    payload = {
-                        "Cita_ID": cita_id,
-                        "Created_At": now_iso(),
-                        "Created_By": "ALEJANDRO",
-                        "Fecha_Inicio": start_dt.strftime("%Y-%m-%d %H:%M:%S"),
-                        "Fecha_Fin": end_dt.strftime("%Y-%m-%d %H:%M:%S"),
-                        "Cliente_Persona": cliente_persona.strip(),
-                        "Empresa_Clinica": empresa.strip(),
-                        "Tipo": tipo,
-                        "Prioridad": prioridad,
-                        "Estatus": estatus,
-                        "Notas": notas.strip(),
-                        "Lugar": "",
-                        "Telefono": "",
-                        "Correo": "",
-                        "Reminder_Minutes_Before": str(int(reminder)),
-                        "Reminder_Status": "Pendiente" if int(reminder) > 0 else "N/A",
-                        "Last_Updated_At": now_iso(),
-                        "Last_Updated_By": "ALEJANDRO",
-                        "Is_Deleted": "0",
-                    }
-                    safe_append("CITAS", payload)
-                    st.success(f"🎈 Cita creada: {cita_id}")
-                    st.rerun()
-                except Exception as e:
-                    st.error(f"❌ Error creando cita: {e}")
-
-        st.markdown("### 📋 Agenda")
         st.dataframe(df_citas, use_container_width=True)
 
     with sub[2]:
         st.subheader("✅ Tareas")
-
-        # ===== Alta rápida =====
-        with st.form("form_nueva_tarea", clear_on_submit=True):
-            st.markdown("### ➕ Nueva tarea")
-            titulo = st.text_input("Título", placeholder="Ej. Llamar a cliente X")
-            descripcion = st.text_area("Descripción", placeholder="Detalles…", height=90)
-
-            col1, col2, col3 = st.columns(3)
-            with col1:
-                fecha_limite = st.date_input("Fecha límite", value=date.today(), format="DD/MM/YYYY")
-            with col2:
-                prioridad = st.selectbox("Prioridad", ["Alta", "Media", "Baja"], index=1)
-            with col3:
-                estatus = st.selectbox("Estatus", ["Pendiente", "Completada"], index=0)
-
-            col4, col5 = st.columns(2)
-            with col4:
-                cliente_rel = st.text_input("Cliente relacionado (opcional)")
-            with col5:
-                folio_cot = st.text_input("Folio cotización (opcional)")
-
-            submitted = st.form_submit_button("✅ Crear tarea")
-
-        if submitted:
-            if not titulo.strip():
-                st.error("❌ El título es obligatorio.")
-            else:
-                try:
-                    tarea_id = new_id("TAREA")
-                    payload = {
-                        "Tarea_ID": tarea_id,
-                        "Created_At": now_iso(),
-                        "Created_By": "ALEJANDRO",
-                        "Titulo": titulo.strip(),
-                        "Descripcion": descripcion.strip(),
-                        "Fecha_Limite": fecha_limite.strftime("%Y-%m-%d"),
-                        "Prioridad": prioridad,
-                        "Estatus": estatus,
-                        "Cliente_Relacionado": cliente_rel.strip(),
-                        "Cotizacion_Folio_Relacionado": folio_cot.strip(),
-                        "Tipo": "Tarea",
-                        "Fecha_Completado": now_iso() if estatus.lower() == "completada" else "",
-                        "Notas_Resultado": "",
-                        "Last_Updated_At": now_iso(),
-                        "Last_Updated_By": "ALEJANDRO",
-                        "Is_Deleted": "0",
-                    }
-                    safe_append("TAREAS", payload)
-                    st.success(f"🎈 Tarea creada: {tarea_id}")
-                    st.rerun()
-                except Exception as e:
-                    st.error(f"❌ Error creando tarea: {e}")
-
-        st.markdown("### 📋 Lista")
         st.dataframe(df_tareas, use_container_width=True)
 
     with sub[3]:
         st.subheader("💰 Cotizaciones")
-
-        with st.form("form_nueva_cot", clear_on_submit=True):
-            st.markdown("### ➕ Nueva cotización")
-            folio = st.text_input("Folio", placeholder="Ej. COT-12345")
-            fecha_cot = st.date_input("Fecha", value=date.today(), format="DD/MM/YYYY")
-            cliente = st.text_input("Cliente")
-            monto = st.number_input("Monto", min_value=0.0, value=0.0, step=100.0)
-            vendedor = st.text_input("Vendedor (opcional)", placeholder="Alejandro")
-
-            estatus = st.selectbox(
-                "Estatus",
-                ["Enviada", "En seguimiento", "Cerrada – Ganada", "Cerrada – Perdida"],
-                index=0
-            )
-
-            prox_seg = st.date_input("Próximo seguimiento", value=date.today(), format="DD/MM/YYYY")
-            notas = st.text_area("Notas (opcional)", height=90)
-
-            submitted_cot = st.form_submit_button("✅ Crear cotización")
-
-        if submitted_cot:
-            if not folio.strip() or not cliente.strip():
-                st.error("❌ Folio y Cliente son obligatorios.")
-            else:
-                try:
-                    cot_id = new_id("COT")
-                    payload = {
-                        "Cotizacion_ID": cot_id,
-                        "Folio": folio.strip(),
-                        "Created_At": now_iso(),
-                        "Created_By": "ALEJANDRO",
-                        "Fecha_Cotizacion": fecha_cot.strftime("%Y-%m-%d"),
-                        "Cliente": cliente.strip(),
-                        "Monto": float(monto),
-                        "Vendedor": vendedor.strip(),
-                        "Estatus": estatus,
-                        "Fecha_Proximo_Seguimiento": prox_seg.strftime("%Y-%m-%d"),
-                        "Ultimo_Seguimiento_Fecha": "",
-                        "Dias_Sin_Seguimiento": "",
-                        "Notas": notas.strip(),
-                        "Resultado_Cierre": "",
-                        "Convertida_A_Tarea_ID": "",
-                        "Convertida_A_Cita_ID": "",
-                        "Last_Updated_At": now_iso(),
-                        "Last_Updated_By": "ALEJANDRO",
-                        "Is_Deleted": "0",
-                    }
-                    safe_append("COTIZACIONES", payload)
-                    st.success(f"🎈 Cotización creada: {cot_id}")
-                    st.rerun()
-                except Exception as e:
-                    st.error(f"❌ Error creando cotización: {e}")
-
-        st.markdown("### 📋 Lista")
         st.dataframe(df_cot, use_container_width=True)
 
     with sub[4]:
