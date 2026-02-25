@@ -602,6 +602,59 @@ def _normalize_text_for_matching(text: str) -> str:
     return without_accents.lower()
 
 
+def _flow_key(value: Any) -> str:
+    return normalize_sheet_text(value).lower()
+
+
+def build_flow_number_maps(df_source: pd.DataFrame) -> tuple[dict[str, str], dict[str, str]]:
+    """Construye mapas de numeración de flujo: foráneos 01+, locales 101+."""
+    if df_source is None or df_source.empty:
+        return {}, {}
+
+    work = df_source.copy()
+    for col in ("Tipo_Envio", "ID_Pedido", "Folio_Factura"):
+        if col not in work.columns:
+            work[col] = ""
+
+    tipo_norm = work["Tipo_Envio"].astype(str).map(_normalize_text_for_matching)
+    mask_foraneo = tipo_norm.str.contains("foraneo", na=False)
+
+    df_foraneo = work[mask_foraneo].reset_index(drop=True)
+    df_local = work[~mask_foraneo].reset_index(drop=True)
+
+    def _build_map(df_block: pd.DataFrame, formatter) -> dict[str, str]:
+        out: dict[str, str] = {}
+        for idx, row in df_block.iterrows():
+            numero = formatter(idx)
+            for raw in (row.get("ID_Pedido", ""), row.get("Folio_Factura", "")):
+                key = _flow_key(raw)
+                if key and key not in out:
+                    out[key] = numero
+        return out
+
+    map_foraneo = _build_map(df_foraneo, lambda idx: f"{idx + 1:02d}")
+    map_local = _build_map(df_local, lambda idx: str(idx + 101))
+    return map_local, map_foraneo
+
+
+def resolve_flow_display_number(row: pd.Series, fallback_order: Any) -> str:
+    """Aplica numeración de flujo solo a foráneos; lo demás conserva su orden de vista."""
+    tipo = _normalize_text_for_matching(str(row.get("Tipo_Envio", "")))
+    is_foraneo = "foraneo" in tipo
+    if not is_foraneo:
+        return str(fallback_order)
+
+    id_key = _flow_key(row.get("ID_Pedido", ""))
+    folio_key = _flow_key(row.get("Folio_Factura", ""))
+    map_foraneo = st.session_state.get("flow_number_map_foraneo", {})
+
+    for key in (id_key, folio_key):
+        if key and key in map_foraneo:
+            return map_foraneo[key]
+
+    return str(fallback_order)
+
+
 _GUIDE_REQUEST_PHRASES = (
     "solicito la guia",
     "solicitamos la guia",
@@ -2646,7 +2699,8 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
             st.info(direccion_retorno)
 
 
-        col_order_num.write(f"**{orden}**")
+        numero_visible = resolve_flow_display_number(row, orden)
+        col_order_num.write(f"**{numero_visible}**")
         folio_factura = row.get("Folio_Factura", "").strip()
         cliente = row.get("Cliente", "").strip()
         col_client.markdown(f"📄 **{folio_factura}**  \n🤝 **{cliente}**")
@@ -3305,7 +3359,8 @@ def mostrar_pedido_solo_guia(df, idx, row, orden, origen_tab, current_main_tab_l
 
         # Cabecera compacta
         col_order_num, col_client, col_time, col_status, col_vendedor = st.columns([0.5, 2, 1.6, 1, 1.2])
-        col_order_num.write(f"**{orden}**")
+        numero_visible = resolve_flow_display_number(row, orden)
+        col_order_num.write(f"**{numero_visible}**")
         col_client.markdown(f"📄 **{folio}**  \n🤝 **{row.get('Cliente','')}**")
 
         hora_registro_dt = pd.to_datetime(row.get('Hora_Registro', ''), errors='coerce')
@@ -3927,6 +3982,10 @@ if df_main is not None:
             st.session_state["active_date_tab_t_index"] = st.session_state.get("active_date_tab_t_index", 0)
 
             st.rerun()
+
+    flow_map_local, flow_map_foraneo = build_flow_number_maps(df_main)
+    st.session_state["flow_number_map_local"] = flow_map_local
+    st.session_state["flow_number_map_foraneo"] = flow_map_foraneo
 
     # --- 🔔 Alerta de Modificación de Surtido ---
     mod_surtido_main_df = _pending_modificaciones(df_main)
