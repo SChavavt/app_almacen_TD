@@ -484,26 +484,6 @@ def safe_update_by_id(nombre_hoja: str, id_col: str, id_value: str, updates: dic
     return True
 
 
-def safe_delete_rows_by_filter(nombre_hoja: str, predicate) -> int:
-    """Elimina filas de una hoja cuando predicate(record) == True. Devuelve cantidad eliminada."""
-    sheet = get_alejandro_worksheet(nombre_hoja)
-    ensure_headers(sheet, nombre_hoja)
-    data = sheet.get_all_records()
-
-    rows_to_delete = []
-    for idx, rec in enumerate(data, start=2):  # start=2 por header en fila 1
-        try:
-            if predicate(rec):
-                rows_to_delete.append(idx)
-        except Exception:
-            continue
-
-    for row_num in sorted(rows_to_delete, reverse=True):
-        sheet.delete_rows(row_num)
-
-    return len(rows_to_delete)
-
-
 def debug_alejandro_documento() -> dict:
     """Diagnóstico de alejandro_data con metadata real de Drive + gspread."""
     gs = st.secrets.get("gsheets", {})
@@ -3411,56 +3391,6 @@ with tabs[0]:
 
         st.markdown("### Plantilla recurrente")
         st.dataframe(df_checklist_template, use_container_width=True)
-
-        if not df_checklist_template.empty:
-            st.markdown("#### 🗑️ Eliminar ítem de plantilla (definitivo)")
-            template_opts = []
-            for _, r in df_checklist_template.iterrows():
-                item_id_opt = _safe_str(r.get("Item_ID", ""))
-                item_txt_opt = _safe_str(r.get("Item", "(sin nombre)"))
-                label = f"{item_txt_opt} · {item_id_opt or 'SIN_ID'}"
-                template_opts.append((label, item_id_opt, item_txt_opt))
-
-            selected_template_label = st.selectbox(
-                "Selecciona el ítem a eliminar",
-                options=[o[0] for o in template_opts],
-                key="chk_template_delete_select",
-            )
-
-            if st.button("🗑️ Eliminar de plantilla y de hoy", key="btn_delete_chk_template", type="secondary"):
-                try:
-                    selected = next((o for o in template_opts if o[0] == selected_template_label), None)
-                    if not selected:
-                        raise Exception("No se pudo identificar el ítem seleccionado.")
-
-                    _, del_item_id, del_item_txt = selected
-                    norm_item = del_item_txt.lower()
-                    today_iso = hoy.strftime("%Y-%m-%d")
-
-                    deleted_template = safe_delete_rows_by_filter(
-                        "CHECKLIST_TEMPLATE",
-                        lambda rec: (
-                            (del_item_id and _safe_str(rec.get("Item_ID", "")) == del_item_id)
-                            or ((not del_item_id) and _safe_str(rec.get("Item", "")).lower() == norm_item)
-                        )
-                    )
-                    deleted_daily = safe_delete_rows_by_filter(
-                        "CHECKLIST_DAILY",
-                        lambda rec: (
-                            _safe_str(rec.get("Fecha", ""))[:10] == today_iso
-                            and (
-                                (del_item_id and _safe_str(rec.get("Item_ID", "")) == del_item_id)
-                                or ((not del_item_id) and _safe_str(rec.get("Item", "")).lower() == norm_item)
-                            )
-                        )
-                    )
-
-                    st.success(
-                        f"✅ Ítem eliminado. Plantilla: {deleted_template} fila(s), hoy: {deleted_daily} fila(s)."
-                    )
-                    st.rerun()
-                except Exception as e:
-                    st.error(f"❌ No se pudo eliminar el ítem: {e}")
 
         st.markdown("### Checklist de hoy")
         chk_hoy_edit = df_checklist_daily.copy()
