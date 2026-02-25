@@ -2753,14 +2753,21 @@ with tabs[0]:
             except Exception as e:
                 st.warning(f"⚠️ No se pudo sincronizar checklist diario: {e}")
 
-        # --- CITAS HOY ---
+        # --- CITAS HOY + SEGUIMIENTOS PENDIENTES ---
         citas = df_citas.copy()
         if "Fecha_Inicio" in citas.columns:
             citas["_fi"] = _to_dt(citas["Fecha_Inicio"])
-            citas = citas[citas["_fi"].dt.date == hoy]
-            citas = citas.sort_values("_fi", ascending=True)
+            citas_hoy = citas[citas["_fi"].dt.date == hoy].copy()
+            citas_hoy = citas_hoy.sort_values("_fi", ascending=True)
+
+            tipo_seg = citas.get("Tipo", "").astype(str).str.lower().str.contains("seguimiento", na=False)
+            estatus_ci = citas.get("Estatus", "").astype(str).str.lower()
+            estatus_pend = ~estatus_ci.isin(["realizada", "cancelada"])
+            seguimientos_pend = citas[tipo_seg & estatus_pend].copy()
+            seguimientos_pend = seguimientos_pend.sort_values("_fi", ascending=True)
         else:
-            citas = citas.iloc[0:0]
+            citas_hoy = citas.iloc[0:0]
+            seguimientos_pend = citas.iloc[0:0]
 
         # --- TAREAS (HOY / VENCIDAS) ---
         tareas = df_tareas.copy()
@@ -2770,15 +2777,19 @@ with tabs[0]:
             tareas_vencidas = tareas[(tareas["_fl"].dt.date < hoy) & (tareas["Estatus"].astype(str).str.lower() != "completada")].copy()
             tareas_hoy = tareas_hoy.sort_values("_fl", ascending=True)
             tareas_vencidas = tareas_vencidas.sort_values("_fl", ascending=True)
+
+            tareas_hoy_total = len(tareas_hoy)
+            tareas_hoy_done = (tareas_hoy["Estatus"].astype(str).str.lower() == "completada").sum()
+            tareas_hoy_pct = round((tareas_hoy_done / tareas_hoy_total) * 100, 1) if tareas_hoy_total else 0
         else:
             tareas_hoy = tareas.iloc[0:0]
             tareas_vencidas = tareas.iloc[0:0]
+            tareas_hoy_total, tareas_hoy_done, tareas_hoy_pct = 0, 0, 0
 
         # --- COTIZACIONES (PENDIENTES / VENCIDAS DE SEGUIMIENTO) ---
         cot = df_cot.copy()
         if "Fecha_Proximo_Seguimiento" in cot.columns:
             cot["_fps"] = _to_dt(cot["Fecha_Proximo_Seguimiento"])
-            # pendientes = no cerradas
             est = cot.get("Estatus", "").astype(str).str.lower()
             no_cerradas = ~est.str.contains("ganada|perdida", na=False)
             cot_pend = cot[no_cerradas].copy()
@@ -2788,6 +2799,26 @@ with tabs[0]:
         else:
             cot_pend = cot.iloc[0:0]
             cot_venc = cot.iloc[0:0]
+
+        # --- RECORDATORIOS DE CITA ACTIVOS ---
+        recordatorios_activos = pd.DataFrame()
+        if not df_citas.empty and "Fecha_Inicio" in df_citas.columns:
+            recordatorios_activos = df_citas.copy()
+            recordatorios_activos["_fi"] = _to_dt(recordatorios_activos["Fecha_Inicio"])
+            mins = pd.to_numeric(recordatorios_activos.get("Reminder_Minutes_Before", 0), errors="coerce").fillna(0)
+            recordatorios_activos["_inicio_recordatorio"] = recordatorios_activos["_fi"] - pd.to_timedelta(mins, unit="m")
+            now_ts = pd.Timestamp(datetime.now())
+            estatus_ci = recordatorios_activos.get("Estatus", "").astype(str).str.lower()
+            status_rem = recordatorios_activos.get("Reminder_Status", "").astype(str).str.lower()
+            activos = (
+                (mins > 0)
+                & recordatorios_activos["_fi"].notna()
+                & (recordatorios_activos["_inicio_recordatorio"] <= now_ts)
+                & (recordatorios_activos["_fi"] >= now_ts)
+                & (~estatus_ci.isin(["realizada", "cancelada"]))
+                & (~status_rem.isin(["enviado", "atendido"]))
+            )
+            recordatorios_activos = recordatorios_activos[activos].sort_values("_fi", ascending=True)
 
         # --- CHECKLIST (% cumplimiento del día) ---
         chk = df_checklist_daily.copy()
@@ -2805,22 +2836,33 @@ with tabs[0]:
             total, done, pct = 0, 0, 0
 
         # ===== RESUMEN (KPIs) =====
-        k1, k2, k3, k4, k5 = st.columns(5)
-        k1.metric("📅 Citas hoy", len(citas))
+        k1, k2, k3, k4, k5, k6 = st.columns(6)
+        k1.metric("📅 Citas hoy", len(citas_hoy))
         k2.metric("✅ Tareas hoy", len(tareas_hoy))
         k3.metric("⏰ Tareas vencidas", len(tareas_vencidas))
-        k4.metric("💰 Cotizaciones pendientes", len(cot_pend))
-        k5.metric("🧾 Checklist hoy", f"{pct}%")
+        k4.metric("🔁 Seguimientos pendientes", len(seguimientos_pend))
+        k5.metric("📈 Cumplimiento tareas de hoy", f"{tareas_hoy_pct}%")
+        k6.metric("💰 Cotizaciones pendientes", len(cot_pend))
+
+        k7 = st.columns(1)[0]
+        k7.metric("🧾 Checklist hoy", f"{pct}%")
 
         st.markdown("---")
 
         # ===== DETALLES =====
         st.markdown("### 📅 Citas de hoy")
-        if citas.empty:
+        if citas_hoy.empty:
             st.info("Sin citas para hoy.")
         else:
-            cols = [c for c in ["Fecha_Inicio","Cliente_Persona","Empresa_Clinica","Tipo","Prioridad","Estatus","Notas"] if c in citas.columns]
-            st.dataframe(citas[cols], use_container_width=True)
+            cols = [c for c in ["Fecha_Inicio","Cliente_Persona","Empresa_Clinica","Tipo","Prioridad","Estatus","Notas"] if c in citas_hoy.columns]
+            st.dataframe(citas_hoy[cols], use_container_width=True)
+
+        st.markdown("### 🔁 Seguimientos pendientes")
+        if seguimientos_pend.empty:
+            st.info("No hay citas de seguimiento pendientes.")
+        else:
+            cols = [c for c in ["Fecha_Inicio","Cliente_Persona","Empresa_Clinica","Tipo","Prioridad","Estatus","Notas"] if c in seguimientos_pend.columns]
+            st.dataframe(seguimientos_pend[cols], use_container_width=True)
 
         st.markdown("### ✅ Tareas de hoy")
         if tareas_hoy.empty:
@@ -2842,6 +2884,13 @@ with tabs[0]:
         else:
             cols = [c for c in ["Folio","Fecha_Cotizacion","Cliente","Monto","Estatus","Fecha_Proximo_Seguimiento","Notas"] if c in cot_venc.columns]
             st.dataframe(cot_venc[cols], use_container_width=True)
+
+        st.markdown("### ⏱️ Recordatorios de citas activos")
+        if recordatorios_activos.empty:
+            st.info("No hay recordatorios activos por atender en este momento.")
+        else:
+            cols = [c for c in ["Cita_ID","Fecha_Inicio","Cliente_Persona","Tipo","Reminder_Minutes_Before","Reminder_Status","Estatus"] if c in recordatorios_activos.columns]
+            st.dataframe(recordatorios_activos[cols], use_container_width=True)
 
         st.markdown("### 🧾 Checklist de hoy")
         if chk_hoy.empty:
@@ -2925,7 +2974,35 @@ with tabs[0]:
                     st.error(f"❌ Error creando cita: {e}")
 
         st.markdown("### 📋 Agenda")
-        st.dataframe(df_citas, use_container_width=True)
+        agenda_view = df_citas.copy()
+        if "Fecha_Inicio" in agenda_view.columns:
+            agenda_view["_fi"] = _to_dt(agenda_view["Fecha_Inicio"])
+            agenda_hoy = agenda_view[agenda_view["_fi"].dt.date == date.today()].copy()
+            fin_semana = date.today() + timedelta(days=7)
+            agenda_semana = agenda_view[
+                agenda_view["_fi"].dt.date.between(date.today(), fin_semana)
+            ].copy()
+            agenda_hoy = agenda_hoy.sort_values("_fi", ascending=True)
+            agenda_semana = agenda_semana.sort_values("_fi", ascending=True)
+        else:
+            agenda_hoy = agenda_view.iloc[0:0]
+            agenda_semana = agenda_view.iloc[0:0]
+
+        tab_agenda_hoy, tab_agenda_semana, tab_agenda_todo = st.tabs(["Hoy", "Semana", "Todo"])
+        with tab_agenda_hoy:
+            if agenda_hoy.empty:
+                st.info("Sin citas para hoy.")
+            else:
+                cols = [c for c in ["Fecha_Inicio","Cliente_Persona","Empresa_Clinica","Tipo","Prioridad","Estatus","Reminder_Minutes_Before","Reminder_Status"] if c in agenda_hoy.columns]
+                st.dataframe(agenda_hoy[cols], use_container_width=True)
+        with tab_agenda_semana:
+            if agenda_semana.empty:
+                st.info("Sin citas para los próximos 7 días.")
+            else:
+                cols = [c for c in ["Fecha_Inicio","Cliente_Persona","Empresa_Clinica","Tipo","Prioridad","Estatus","Reminder_Minutes_Before","Reminder_Status"] if c in agenda_semana.columns]
+                st.dataframe(agenda_semana[cols], use_container_width=True)
+        with tab_agenda_todo:
+            st.dataframe(df_citas, use_container_width=True)
 
     with sub[2]:
         st.subheader("✅ Tareas")
@@ -3064,14 +3141,38 @@ with tabs[0]:
                         st.error(f"❌ Error reabriendo tarea: {e}")
 
         st.markdown("### 📋 Lista")
-        st.dataframe(df_tareas, use_container_width=True)
+        tareas_lista = df_tareas.copy()
+        if "Fecha_Limite" in tareas_lista.columns:
+            tareas_lista["_fl"] = _to_dt(tareas_lista["Fecha_Limite"])
+            hoy_t = date.today()
+            estado_t = tareas_lista.get("Estatus", "").astype(str).str.lower()
+            tareas_hoy_tab = tareas_lista[tareas_lista["_fl"].dt.date == hoy_t].copy()
+            tareas_vencidas_tab = tareas_lista[(tareas_lista["_fl"].dt.date < hoy_t) & (estado_t != "completada")].copy()
+            tareas_proximas_tab = tareas_lista[(tareas_lista["_fl"].dt.date > hoy_t) & (estado_t != "completada")].copy()
+            tareas_hoy_tab = tareas_hoy_tab.sort_values("_fl", ascending=True)
+            tareas_vencidas_tab = tareas_vencidas_tab.sort_values("_fl", ascending=True)
+            tareas_proximas_tab = tareas_proximas_tab.sort_values("_fl", ascending=True)
+        else:
+            tareas_hoy_tab = tareas_lista.iloc[0:0]
+            tareas_vencidas_tab = tareas_lista.iloc[0:0]
+            tareas_proximas_tab = tareas_lista.iloc[0:0]
+
+        tab_t_hoy, tab_t_venc, tab_t_prox, tab_t_todo = st.tabs(["Hoy", "Vencidas", "Próximas", "Todo"])
+        with tab_t_hoy:
+            st.dataframe(tareas_hoy_tab, use_container_width=True)
+        with tab_t_venc:
+            st.dataframe(tareas_vencidas_tab, use_container_width=True)
+        with tab_t_prox:
+            st.dataframe(tareas_proximas_tab, use_container_width=True)
+        with tab_t_todo:
+            st.dataframe(df_tareas, use_container_width=True)
 
     with sub[3]:
         st.subheader("💰 Cotizaciones")
 
         with st.form("form_nueva_cot", clear_on_submit=True):
             st.markdown("### ➕ Nueva cotización")
-            folio = st.text_input("Folio", placeholder="Ej. COT-12345")
+            folio = st.text_input("Folio")
             fecha_cot = st.date_input("Fecha", value=date.today(), format="DD/MM/YYYY")
             cliente = st.text_input("Cliente")
             monto = st.number_input("Monto", min_value=0.0, value=0.0, step=100.0)
@@ -3403,7 +3504,31 @@ with tabs[0]:
                         st.error(f"❌ Error al convertir a cita: {e}")
 
         st.markdown("### 📋 Lista")
-        st.dataframe(df_cot, use_container_width=True)
+        cot_dash = df_cot.copy()
+        if "Fecha_Proximo_Seguimiento" in cot_dash.columns:
+            cot_dash["_fps"] = _to_dt(cot_dash["Fecha_Proximo_Seguimiento"])
+        else:
+            cot_dash["_fps"] = pd.NaT
+        estatus_cot = cot_dash.get("Estatus", "").astype(str).str.lower()
+        cot_pend_tab = cot_dash[~estatus_cot.str.contains("ganada|perdida", na=False)].copy()
+        cot_seg_tab = cot_dash[estatus_cot.str.contains("en seguimiento", na=False)].copy()
+        cot_venc_tab = cot_pend_tab[cot_pend_tab["_fps"].notna() & (cot_pend_tab["_fps"].dt.date < date.today())].copy()
+        pipeline_monto = pd.to_numeric(cot_pend_tab.get("Monto", 0), errors="coerce").fillna(0).sum()
+
+        d1, d2, d3 = st.columns(3)
+        d1.metric("Pendientes", len(cot_pend_tab))
+        d2.metric("Vencidas de seguimiento", len(cot_venc_tab))
+        d3.metric("Pipeline monto", f"${pipeline_monto:,.2f}")
+
+        tab_c_pend, tab_c_venc, tab_c_seg, tab_c_todo = st.tabs(["Pendientes", "Vencidas", "En seguimiento", "Todo"])
+        with tab_c_pend:
+            st.dataframe(cot_pend_tab, use_container_width=True)
+        with tab_c_venc:
+            st.dataframe(cot_venc_tab, use_container_width=True)
+        with tab_c_seg:
+            st.dataframe(cot_seg_tab, use_container_width=True)
+        with tab_c_todo:
+            st.dataframe(df_cot, use_container_width=True)
 
     with sub[4]:
         st.subheader("🧾 Checklist")
