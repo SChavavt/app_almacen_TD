@@ -2840,6 +2840,8 @@ with tabs[0]:
 
         hoy_dt = pd.to_datetime(date.today())
         df_cot_view = df_cot.copy()
+        df_cot_view["Convertida_A_Tarea_ID"] = df_cot.get("Convertida_A_Tarea_ID", "")
+        df_cot_view["Convertida_A_Cita_ID"] = df_cot.get("Convertida_A_Cita_ID", "")
         df_cot_view["_vencida"] = df_cot_view["_prox_dt"].notna() & (df_cot_view["_prox_dt"] < hoy_dt)
         df_cot_view = df_cot_view.sort_values(by=["_vencida", "_prox_dt"], ascending=[False, True])
 
@@ -2868,6 +2870,21 @@ with tabs[0]:
             estatus = str(row_cot.get("_estatus", "")).strip()
             prox = str(row_cot.get("_prox", "")).strip()
             notas = str(row_cot.get("_notas", "")).strip()
+
+            # --- Anti-duplicados: si ya se convirtió, deshabilitar botones ---
+            tarea_link = str(row_cot.get("Convertida_A_Tarea_ID", "") or "").strip()
+            cita_link = str(row_cot.get("Convertida_A_Cita_ID", "") or "").strip()
+
+            ya_tarea = bool(tarea_link)
+            ya_cita = bool(cita_link)
+
+            if ya_tarea:
+                st.info(f"🧩 Esta cotización ya fue convertida a **Tarea**: {tarea_link}")
+            if ya_cita:
+                st.info(f"📅 Esta cotización ya fue convertida a **Cita**: {cita_link}")
+
+            with st.expander("DEBUG columnas cotización", expanded=False):
+                st.write(list(row_cot.index))
 
             st.markdown("#### ➜ Tipo de conversión")
             tipo_conv = st.radio(
@@ -2915,7 +2932,12 @@ with tabs[0]:
                         index=1,
                         key="prioridad_tarea_desde_cot"
                     )
-                if st.button("🧩 Convertir a TAREA", key="btn_convertir_a_tarea", use_container_width=True):
+                if st.button(
+                    "🧩 Convertir a TAREA",
+                    key="btn_convertir_a_tarea",
+                    use_container_width=True,
+                    disabled=ya_tarea,
+                ):
                     if not titulo_sugerido.strip():
                         st.error("❌ El título de la tarea no puede ir vacío.")
                     else:
@@ -3023,7 +3045,12 @@ with tabs[0]:
                     key="notas_cita_desde_cot"
                 )
 
-                if st.button("📅 Convertir a CITA", key="btn_convertir_a_cita", use_container_width=True):
+                if st.button(
+                    "📅 Convertir a CITA",
+                    key="btn_convertir_a_cita",
+                    use_container_width=True,
+                    disabled=ya_cita,
+                ):
                     try:
                         start_dt = datetime.combine(fecha_cita, hora_cita)
                         end_dt = start_dt + timedelta(minutes=int(duracion_min))
