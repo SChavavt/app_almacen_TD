@@ -2832,6 +2832,8 @@ with tabs[0]:
 
         hoy_dt = pd.to_datetime(date.today())
         df_cot_view = df_cot.copy()
+        df_cot_view["Convertida_A_Tarea_ID"] = df_cot.get("Convertida_A_Tarea_ID", "")
+        df_cot_view["Convertida_A_Cita_ID"] = df_cot.get("Convertida_A_Cita_ID", "")
         df_cot_view["_vencida"] = df_cot_view["_prox_dt"].notna() & (df_cot_view["_prox_dt"] < hoy_dt)
         df_cot_view = df_cot_view.sort_values(by=["_vencida", "_prox_dt"], ascending=[False, True])
 
@@ -2872,6 +2874,9 @@ with tabs[0]:
                 st.info(f"🧩 Esta cotización ya fue convertida a **Tarea**: {tarea_link}")
             if ya_cita:
                 st.info(f"📅 Esta cotización ya fue convertida a **Cita**: {cita_link}")
+
+            with st.expander("DEBUG columnas cotización", expanded=False):
+                st.write(list(row_cot.index))
 
             st.markdown("#### ➜ Tipo de conversión")
             tipo_conv = st.radio(
