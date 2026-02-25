@@ -62,7 +62,30 @@ def _is_transient_gspread_error(exc: Exception) -> bool:
     transient_codes = {429, 500, 502, 503, 504}
     if status_code in transient_codes:
         return True
+    # En Streamlit Cloud, algunos errores se redactan y llegan sin status_code legible.
+    # En esos casos preferimos reintentar para evitar fallos espurios al recargar la app.
+    if status_code is None and "redacted" in text:
+        return True
     return any(token in text for token in ["quota", "ratelimit", "rate limit", "backend error", "timeout"])
+
+
+def _retry_gspread_api_call(fn, retries: int = 5, base_delay: float = 0.8):
+    """Ejecuta `fn` con reintentos ante APIError transitorio (o redacted sin status)."""
+    last_exc = None
+    for attempt in range(retries):
+        try:
+            return fn()
+        except gspread.exceptions.APIError as exc:
+            last_exc = exc
+            if attempt == retries - 1:
+                raise
+            # Si luce permanente, damos un intento adicional corto y luego dejamos propagar.
+            if (not _is_transient_gspread_error(exc)) and attempt >= 1:
+                raise
+            time.sleep(base_delay * (attempt + 1))
+
+    if last_exc:
+        raise last_exc
 
 
 def get_main_spreadsheet(force_refresh: bool = False):
@@ -72,19 +95,12 @@ def get_main_spreadsheet(force_refresh: bool = False):
     if _MAIN_SPREADSHEET_CACHE is not None and not force_refresh:
         return _MAIN_SPREADSHEET_CACHE
 
-    last_exc = None
-    for attempt in range(3):
-        try:
-            _MAIN_SPREADSHEET_CACHE = gspread_client.open_by_key(SPREADSHEET_ID_MAIN)
-            return _MAIN_SPREADSHEET_CACHE
-        except gspread.exceptions.APIError as exc:
-            last_exc = exc
-            if not _is_transient_gspread_error(exc) or attempt == 2:
-                raise
-            time.sleep(0.8 * (attempt + 1))
-
-    if last_exc:
-        raise last_exc
+    _MAIN_SPREADSHEET_CACHE = _retry_gspread_api_call(
+        lambda: gspread_client.open_by_key(SPREADSHEET_ID_MAIN),
+        retries=4,
+        base_delay=0.8,
+    )
+    return _MAIN_SPREADSHEET_CACHE
 
 
 def get_main_worksheet(nombre_hoja: str):
@@ -99,19 +115,11 @@ def get_main_worksheet(nombre_hoja: str):
 
 def _get_all_records_with_retry(sheet, retries: int = 3):
     """Lee registros de una hoja con reintentos para errores transitorios de Google API."""
-    last_exc = None
-    for attempt in range(retries):
-        try:
-            return sheet.get_all_records()
-        except gspread.exceptions.APIError as exc:
-            last_exc = exc
-            if not _is_transient_gspread_error(exc) or attempt == retries - 1:
-                raise
-            time.sleep(0.8 * (attempt + 1))
-
-    if last_exc:
-        raise last_exc
-    return []
+    return _retry_gspread_api_call(
+        lambda: sheet.get_all_records(),
+        retries=max(retries, 4),
+        base_delay=0.9,
+    )
 
 
 PEDIDOS_SHEETS = ("datos_pedidos", "data_pedidos")
@@ -517,10 +525,15 @@ def safe_delete_rows_by_filter(nombre_hoja: str, predicate) -> int:
 
     for row_num in sorted(rows_to_delete, reverse=True):
         # Compatibilidad gspread: algunas versiones solo exponen delete_row (singular)
-        if hasattr(sheet, "delete_rows"):
-            sheet.delete_rows(row_num)
-        else:
-            sheet.delete_row(row_num)
+        _retry_gspread_api_call(
+            (lambda rn=row_num: sheet.delete_rows(rn))
+            if hasattr(sheet, "delete_rows")
+            else (lambda rn=row_num: sheet.delete_row(rn)),
+            retries=4,
+            base_delay=0.7,
+        )
+        # Pausa mínima para reducir picos de cuota al borrar múltiples filas consecutivas.
+        time.sleep(0.12)
 
     return len(rows_to_delete)
 
