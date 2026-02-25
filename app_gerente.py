@@ -2861,6 +2861,18 @@ with tabs[0]:
             prox = str(row_cot.get("_prox", "")).strip()
             notas = str(row_cot.get("_notas", "")).strip()
 
+            # --- Anti-duplicados: si ya se convirtió, deshabilitar botones ---
+            tarea_link = str(row_cot.get("Convertida_A_Tarea_ID", "") or "").strip()
+            cita_link = str(row_cot.get("Convertida_A_Cita_ID", "") or "").strip()
+
+            ya_tarea = bool(tarea_link)
+            ya_cita = bool(cita_link)
+
+            if ya_tarea:
+                st.info(f"🧩 Esta cotización ya fue convertida a **Tarea**: {tarea_link}")
+            if ya_cita:
+                st.info(f"📅 Esta cotización ya fue convertida a **Cita**: {cita_link}")
+
             st.markdown("#### ➜ Tipo de conversión")
             tipo_conv = st.radio(
                 "¿Qué quieres crear?",
@@ -2907,7 +2919,12 @@ with tabs[0]:
                         index=1,
                         key="prioridad_tarea_desde_cot"
                     )
-                if st.button("🧩 Convertir a TAREA", key="btn_convertir_a_tarea", use_container_width=True):
+                if st.button(
+                    "🧩 Convertir a TAREA",
+                    key="btn_convertir_a_tarea",
+                    use_container_width=True,
+                    disabled=ya_tarea,
+                ):
                     if not titulo_sugerido.strip():
                         st.error("❌ El título de la tarea no puede ir vacío.")
                     else:
@@ -3015,7 +3032,12 @@ with tabs[0]:
                     key="notas_cita_desde_cot"
                 )
 
-                if st.button("📅 Convertir a CITA", key="btn_convertir_a_cita", use_container_width=True):
+                if st.button(
+                    "📅 Convertir a CITA",
+                    key="btn_convertir_a_cita",
+                    use_container_width=True,
+                    disabled=ya_cita,
+                ):
                     try:
                         start_dt = datetime.combine(fecha_cita, hora_cita)
                         end_dt = start_dt + timedelta(minutes=int(duracion_min))
