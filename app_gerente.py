@@ -1175,12 +1175,12 @@ def _safe_str(s):
 
 # --- INTERFAZ ---
 tabs = st.tabs([
+    "🗂️ Organizador (Alejandro)",
     "🔍 Buscar Pedido",
     "⬇️ Descargar Datos",
     "✏️ Modificar Pedido",
-    "🗂️ Organizador (Alejandro)",
 ])
-with tabs[0]:
+with tabs[1]:
     modo_busqueda = st.radio("Selecciona el modo de búsqueda:", ["🔢 Por número de guía", "🧑 Por cliente/factura"], key="modo_busqueda_radio")
 
     orden_seleccionado = "Más recientes primero"
@@ -1644,7 +1644,7 @@ with tabs[0]:
                 mensaje += " Revisa el rango de fechas seleccionado."
             st.warning(mensaje)
 
-with tabs[1]:
+with tabs[2]:
     st.header("⬇️ Descargar Datos")
 
     if st.button(
@@ -1732,7 +1732,7 @@ with tabs[1]:
 CONTRASENA_ADMIN = "Ceci"  # puedes cambiar esta contraseña si lo deseas
 
 # --- PESTAÑA DE MODIFICACIÓN DE PEDIDOS CON CONTRASEÑA ---
-with tabs[2]:
+with tabs[3]:
     st.header("✏️ Modificar Pedido Existente")
 
     if "acceso_modificacion" not in st.session_state:
@@ -2343,9 +2343,9 @@ with tabs[2]:
             st.rerun()
 
 # ===== ORGANIZADOR ALEJANDRO (CON CONTRASEÑA) =====
-CONTRASENA_ALEJANDRO = "Ceci"  # puedes cambiarla (o usar otra)
+CONTRASENA_ALEJANDRO = "ale1"
 
-with tabs[3]:
+with tabs[0]:
     st.header("🗂️ Organizador (Alejandro)")
 
     if "acceso_alejandro" not in st.session_state:
