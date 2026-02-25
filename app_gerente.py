@@ -1255,11 +1255,12 @@ def get_checklist_daily_row_lookup(fecha_iso: str) -> dict:
     return lookup
 
 
-def update_checklist_daily_item(fecha_iso: str, item_id: str, item: str, completado: bool, notas: str, row_number: int = None):
+def update_checklist_daily_item(fecha_iso: str, item_id: str, item: str, completado: bool, notas: str, row_number: int = None, headers: list = None):
     """Actualiza una fila en CHECKLIST_DAILY por (Fecha + Item_ID/Item)."""
     sheet = get_alejandro_worksheet("CHECKLIST_DAILY")
     ensure_headers(sheet, "CHECKLIST_DAILY")
-    headers = [h.strip() for h in sheet.row_values(1)]
+    if headers is None:
+        headers = [h.strip() for h in sheet.row_values(1)]
     if row_number is None:
         data = sheet.get_all_records()
         for idx, rec in enumerate(data, start=2):
@@ -2642,6 +2643,14 @@ with tabs[0]:
                 else:
                     st.info("🧾 Checklist de hoy ya estaba sincronizado.")
                 df_checklist_daily = cargar_alejandro_hoja("CHECKLIST_DAILY")
+
+                # rebuild chk_hoy para dashboard tras recarga
+                chk_hoy = df_checklist_daily.copy()
+                if "Fecha" in chk_hoy.columns:
+                    chk_hoy["_f"] = _to_date(chk_hoy["Fecha"])
+                    chk_hoy = chk_hoy[chk_hoy["_f"] == hoy].copy()
+                else:
+                    chk_hoy = chk_hoy.iloc[0:0]
             except Exception as e:
                 st.warning(f"⚠️ No se pudo sincronizar checklist diario: {e}")
 
@@ -3339,7 +3348,17 @@ with tabs[0]:
         if chk_hoy_edit.empty:
             st.info("No hay checklist para hoy. Entra a 'Hoy' para sincronizar con plantilla.")
         else:
-            row_lookup = get_checklist_daily_row_lookup(hoy.strftime("%Y-%m-%d"))
+            today_iso = hoy.strftime("%Y-%m-%d")
+            lk_key = f"chk_row_lookup_{today_iso}"
+            if lk_key not in st.session_state:
+                st.session_state[lk_key] = get_checklist_daily_row_lookup(today_iso)
+            row_lookup = st.session_state[lk_key]
+
+            hdr_key = "chk_headers"
+            if hdr_key not in st.session_state:
+                sheet_daily = get_alejandro_worksheet("CHECKLIST_DAILY")
+                st.session_state[hdr_key] = [h.strip() for h in sheet_daily.row_values(1)]
+            checklist_headers = st.session_state[hdr_key]
             if "Orden" in df_checklist_template.columns and "Item_ID" in chk_hoy_edit.columns:
                 order_map = {
                     _safe_str(r.get("Item_ID", "")): pd.to_numeric(r.get("Orden", None), errors="coerce")
@@ -3369,13 +3388,16 @@ with tabs[0]:
                                 row_number = row_lookup.get((hoy.strftime("%Y-%m-%d"), "", item.lower()))
 
                             update_checklist_daily_item(
-                                fecha_iso=hoy.strftime("%Y-%m-%d"),
+                                fecha_iso=today_iso,
                                 item_id=item_id,
                                 item=item,
                                 completado=nuevo_comp,
                                 notas=nuevo_notas,
                                 row_number=row_number,
+                                headers=checklist_headers,
                             )
+                            # refrescar lookup cache tras cambios
+                            st.session_state[lk_key] = get_checklist_daily_row_lookup(today_iso)
                             st.success(f"✅ Actualizado: {item}")
                             st.rerun()
                         except Exception as e:
