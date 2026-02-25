@@ -2112,11 +2112,47 @@ with tabs[3]:
         if "mensaje_exito" in st.session_state:
             st.success(st.session_state["mensaje_exito"])
             del st.session_state["mensaje_exito"]  # ✅ eliminar para que no se repita
+        if "mensaje_error" in st.session_state:
+            st.error(st.session_state["mensaje_error"])
+            del st.session_state["mensaje_error"]
 
 
         # Definir la hoja de Google Sheets para modificación
         hoja_nombre = "datos_pedidos" if source_sel == "pedidos" else "casos_especiales"
         hoja = gspread_client.open_by_key(SPREADSHEET_ID_MAIN).worksheet(hoja_nombre)
+
+        def actualizar_celdas_y_confirmar(cambios, mensaje_exito):
+            """Actualiza celdas en lote y valida lectura de los nuevos valores."""
+            try:
+                updates = []
+                for nombre_col, valor in cambios:
+                    if nombre_col not in row_df.columns:
+                        raise ValueError(f"No existe la columna '{nombre_col}' en la hoja {hoja_nombre}.")
+                    col_idx = row_df.columns.get_loc(nombre_col) + 1
+                    updates.append({
+                        "range": gspread.utils.rowcol_to_a1(gspread_row_idx, col_idx),
+                        "values": [[valor]],
+                    })
+
+                hoja.batch_update(updates, value_input_option="USER_ENTERED")
+
+                for nombre_col, valor_esperado in cambios:
+                    col_idx = row_df.columns.get_loc(nombre_col) + 1
+                    valor_real = hoja.cell(gspread_row_idx, col_idx).value
+                    esperado = "" if valor_esperado is None else str(valor_esperado).strip()
+                    real = "" if valor_real is None else str(valor_real).strip()
+                    if esperado != real:
+                        raise ValueError(
+                            f"La columna '{nombre_col}' no se confirmó. Esperado: '{esperado}' | Guardado: '{real}'."
+                        )
+
+                st.session_state["pedido_modificado"] = pedido_sel
+                st.session_state["pedido_modificado_source"] = source_sel
+                st.session_state["mensaje_exito"] = mensaje_exito
+                return True
+            except Exception as e:
+                st.session_state["mensaje_error"] = f"❌ No se pudo guardar en Excel: {e}"
+                return False
 
         st.markdown(
             f"📦 **Cliente:** {row['Cliente']} &nbsp;&nbsp;&nbsp;&nbsp; 🧾 **Folio Factura:** {row.get('Folio_Factura', 'N/A')}"
@@ -2158,19 +2194,21 @@ with tabs[3]:
                 if success:
                     nuevas_otros_urls.append(url_subida)
 
+            cambios_archivos = []
             if nuevas_guias_urls:
                 existente = row.get(col_guias, "")
                 nuevo_valor = combinar_urls_existentes(existente, nuevas_guias_urls)
-                hoja.update_cell(gspread_row_idx, row_df.columns.get_loc(col_guias)+1, nuevo_valor)
+                cambios_archivos.append((col_guias, nuevo_valor))
             if nuevas_otros_urls:
                 existente = row.get("Adjuntos", "")
                 nuevo_valor = combinar_urls_existentes(existente, nuevas_otros_urls)
-                hoja.update_cell(gspread_row_idx, row_df.columns.get_loc("Adjuntos")+1, nuevo_valor)
+                cambios_archivos.append(("Adjuntos", nuevo_valor))
 
-            st.session_state["pedido_modificado"] = pedido_sel
-            st.session_state["pedido_modificado_source"] = source_sel
-            st.session_state["mensaje_exito"] = "📎 Archivos subidos correctamente."
-            st.rerun()
+            if cambios_archivos:
+                if actualizar_celdas_y_confirmar(cambios_archivos, "📎 Archivos subidos correctamente."):
+                    st.rerun()
+            else:
+                st.warning("⚠️ No se cargaron archivos nuevos para actualizar en Excel.")
 
 
         # --- CAMPOS MODIFICABLES ---
@@ -2201,15 +2239,11 @@ with tabs[3]:
                 )
 
                 if st.button("Guardar seguimiento"):
-                    hoja.update_cell(
-                        gspread_row_idx,
-                        row_df.columns.get_loc("Seguimiento") + 1,
-                        seguimiento_sel,
-                    )
-                    st.session_state["pedido_modificado"] = pedido_sel
-                    st.session_state["pedido_modificado_source"] = source_sel
-                    st.session_state["mensaje_exito"] = "🔄 Seguimiento de garantía guardado correctamente."
-                    st.rerun()
+                    if actualizar_celdas_y_confirmar(
+                        [("Seguimiento", seguimiento_sel)],
+                        "🔄 Seguimiento de garantía guardado correctamente.",
+                    ):
+                        st.rerun()
 
         comentario_usuario = st.text_area("📝 Comentario desde almacén", key="comentario_almacen")
         if st.button("Guardar comentario"):
@@ -2223,12 +2257,12 @@ with tabs[3]:
                     valor_final = f"{existente.rstrip()}\n{nuevo_comentario}"
                 else:
                     valor_final = nuevo_comentario
-                hoja.update_cell(gspread_row_idx, row_df.columns.get_loc("Comentario") + 1, valor_final)
-                st.session_state["comentario_almacen"] = ""
-                st.session_state["pedido_modificado"] = pedido_sel
-                st.session_state["pedido_modificado_source"] = source_sel
-                st.session_state["mensaje_exito"] = "📝 Comentario guardado correctamente."
-                st.rerun()
+                if actualizar_celdas_y_confirmar(
+                    [("Comentario", valor_final)],
+                    "📝 Comentario guardado correctamente.",
+                ):
+                    st.session_state["comentario_almacen"] = ""
+                    st.rerun()
 
         vendedores = [
             "ALEJANDRO RODRIGUEZ",
@@ -2251,11 +2285,11 @@ with tabs[3]:
         nuevo_vendedor = st.selectbox("➡️ Cambiar a:", vendedores_opciones)
 
         if st.button("🧑‍💼 Guardar cambio de vendedor"):
-            hoja.update_cell(gspread_row_idx, row_df.columns.get_loc("Vendedor_Registro")+1, nuevo_vendedor)
-            st.session_state["pedido_modificado"] = pedido_sel
-            st.session_state["pedido_modificado_source"] = source_sel
-            st.session_state["mensaje_exito"] = "🎈 Vendedor actualizado correctamente."
-            st.rerun()
+            if actualizar_celdas_y_confirmar(
+                [("Vendedor_Registro", nuevo_vendedor)],
+                "🎈 Vendedor actualizado correctamente.",
+            ):
+                st.rerun()
 
 
         if source_sel == "pedidos":
@@ -2294,13 +2328,15 @@ with tabs[3]:
                 fecha_entrega_nueva_str = str(row.get("Fecha_Entrega", "") or "").strip()
 
             if st.button("📦 Guardar cambio de tipo de envío"):
-                hoja.update_cell(gspread_row_idx, row_df.columns.get_loc("Tipo_Envio")+1, tipo_envio)
-                hoja.update_cell(gspread_row_idx, row_df.columns.get_loc("Turno")+1, nuevo_turno)
-                hoja.update_cell(gspread_row_idx, row_df.columns.get_loc("Fecha_Entrega")+1, fecha_entrega_nueva_str)
-                st.session_state["pedido_modificado"] = pedido_sel
-                st.session_state["pedido_modificado_source"] = source_sel
-                st.session_state["mensaje_exito"] = "📦 Tipo de envío, turno y fecha de entrega actualizados correctamente."
-                st.rerun()
+                if actualizar_celdas_y_confirmar(
+                    [
+                        ("Tipo_Envio", tipo_envio),
+                        ("Turno", nuevo_turno),
+                        ("Fecha_Entrega", fecha_entrega_nueva_str),
+                    ],
+                    "📦 Tipo de envío, turno y fecha de entrega actualizados correctamente.",
+                ):
+                    st.rerun()
 
 
         # --- NUEVO: CAMBIO DE ESTADO A CANCELADO ---
@@ -2314,12 +2350,11 @@ with tabs[3]:
                 try:
                     # Actualizar el estado en la hoja de cálculo
                     nuevo_estado = "🟣 Cancelado"
-                    hoja.update_cell(gspread_row_idx, row_df.columns.get_loc("Estado")+1, nuevo_estado)
-                    # Usar el mismo sistema que las otras secciones
-                    st.session_state["pedido_modificado"] = pedido_sel
-                    st.session_state["pedido_modificado_source"] = source_sel
-                    st.session_state["mensaje_exito"] = "🟣 Pedido marcado como CANCELADO correctamente."
-                    st.rerun()
+                    if actualizar_celdas_y_confirmar(
+                        [("Estado", nuevo_estado)],
+                        "🟣 Pedido marcado como CANCELADO correctamente.",
+                    ):
+                        st.rerun()
                 except Exception as e:
                     st.error(f"❌ Error al cancelar el pedido: {str(e)}")
         else:
@@ -2336,11 +2371,11 @@ with tabs[3]:
 
 
         if st.button("👁 Guardar visibilidad en Panel"):
-            hoja.update_cell(gspread_row_idx, row_df.columns.get_loc("Completados_Limpiado")+1, nuevo_valor_completado)
-            st.session_state["pedido_modificado"] = pedido_sel
-            st.session_state["pedido_modificado_source"] = source_sel
-            st.session_state["mensaje_exito"] = "👁 Visibilidad en pantalla de producción actualizada."
-            st.rerun()
+            if actualizar_celdas_y_confirmar(
+                [("Completados_Limpiado", nuevo_valor_completado)],
+                "👁 Visibilidad en pantalla de producción actualizada.",
+            ):
+                st.rerun()
 
 # ===== ORGANIZADOR ALEJANDRO (CON CONTRASEÑA) =====
 CONTRASENA_ALEJANDRO = "ale1"
