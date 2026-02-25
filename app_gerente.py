@@ -1289,6 +1289,14 @@ def update_checklist_daily_item(fecha_iso: str, item_id: str, item: str, complet
     for k, v in updates.items():
         if k in headers:
             cells.append(gspread.Cell(row=row_number, col=headers.index(k) + 1, value=v))
+
+    # Si headers cacheados están desactualizados, reintenta leyendo headers actuales
+    if not cells:
+        fresh_headers = [h.strip() for h in sheet.row_values(1)]
+        for k, v in updates.items():
+            if k in fresh_headers:
+                cells.append(gspread.Cell(row=row_number, col=fresh_headers.index(k) + 1, value=v))
+
     if cells:
         sheet.update_cells(cells, value_input_option="USER_ENTERED")
 
@@ -2627,6 +2635,14 @@ with tabs[0]:
         st.subheader("📌 Hoy")
 
         hoy = date.today()
+        # chk_hoy base (por si no se sincroniza en este rerun)
+        chk_hoy = df_checklist_daily.copy()
+        if "Fecha" in chk_hoy.columns:
+            chk_hoy["_f"] = _to_date(chk_hoy["Fecha"])
+            chk_hoy = chk_hoy[chk_hoy["_f"] == hoy].copy()
+        else:
+            chk_hoy = chk_hoy.iloc[0:0]
+
         key_sync = f"chk_sync_{hoy.isoformat()}"
         if key_sync not in st.session_state:
             st.session_state[key_sync] = False
@@ -3354,7 +3370,7 @@ with tabs[0]:
                 st.session_state[lk_key] = get_checklist_daily_row_lookup(today_iso)
             row_lookup = st.session_state[lk_key]
 
-            hdr_key = "chk_headers"
+            hdr_key = "chk_headers_CHECKLIST_DAILY"
             if hdr_key not in st.session_state:
                 sheet_daily = get_alejandro_worksheet("CHECKLIST_DAILY")
                 st.session_state[hdr_key] = [h.strip() for h in sheet_daily.row_values(1)]
