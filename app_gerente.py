@@ -1738,6 +1738,14 @@ CONTRASENA_ADMIN = "Ceci"  # puedes cambiar esta contraseña si lo deseas
 with tabs[3]:
     st.header("✏️ Modificar Pedido Existente")
 
+    if st.button(
+        "🔄 Actualizar pedidos",
+        key="refresh_modificar_pedido",
+        help="Recarga la información más reciente de la hoja para mostrar nuevos pedidos y cambios.",
+    ):
+        st.cache_data.clear()
+        st.rerun()
+
     if "acceso_modificacion" not in st.session_state:
         st.session_state.acceso_modificacion = False
 
