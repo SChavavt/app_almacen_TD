@@ -2820,44 +2820,6 @@ with tabs[3]:
             prox = str(row_cot.get("_prox", "")).strip()
             notas = str(row_cot.get("_notas", "")).strip()
 
-            colA, colB = st.columns([2, 1])
-
-            with colA:
-                titulo_sugerido = st.text_input(
-                    "Título de la tarea (editable):",
-                    value=f"Seguimiento cotización {folio} - {cliente}",
-                    key="titulo_tarea_desde_cot"
-                )
-                desc_sugerida = st.text_area(
-                    "Descripción (opcional):",
-                    value=(f"Estatus cotización: {estatus}\n"
-                           f"Próx. seguimiento: {prox}\n"
-                           f"Notas: {notas}").strip(),
-                    height=90,
-                    key="desc_tarea_desde_cot"
-                )
-
-            with colB:
-                # Fecha límite por defecto = fecha de próximo seguimiento, si es válida; si no, hoy
-                try:
-                    prox_dt = pd.to_datetime(prox, errors="coerce")
-                    fecha_limite_default = prox_dt.date() if pd.notna(prox_dt) else date.today()
-                except Exception:
-                    fecha_limite_default = date.today()
-
-                fecha_limite = st.date_input(
-                    "Fecha límite",
-                    value=fecha_limite_default,
-                    format="DD/MM/YYYY",
-                    key="fecha_limite_tarea_desde_cot"
-                )
-                prioridad = st.selectbox(
-                    "Prioridad",
-                    ["Alta", "Media", "Baja"],
-                    index=1,
-                    key="prioridad_tarea_desde_cot"
-                )
-
             st.markdown("#### ➜ Tipo de conversión")
             tipo_conv = st.radio(
                 "¿Qué quieres crear?",
@@ -2867,6 +2829,43 @@ with tabs[3]:
             )
 
             if tipo_conv == "🧩 Tarea":
+                colA, colB = st.columns([2, 1])
+
+                with colA:
+                    titulo_sugerido = st.text_input(
+                        "Título de la tarea (editable):",
+                        value=f"Seguimiento cotización {folio} - {cliente}",
+                        key="titulo_tarea_desde_cot"
+                    )
+                    desc_sugerida = st.text_area(
+                        "Descripción (opcional):",
+                        value=(f"Estatus cotización: {estatus}\n"
+                               f"Próx. seguimiento: {prox}\n"
+                               f"Notas: {notas}").strip(),
+                        height=90,
+                        key="desc_tarea_desde_cot"
+                    )
+
+                with colB:
+                    # Fecha límite por defecto = fecha de próximo seguimiento, si es válida; si no, hoy
+                    try:
+                        prox_dt = pd.to_datetime(prox, errors="coerce")
+                        fecha_limite_default = prox_dt.date() if pd.notna(prox_dt) else date.today()
+                    except Exception:
+                        fecha_limite_default = date.today()
+
+                    fecha_limite = st.date_input(
+                        "Fecha límite",
+                        value=fecha_limite_default,
+                        format="DD/MM/YYYY",
+                        key="fecha_limite_tarea_desde_cot"
+                    )
+                    prioridad = st.selectbox(
+                        "Prioridad",
+                        ["Alta", "Media", "Baja"],
+                        index=1,
+                        key="prioridad_tarea_desde_cot"
+                    )
                 if st.button("🧩 Convertir a TAREA", key="btn_convertir_a_tarea", use_container_width=True):
                     if not titulo_sugerido.strip():
                         st.error("❌ El título de la tarea no puede ir vacío.")
