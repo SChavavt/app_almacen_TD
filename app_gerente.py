@@ -1196,7 +1196,7 @@ def ensure_daily_checklist_items(hoy: date, df_template: pd.DataFrame, df_daily:
 
     activos = df_template.copy()
     if "Activo" in activos.columns:
-        activos = activos[activos["Activo"].astype(str).str.lower().isin(["1", "true", "sí", "si", "x", "ok", "✅"]) | (activos["Activo"].astype(str).str.strip() == "")]
+        activos = activos[activos["Activo"].apply(_to_bool)]
     if "Orden" in activos.columns:
         activos["_orden"] = pd.to_numeric(activos["Orden"], errors="coerce")
         activos = activos.sort_values("_orden", ascending=True, na_position="last")
@@ -1235,26 +1235,45 @@ def ensure_daily_checklist_items(hoy: date, df_template: pd.DataFrame, df_daily:
     return inserted
 
 
-def update_checklist_daily_item(fecha_iso: str, item_id: str, item: str, completado: bool, notas: str):
+def get_checklist_daily_row_lookup(fecha_iso: str) -> dict:
+    """Devuelve lookup para ubicar fila por (fecha+item) sin relecturas por cada guardado."""
+    sheet = get_alejandro_worksheet("CHECKLIST_DAILY")
+    ensure_headers(sheet, "CHECKLIST_DAILY")
+    data = sheet.get_all_records()
+
+    lookup = {}
+    for idx, rec in enumerate(data, start=2):
+        rec_fecha = _safe_str(rec.get("Fecha", ""))[:10]
+        if rec_fecha != fecha_iso:
+            continue
+        rec_item_id = _safe_str(rec.get("Item_ID", ""))
+        rec_item = _safe_str(rec.get("Item", "")).lower()
+        if rec_item_id:
+            lookup[(fecha_iso, rec_item_id, "")] = idx
+        if rec_item:
+            lookup[(fecha_iso, "", rec_item)] = idx
+    return lookup
+
+
+def update_checklist_daily_item(fecha_iso: str, item_id: str, item: str, completado: bool, notas: str, row_number: int = None):
     """Actualiza una fila en CHECKLIST_DAILY por (Fecha + Item_ID/Item)."""
     sheet = get_alejandro_worksheet("CHECKLIST_DAILY")
     ensure_headers(sheet, "CHECKLIST_DAILY")
     headers = [h.strip() for h in sheet.row_values(1)]
-    data = sheet.get_all_records()
-
-    row_number = None
-    for idx, rec in enumerate(data, start=2):
-        rec_fecha = _safe_str(rec.get("Fecha", ""))[:10]
-        rec_item_id = _safe_str(rec.get("Item_ID", ""))
-        rec_item = _safe_str(rec.get("Item", "")).lower()
-        if rec_fecha != fecha_iso:
-            continue
-        if item_id and rec_item_id == item_id:
-            row_number = idx
-            break
-        if (not item_id) and rec_item == item.lower():
-            row_number = idx
-            break
+    if row_number is None:
+        data = sheet.get_all_records()
+        for idx, rec in enumerate(data, start=2):
+            rec_fecha = _safe_str(rec.get("Fecha", ""))[:10]
+            rec_item_id = _safe_str(rec.get("Item_ID", ""))
+            rec_item = _safe_str(rec.get("Item", "")).lower()
+            if rec_fecha != fecha_iso:
+                continue
+            if item_id and rec_item_id == item_id:
+                row_number = idx
+                break
+            if (not item_id) and rec_item == item.lower():
+                row_number = idx
+                break
 
     if row_number is None:
         raise Exception("No se encontró el ítem en CHECKLIST_DAILY")
@@ -1299,7 +1318,8 @@ def build_hoy_alerts(hoy: date, df_citas: pd.DataFrame, df_tareas: pd.DataFrame,
 
         if "Ultimo_Seguimiento_Fecha" in no_cerradas.columns:
             no_cerradas["_usf"] = _to_dt(no_cerradas["Ultimo_Seguimiento_Fecha"])
-            sin_seg = no_cerradas[no_cerradas["_usf"].isna() | ((now_dt - no_cerradas["_usf"]).dt.days >= cot_x_dias)]
+            delta_days = (pd.Timestamp(now_dt) - no_cerradas["_usf"]).dt.days
+            sin_seg = no_cerradas[no_cerradas["_usf"].isna() | (delta_days >= cot_x_dias)]
             if len(sin_seg) > 0:
                 alerts.append(("warning", f"Hay {len(sin_seg)} cotización(es) sin seguimiento en {cot_x_dias}+ día(s)."))
 
@@ -2606,15 +2626,24 @@ with tabs[0]:
         st.subheader("📌 Hoy")
 
         hoy = date.today()
+        key_sync = f"chk_sync_{hoy.isoformat()}"
+        if key_sync not in st.session_state:
+            st.session_state[key_sync] = False
 
-        # Sincroniza checklist recurrente del día (desde plantilla activa)
-        try:
-            inserted = ensure_daily_checklist_items(hoy, df_checklist_template, df_checklist_daily)
-            if inserted > 0:
-                st.success(f"🧾 Se generaron {inserted} ítem(s) de checklist para hoy.")
+        sync_clicked = st.button("🔄 Sincronizar checklist de hoy", key=f"btn_sync_chk_hoy_{hoy.isoformat()}")
+
+        # Sincroniza checklist recurrente del día (solo 1 vez por sesión/día o por botón)
+        if sync_clicked or not st.session_state[key_sync]:
+            try:
+                inserted = ensure_daily_checklist_items(hoy, df_checklist_template, df_checklist_daily)
+                st.session_state[key_sync] = True
+                if inserted > 0:
+                    st.success(f"🧾 Se generaron {inserted} ítem(s) de checklist para hoy.")
+                else:
+                    st.info("🧾 Checklist de hoy ya estaba sincronizado.")
                 df_checklist_daily = cargar_alejandro_hoja("CHECKLIST_DAILY")
-        except Exception as e:
-            st.warning(f"⚠️ No se pudo sincronizar checklist diario: {e}")
+            except Exception as e:
+                st.warning(f"⚠️ No se pudo sincronizar checklist diario: {e}")
 
         # --- CITAS HOY ---
         citas = df_citas.copy()
@@ -3302,9 +3331,15 @@ with tabs[0]:
             chk_hoy_edit["_f"] = _to_date(chk_hoy_edit["Fecha"])
             chk_hoy_edit = chk_hoy_edit[chk_hoy_edit["_f"] == hoy].copy()
 
+        done_chk = chk_hoy_edit["Completado"].apply(_to_bool).sum() if (not chk_hoy_edit.empty and "Completado" in chk_hoy_edit.columns) else 0
+        total_chk = len(chk_hoy_edit)
+        pct_chk = (done_chk / total_chk * 100) if total_chk else 0
+        st.metric("✅ Cumplimiento hoy", f"{pct_chk:.0f}%")
+
         if chk_hoy_edit.empty:
             st.info("No hay checklist para hoy. Entra a 'Hoy' para sincronizar con plantilla.")
         else:
+            row_lookup = get_checklist_daily_row_lookup(hoy.strftime("%Y-%m-%d"))
             if "Orden" in df_checklist_template.columns and "Item_ID" in chk_hoy_edit.columns:
                 order_map = {
                     _safe_str(r.get("Item_ID", "")): pd.to_numeric(r.get("Orden", None), errors="coerce")
@@ -3327,12 +3362,19 @@ with tabs[0]:
                 with c3:
                     if st.button("💾 Guardar", key=f"chk_save_{item_id}_{item}"):
                         try:
+                            row_number = None
+                            if item_id:
+                                row_number = row_lookup.get((hoy.strftime("%Y-%m-%d"), item_id, ""))
+                            if row_number is None:
+                                row_number = row_lookup.get((hoy.strftime("%Y-%m-%d"), "", item.lower()))
+
                             update_checklist_daily_item(
                                 fecha_iso=hoy.strftime("%Y-%m-%d"),
                                 item_id=item_id,
                                 item=item,
                                 completado=nuevo_comp,
                                 notas=nuevo_notas,
+                                row_number=row_number,
                             )
                             st.success(f"✅ Actualizado: {item}")
                             st.rerun()
