@@ -13,6 +13,7 @@ from datetime import datetime, timedelta, date
 import uuid
 import urllib.parse
 import urllib.request
+import time
 
 # --- CONFIGURACIÓN DE STREAMLIT ---
 st.set_page_config(page_title="🔍 Buscador de Guías y Descargas", layout="wide")
@@ -23,6 +24,7 @@ SPREADSHEET_ID_MAIN = "1aWkSelodaz0nWfQx7FZAysGnIYGQFJxAN7RO3YgCiZY"
 SPREADSHEET_ID_ALEJANDRO = "1lWZEL228boUMH_tAdQ3_ZGkYHZZuEkfv"
 _ALE_ID_CACHE = {}
 _ALE_BOOTSTRAP_CACHE = {}
+_MAIN_SPREADSHEET_CACHE = None
 
 # --- CREDENCIALES DESDE SECRETS ---
 try:
@@ -50,9 +52,49 @@ except Exception as e:
 
 def get_worksheet():
     """Obtiene la hoja de cálculo principal de pedidos."""
-    return gspread_client.open_by_key(
-        SPREADSHEET_ID_MAIN
-    ).worksheet("datos_pedidos")
+    return get_main_worksheet("datos_pedidos")
+
+
+def _is_transient_gspread_error(exc: Exception) -> bool:
+    """Determina si un APIError de gspread parece transitorio (quota/rate/5xx)."""
+    status_code = getattr(getattr(exc, "response", None), "status_code", None)
+    text = str(exc).lower()
+    transient_codes = {429, 500, 502, 503, 504}
+    if status_code in transient_codes:
+        return True
+    return any(token in text for token in ["quota", "ratelimit", "rate limit", "backend error", "timeout"])
+
+
+def get_main_spreadsheet(force_refresh: bool = False):
+    """Abre y cachea el spreadsheet principal con reintentos para errores transitorios."""
+    global _MAIN_SPREADSHEET_CACHE
+
+    if _MAIN_SPREADSHEET_CACHE is not None and not force_refresh:
+        return _MAIN_SPREADSHEET_CACHE
+
+    last_exc = None
+    for attempt in range(3):
+        try:
+            _MAIN_SPREADSHEET_CACHE = gspread_client.open_by_key(SPREADSHEET_ID_MAIN)
+            return _MAIN_SPREADSHEET_CACHE
+        except gspread.exceptions.APIError as exc:
+            last_exc = exc
+            if not _is_transient_gspread_error(exc) or attempt == 2:
+                raise
+            time.sleep(0.8 * (attempt + 1))
+
+    if last_exc:
+        raise last_exc
+
+
+def get_main_worksheet(nombre_hoja: str):
+    """Obtiene una worksheet del spreadsheet principal con fallback de recarga de metadata."""
+    try:
+        return get_main_spreadsheet().worksheet(nombre_hoja)
+    except gspread.exceptions.APIError as exc:
+        if not _is_transient_gspread_error(exc):
+            raise
+        return get_main_spreadsheet(force_refresh=True).worksheet(nombre_hoja)
 
 
 PEDIDOS_SHEETS = ("datos_pedidos", "data_pedidos")
@@ -105,7 +147,7 @@ ALE_COLUMNAS = {
 
 def cargar_hoja_pedidos(nombre_hoja):
     """Carga una hoja de pedidos por nombre y garantiza columnas mínimas."""
-    sheet = gspread_client.open_by_key(SPREADSHEET_ID_MAIN).worksheet(nombre_hoja)
+    sheet = get_main_worksheet(nombre_hoja)
     data = sheet.get_all_records()
     df = pd.DataFrame(data)
     for c in PEDIDOS_COLUMNAS_MINIMAS:
@@ -517,7 +559,7 @@ def cargar_casos_especiales():
     Lee la hoja 'casos_especiales' y regresa un DataFrame.
     Si faltan columnas del ejemplo, las crea vacías para evitar KeyError.
     """
-    sheet = gspread_client.open_by_key(SPREADSHEET_ID_MAIN).worksheet("casos_especiales")
+    sheet = get_main_worksheet("casos_especiales")
     data = sheet.get_all_records()
     df = pd.DataFrame(data)
 
@@ -2306,7 +2348,7 @@ with tabs[3]:
             hoja_nombre = str(row.get("__hoja_origen", "")).strip() or "datos_pedidos"
         else:
             hoja_nombre = "casos_especiales"
-        hoja = gspread_client.open_by_key(SPREADSHEET_ID_MAIN).worksheet(hoja_nombre)
+        hoja = get_main_worksheet(hoja_nombre)
 
         def actualizar_celdas_y_confirmar(cambios, mensaje_exito):
             """Actualiza celdas en lote y valida lectura de los nuevos valores."""
