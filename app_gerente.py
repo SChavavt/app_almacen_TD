@@ -97,6 +97,23 @@ def get_main_worksheet(nombre_hoja: str):
         return get_main_spreadsheet(force_refresh=True).worksheet(nombre_hoja)
 
 
+def _get_all_records_with_retry(sheet, retries: int = 3):
+    """Lee registros de una hoja con reintentos para errores transitorios de Google API."""
+    last_exc = None
+    for attempt in range(retries):
+        try:
+            return sheet.get_all_records()
+        except gspread.exceptions.APIError as exc:
+            last_exc = exc
+            if not _is_transient_gspread_error(exc) or attempt == retries - 1:
+                raise
+            time.sleep(0.8 * (attempt + 1))
+
+    if last_exc:
+        raise last_exc
+    return []
+
+
 PEDIDOS_SHEETS = ("datos_pedidos", "data_pedidos")
 PEDIDOS_COLUMNAS_MINIMAS = [
     "ID_Pedido", "Hora_Registro", "Cliente", "Estado", "Vendedor_Registro", "Folio_Factura",
@@ -148,7 +165,7 @@ ALE_COLUMNAS = {
 def cargar_hoja_pedidos(nombre_hoja):
     """Carga una hoja de pedidos por nombre y garantiza columnas mínimas."""
     sheet = get_main_worksheet(nombre_hoja)
-    data = sheet.get_all_records()
+    data = _get_all_records_with_retry(sheet)
     df = pd.DataFrame(data)
     for c in PEDIDOS_COLUMNAS_MINIMAS:
         if c not in df.columns:
@@ -371,7 +388,7 @@ def get_alejandro_worksheet(nombre_hoja: str):
 def cargar_alejandro_hoja(nombre_hoja: str) -> pd.DataFrame:
     """Carga una hoja de alejandro_data y garantiza columnas mínimas."""
     sheet = get_alejandro_worksheet(nombre_hoja)
-    data = sheet.get_all_records()
+    data = _get_all_records_with_retry(sheet)
     df = pd.DataFrame(data)
 
     cols_min = ALE_COLUMNAS.get(nombre_hoja, [])
@@ -488,7 +505,7 @@ def safe_delete_rows_by_filter(nombre_hoja: str, predicate) -> int:
     """Elimina filas de una hoja cuando predicate(record) == True. Devuelve cantidad eliminada."""
     sheet = get_alejandro_worksheet(nombre_hoja)
     ensure_headers(sheet, nombre_hoja)
-    data = sheet.get_all_records()
+    data = _get_all_records_with_retry(sheet)
 
     rows_to_delete = []
     for idx, rec in enumerate(data, start=2):  # start=2 por header en fila 1
@@ -584,7 +601,7 @@ def cargar_casos_especiales():
     Si faltan columnas del ejemplo, las crea vacías para evitar KeyError.
     """
     sheet = get_main_worksheet("casos_especiales")
-    data = sheet.get_all_records()
+    data = _get_all_records_with_retry(sheet)
     df = pd.DataFrame(data)
 
     columnas_ejemplo = [
@@ -1305,7 +1322,7 @@ def get_checklist_daily_row_lookup(fecha_iso: str) -> dict:
     """Devuelve lookup para ubicar fila por (fecha+item) sin relecturas por cada guardado."""
     sheet = get_alejandro_worksheet("CHECKLIST_DAILY")
     ensure_headers(sheet, "CHECKLIST_DAILY")
-    data = sheet.get_all_records()
+    data = _get_all_records_with_retry(sheet)
 
     lookup = {}
     for idx, rec in enumerate(data, start=2):
@@ -1328,7 +1345,7 @@ def update_checklist_daily_item(fecha_iso: str, item_id: str, item: str, complet
     if headers is None:
         headers = [h.strip() for h in sheet.row_values(1)]
     if row_number is None:
-        data = sheet.get_all_records()
+        data = _get_all_records_with_retry(sheet)
         for idx, rec in enumerate(data, start=2):
             rec_fecha = _safe_str(rec.get("Fecha", ""))[:10]
             rec_item_id = _safe_str(rec.get("Item_ID", ""))
@@ -3410,6 +3427,8 @@ with tabs[0]:
                         "Activo": "1" if activo else "0",
                     }
                     safe_append("CHECKLIST_TEMPLATE", payload)
+                    # Fuerza re-sincronización del checklist diario tras cambios en plantilla.
+                    st.session_state[f"chk_sync_{hoy.isoformat()}"] = False
                     st.success("✅ Ítem agregado a la plantilla.")
                     st.rerun()
 
