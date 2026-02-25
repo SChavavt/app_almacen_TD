@@ -111,6 +111,9 @@ def cargar_hoja_pedidos(nombre_hoja):
     for c in PEDIDOS_COLUMNAS_MINIMAS:
         if c not in df.columns:
             df[c] = ""
+    # Metadata interna para saber desde qué worksheet proviene cada pedido.
+    # Se usa al momento de guardar cambios para escribir en la hoja correcta.
+    df["__hoja_origen"] = nombre_hoja
     return df
 
 def _extract_sheet_id(value: str) -> str:
@@ -2118,7 +2121,10 @@ with tabs[3]:
 
 
         # Definir la hoja de Google Sheets para modificación
-        hoja_nombre = "datos_pedidos" if source_sel == "pedidos" else "casos_especiales"
+        if source_sel == "pedidos":
+            hoja_nombre = str(row.get("__hoja_origen", "")).strip() or "datos_pedidos"
+        else:
+            hoja_nombre = "casos_especiales"
         hoja = gspread_client.open_by_key(SPREADSHEET_ID_MAIN).worksheet(hoja_nombre)
 
         def actualizar_celdas_y_confirmar(cambios, mensaje_exito):
