@@ -1224,7 +1224,30 @@ def _record_local_sheet_update(worksheet_name: str, row_index: int, values: dict
     local_updates = st.session_state.setdefault("local_sheet_updates", {})
     worksheet_updates = local_updates.setdefault(worksheet_name, {})
     row_updates = worksheet_updates.setdefault(int(row_index), {})
+    identity_cache = st.session_state.get("sheet_row_identity", {}).get(worksheet_name, {})
+    pedido_id_ref = str(identity_cache.get(int(row_index), "")).strip()
+    if pedido_id_ref:
+        row_updates["__pedido_id_ref"] = pedido_id_ref
+    row_updates["__updated_at"] = time.time()
     row_updates.update(values)
+
+
+def _refresh_sheet_row_identity(df: pd.DataFrame, worksheet_name: str) -> None:
+    if df.empty:
+        return
+
+    rows = pd.to_numeric(df.get("_gsheet_row_index", pd.Series(dtype=float)), errors="coerce")
+    ids = df.get("ID_Pedido", pd.Series("", index=df.index)).astype(str).str.strip()
+
+    mapping: dict[int, str] = {}
+    for row_num, pedido_id in zip(rows, ids):
+        if pd.isna(row_num):
+            continue
+        if pedido_id:
+            mapping[int(row_num)] = pedido_id
+
+    identity = st.session_state.setdefault("sheet_row_identity", {})
+    identity[worksheet_name] = mapping
 
 
 def _apply_local_sheet_updates(df: pd.DataFrame, worksheet_name: str) -> pd.DataFrame:
@@ -1236,14 +1259,40 @@ def _apply_local_sheet_updates(df: pd.DataFrame, worksheet_name: str) -> pd.Data
         return df
 
     rows = pd.to_numeric(df.get("_gsheet_row_index", pd.Series(dtype=float)), errors="coerce")
-    for row_index, updates in worksheet_updates.items():
+    ids = df.get("ID_Pedido", pd.Series("", index=df.index)).astype(str).str.strip()
+    now_ts = time.time()
+    stale_rows: list[int] = []
+
+    for row_index, updates in list(worksheet_updates.items()):
+        updated_at = float(updates.get("__updated_at", 0) or 0)
+        if updated_at and (now_ts - updated_at) > 180:
+            stale_rows.append(int(row_index))
+            continue
+
         mask = rows == int(row_index)
         if not mask.any():
             continue
+
+        pedido_id_ref = str(updates.get("__pedido_id_ref", "")).strip()
+        if pedido_id_ref:
+            current_ids = set(ids[mask].tolist())
+            if pedido_id_ref not in current_ids:
+                stale_rows.append(int(row_index))
+                continue
+
         for col, value in updates.items():
+            if str(col).startswith("__"):
+                continue
             if col not in df.columns:
                 df[col] = ""
             df.loc[mask, col] = value
+
+    for row_index in stale_rows:
+        worksheet_updates.pop(int(row_index), None)
+
+    if not worksheet_updates:
+        all_updates = st.session_state.get("local_sheet_updates", {})
+        all_updates.pop(worksheet_name, None)
     return df
 
 
@@ -3597,6 +3646,7 @@ def _load_pedidos():
         client=g_spread_client,
         light_mode=True,
     )
+    _refresh_sheet_row_identity(df, GOOGLE_SHEET_WORKSHEET_NAME)
     df = _apply_local_sheet_updates(df, GOOGLE_SHEET_WORKSHEET_NAME)
     # Re-filtrar después de aplicar updates locales para reflejar de inmediato
     # cuando un pedido se marca como limpiado/completado en la sesión actual.
@@ -3908,6 +3958,7 @@ def _load_casos():
         client=g_spread_client,
         light_mode=False,
     )
+    _refresh_sheet_row_identity(df, "casos_especiales")
     return _apply_local_sheet_updates(df, "casos_especiales"), headers
 
 
