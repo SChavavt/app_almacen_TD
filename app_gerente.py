@@ -106,11 +106,19 @@ def get_main_spreadsheet(force_refresh: bool = False):
 def get_main_worksheet(nombre_hoja: str):
     """Obtiene una worksheet del spreadsheet principal con fallback de recarga de metadata."""
     try:
-        return get_main_spreadsheet().worksheet(nombre_hoja)
+        return _retry_gspread_api_call(
+            lambda: get_main_spreadsheet().worksheet(nombre_hoja),
+            retries=4,
+            base_delay=0.8,
+        )
     except gspread.exceptions.APIError as exc:
         if not _is_transient_gspread_error(exc):
             raise
-        return get_main_spreadsheet(force_refresh=True).worksheet(nombre_hoja)
+        return _retry_gspread_api_call(
+            lambda: get_main_spreadsheet(force_refresh=True).worksheet(nombre_hoja),
+            retries=4,
+            base_delay=1.0,
+        )
 
 
 def _get_all_records_with_retry(sheet, retries: int = 3):
