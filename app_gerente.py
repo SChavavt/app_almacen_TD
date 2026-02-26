@@ -2429,57 +2429,57 @@ with tabs[3]:
             f"📦 **Cliente:** {row['Cliente']} &nbsp;&nbsp;&nbsp;&nbsp; 🧾 **Folio Factura:** {row.get('Folio_Factura', 'N/A')}"
         )
 
-        with st.expander("📎 Adjuntar Archivos — Gestionar guías y documentos", expanded=False):
-            col_guias = "Adjuntos_Guia" if source_sel == "pedidos" else "Hoja_Ruta_Mensajero"
-            existentes_guias = partir_urls(row.get(col_guias, ""))
-            existentes_otros = partir_urls(row.get("Adjuntos", ""))
+        st.markdown("### 📎 Adjuntar Archivos")
+        col_guias = "Adjuntos_Guia" if source_sel == "pedidos" else "Hoja_Ruta_Mensajero"
+        existentes_guias = partir_urls(row.get(col_guias, ""))
+        existentes_otros = partir_urls(row.get("Adjuntos", ""))
 
-            if existentes_guias or existentes_otros:
-                with st.expander("📥 Archivos existentes", expanded=False):
-                    if existentes_guias:
-                        st.markdown("**Guías:**")
-                        for u in existentes_guias:
-                            tmp = get_s3_file_download_url(s3_client, u)
-                            nombre = extract_s3_key(u).split("/")[-1]
-                            st.markdown(f'- <a href="{tmp}" target="_blank">{nombre}</a>', unsafe_allow_html=True)
-                    if existentes_otros:
-                        st.markdown("**Otros:**")
-                        for u in existentes_otros:
-                            tmp = get_s3_file_download_url(s3_client, u)
-                            nombre = extract_s3_key(u).split("/")[-1]
-                            st.markdown(f'- <a href="{tmp}" target="_blank">{nombre}</a>', unsafe_allow_html=True)
+        if existentes_guias or existentes_otros:
+            with st.expander("📥 Archivos existentes", expanded=False):
+                if existentes_guias:
+                    st.markdown("**Guías:**")
+                    for u in existentes_guias:
+                        tmp = get_s3_file_download_url(s3_client, u)
+                        nombre = extract_s3_key(u).split("/")[-1]
+                        st.markdown(f'- <a href="{tmp}" target="_blank">{nombre}</a>', unsafe_allow_html=True)
+                if existentes_otros:
+                    st.markdown("**Otros:**")
+                    for u in existentes_otros:
+                        tmp = get_s3_file_download_url(s3_client, u)
+                        nombre = extract_s3_key(u).split("/")[-1]
+                        st.markdown(f'- <a href="{tmp}" target="_blank">{nombre}</a>', unsafe_allow_html=True)
 
-            uploaded_guias = st.file_uploader("📄 Guías", accept_multiple_files=True)
-            uploaded_otros = st.file_uploader("📁 Otros", accept_multiple_files=True)
+        uploaded_guias = st.file_uploader("📄 Guías", accept_multiple_files=True)
+        uploaded_otros = st.file_uploader("📁 Otros", accept_multiple_files=True)
 
-            if st.button("⬆️ Subir archivos"):
-                nuevas_guias_urls, nuevas_otros_urls = [], []
-                for file in uploaded_guias or []:
-                    key = f"adjuntos_pedidos/{pedido_sel}/{file.name}"
-                    success, url_subida = upload_file_to_s3(s3_client, S3_BUCKET, file, key)
-                    if success:
-                        nuevas_guias_urls.append(url_subida)
-                for file in uploaded_otros or []:
-                    key = f"adjuntos_pedidos/{pedido_sel}/{file.name}"
-                    success, url_subida = upload_file_to_s3(s3_client, S3_BUCKET, file, key)
-                    if success:
-                        nuevas_otros_urls.append(url_subida)
+        if st.button("⬆️ Subir archivos"):
+            nuevas_guias_urls, nuevas_otros_urls = [], []
+            for file in uploaded_guias or []:
+                key = f"adjuntos_pedidos/{pedido_sel}/{file.name}"
+                success, url_subida = upload_file_to_s3(s3_client, S3_BUCKET, file, key)
+                if success:
+                    nuevas_guias_urls.append(url_subida)
+            for file in uploaded_otros or []:
+                key = f"adjuntos_pedidos/{pedido_sel}/{file.name}"
+                success, url_subida = upload_file_to_s3(s3_client, S3_BUCKET, file, key)
+                if success:
+                    nuevas_otros_urls.append(url_subida)
 
-                cambios_archivos = []
-                if nuevas_guias_urls:
-                    existente = row.get(col_guias, "")
-                    nuevo_valor = combinar_urls_existentes(existente, nuevas_guias_urls)
-                    cambios_archivos.append((col_guias, nuevo_valor))
-                if nuevas_otros_urls:
-                    existente = row.get("Adjuntos", "")
-                    nuevo_valor = combinar_urls_existentes(existente, nuevas_otros_urls)
-                    cambios_archivos.append(("Adjuntos", nuevo_valor))
+            cambios_archivos = []
+            if nuevas_guias_urls:
+                existente = row.get(col_guias, "")
+                nuevo_valor = combinar_urls_existentes(existente, nuevas_guias_urls)
+                cambios_archivos.append((col_guias, nuevo_valor))
+            if nuevas_otros_urls:
+                existente = row.get("Adjuntos", "")
+                nuevo_valor = combinar_urls_existentes(existente, nuevas_otros_urls)
+                cambios_archivos.append(("Adjuntos", nuevo_valor))
 
-                if cambios_archivos:
-                    if actualizar_celdas_y_confirmar(cambios_archivos, "📎 Archivos subidos correctamente."):
-                        st.rerun()
-                else:
-                    st.warning("⚠️ No se cargaron archivos nuevos para actualizar en Excel.")
+            if cambios_archivos:
+                if actualizar_celdas_y_confirmar(cambios_archivos, "📎 Archivos subidos correctamente."):
+                    st.rerun()
+            else:
+                st.warning("⚠️ No se cargaron archivos nuevos para actualizar en Excel.")
 
 
         # --- CAMPOS MODIFICABLES ---
@@ -2549,104 +2549,104 @@ with tabs[3]:
         ]
         vendedor_actual = row.get("Vendedor_Registro", "").strip()
 
-        with st.expander("🧑‍💼 Cambio de Vendedor — Reasignar responsable", expanded=False):
-            st.markdown(f"**Actual:** {vendedor_actual}")
+        st.markdown("### 🧑‍💼 Cambio de Vendedor")
+        st.markdown(f"**Actual:** {vendedor_actual}")
 
-            vendedores_opciones = [v for v in vendedores if v != vendedor_actual] or [vendedor_actual]
-            nuevo_vendedor = st.selectbox("➡️ Cambiar a:", vendedores_opciones)
+        vendedores_opciones = [v for v in vendedores if v != vendedor_actual] or [vendedor_actual]
+        nuevo_vendedor = st.selectbox("➡️ Cambiar a:", vendedores_opciones)
 
-            if st.button("🧑‍💼 Guardar cambio de vendedor"):
-                if actualizar_celdas_y_confirmar(
-                    [("Vendedor_Registro", nuevo_vendedor)],
-                    "🎈 Vendedor actualizado correctamente.",
-                ):
-                    st.rerun()
+        if st.button("🧑‍💼 Guardar cambio de vendedor"):
+            if actualizar_celdas_y_confirmar(
+                [("Vendedor_Registro", nuevo_vendedor)],
+                "🎈 Vendedor actualizado correctamente.",
+            ):
+                st.rerun()
 
 
         if source_sel == "pedidos":
             tipo_envio_actual = row["Tipo_Envio"].strip()
-            with st.expander("🚚 Cambio de Tipo de Envío — Ajustar logística", expanded=False):
-                st.markdown(f"**Actual:** {tipo_envio_actual}")
+            st.markdown("### 🚚 Cambio de Tipo de Envío")
+            st.markdown(f"**Actual:** {tipo_envio_actual}")
 
-                opcion_contraria = "📍 Pedido Local" if "Foráneo" in tipo_envio_actual else "🚚 Pedido Foráneo"
-                tipo_envio = st.selectbox("➡️ Cambiar a:", [opcion_contraria])
+            opcion_contraria = "📍 Pedido Local" if "Foráneo" in tipo_envio_actual else "🚚 Pedido Foráneo"
+            tipo_envio = st.selectbox("➡️ Cambiar a:", [opcion_contraria])
 
-                if tipo_envio == "📍 Pedido Local":
-                    nuevo_turno = st.selectbox("⏰ Turno", ["☀️ Local Mañana", "🌙 Local Tarde", "🌵 Saltillo", "📦 Pasa a Bodega"])
-                    fecha_entrega_actual_raw = str(row.get("Fecha_Entrega", "") or "").strip()
-                    fecha_entrega_actual_dt = pd.to_datetime(fecha_entrega_actual_raw, errors="coerce")
-                    fecha_entrega_actual_mostrar = (
-                        fecha_entrega_actual_dt.strftime("%d/%m/%Y")
+            if tipo_envio == "📍 Pedido Local":
+                nuevo_turno = st.selectbox("⏰ Turno", ["☀️ Local Mañana", "🌙 Local Tarde", "🌵 Saltillo", "📦 Pasa a Bodega"])
+                fecha_entrega_actual_raw = str(row.get("Fecha_Entrega", "") or "").strip()
+                fecha_entrega_actual_dt = pd.to_datetime(fecha_entrega_actual_raw, errors="coerce")
+                fecha_entrega_actual_mostrar = (
+                    fecha_entrega_actual_dt.strftime("%d/%m/%Y")
+                    if pd.notna(fecha_entrega_actual_dt)
+                    else "Sin fecha"
+                )
+                st.markdown(f"**📅 Fecha de entrega actual:** {fecha_entrega_actual_mostrar}")
+
+                fecha_entrega_nueva = st.date_input(
+                    "📅 Fecha de entrega",
+                    value=(
+                        fecha_entrega_actual_dt.date()
                         if pd.notna(fecha_entrega_actual_dt)
-                        else "Sin fecha"
-                    )
-                    st.markdown(f"**📅 Fecha de entrega actual:** {fecha_entrega_actual_mostrar}")
+                        else date.today()
+                    ),
+                    min_value=date.today(),
+                    max_value=date.today() + timedelta(days=365),
+                    format="DD/MM/YYYY",
+                )
+                fecha_entrega_nueva_str = fecha_entrega_nueva.strftime("%Y-%m-%d")
+            else:
+                nuevo_turno = ""
+                fecha_entrega_nueva_str = str(row.get("Fecha_Entrega", "") or "").strip()
 
-                    fecha_entrega_nueva = st.date_input(
-                        "📅 Fecha de entrega",
-                        value=(
-                            fecha_entrega_actual_dt.date()
-                            if pd.notna(fecha_entrega_actual_dt)
-                            else date.today()
-                        ),
-                        min_value=date.today(),
-                        max_value=date.today() + timedelta(days=365),
-                        format="DD/MM/YYYY",
-                    )
-                    fecha_entrega_nueva_str = fecha_entrega_nueva.strftime("%Y-%m-%d")
-                else:
-                    nuevo_turno = ""
-                    fecha_entrega_nueva_str = str(row.get("Fecha_Entrega", "") or "").strip()
-
-                if st.button("📦 Guardar cambio de tipo de envío"):
-                    if actualizar_celdas_y_confirmar(
-                        [
-                            ("Tipo_Envio", tipo_envio),
-                            ("Turno", nuevo_turno),
-                            ("Fecha_Entrega", fecha_entrega_nueva_str),
-                        ],
-                        "📦 Tipo de envío, turno y fecha de entrega actualizados correctamente.",
-                    ):
-                        st.rerun()
+            if st.button("📦 Guardar cambio de tipo de envío"):
+                if actualizar_celdas_y_confirmar(
+                    [
+                        ("Tipo_Envio", tipo_envio),
+                        ("Turno", nuevo_turno),
+                        ("Fecha_Entrega", fecha_entrega_nueva_str),
+                    ],
+                    "📦 Tipo de envío, turno y fecha de entrega actualizados correctamente.",
+                ):
+                    st.rerun()
 
 
         # --- NUEVO: CAMBIO DE ESTADO A CANCELADO ---
         estado_actual = row.get("Estado", "").strip()
-        with st.expander("🟣 Cancelar Pedido — Marcar como no procesable", expanded=False):
-            st.markdown(f"**Estado Actual:** {estado_actual}")
+        st.markdown("### 🟣 Cancelar Pedido")
+        st.markdown(f"**Estado Actual:** {estado_actual}")
 
-            # Solo mostrar la opción de cancelar si el pedido no está ya cancelado
-            if "Cancelado" not in estado_actual:
-                if st.button("🟣 Cambiar Estado a CANCELADO"):
-                    try:
-                        # Actualizar el estado en la hoja de cálculo
-                        nuevo_estado = "🟣 Cancelado"
-                        if actualizar_celdas_y_confirmar(
-                            [("Estado", nuevo_estado)],
-                            "🟣 Pedido marcado como CANCELADO correctamente.",
-                        ):
-                            st.rerun()
-                    except Exception as e:
-                        st.error(f"❌ Error al cancelar el pedido: {str(e)}")
-            else:
-                st.info("ℹ️ Este pedido ya está marcado como CANCELADO.")
+        # Solo mostrar la opción de cancelar si el pedido no está ya cancelado
+        if "Cancelado" not in estado_actual:
+            if st.button("🟣 Cambiar Estado a CANCELADO"):
+                try:
+                    # Actualizar el estado en la hoja de cálculo
+                    nuevo_estado = "🟣 Cancelado"
+                    if actualizar_celdas_y_confirmar(
+                        [("Estado", nuevo_estado)],
+                        "🟣 Pedido marcado como CANCELADO correctamente.",
+                    ):
+                        st.rerun()
+                except Exception as e:
+                    st.error(f"❌ Error al cancelar el pedido: {str(e)}")
+        else:
+            st.info("ℹ️ Este pedido ya está marcado como CANCELADO.")
 
 
         completado = row.get("Completados_Limpiado", "")
-        with st.expander("👁 Visibilidad en Pantalla de Producción — Mostrar u ocultar", expanded=False):
-            opciones_visibilidad = {"Sí": "", "No": "sí"}
-            valor_actual = completado.strip().lower()
-            valor_preseleccionado = "No" if valor_actual == "sí" else "Sí"
-            seleccion = st.selectbox("¿Mostrar este pedido en el Panel?", list(opciones_visibilidad.keys()), index=list(opciones_visibilidad.keys()).index(valor_preseleccionado))
-            nuevo_valor_completado = opciones_visibilidad[seleccion]
+        st.markdown("### 👁 Visibilidad en Pantalla de Producción")
+        opciones_visibilidad = {"Sí": "", "No": "sí"}
+        valor_actual = completado.strip().lower()
+        valor_preseleccionado = "No" if valor_actual == "sí" else "Sí"
+        seleccion = st.selectbox("¿Mostrar este pedido en el Panel?", list(opciones_visibilidad.keys()), index=list(opciones_visibilidad.keys()).index(valor_preseleccionado))
+        nuevo_valor_completado = opciones_visibilidad[seleccion]
 
 
-            if st.button("👁 Guardar visibilidad en Panel"):
-                if actualizar_celdas_y_confirmar(
-                    [("Completados_Limpiado", nuevo_valor_completado)],
-                    "👁 Visibilidad en pantalla de producción actualizada.",
-                ):
-                    st.rerun()
+        if st.button("👁 Guardar visibilidad en Panel"):
+            if actualizar_celdas_y_confirmar(
+                [("Completados_Limpiado", nuevo_valor_completado)],
+                "👁 Visibilidad en pantalla de producción actualizada.",
+            ):
+                st.rerun()
 
 # ===== ORGANIZADOR ALEJANDRO (CON CONTRASEÑA) =====
 CONTRASENA_ALEJANDRO = "ale1"
