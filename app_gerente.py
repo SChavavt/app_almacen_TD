@@ -1360,7 +1360,7 @@ def get_checklist_daily_row_lookup(fecha_iso: str) -> dict:
     return lookup
 
 
-def update_checklist_daily_item(fecha_iso: str, item_id: str, item: str, completado: bool, notas: str, row_number: int = None, headers: list = None):
+def update_checklist_daily_item(fecha_iso: str, item_id: str, item: str, completado: bool, notas: str = None, row_number: int = None, headers: list = None):
     """Actualiza una fila en CHECKLIST_DAILY por (Fecha + Item_ID/Item)."""
     sheet = get_alejandro_worksheet("CHECKLIST_DAILY")
     ensure_headers(sheet, "CHECKLIST_DAILY")
@@ -1388,8 +1388,11 @@ def update_checklist_daily_item(fecha_iso: str, item_id: str, item: str, complet
         "Completado": "1" if completado else "0",
         "Completado_At": now_iso() if completado else "",
         "Completado_By": "ALEJANDRO" if completado else "",
-        "Notas": _safe_str(notas),
     }
+    notas_limpias = _safe_str(notas).strip()
+    if notas_limpias:
+        updates["Notas"] = notas_limpias
+
     cells = []
     for k, v in updates.items():
         if k in headers:
@@ -3604,7 +3607,15 @@ with tabs[0]:
             chk_hoy_edit["_f"] = _to_date(chk_hoy_edit["Fecha"])
             chk_hoy_edit = chk_hoy_edit[chk_hoy_edit["_f"] == hoy].copy()
 
-        done_chk = chk_hoy_edit["Completado"].apply(_to_bool).sum() if (not chk_hoy_edit.empty and "Completado" in chk_hoy_edit.columns) else 0
+        done_chk = 0
+        if not chk_hoy_edit.empty and "Completado" in chk_hoy_edit.columns:
+            for _, row in chk_hoy_edit.iterrows():
+                item_id = _safe_str(row.get("Item_ID", ""))
+                item = _safe_str(row.get("Item", "(sin item)"))
+                comp = _to_bool(row.get("Completado", "0"))
+                chk_key = f"chk_done_{item_id}_{item}"
+                if _to_bool(st.session_state.get(chk_key, comp)):
+                    done_chk += 1
         total_chk = len(chk_hoy_edit)
         pct_chk = (done_chk / total_chk * 100) if total_chk else 0
         st.metric("✅ Cumplimiento hoy", f"{pct_chk:.0f}%")
