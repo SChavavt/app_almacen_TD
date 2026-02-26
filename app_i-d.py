@@ -565,9 +565,7 @@ def render_auto_list(
     sub = f"<div class='board-sub'>{subtitle}</div>" if subtitle else ""
 
     list_id = f"board-{next(_AUTO_LIST_COUNTER)}"
-    enable_auto_scroll = len(visible) > scroll_threshold
-    scroll_duration = max(14, len(visible) * 1.2)
-    scroll_class = "board-scroll auto-scroll" if enable_auto_scroll else "board-scroll"
+    scroll_class = "board-scroll"
 
     html = f"""
     <style>
@@ -584,44 +582,19 @@ def render_auto_list(
     .board-meta{{margin-top:0.12rem;display:flex;flex-wrap:wrap;gap:0.25rem;font-size:0.72rem;opacity:0.85;font-weight:650;align-items:center;color:#fff;}}
     .chip{{padding:0.05rem 0.4rem;border-radius:0.6rem;background:rgba(255,255,255,0.10);white-space:nowrap;}}
     .board-status{{margin-left:auto;font-size:0.82rem;font-weight:900;white-space:nowrap;opacity:0.95;}}
-    #{list_id} .board-scroll{{max-height:{scroll_max_height}px;overflow:hidden;position:relative;}}
-    #{list_id} .board-scroll.auto-scroll .board-table{{animation: board-scroll-{list_id} var(--scroll-duration, 18s) linear infinite;}}
-    @keyframes board-scroll-{list_id} {{
-        0% {{ transform: translateY(0); }}
-        10% {{ transform: translateY(0); }}
-        45% {{ transform: translateY(calc(var(--scroll-distance, 0px) * -1)); }}
-        55% {{ transform: translateY(calc(var(--scroll-distance, 0px) * -1)); }}
-        90% {{ transform: translateY(0); }}
-        100% {{ transform: translateY(0); }}
-    }}
+    #{list_id} .board-scroll{{max-height:{scroll_max_height}px;overflow-y:auto;overflow-x:hidden;position:relative;}}
     </style>
     <div class="board-col" id="{list_id}">
     <div class="board-title">
         <div>{title}{sub}</div>
         <div class="board-sub">Mostrando {len(visible)}/{len(entries)}</div>
     </div>
-    <div class="{scroll_class}" data-auto-scroll="{str(enable_auto_scroll).lower()}">
+    <div class="{scroll_class}">
         <table class="board-table">
             {''.join(rows_html)}
         </table>
     </div>
     </div>
-    <script>
-    (() => {{
-        const root = document.getElementById("{list_id}");
-        if (!root) return;
-        const wrapper = root.querySelector(".board-scroll");
-        const table = root.querySelector(".board-table");
-        if (!wrapper || !table) return;
-        if (wrapper.dataset.autoScroll !== "true") return;
-        const distance = table.scrollHeight - wrapper.clientHeight;
-        if (distance > 0) {{
-            wrapper.style.setProperty("--scroll-distance", `${{distance}}px`);
-            wrapper.style.setProperty("--scroll-duration", "{scroll_duration}s");
-            wrapper.classList.add("auto-scroll");
-        }}
-    }})();
-    </script>
     """
 
 
