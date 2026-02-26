@@ -1436,7 +1436,7 @@ def build_hoy_alerts(hoy: date, df_citas: pd.DataFrame, df_tareas: pd.DataFrame,
         t["_fl"] = _to_dt(t["Fecha_Limite"])
         vencidas = t[(t["_fl"].dt.date < hoy) & (t["Estatus"].astype(str).str.lower() != "completada")]
         if len(vencidas) > 0:
-            alerts.append(("error", f"Hay {len(vencidas)} tarea(s) vencida(s)."))
+            alerts.append(("error", f"Hay {len(vencidas)} pendientes vencidos."))
 
     if not df_cot.empty:
         c = df_cot.copy()
@@ -2681,7 +2681,7 @@ with tabs[0]:
         st.rerun()
 
     # --- Subpestañas internas del organizador ---
-    sub = st.tabs(["Hoy", "Agenda", "Tareas", "Cotizaciones", "Checklist", "Config"])
+    sub = st.tabs(["Hoy", "Agenda", "Pendientes", "Cotizaciones", "Checklist", "Config"])
 
     errores_alejandro = []
 
@@ -2848,10 +2848,10 @@ with tabs[0]:
         # ===== RESUMEN (KPIs) =====
         k1, k2, k3, k4, k5, k6 = st.columns(6)
         k1.metric("📅 Citas hoy", len(citas_hoy))
-        k2.metric("✅ Tareas hoy", len(tareas_hoy))
-        k3.metric("⏰ Tareas vencidas", len(tareas_vencidas))
+        k2.metric("✅ Pendientes hoy", len(tareas_hoy))
+        k3.metric("⏰ Pendientes vencidos", len(tareas_vencidas))
         k4.metric("🔁 Seguimientos pendientes", len(seguimientos_pend))
-        k5.metric("📈 Cumplimiento tareas de hoy", f"{tareas_hoy_pct}%")
+        k5.metric("📈 Cumplimiento pendientes de hoy", f"{tareas_hoy_pct}%")
         k6.metric("💰 Cotizaciones pendientes", len(cot_pend))
 
         k7 = st.columns(1)[0]
@@ -2874,16 +2874,16 @@ with tabs[0]:
             cols = [c for c in ["Fecha_Inicio","Cliente_Persona","Empresa_Clinica","Tipo","Prioridad","Estatus","Notas"] if c in seguimientos_pend.columns]
             st.dataframe(seguimientos_pend[cols], use_container_width=True)
 
-        st.markdown("### ✅ Tareas de hoy")
+        st.markdown("### ✅ Pendientes de hoy")
         if tareas_hoy.empty:
-            st.info("Sin tareas para hoy.")
+            st.info("Sin pendientes para hoy.")
         else:
             cols = [c for c in ["Fecha_Limite","Titulo","Prioridad","Estatus","Cliente_Relacionado","Cotizacion_Folio_Relacionado"] if c in tareas_hoy.columns]
             st.dataframe(tareas_hoy[cols], use_container_width=True)
 
-        st.markdown("### ⏰ Tareas vencidas")
+        st.markdown("### ⏰ Pendientes vencidos")
         if tareas_vencidas.empty:
-            st.info("No hay tareas vencidas 🎉")
+            st.info("No hay pendientes vencidos 🎉")
         else:
             cols = [c for c in ["Fecha_Limite","Titulo","Prioridad","Estatus","Cliente_Relacionado"] if c in tareas_vencidas.columns]
             st.dataframe(tareas_vencidas[cols], use_container_width=True)
@@ -3015,11 +3015,11 @@ with tabs[0]:
             st.dataframe(df_citas, use_container_width=True)
 
     with sub[2]:
-        st.subheader("✅ Tareas")
+        st.subheader("✅ Pendientes")
 
         # ===== Alta rápida =====
         with st.form("form_nueva_tarea", clear_on_submit=True):
-            st.markdown("### ➕ Nueva tarea")
+            st.markdown("### ➕ Nuevo pendiente")
             titulo = st.text_input("Título", placeholder="Ej. Llamar a cliente X")
             descripcion = st.text_area("Descripción", placeholder="Detalles…", height=90)
 
@@ -3037,7 +3037,7 @@ with tabs[0]:
             with col5:
                 folio_cot = st.text_input("Folio cotización (opcional)")
 
-            submitted = st.form_submit_button("✅ Crear tarea")
+            submitted = st.form_submit_button("✅ Crear pendiente")
 
         if submitted:
             if not titulo.strip():
@@ -3056,7 +3056,7 @@ with tabs[0]:
                         "Estatus": estatus,
                         "Cliente_Relacionado": cliente_rel.strip(),
                         "Cotizacion_Folio_Relacionado": folio_cot.strip(),
-                        "Tipo": "Tarea",
+                        "Tipo": "Pendiente",
                         "Fecha_Completado": now_iso() if estatus.lower() == "completada" else "",
                         "Notas_Resultado": "",
                         "Last_Updated_At": now_iso(),
@@ -3064,13 +3064,13 @@ with tabs[0]:
                         "Is_Deleted": "0",
                     }
                     safe_append("TAREAS", payload)
-                    st.success(f"🎈 Tarea creada: {tarea_id}")
+                    st.success(f"🎈 Pendiente creado: {tarea_id}")
                     st.rerun()
                 except Exception as e:
-                    st.error(f"❌ Error creando tarea: {e}")
+                    st.error(f"❌ Error creando pendiente: {e}")
 
         st.markdown("---")
-        st.markdown("### ✅ Completar / Reabrir tarea")
+        st.markdown("### ✅ Completar / Reabrir pendiente")
 
         # Normaliza columnas básicas por si vienen vacías
         df_tareas["_id"] = df_tareas.get("Tarea_ID", "").astype(str)
@@ -3102,10 +3102,10 @@ with tabs[0]:
             return f"{tid} | {est} | {fec} | {tit}"
 
         if not opciones:
-            st.info("No hay tareas disponibles para actualizar.")
+            st.info("No hay pendientes disponibles para actualizar.")
             tarea_sel = None
         else:
-            tarea_sel = st.selectbox("Selecciona una tarea:", opciones, format_func=format_tarea, key="tarea_sel_update")
+            tarea_sel = st.selectbox("Selecciona un pendiente:", opciones, format_func=format_tarea, key="tarea_sel_update")
 
         if tarea_sel:
             colA, colB = st.columns(2)
@@ -3125,10 +3125,10 @@ with tabs[0]:
                             }
                         )
                         if ok:
-                            st.success("🎈 Tarea marcada como completada.")
+                            st.success("🎈 Pendiente marcado como completado.")
                             st.rerun()
                     except Exception as e:
-                        st.error(f"❌ Error actualizando tarea: {e}")
+                        st.error(f"❌ Error actualizando pendiente: {e}")
 
             with colB:
                 if st.button("↩️ Reabrir (PENDIENTE)", use_container_width=True):
@@ -3145,10 +3145,10 @@ with tabs[0]:
                             }
                         )
                         if ok:
-                            st.success("🎈 Tarea reabierta (Pendiente).")
+                            st.success("🎈 Pendiente reabierto (Pendiente).")
                             st.rerun()
                     except Exception as e:
-                        st.error(f"❌ Error reabriendo tarea: {e}")
+                        st.error(f"❌ Error reabriendo pendiente: {e}")
 
         st.markdown("### 📋 Lista")
         tareas_lista = df_tareas.copy()
@@ -3233,7 +3233,7 @@ with tabs[0]:
                     st.error(f"❌ Error creando cotización: {e}")
 
         st.markdown("---")
-        st.markdown("### 🔁 Convertir cotización a tarea")
+        st.markdown("### 🔁 Convertir cotización a pendiente")
 
         # Normalizar DF por si viene vacío o con tipos raros
         df_cot["_id"] = df_cot.get("Cotizacion_ID", "").astype(str)
@@ -3295,24 +3295,24 @@ with tabs[0]:
             ya_cita = bool(cita_link)
 
             if ya_tarea:
-                st.info(f"🧩 Esta cotización ya fue convertida a **Tarea**: {tarea_link}")
+                st.info(f"🧩 Esta cotización ya fue convertida a **Pendiente**: {tarea_link}")
             if ya_cita:
                 st.info(f"📅 Esta cotización ya fue convertida a **Cita**: {cita_link}")
 
             st.markdown("#### ➜ Tipo de conversión")
             tipo_conv = st.radio(
                 "¿Qué quieres crear?",
-                ["🧩 Tarea", "📅 Cita"],
+                ["🧩 Pendiente", "📅 Cita"],
                 horizontal=True,
                 key="tipo_conversion_cot"
             )
 
-            if tipo_conv == "🧩 Tarea":
+            if tipo_conv == "🧩 Pendiente":
                 colA, colB = st.columns([2, 1])
 
                 with colA:
                     titulo_sugerido = st.text_input(
-                        "Título de la tarea (editable):",
+                        "Título del pendiente (editable):",
                         value=f"Seguimiento cotización {folio} - {cliente}",
                         key="titulo_tarea_desde_cot"
                     )
@@ -3346,13 +3346,13 @@ with tabs[0]:
                         key="prioridad_tarea_desde_cot"
                     )
                 if st.button(
-                    "🧩 Convertir a TAREA",
+                    "🧩 Convertir a PENDIENTE",
                     key="btn_convertir_a_tarea",
                     use_container_width=True,
                     disabled=ya_tarea,
                 ):
                     if not titulo_sugerido.strip():
-                        st.error("❌ El título de la tarea no puede ir vacío.")
+                        st.error("❌ El título del pendiente no puede ir vacío.")
                     else:
                         try:
                             tarea_id = new_id("TAREA")
@@ -3391,10 +3391,10 @@ with tabs[0]:
                             except Exception:
                                 pass
 
-                            st.success(f"🎈 Tarea creada desde cotización: {tarea_id}")
+                            st.success(f"🎈 Pendiente creado desde cotización: {tarea_id}")
                             st.rerun()
                         except Exception as e:
-                            st.error(f"❌ Error al convertir a tarea: {e}")
+                            st.error(f"❌ Error al convertir a pendiente: {e}")
 
             else:
                 st.markdown("#### 📅 Configurar cita")
