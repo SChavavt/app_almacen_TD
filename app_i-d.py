@@ -2234,40 +2234,15 @@ if selected_tab == 2:
     # 1) Entradas (foráneo + casos asignados a foráneo)
     combined_entries = list(auto_foraneo_entries)
 
-    ant = filter_entries_before_date(combined_entries, hoy)
-    ant = [e for e in ant if _is_visible_auto_entry(e)]
-    ant = sort_entries_by_flow_number_desc(ant)
-
-    hoy_entries = filter_entries_on_or_after(combined_entries, hoy)
-    sin_fecha = filter_entries_no_entrega_date(combined_entries)
-
-    seen = set()
-    merged = []
-    for e in (hoy_entries + sin_fecha):
-        key = sanitize_text(e.get("id_pedido", "")) or (
-            sanitize_text(e.get("cliente", "")) + "|" + sanitize_text(e.get("hora", ""))
-        )
-        if key in seen:
-            continue
-        seen.add(key)
-        merged.append(e)
-
-    merged = [e for e in merged if _is_visible_auto_entry(e)]
-    merged = sort_entries_by_flow_number_desc(merged)
-
-    # Distribución inteligente: usar el espacio libre de "Anteriores"
-    # para continuar la lista de "Hoy" y evitar columnas desbalanceadas.
-    ant_count = len(ant)
-    hoy_count = len(merged)
-    objetivo_derecha = int(np.ceil((ant_count + hoy_count) / 2.0))
-    hoy_primarios = merged[:objetivo_derecha]
-    hoy_continuacion = merged[objetivo_derecha:]
-
     # 2) Layout: izquierda/derecha
     col_left, col_right = st.columns(2, gap="large")
 
-    # --- IZQUIERDA: ANTERIORES + CONTINUACIÓN DE HOY ---
+    # --- IZQUIERDA: ANTERIORES (todos los previos) ---
     with col_left:
+        ant = filter_entries_before_date(combined_entries, hoy)
+        ant = [e for e in ant if _is_visible_auto_entry(e)]
+        ant = sort_entries_by_flow_number_desc(ant)
+
         next_number = render_auto_list(
             ant,
             title="🚚 FORÁNEOS • ANTERIORES",
@@ -2275,19 +2250,26 @@ if selected_tab == 2:
             max_rows=140,
         )
 
-        if hoy_continuacion:
-            render_auto_list(
-                hoy_continuacion,
-                title=f"🚚 FORÁNEOS • HOY ({hoy.strftime('%d/%m')}) · CONT.",
-                subtitle="Continuación automática para aprovechar espacio disponible",
-                max_rows=140,
-                start_number=next_number,
-            )
-
     # --- DERECHA: HOY + FUTUROS + SIN Fecha_Entrega ---
     with col_right:
+        hoy_entries = filter_entries_on_or_after(combined_entries, hoy)
+        sin_fecha = filter_entries_no_entrega_date(combined_entries)
+
+        seen = set()
+        merged = []
+        for e in (hoy_entries + sin_fecha):
+            key = sanitize_text(e.get("id_pedido", "")) or (
+                sanitize_text(e.get("cliente", "")) + "|" + sanitize_text(e.get("hora", ""))
+            )
+            if key in seen:
+                continue
+            seen.add(key)
+            merged.append(e)
+
+        merged = [e for e in merged if _is_visible_auto_entry(e)]
+        merged = sort_entries_by_flow_number_desc(merged)
         render_auto_list(
-            hoy_primarios,
+            merged,
             title=f"🚚 FORÁNEOS • HOY ({hoy.strftime('%d/%m')})",
             subtitle="Todos los de hoy y fechas futuras + pedidos sin Fecha_Entrega",
             max_rows=140,
