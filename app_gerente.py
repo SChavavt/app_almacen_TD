@@ -396,6 +396,7 @@ def get_alejandro_worksheet(nombre_hoja: str):
     return gspread_client.open_by_key(spreadsheet_id).worksheet(nombre_hoja)
 
 
+@st.cache_data(ttl=180, show_spinner=False)
 def cargar_alejandro_hoja(nombre_hoja: str) -> pd.DataFrame:
     """Carga una hoja de alejandro_data y garantiza columnas mínimas."""
     sheet = get_alejandro_worksheet(nombre_hoja)
@@ -461,6 +462,7 @@ def safe_append(nombre_hoja: str, row_dict: dict):
     row = [row_dict.get(c, "") for c in cols]
     try:
         sheet.append_row(row, value_input_option="USER_ENTERED")
+        cargar_alejandro_hoja.clear()
     except Exception as e:
         msg = str(e)
         if "not supported for this document" in msg.lower():
@@ -509,6 +511,7 @@ def safe_update_by_id(nombre_hoja: str, id_col: str, id_value: str, updates: dic
         return False
 
     sheet.update_cells(cells, value_input_option="USER_ENTERED")
+    cargar_alejandro_hoja.clear()
     return True
 
 
@@ -537,6 +540,9 @@ def safe_delete_rows_by_filter(nombre_hoja: str, predicate) -> int:
         )
         # Pausa mínima para reducir picos de cuota al borrar múltiples filas consecutivas.
         time.sleep(0.12)
+
+    if rows_to_delete:
+        cargar_alejandro_hoja.clear()
 
     return len(rows_to_delete)
 
@@ -1407,6 +1413,7 @@ def update_checklist_daily_item(fecha_iso: str, item_id: str, item: str, complet
 
     if cells:
         sheet.update_cells(cells, value_input_option="USER_ENTERED")
+        cargar_alejandro_hoja.clear()
 
 
 def build_hoy_alerts(hoy: date, df_citas: pd.DataFrame, df_tareas: pd.DataFrame, df_cot: pd.DataFrame, chk_hoy: pd.DataFrame, df_config: pd.DataFrame):
@@ -3613,7 +3620,8 @@ with tabs[0]:
                 item_id = _safe_str(row.get("Item_ID", ""))
                 item = _safe_str(row.get("Item", "(sin item)"))
                 comp = _to_bool(row.get("Completado", "0"))
-                chk_key = f"chk_done_{item_id}_{item}"
+                item_key = f"{item_id or 'sinid'}_{item}".lower().replace(" ", "_")
+                chk_key = f"chk_done_{item_key}"
                 if _to_bool(st.session_state.get(chk_key, comp)):
                     done_chk += 1
         total_chk = len(chk_hoy_edit)
@@ -3648,35 +3656,39 @@ with tabs[0]:
                 comp = _to_bool(row.get("Completado", "0"))
                 notas_actuales = _safe_str(row.get("Notas", ""))
 
-                c1, c2, c3 = st.columns([4, 1.5, 2])
-                with c1:
-                    nuevo_comp = st.checkbox(item, value=comp, key=f"chk_done_{item_id}_{item}")
-                with c2:
-                    nuevo_notas = st.text_input("Notas", value=notas_actuales, key=f"chk_note_{item_id}_{item}")
-                with c3:
-                    if st.button("💾 Guardar", key=f"chk_save_{item_id}_{item}"):
-                        try:
-                            row_number = None
-                            if item_id:
-                                row_number = row_lookup.get((hoy.strftime("%Y-%m-%d"), item_id, ""))
-                            if row_number is None:
-                                row_number = row_lookup.get((hoy.strftime("%Y-%m-%d"), "", item.lower()))
+                item_key = f"{item_id or 'sinid'}_{item}".lower().replace(" ", "_")
+                with st.form(f"form_chk_item_{item_key}"):
+                    c1, c2, c3 = st.columns([4, 1.5, 2])
+                    with c1:
+                        nuevo_comp = st.checkbox(item, value=comp, key=f"chk_done_{item_key}")
+                    with c2:
+                        nuevo_notas = st.text_input("Notas", value=notas_actuales, key=f"chk_note_{item_key}")
+                    with c3:
+                        guardar_chk = st.form_submit_button("💾 Guardar")
 
-                            update_checklist_daily_item(
-                                fecha_iso=today_iso,
-                                item_id=item_id,
-                                item=item,
-                                completado=nuevo_comp,
-                                notas=nuevo_notas,
-                                row_number=row_number,
-                                headers=checklist_headers,
-                            )
-                            # refrescar lookup cache tras cambios
-                            st.session_state[lk_key] = get_checklist_daily_row_lookup(today_iso)
-                            st.success(f"✅ Actualizado: {item}")
-                            st.rerun()
-                        except Exception as e:
-                            st.error(f"❌ No se pudo actualizar '{item}': {e}")
+                if guardar_chk:
+                    try:
+                        row_number = None
+                        if item_id:
+                            row_number = row_lookup.get((hoy.strftime("%Y-%m-%d"), item_id, ""))
+                        if row_number is None:
+                            row_number = row_lookup.get((hoy.strftime("%Y-%m-%d"), "", item.lower()))
+
+                        update_checklist_daily_item(
+                            fecha_iso=today_iso,
+                            item_id=item_id,
+                            item=item,
+                            completado=nuevo_comp,
+                            notas=nuevo_notas,
+                            row_number=row_number,
+                            headers=checklist_headers,
+                        )
+                        # refrescar lookup cache tras cambios
+                        st.session_state[lk_key] = get_checklist_daily_row_lookup(today_iso)
+                        st.success(f"✅ Actualizado: {item}")
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"❌ No se pudo actualizar '{item}': {e}")
 
         st.markdown("---")
         st.markdown("### 🗑️ Eliminar ítem (al final)")
