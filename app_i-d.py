@@ -573,7 +573,7 @@ def render_auto_list(
 
     html = f"""
     <style>
-    .board-col{{flex:1;background:rgba(18,18,20,0.92);border-radius:0.9rem;padding:0.55rem 0.7rem;box-shadow:0 2px 12px rgba(0,0,0,0.25);height:100%;}}
+    .board-col{{flex:1;background:rgba(18,18,20,0.92);border-radius:0.9rem;padding:0.55rem 0.7rem;box-shadow:0 2px 12px rgba(0,0,0,0.25);height:100%;font-family:"Source Sans Pro", sans-serif;}}
     .board-title{{display:flex;justify-content:space-between;align-items:center;gap:0.6rem;margin-bottom:0.45rem;font-weight:600;font-size:1.03rem;color:#fff;letter-spacing:0.01em;}}
     .board-sub{{font-size:0.73rem;opacity:0.8;font-weight:500;}}
     .board-table{{width:100%;border-collapse:collapse;table-layout:fixed;}}
