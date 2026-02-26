@@ -181,6 +181,9 @@ def cargar_hoja_pedidos(nombre_hoja):
     # Metadata interna para saber desde qué worksheet proviene cada pedido.
     # Se usa al momento de guardar cambios para escribir en la hoja correcta.
     df["__hoja_origen"] = nombre_hoja
+    # Fila real en Google Sheets (considerando encabezado en fila 1).
+    # Se usa para asegurar que las modificaciones se escriban en el pedido correcto.
+    df["__sheet_row"] = df.index + 2
     return df
 
 def _extract_sheet_id(value: str) -> str:
@@ -607,6 +610,12 @@ def cargar_pedidos():
     if not pedidos_frames:
         return pd.DataFrame(columns=PEDIDOS_COLUMNAS_MINIMAS)
     return pd.concat(pedidos_frames, ignore_index=True, sort=False)
+
+
+@st.cache_data(ttl=300)
+def cargar_pedidos_modificables():
+    """Carga solo pedidos de data_pedidos para la pestaña de modificación."""
+    return cargar_hoja_pedidos("data_pedidos").copy()
 @st.cache_data(ttl=300)
 def cargar_casos_especiales():
     """
@@ -2029,17 +2038,15 @@ with tabs[3]:
                 st.error("❌ Contraseña incorrecta.")
 
     if st.session_state.acceso_modificacion:
-        df_pedidos = cargar_pedidos()
+        df_pedidos = cargar_pedidos_modificables()
         df_casos = cargar_casos_especiales()
 
-        def es_devol_o_garant(row):
-            for col in ("Tipo_Envio", "Tipo_Caso"):
-                valor = str(row.get(col, ""))
-                if valor and ("devolu" in normalizar(valor) or "garant" in normalizar(valor)):
-                    return True
-            return False
-
-        df_casos = df_casos[df_casos.apply(es_devol_o_garant, axis=1)]
+        # En modificación solo se incluyen casos especiales pendientes de limpieza.
+        if "Completados_Limpiado" not in df_casos.columns:
+            df_casos["Completados_Limpiado"] = ""
+        df_casos = df_casos[
+            df_casos["Completados_Limpiado"].astype(str).str.strip() == ""
+        ]
 
         for d in (df_pedidos, df_casos):
             d["Hora_Registro"] = pd.to_datetime(d["Hora_Registro"], errors="coerce")
@@ -2304,79 +2311,40 @@ with tabs[3]:
                 del st.session_state["pedido_modificado_source"]
 
 
-        usar_busqueda = False
         if pedido_sel is None:
-            usar_busqueda = st.checkbox(
-                "🔍 Buscar por nombre de cliente (activar para ocultar los últimos 10 pedidos)"
+            st.markdown("### 📋 Lista completa de pedidos y casos disponibles")
+
+            if df.empty:
+                st.warning("⚠️ No hay pedidos disponibles para modificar.")
+                st.stop()
+
+            def _fmt_hora_mod(valor):
+                if pd.isna(valor):
+                    return "Sin fecha"
+                if isinstance(valor, pd.Timestamp):
+                    return valor.strftime('%d/%m %H:%M')
+                try:
+                    return pd.to_datetime(valor).strftime('%d/%m %H:%M')
+                except Exception:
+                    return str(valor)
+
+            df_lista = df.copy()
+            df_lista["display"] = df_lista.apply(
+                lambda row: (
+                    f"🧾 {row.get('Folio_Factura', row.get('Folio',''))} – 🚚 {row.get('Tipo_Envio','')} "
+                    f"– 👤 {row.get('Cliente','')} – 🔍 {row.get('Estado', row.get('Estado_Caso',''))} "
+                    f"– 🧑‍💼 {row.get('Vendedor_Registro','')} – 🕒 {_fmt_hora_mod(row.get('Hora_Registro'))}"
+                ),
+                axis=1,
             )
 
-        if pedido_sel is None:
-            if usar_busqueda:
-                st.markdown("### 🔍 Buscar Pedido por Cliente")
-                cliente_buscado = st.text_input("👤 Escribe el nombre del cliente:")
-                cliente_normalizado = normalizar(cliente_buscado)
-                coincidencias = []
-
-                if cliente_buscado:
-                    for _, row_ in df.iterrows():
-                        cliente_row = row_.get("Cliente", "").strip()
-                        if not cliente_row:
-                            continue
-                        cliente_row_normalizado = normalizar(cliente_row)
-                        if cliente_normalizado in cliente_row_normalizado:
-                            coincidencias.append(row_)
-
-                if not coincidencias:
-                    st.warning("⚠️ No se encontraron pedidos para ese cliente.")
-                    st.stop()
-                else:
-                    st.success(
-                        f"✅ Se encontraron {len(coincidencias)} coincidencia(s) para este cliente."
-                    )
-
-                    if len(coincidencias) == 1:
-                        pedido_sel = coincidencias[0]["ID_Pedido"]
-                        source_sel = coincidencias[0]["__source"]
-                        row = coincidencias[0]
-                        st.markdown(
-                            f"🧾 {row.get('Folio_Factura', row.get('Folio',''))} – 🚚 {row.get('Tipo_Envio','')} – 👤 {row['Cliente']} – 🔍 {row.get('Estado', row.get('Estado_Caso',''))} – 🧑‍💼 {row.get('Vendedor_Registro','')} – 🕒 {row['Hora_Registro'].strftime('%d/%m %H:%M')}"
-                        )
-
-                    else:
-                        opciones = []
-                        for r in coincidencias:
-                            folio = r.get('Folio_Factura', r.get('Folio',''))
-                            tipo_envio = r.get('Tipo_Envio','')
-                            display = (
-                                f"{folio} – 🚚 {tipo_envio} – 👤 {r['Cliente']} – 🔍 {r.get('Estado', r.get('Estado_Caso',''))} "
-                                f"– 🧑‍💼 {r.get('Vendedor_Registro','')} – 🕒 {r['Hora_Registro'].strftime('%d/%m %H:%M')}"
-                            )
-                            opciones.append(display)
-                        seleccion = st.selectbox(
-                            "👥 Se encontraron múltiples pedidos, selecciona uno:", opciones
-                        )
-                        idx = opciones.index(seleccion)
-                        pedido_sel = coincidencias[idx]["ID_Pedido"]
-                        source_sel = coincidencias[idx]["__source"]
-
-            else:
-                ultimos_10 = df.head(10)
-                st.markdown("### 🕒 Últimos 10 Pedidos Registrados")
-                ultimos_10["display"] = ultimos_10.apply(
-                    lambda row: (
-                        f"{row.get('Folio_Factura', row.get('Folio',''))} – {row.get('Tipo_Envio','')} – 👤 {row['Cliente']} "
-                        f"– 🔍 {row.get('Estado', row.get('Estado_Caso',''))} – 🧑‍💼 {row.get('Vendedor_Registro','')} "
-                        f"– 🕒 {row['Hora_Registro'].strftime('%d/%m %H:%M')}"
-                    ),
-                    axis=1
-                )
-                idx_seleccion = st.selectbox(
-                    "⬇️ Selecciona uno de los pedidos recientes:",
-                    ultimos_10.index,
-                    format_func=lambda i: ultimos_10.loc[i, "display"]
-                )
-                pedido_sel = ultimos_10.loc[idx_seleccion, "ID_Pedido"]
-                source_sel = ultimos_10.loc[idx_seleccion, "__source"]
+            idx_seleccion = st.selectbox(
+                "⬇️ Selecciona el pedido a modificar:",
+                df_lista.index.tolist(),
+                format_func=lambda i: df_lista.loc[i, "display"],
+            )
+            pedido_sel = df_lista.loc[idx_seleccion, "ID_Pedido"]
+            source_sel = df_lista.loc[idx_seleccion, "__source"]
 
 
         # --- Cargar datos del pedido seleccionado ---
@@ -2387,8 +2355,9 @@ with tabs[3]:
             st.stop()
 
         row_df = df_pedidos if source_sel == "pedidos" else df_casos
-        row = row_df[row_df["ID_Pedido"].astype(str) == str(pedido_sel)].iloc[0]
-        gspread_row_idx = row_df[row_df["ID_Pedido"].astype(str) == str(pedido_sel)].index[0] + 2  # índice real en hoja
+        row_sel = row_df[row_df["ID_Pedido"].astype(str) == str(pedido_sel)]
+        row = row_sel.iloc[0]
+        gspread_row_idx = int(row.get("__sheet_row", row_sel.index[0] + 2))
         if "mensaje_exito" in st.session_state:
             st.success(st.session_state["mensaje_exito"])
             del st.session_state["mensaje_exito"]  # ✅ eliminar para que no se repita
@@ -2407,11 +2376,20 @@ with tabs[3]:
         def actualizar_celdas_y_confirmar(cambios, mensaje_exito):
             """Actualiza celdas en lote y valida lectura de los nuevos valores."""
             try:
+                headers = hoja.row_values(1)
+                mapa_columnas_hoja = {
+                    str(nombre).strip(): idx + 1
+                    for idx, nombre in enumerate(headers)
+                    if str(nombre).strip()
+                }
+
                 updates = []
                 for nombre_col, valor in cambios:
-                    if nombre_col not in row_df.columns:
-                        raise ValueError(f"No existe la columna '{nombre_col}' en la hoja {hoja_nombre}.")
-                    col_idx = row_df.columns.get_loc(nombre_col) + 1
+                    if nombre_col not in mapa_columnas_hoja:
+                        raise ValueError(
+                            f"No existe la columna '{nombre_col}' en la hoja {hoja_nombre}."
+                        )
+                    col_idx = mapa_columnas_hoja[nombre_col]
                     updates.append({
                         "range": gspread.utils.rowcol_to_a1(gspread_row_idx, col_idx),
                         "values": [[valor]],
@@ -2420,7 +2398,7 @@ with tabs[3]:
                 hoja.batch_update(updates, value_input_option="USER_ENTERED")
 
                 for nombre_col, valor_esperado in cambios:
-                    col_idx = row_df.columns.get_loc(nombre_col) + 1
+                    col_idx = mapa_columnas_hoja[nombre_col]
                     valor_real = hoja.cell(gspread_row_idx, col_idx).value
                     esperado = "" if valor_esperado is None else str(valor_esperado).strip()
                     real = "" if valor_real is None else str(valor_real).strip()
