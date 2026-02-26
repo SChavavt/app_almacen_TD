@@ -497,7 +497,6 @@ def render_auto_list(
     subtitle: str = "",
     max_rows: int = 60,
     start_number: int = 1,
-    scroll_threshold: int = 10,
     panel_height: int = 720,
     scroll_max_height: int = 640,
 ):
@@ -567,22 +566,27 @@ def render_auto_list(
     list_id = f"board-{next(_AUTO_LIST_COUNTER)}"
     scroll_class = "board-scroll"
 
+    row_height_px = 52
+    title_height_px = 68
+    content_height = max(200, (len(visible) * row_height_px) + title_height_px)
+    component_height = max(panel_height, content_height)
+
     html = f"""
     <style>
     .board-col{{flex:1;background:rgba(18,18,20,0.92);border-radius:0.9rem;padding:0.55rem 0.7rem;box-shadow:0 2px 12px rgba(0,0,0,0.25);height:100%;}}
-    .board-title{{display:flex;justify-content:space-between;align-items:center;gap:0.6rem;margin-bottom:0.45rem;font-weight:800;font-size:1.15rem;color:#fff;}}
-    .board-sub{{font-size:0.8rem;opacity:0.8;font-weight:600;}}
+    .board-title{{display:flex;justify-content:space-between;align-items:center;gap:0.6rem;margin-bottom:0.45rem;font-weight:600;font-size:1.03rem;color:#fff;letter-spacing:0.01em;}}
+    .board-sub{{font-size:0.73rem;opacity:0.8;font-weight:500;}}
     .board-table{{width:100%;border-collapse:collapse;table-layout:fixed;}}
     .board-row{{border-top:1px solid rgba(255,255,255,0.08);}}
     .board-row:first-child{{border-top:none;}}
-    .board-n{{width:2.6rem;font-size:1.1rem;font-weight:900;padding:0.18rem 0.15rem;opacity:0.95;vertical-align:top;white-space:nowrap;color:#fff;}}
+    .board-n{{width:2.3rem;font-size:0.95rem;font-weight:600;padding:0.15rem 0.12rem;opacity:0.95;vertical-align:top;white-space:nowrap;color:#fff;}}
     .board-main{{padding:0.18rem 0.15rem;vertical-align:top;}}
-    .board-client{{font-size:0.95rem;font-weight:800;line-height:1.15rem;color:#fff;word-break:break-word;display:flex;align-items:center;gap:0.4rem;flex-wrap:wrap;}}
-    .surtidor-tag{{margin-left:0.25rem;padding:0.1rem 0.45rem;border-radius:0.7rem;background:rgba(114,190,255,0.18);color:#a9dcff;font-weight:800;font-size:0.75rem;white-space:nowrap;}}
-    .board-meta{{margin-top:0.12rem;display:flex;flex-wrap:wrap;gap:0.25rem;font-size:0.72rem;opacity:0.85;font-weight:650;align-items:center;color:#fff;}}
-    .chip{{padding:0.05rem 0.4rem;border-radius:0.6rem;background:rgba(255,255,255,0.10);white-space:nowrap;}}
-    .board-status{{margin-left:auto;font-size:0.82rem;font-weight:900;white-space:nowrap;opacity:0.95;}}
-    #{list_id} .board-scroll{{max-height:{scroll_max_height}px;overflow-y:auto;overflow-x:hidden;position:relative;}}
+    .board-client{{font-size:0.84rem;font-weight:500;line-height:1.05rem;color:#fff;word-break:break-word;display:flex;align-items:center;gap:0.3rem;flex-wrap:wrap;}}
+    .surtidor-tag{{margin-left:0.2rem;padding:0.08rem 0.36rem;border-radius:0.7rem;background:rgba(114,190,255,0.18);color:#a9dcff;font-weight:600;font-size:0.68rem;white-space:nowrap;}}
+    .board-meta{{margin-top:0.08rem;display:flex;flex-wrap:wrap;gap:0.2rem;font-size:0.66rem;opacity:0.85;font-weight:500;align-items:center;color:#fff;line-height:1rem;}}
+    .chip{{padding:0.04rem 0.34rem;border-radius:0.55rem;background:rgba(255,255,255,0.10);white-space:nowrap;}}
+    .board-status{{margin-left:auto;font-size:0.7rem;font-weight:600;white-space:nowrap;opacity:0.95;}}
+    #{list_id} .board-scroll{{max-height:none;overflow:visible;position:relative;}}
     </style>
     <div class="board-col" id="{list_id}">
     <div class="board-title">
@@ -599,7 +603,7 @@ def render_auto_list(
 
 
     # ✅ Forzar render HTML real (no texto)
-    components.html(html, height=panel_height, scrolling=False)
+    components.html(html, height=component_height, scrolling=False)
     return start_number + len(visible)
 
 
@@ -2214,7 +2218,6 @@ if selected_tab == 1:
                     subtitle="Pedidos activos por turno",
                     max_rows=140,
                     start_number=next_number,
-                    scroll_threshold=8,
                     panel_height=380,
                     scroll_max_height=300,
                 )
