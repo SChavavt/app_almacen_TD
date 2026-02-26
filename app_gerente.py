@@ -3668,42 +3668,46 @@ with tabs[0]:
                 label = f"{item_txt_opt} · {item_id_opt or 'SIN_ID'}"
                 template_opts.append((label, item_id_opt, item_txt_opt))
 
-            selected_template_label = st.selectbox(
-                "Selecciona el ítem a eliminar por completo",
+            selected_template_labels = st.multiselect(
+                "Selecciona uno o varios ítems a eliminar por completo",
                 options=[o[0] for o in template_opts],
-                key="chk_template_delete_select",
+                key="chk_template_delete_select_multi",
             )
 
-            if st.button("🗑️ Eliminar de plantilla y daily (todas las fechas)", key="btn_delete_chk_template", type="secondary"):
+            if st.button("🗑️ Eliminar seleccionados de plantilla y daily (todas las fechas)", key="btn_delete_chk_template", type="secondary"):
                 try:
-                    selected = next((o for o in template_opts if o[0] == selected_template_label), None)
-                    if not selected:
-                        raise Exception("No se pudo identificar el ítem seleccionado.")
+                    if not selected_template_labels:
+                        raise Exception("Selecciona al menos un ítem para eliminar.")
 
-                    _, del_item_id, del_item_txt = selected
-                    norm_item = del_item_txt.lower()
+                    selected_rows = [o for o in template_opts if o[0] in selected_template_labels]
+                    if not selected_rows:
+                        raise Exception("No se pudieron identificar los ítems seleccionados.")
+
+                    ids_to_delete = {_safe_str(item_id) for _, item_id, _ in selected_rows if _safe_str(item_id)}
+                    names_to_delete = {_safe_str(item_txt).lower() for _, item_id, item_txt in selected_rows if not _safe_str(item_id)}
 
                     deleted_template = safe_delete_rows_by_filter(
                         "CHECKLIST_TEMPLATE",
                         lambda rec: (
-                            (del_item_id and _safe_str(rec.get("Item_ID", "")) == del_item_id)
-                            or ((not del_item_id) and _safe_str(rec.get("Item", "")).lower() == norm_item)
+                            (_safe_str(rec.get("Item_ID", "")) in ids_to_delete)
+                            or ((not _safe_str(rec.get("Item_ID", ""))) and (_safe_str(rec.get("Item", "")).lower() in names_to_delete))
                         )
                     )
                     deleted_daily = safe_delete_rows_by_filter(
                         "CHECKLIST_DAILY",
                         lambda rec: (
-                            (del_item_id and _safe_str(rec.get("Item_ID", "")) == del_item_id)
-                            or ((not del_item_id) and _safe_str(rec.get("Item", "")).lower() == norm_item)
+                            (_safe_str(rec.get("Item_ID", "")) in ids_to_delete)
+                            or ((not _safe_str(rec.get("Item_ID", ""))) and (_safe_str(rec.get("Item", "")).lower() in names_to_delete))
                         )
                     )
 
                     st.success(
-                        f"✅ Ítem eliminado por completo. Plantilla: {deleted_template} fila(s), daily (todas las fechas): {deleted_daily} fila(s)."
+                        f"✅ Ítems eliminados por completo ({len(selected_rows)} seleccionados). "
+                        f"Plantilla: {deleted_template} fila(s), daily (todas las fechas): {deleted_daily} fila(s)."
                     )
                     st.rerun()
                 except Exception as e:
-                    st.error(f"❌ No se pudo eliminar el ítem: {e}")
+                    st.error(f"❌ No se pudieron eliminar los ítems: {e}")
         else:
             st.info("No hay ítems en plantilla para eliminar.")
 
