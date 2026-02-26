@@ -1723,10 +1723,32 @@ def compute_dashboard_base(df_conf: pd.DataFrame):
 
 @st.cache_data(ttl=120)
 def build_ultimos_pedidos(df_pedidos: pd.DataFrame, vendedor: str):
-    if df_pedidos.empty:
+    work = df_pedidos.copy() if not df_pedidos.empty else pd.DataFrame()
+    casos = load_casos_from_gsheets()
+
+    if not casos.empty:
+        if "Completados_Limpiado" not in casos.columns:
+            casos["Completados_Limpiado"] = ""
+        casos = casos[
+            casos["Completados_Limpiado"].map(sanitize_text) == ""
+        ].copy()
+
+        if not casos.empty:
+            for base_col in [
+                "Hora_Registro",
+                "Cliente",
+                "Vendedor_Registro",
+                "Folio_Factura",
+                "Tipo_Envio",
+                "Estado",
+            ]:
+                if base_col not in casos.columns:
+                    casos[base_col] = ""
+            work = pd.concat([work, casos], ignore_index=True, sort=False)
+
+    if work.empty:
         return pd.DataFrame()
 
-    work = df_pedidos.copy()
     if "Hora_Registro" not in work.columns:
         work["Hora_Registro"] = pd.NaT
     if "Vendedor_Registro" not in work.columns:
@@ -2506,9 +2528,9 @@ if selected_tab == 0:
         st.info("No hay pedidos recientes para el filtro seleccionado.")
     else:
         st.caption(
-            "Mostrando todos los pedidos de data_pedidos"
+            "Mostrando pedidos de data_pedidos y casos_especiales pendientes de limpieza"
             if vendedor_sel == "(Todos)"
-            else f"Mostrando todos los pedidos de {vendedor_sel} en data_pedidos"
+            else f"Mostrando pedidos de {vendedor_sel} en data_pedidos + casos_especiales pendientes de limpieza"
         )
         st.dataframe(ultimos_filtrados, use_container_width=True, height=260, hide_index=True)
 
