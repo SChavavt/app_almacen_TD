@@ -2744,7 +2744,7 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
             (row.get("Tipo_Envio") == "🚚 Pedido Foráneo" or origen_tab == "Foráneo")
             and direccion_retorno
         ):
-            st.markdown("📍 Dirección para guía de retorno:")
+            st.markdown("📍 Dirección de guía solicitada:")
             st.info(direccion_retorno)
 
 
