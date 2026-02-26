@@ -28,7 +28,9 @@ st.markdown(
     .header-compact h2 { margin: 0; font-size: 1.5rem; line-height: 1.6rem; }
     .header-meta { font-size: 0.8rem; color: #c9c9c9; }
     div[data-testid="stHorizontalBlock"] { gap: 0.4rem; }
+    div[data-testid="stVerticalBlock"] > div:has(iframe) { margin-bottom: 0.2rem; }
     div[data-testid="stRadio"] > label { margin-bottom: 0; }
+    div[data-testid="element-container"] { margin-bottom: 0.25rem; }
     div[data-testid="stRadio"] div[role="radiogroup"] { gap: 0.25rem; }
     div[data-testid="stRadio"] label { padding: 0.1rem 0.4rem; font-size: 0.8rem; }
     div[data-testid="stRadio"] input[type="radio"] { display: none; }
@@ -499,6 +501,7 @@ def render_auto_list(
     start_number: int = 1,
     panel_height: int = 720,
     scroll_max_height: int = 640,
+    show_header: bool = True,
 ):
     if not entries:
         st.info("No hay pedidos para mostrar.")
@@ -566,10 +569,22 @@ def render_auto_list(
     list_id = f"board-{next(_AUTO_LIST_COUNTER)}"
     scroll_class = "board-scroll"
 
+    header_html = (
+        f"""
+    <div class=\"board-title\">
+        <div>{title}{sub}</div>
+        <div class=\"board-sub\">Mostrando {len(visible)}/{len(entries)}</div>
+    </div>
+    """
+        if show_header
+        else ""
+    )
+
     row_height_px = 52
-    title_height_px = 68
-    content_height = max(200, (len(visible) * row_height_px) + title_height_px)
-    component_height = max(panel_height, content_height)
+    title_height_px = 68 if show_header else 8
+    min_content = 200 if show_header else 120
+    content_height = max(min_content, (len(visible) * row_height_px) + title_height_px)
+    component_height = content_height
 
     html = f"""
     <style>
@@ -589,10 +604,7 @@ def render_auto_list(
     #{list_id} .board-scroll{{max-height:none;overflow:visible;position:relative;}}
     </style>
     <div class="board-col" id="{list_id}">
-    <div class="board-title">
-        <div>{title}{sub}</div>
-        <div class="board-sub">Mostrando {len(visible)}/{len(entries)}</div>
-    </div>
+    {header_html}
     <div class="{scroll_class}">
         <table class="board-table">
             {''.join(rows_html)}
@@ -2218,7 +2230,7 @@ if selected_tab == 1:
                     subtitle="Pedidos activos por turno",
                     max_rows=140,
                     start_number=next_number,
-                    panel_height=380,
+                    panel_height=220,
                     scroll_max_height=300,
                 )
 
@@ -2234,42 +2246,63 @@ if selected_tab == 2:
     # 1) Entradas (foráneo + casos asignados a foráneo)
     combined_entries = list(auto_foraneo_entries)
 
+    ant = filter_entries_before_date(combined_entries, hoy)
+    ant = [e for e in ant if _is_visible_auto_entry(e)]
+    ant = sort_entries_by_flow_number_desc(ant)
+
+    hoy_entries = filter_entries_on_or_after(combined_entries, hoy)
+    sin_fecha = filter_entries_no_entrega_date(combined_entries)
+
+    seen = set()
+    merged = []
+    for e in (hoy_entries + sin_fecha):
+        key = sanitize_text(e.get("id_pedido", "")) or (
+            sanitize_text(e.get("cliente", "")) + "|" + sanitize_text(e.get("hora", ""))
+        )
+        if key in seen:
+            continue
+        seen.add(key)
+        merged.append(e)
+
+    merged = [e for e in merged if _is_visible_auto_entry(e)]
+    merged = sort_entries_by_flow_number_desc(merged)
+
+    # Distribución inteligente: usar el espacio libre de "Anteriores"
+    # para continuar la lista de "Hoy" y evitar columnas desbalanceadas.
+    ant_count = len(ant)
+    hoy_count = len(merged)
+    objetivo_derecha = int(np.ceil((ant_count + hoy_count) / 2.0))
+    hoy_primarios = merged[:objetivo_derecha]
+    hoy_continuacion = merged[objetivo_derecha:]
+
     # 2) Layout: izquierda/derecha
     col_left, col_right = st.columns(2, gap="large")
 
-    # --- IZQUIERDA: ANTERIORES (todos los previos) ---
+    # --- IZQUIERDA: ANTERIORES + CONTINUACIÓN DE HOY ---
     with col_left:
-        ant = filter_entries_before_date(combined_entries, hoy)
-        ant = [e for e in ant if _is_visible_auto_entry(e)]
-        ant = sort_entries_by_flow_number_desc(ant)
-
         next_number = render_auto_list(
             ant,
             title="🚚 FORÁNEOS • ANTERIORES",
             subtitle="Fechas previas (sin completados)",
             max_rows=140,
+            panel_height=220,
         )
+
+        if hoy_continuacion:
+            render_auto_list(
+                hoy_continuacion,
+                title="",
+                subtitle="",
+                max_rows=140,
+                start_number=next_number,
+                panel_height=120,
+                show_header=False,
+            )
 
     # --- DERECHA: HOY + FUTUROS + SIN Fecha_Entrega ---
     with col_right:
-        hoy_entries = filter_entries_on_or_after(combined_entries, hoy)
-        sin_fecha = filter_entries_no_entrega_date(combined_entries)
-
-        seen = set()
-        merged = []
-        for e in (hoy_entries + sin_fecha):
-            key = sanitize_text(e.get("id_pedido", "")) or (
-                sanitize_text(e.get("cliente", "")) + "|" + sanitize_text(e.get("hora", ""))
-            )
-            if key in seen:
-                continue
-            seen.add(key)
-            merged.append(e)
-
-        merged = [e for e in merged if _is_visible_auto_entry(e)]
-        merged = sort_entries_by_flow_number_desc(merged)
         render_auto_list(
-            merged,
+            hoy_primarios,
             title=f"🚚 FORÁNEOS • HOY ({hoy.strftime('%d/%m')})",
             subtitle="Todos los de hoy y fechas futuras + pedidos sin Fecha_Entrega",
             max_rows=140,
