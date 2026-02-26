@@ -181,6 +181,9 @@ def cargar_hoja_pedidos(nombre_hoja):
     # Metadata interna para saber desde qué worksheet proviene cada pedido.
     # Se usa al momento de guardar cambios para escribir en la hoja correcta.
     df["__hoja_origen"] = nombre_hoja
+    # Fila real en Google Sheets (considerando encabezado en fila 1).
+    # Se usa para asegurar que las modificaciones se escriban en el pedido correcto.
+    df["__sheet_row"] = df.index + 2
     return df
 
 def _extract_sheet_id(value: str) -> str:
@@ -607,6 +610,12 @@ def cargar_pedidos():
     if not pedidos_frames:
         return pd.DataFrame(columns=PEDIDOS_COLUMNAS_MINIMAS)
     return pd.concat(pedidos_frames, ignore_index=True, sort=False)
+
+
+@st.cache_data(ttl=300)
+def cargar_pedidos_modificables():
+    """Carga solo pedidos de data_pedidos para la pestaña de modificación."""
+    return cargar_hoja_pedidos("data_pedidos").copy()
 @st.cache_data(ttl=300)
 def cargar_casos_especiales():
     """
@@ -2029,7 +2038,7 @@ with tabs[3]:
                 st.error("❌ Contraseña incorrecta.")
 
     if st.session_state.acceso_modificacion:
-        df_pedidos = cargar_pedidos()
+        df_pedidos = cargar_pedidos_modificables()
         df_casos = cargar_casos_especiales()
 
         def es_devol_o_garant(row):
@@ -2387,8 +2396,9 @@ with tabs[3]:
             st.stop()
 
         row_df = df_pedidos if source_sel == "pedidos" else df_casos
-        row = row_df[row_df["ID_Pedido"].astype(str) == str(pedido_sel)].iloc[0]
-        gspread_row_idx = row_df[row_df["ID_Pedido"].astype(str) == str(pedido_sel)].index[0] + 2  # índice real en hoja
+        row_sel = row_df[row_df["ID_Pedido"].astype(str) == str(pedido_sel)]
+        row = row_sel.iloc[0]
+        gspread_row_idx = int(row.get("__sheet_row", row_sel.index[0] + 2))
         if "mensaje_exito" in st.session_state:
             st.success(st.session_state["mensaje_exito"])
             del st.session_state["mensaje_exito"]  # ✅ eliminar para que no se repita
@@ -2407,11 +2417,20 @@ with tabs[3]:
         def actualizar_celdas_y_confirmar(cambios, mensaje_exito):
             """Actualiza celdas en lote y valida lectura de los nuevos valores."""
             try:
+                headers = hoja.row_values(1)
+                mapa_columnas_hoja = {
+                    str(nombre).strip(): idx + 1
+                    for idx, nombre in enumerate(headers)
+                    if str(nombre).strip()
+                }
+
                 updates = []
                 for nombre_col, valor in cambios:
-                    if nombre_col not in row_df.columns:
-                        raise ValueError(f"No existe la columna '{nombre_col}' en la hoja {hoja_nombre}.")
-                    col_idx = row_df.columns.get_loc(nombre_col) + 1
+                    if nombre_col not in mapa_columnas_hoja:
+                        raise ValueError(
+                            f"No existe la columna '{nombre_col}' en la hoja {hoja_nombre}."
+                        )
+                    col_idx = mapa_columnas_hoja[nombre_col]
                     updates.append({
                         "range": gspread.utils.rowcol_to_a1(gspread_row_idx, col_idx),
                         "values": [[valor]],
@@ -2420,7 +2439,7 @@ with tabs[3]:
                 hoja.batch_update(updates, value_input_option="USER_ENTERED")
 
                 for nombre_col, valor_esperado in cambios:
-                    col_idx = row_df.columns.get_loc(nombre_col) + 1
+                    col_idx = mapa_columnas_hoja[nombre_col]
                     valor_real = hoja.cell(gspread_row_idx, col_idx).value
                     esperado = "" if valor_esperado is None else str(valor_esperado).strip()
                     real = "" if valor_real is None else str(valor_real).strip()
