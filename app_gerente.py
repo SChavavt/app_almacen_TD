@@ -2341,7 +2341,7 @@ with tabs[3]:
             df_lista = df.copy()
             df_lista["display"] = df_lista.apply(
                 lambda row: (
-                    f"🧾 {row.get('Folio_Factura', row.get('Folio',''))} – 🚚 {row.get('Tipo_Envio','')} "
+                    f"🧾 {row.get('Folio_Factura', row.get('Folio',''))} – {row.get('Tipo_Envio','')} "
                     f"– 👤 {row.get('Cliente','')} – 🔍 {row.get('Estado', row.get('Estado_Caso',''))} "
                     f"– 🧑‍💼 {row.get('Vendedor_Registro','')} – 🕒 {_fmt_hora_mod(row.get('Hora_Registro'))}"
                 ),
