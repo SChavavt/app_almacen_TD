@@ -2528,9 +2528,9 @@ if selected_tab == 0:
         st.info("No hay pedidos recientes para el filtro seleccionado.")
     else:
         st.caption(
-            "Mostrando pedidos de data_pedidos y casos_especiales pendientes de limpieza"
+            "Mostrando pedidos y casos especiales en flujo"
             if vendedor_sel == "(Todos)"
-            else f"Mostrando pedidos de {vendedor_sel} en data_pedidos + casos_especiales pendientes de limpieza"
+            else f"Mostrando pedidos de {vendedor_sel} en flujo"
         )
         st.dataframe(ultimos_filtrados, use_container_width=True, height=260, hide_index=True)
 
