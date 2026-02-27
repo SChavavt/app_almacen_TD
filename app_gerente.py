@@ -2374,6 +2374,13 @@ with tabs[3]:
 
         row_df = df_pedidos if source_sel == "pedidos" else df_casos
         row_sel = row_df[row_df["ID_Pedido"].astype(str) == str(pedido_sel)]
+        if row_sel.empty:
+            st.session_state.pop("pedido_modificado", None)
+            st.session_state.pop("pedido_modificado_source", None)
+            st.warning(
+                "⚠️ El pedido seleccionado ya no está disponible en la lista actual. Selecciona otro pedido."
+            )
+            st.rerun()
         row = row_sel.iloc[0]
         gspread_row_idx = int(row.get("__sheet_row", row_sel.index[0] + 2))
         if "mensaje_exito" in st.session_state:
@@ -2565,12 +2572,31 @@ with tabs[3]:
         with st.expander("🧑‍💼 Cambio de Vendedor — Reasignar responsable", expanded=False):
             st.markdown(f"**Actual:** {vendedor_actual}")
 
+            opcion_manual = "✍️ Escribir vendedor manualmente"
             vendedores_opciones = [v for v in vendedores if v != vendedor_actual] or [vendedor_actual]
+            vendedores_opciones = vendedores_opciones + [opcion_manual]
             nuevo_vendedor = st.selectbox("➡️ Cambiar a:", vendedores_opciones)
 
+            vendedor_manual = ""
+            if nuevo_vendedor == opcion_manual:
+                vendedor_manual = st.text_input(
+                    "📝 Nombre del vendedor",
+                    placeholder="Ej. JUAN PÉREZ",
+                    key="vendedor_manual_modificar",
+                )
+
+            vendedor_destino = (
+                vendedor_manual.strip().upper()
+                if nuevo_vendedor == opcion_manual
+                else nuevo_vendedor
+            )
+
             if st.button("🧑‍💼 Guardar cambio de vendedor"):
+                if not vendedor_destino:
+                    st.warning("⚠️ Escribe un nombre de vendedor válido para continuar.")
+                    st.stop()
                 if actualizar_celdas_y_confirmar(
-                    [("Vendedor_Registro", nuevo_vendedor)],
+                    [("Vendedor_Registro", vendedor_destino)],
                     "🎈 Vendedor actualizado correctamente.",
                 ):
                     st.rerun()
