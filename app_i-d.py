@@ -1711,7 +1711,7 @@ def compute_dashboard_base(df_conf: pd.DataFrame):
 
 
 @st.cache_data(ttl=120)
-def build_ultimos_pedidos(df_pedidos: pd.DataFrame, vendedor: str):
+def build_ultimos_pedidos_data(df_pedidos: pd.DataFrame, vendedor: str) -> pd.DataFrame:
     work = df_pedidos.copy() if not df_pedidos.empty else pd.DataFrame()
     casos = load_casos_from_gsheets()
 
@@ -1750,8 +1750,15 @@ def build_ultimos_pedidos(df_pedidos: pd.DataFrame, vendedor: str):
             work["Vendedor_Registro"].map(_normalize_vendedor_name) == vend_norm
         ]
 
-    work = work.sort_values("Hora_Registro", ascending=False)
-    work = work.copy()
+    return work.sort_values("Hora_Registro", ascending=False).copy()
+
+
+@st.cache_data(ttl=120)
+def build_ultimos_pedidos(df_pedidos: pd.DataFrame, vendedor: str):
+    work = build_ultimos_pedidos_data(df_pedidos, vendedor)
+
+    if work.empty:
+        return pd.DataFrame()
 
     columnas = [
         "Hora_Registro",
@@ -1776,6 +1783,15 @@ def build_ultimos_pedidos(df_pedidos: pd.DataFrame, vendedor: str):
             vista["Fecha_Entrega"], errors="coerce"
         ).dt.strftime("%d/%m/%Y")
     return vista
+
+
+def _format_detail_value(value) -> str:
+    formatted = sanitize_text(value)
+    return formatted if formatted else "—"
+
+
+def _render_detail_row(label: str, value):
+    st.markdown(f"**{label}:** {_format_detail_value(value)}")
 
 
 # --- S3 helper (solo lectura presignada aquí) ---
@@ -2539,6 +2555,7 @@ if selected_tab == 0:
             st.rerun()
 
     ultimos_filtrados = build_ultimos_pedidos(df_all, vendedor_sel)
+    ultimos_base = build_ultimos_pedidos_data(df_all, vendedor_sel)
     if ultimos_filtrados.empty:
         st.info("No hay pedidos recientes para el filtro seleccionado.")
     else:
@@ -2548,6 +2565,77 @@ if selected_tab == 0:
             else f"Mostrando pedidos de {vendedor_sel} en flujo"
         )
         st.dataframe(ultimos_filtrados, use_container_width=True, height=260, hide_index=True)
+
+        st.markdown("##### 🔎 Ver detalle de un pedido")
+        selector_df = ultimos_base.copy()
+        if "Folio_Factura" not in selector_df.columns:
+            selector_df["Folio_Factura"] = ""
+        if "Cliente" not in selector_df.columns:
+            selector_df["Cliente"] = ""
+        if "Hora_Registro" not in selector_df.columns:
+            selector_df["Hora_Registro"] = pd.NaT
+
+        selector_df["_label_hora"] = pd.to_datetime(
+            selector_df["Hora_Registro"], errors="coerce"
+        ).dt.strftime("%d/%m/%Y %H:%M").fillna("sin fecha")
+        selector_df["_label_folio"] = selector_df["Folio_Factura"].map(sanitize_text)
+        selector_df.loc[selector_df["_label_folio"] == "", "_label_folio"] = "Sin folio"
+        selector_df["_label_cliente"] = selector_df["Cliente"].map(sanitize_text)
+        selector_df.loc[selector_df["_label_cliente"] == "", "_label_cliente"] = "Sin cliente"
+        selector_df["_pedido_label"] = selector_df.apply(
+            lambda r: f"{r['_label_folio']} · {r['_label_cliente']} · {r['_label_hora']}", axis=1
+        )
+
+        pedido_idx = st.selectbox(
+            "Selecciona un pedido para ver más información",
+            options=selector_df.index.tolist(),
+            format_func=lambda idx: selector_df.loc[idx, "_pedido_label"],
+            key="dashboard_detalle_pedido_idx",
+        )
+        pedido_sel = selector_df.loc[pedido_idx]
+
+        with st.container(border=True):
+            st.markdown("**🧾 Info general**")
+            c1, c2 = st.columns(2)
+            with c1:
+                _render_detail_row("id_vendedor", pedido_sel.get("id_vendedor", ""))
+                turno_val = sanitize_text(pedido_sel.get("Turno", ""))
+                if turno_val:
+                    _render_detail_row("Turno", turno_val)
+                _render_detail_row("Comentario", pedido_sel.get("Comentario", ""))
+            with c2:
+                _render_detail_row("Estado_Pago", pedido_sel.get("Estado_Pago", ""))
+                _render_detail_row("Adjuntos", display_attachments(pedido_sel.get("Adjuntos", "")))
+
+            st.markdown("---")
+            st.markdown("**📦 Sección de guías**")
+            g1, g2 = st.columns(2)
+            with g1:
+                _render_detail_row(
+                    "Direccion_Guia_Retorno",
+                    pedido_sel.get("Direccion_Guia_Retorno", ""),
+                )
+            with g2:
+                _render_detail_row(
+                    "Adjuntos_Guia",
+                    display_attachments(pedido_sel.get("Adjuntos_Guia", "")),
+                )
+
+            mod_cols = ["id_vendedor_Mod", "Modificacion_Surtido", "Adjuntos_Surtido"]
+            has_mod_data = any(sanitize_text(pedido_sel.get(col, "")) for col in mod_cols)
+            if has_mod_data:
+                st.markdown("---")
+                st.markdown("**🛠️ Sección de modificación**")
+                m1, m2, m3 = st.columns(3)
+                with m1:
+                    _render_detail_row("id_vendedor_Mod", pedido_sel.get("id_vendedor_Mod", ""))
+                with m2:
+                    _render_detail_row("Modificacion_Surtido", pedido_sel.get("Modificacion_Surtido", ""))
+                with m3:
+                    _render_detail_row(
+                        "Adjuntos_Surtido",
+                        display_attachments(pedido_sel.get("Adjuntos_Surtido", "")),
+                    )
 
     st.markdown("---")
 
