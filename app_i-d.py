@@ -1729,6 +1729,7 @@ def build_ultimos_pedidos(df_pedidos: pd.DataFrame, vendedor: str):
                 "Vendedor_Registro",
                 "Folio_Factura",
                 "Tipo_Envio",
+                "Fecha_Entrega",
                 "Estado",
             ]:
                 if base_col not in casos.columns:
@@ -1758,6 +1759,7 @@ def build_ultimos_pedidos(df_pedidos: pd.DataFrame, vendedor: str):
         "Vendedor_Registro",
         "Folio_Factura",
         "Tipo_Envio",
+        "Fecha_Entrega",
         "Estado",
     ]
     cols_exist = [c for c in columnas if c in work.columns]
@@ -1769,6 +1771,10 @@ def build_ultimos_pedidos(df_pedidos: pd.DataFrame, vendedor: str):
         vista["Hora_Registro"] = pd.to_datetime(
             vista["Hora_Registro"], errors="coerce"
         ).dt.strftime("%d/%m/%Y %H:%M")
+    if "Fecha_Entrega" in vista.columns:
+        vista["Fecha_Entrega"] = pd.to_datetime(
+            vista["Fecha_Entrega"], errors="coerce"
+        ).dt.strftime("%d/%m/%Y")
     return vista
 
 
