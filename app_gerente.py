@@ -2402,6 +2402,7 @@ with tabs[3]:
                 }
 
                 updates = []
+                celdas = []
                 for nombre_col, valor in cambios:
                     if nombre_col not in mapa_columnas_hoja:
                         raise ValueError(
@@ -2412,8 +2413,12 @@ with tabs[3]:
                         "range": gspread.utils.rowcol_to_a1(gspread_row_idx, col_idx),
                         "values": [[valor]],
                     })
+                    celdas.append(gspread.Cell(row=gspread_row_idx, col=col_idx, value=valor))
 
-                hoja.batch_update(updates, value_input_option="USER_ENTERED")
+                if hasattr(hoja, "batch_update"):
+                    hoja.batch_update(updates, value_input_option="USER_ENTERED")
+                else:
+                    hoja.update_cells(celdas, value_input_option="USER_ENTERED")
 
                 for nombre_col, valor_esperado in cambios:
                     col_idx = mapa_columnas_hoja[nombre_col]
@@ -2597,7 +2602,12 @@ with tabs[3]:
                             if pd.notna(fecha_entrega_actual_dt)
                             else date.today()
                         ),
-                        min_value=date.today(),
+                        min_value=min(
+                            fecha_entrega_actual_dt.date(),
+                            date.today(),
+                        )
+                        if pd.notna(fecha_entrega_actual_dt)
+                        else date.today(),
                         max_value=date.today() + timedelta(days=365),
                         format="DD/MM/YYYY",
                     )
