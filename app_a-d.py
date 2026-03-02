@@ -1283,6 +1283,12 @@ def _apply_local_sheet_updates(df: pd.DataFrame, worksheet_name: str) -> pd.Data
         for col, value in updates.items():
             if str(col).startswith("__"):
                 continue
+            if col == "Estado" and col in df.columns:
+                current_estado = str(df.loc[mask, col].iloc[0]).strip()
+                local_estado = str(value).strip()
+                # No degradar el estado si en Sheets ya avanzó (ej. Pendiente -> En Proceso).
+                if _estado_sort_key(local_estado) < _estado_sort_key(current_estado):
+                    continue
             if col not in df.columns:
                 df[col] = ""
             df.loc[mask, col] = value
@@ -1295,6 +1301,23 @@ def _apply_local_sheet_updates(df: pd.DataFrame, worksheet_name: str) -> pd.Data
         all_updates.pop(worksheet_name, None)
     return df
 
+
+
+
+def _estado_sort_key(estado: Any) -> int:
+    """Prioridad para evitar sobrescribir estados más avanzados con caché local."""
+    estado_norm = str(estado or "").strip()
+    ranking = {
+        "🟡 Pendiente": 10,
+        "🔴 Demorado": 15,
+        "🛠 Modificación": 15,
+        "✏️ Modificación": 15,
+        "🔵 En Proceso": 20,
+        "🟢 Completado": 30,
+        "✅ Viajó": 30,
+        "🟣 Cancelado": 30,
+    }
+    return ranking.get(estado_norm, 0)
 
 def _get_worksheet_name_safe(worksheet: Any) -> str:
     return str(getattr(worksheet, "title", "") or "")
