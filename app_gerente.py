@@ -1537,7 +1537,7 @@ tab_specs = [
 ]
 
 if usuario_puede(usuario_actual, "organizador"):
-    tab_specs.insert(0, ("organizador", "🗂️ Organizador (Alejandro)"))
+    tab_specs.insert(0, ("organizador", "🗂️ Organizador"))
 
 if usuario_puede(usuario_actual, "modificar"):
     tab_specs.append(("modificar", "✏️ Modificar Pedido"))
@@ -2751,7 +2751,7 @@ if "modificar" in tab_map:
 
 if "organizador" in tab_map:
     with tab_map["organizador"]:
-        st.header("🗂️ Organizador (Alejandro)")
+        st.header("🗂️ Organizador")
 
         if st.button("🔄 Refrescar Organizador", key="refresh_alejandro"):
             st.rerun()
