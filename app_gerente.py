@@ -3366,20 +3366,26 @@ if "organizador" in tab_map:
                 if not opciones_cierre:
                     st.info("No hay cotizaciones disponibles para cerrar.")
                 else:
-                    cot_sel_cierre = st.selectbox(
-                        "Selecciona una cotización para cerrar:",
-                        opciones_cierre,
-                        format_func=format_cot,
-                        key="cot_sel_cierre"
-                    )
-                    estado_cierre = st.radio(
-                        "Nuevo estatus de cierre:",
-                        ["Cerrada – Ganada", "Cerrada – Perdida"],
-                        horizontal=True,
-                        key="estado_cierre_cot"
-                    )
+                    with st.form("form_cerrar_cotizacion"):
+                        cot_sel_cierre = st.selectbox(
+                            "Selecciona una cotización para cerrar:",
+                            opciones_cierre,
+                            format_func=format_cot,
+                            key="cot_sel_cierre"
+                        )
+                        estado_cierre = st.radio(
+                            "Nuevo estatus de cierre:",
+                            ["Cerrada – Ganada", "Cerrada – Perdida"],
+                            horizontal=True,
+                            key="estado_cierre_cot"
+                        )
 
-                    if st.button("🏁 Actualizar estatus de cotización", key="btn_cerrar_cot", use_container_width=True):
+                        enviar_cierre = st.form_submit_button(
+                            "🏁 Actualizar estatus de cotización",
+                            use_container_width=True,
+                        )
+
+                    if enviar_cierre:
                         try:
                             safe_update_by_id(
                                 "COTIZACIONES",
