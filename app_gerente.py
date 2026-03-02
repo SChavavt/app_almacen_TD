@@ -2906,6 +2906,23 @@ if "organizador" in tab_map:
                 )
                 recordatorios_activos = recordatorios_activos[activos].sort_values("_fi", ascending=True)
 
+            # Persistencia para ocultar notificaciones de cita hasta que el usuario decida volver a mostrarlas.
+            dismissed_key = "organizador_notificaciones_citas_ocultas"
+            if dismissed_key not in st.session_state:
+                st.session_state[dismissed_key] = set()
+            if "Cita_ID" in recordatorios_activos.columns:
+                ids_activos = set(recordatorios_activos["Cita_ID"].astype(str))
+                # Limpia IDs que ya no están activos para evitar crecer indefinidamente en sesión.
+                st.session_state[dismissed_key] = {
+                    cid for cid in st.session_state[dismissed_key] if cid in ids_activos
+                }
+
+                recordatorios_visibles = recordatorios_activos[
+                    ~recordatorios_activos["Cita_ID"].astype(str).isin(st.session_state[dismissed_key])
+                ].copy()
+            else:
+                recordatorios_visibles = recordatorios_activos.copy()
+
             # --- CHECKLIST (% cumplimiento del día) ---
             chk = df_checklist_daily.copy()
             if "Fecha" in chk.columns:
@@ -2932,6 +2949,29 @@ if "organizador" in tab_map:
 
             k7 = st.columns(1)[0]
             k7.metric("🧾 Checklist hoy", f"{pct}%")
+
+            if not recordatorios_visibles.empty:
+                primera_cita = recordatorios_visibles.iloc[0]
+                hora_cita = primera_cita.get("Fecha_Inicio", "")
+                cliente_cita = primera_cita.get("Cliente_Persona", "Sin cliente")
+                tipo_cita = primera_cita.get("Tipo", "Cita")
+                minutos_previos = primera_cita.get("Reminder_Minutes_Before", "")
+
+                st.warning(
+                    f"🔔 **Tienes {len(recordatorios_visibles)} recordatorio(s) de cita activo(s)**. "
+                    f"Próxima: {hora_cita} · {cliente_cita} · {tipo_cita} "
+                    f"(aviso {minutos_previos} min antes)."
+                )
+                col_notif_1, col_notif_2 = st.columns([1, 1])
+                with col_notif_1:
+                    if st.button("✅ Quitar estas notificaciones", key="btn_ocultar_notif_citas"):
+                        if "Cita_ID" in recordatorios_visibles.columns:
+                            st.session_state[dismissed_key].update(
+                                recordatorios_visibles["Cita_ID"].astype(str).tolist()
+                            )
+                        st.rerun()
+                with col_notif_2:
+                    st.caption("La alerta se mantiene visible hasta que la quites manualmente.")
 
             st.markdown("---")
 
@@ -2972,11 +3012,11 @@ if "organizador" in tab_map:
                 st.dataframe(cot_venc[cols], use_container_width=True)
 
             st.markdown("### ⏱️ Recordatorios de citas activos")
-            if recordatorios_activos.empty:
+            if recordatorios_visibles.empty:
                 st.info("No hay recordatorios activos por atender en este momento.")
             else:
                 cols = [c for c in ["Cita_ID","Fecha_Inicio","Cliente_Persona","Tipo","Reminder_Minutes_Before","Reminder_Status","Estatus"] if c in recordatorios_activos.columns]
-                st.dataframe(recordatorios_activos[cols], use_container_width=True)
+                st.dataframe(recordatorios_visibles[cols], use_container_width=True)
 
             st.markdown("### 🧾 Checklist de hoy")
             if chk_hoy.empty:
