@@ -3806,8 +3806,8 @@ if "organizador" in tab_map:
                             st.error(f"❌ No se pudo actualizar '{item}': {e}")
 
             st.markdown("---")
-            st.markdown("### 🗑️ Eliminar ítem (al final)")
-            st.caption("Este borrado elimina el ítem de CHECKLIST_TEMPLATE y también de CHECKLIST_DAILY en todas las fechas.")
+            st.markdown("### 🗑️ Eliminar ítem")
+            st.caption("Este borrado elimina el ítem en todas las fechas.")
             if not df_checklist_template.empty:
                 template_opts = []
                 for _, r in df_checklist_template.iterrows():
