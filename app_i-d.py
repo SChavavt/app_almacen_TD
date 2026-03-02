@@ -2591,6 +2591,9 @@ if selected_tab == 0:
         ).dt.strftime("%d/%m/%Y %H:%M").fillna("sin fecha")
         selector_df["_label_folio"] = selector_df["Folio_Factura"].map(sanitize_text)
         selector_df.loc[selector_df["_label_folio"] == "", "_label_folio"] = "Sin folio"
+        selector_df["_label_guia"] = selector_df.get("Adjuntos_Guia", "").map(sanitize_text).map(
+            lambda x: "📋 " if x else ""
+        )
         selector_df["_label_cliente"] = selector_df["Cliente"].map(sanitize_text)
         selector_df.loc[selector_df["_label_cliente"] == "", "_label_cliente"] = "Sin cliente"
         selector_df["_label_estado"] = selector_df["Estado"].map(sanitize_text)
@@ -2600,8 +2603,8 @@ if selected_tab == 0:
             selector_df["_label_envio"] = ""
         selector_df["_pedido_label"] = selector_df.apply(
             lambda r: (
-                f"{r['_label_folio']} · {r['_label_cliente']} · {r['_label_estado']} · {r['_label_hora']}"
-                f" {r['_label_envio']}" if r["_label_envio"] else f"{r['_label_folio']} · {r['_label_cliente']} · {r['_label_estado']} · {r['_label_hora']}"
+                f"{r['_label_guia']}{r['_label_folio']} · {r['_label_cliente']} · {r['_label_estado']} · {r['_label_hora']}"
+                f" {r['_label_envio']}" if r["_label_envio"] else f"{r['_label_guia']}{r['_label_folio']} · {r['_label_cliente']} · {r['_label_estado']} · {r['_label_hora']}"
             ),
             axis=1,
         )
