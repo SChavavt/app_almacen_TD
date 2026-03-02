@@ -2983,10 +2983,8 @@ if "organizador" in tab_map:
                 cols = [c for c in ["Fecha_Inicio","Cliente_Persona","Empresa_Clinica","Tipo","Prioridad","Estatus","Notas"] if c in citas_hoy.columns]
                 st.dataframe(citas_hoy[cols], use_container_width=True)
 
-            st.markdown("### 🔁 Seguimientos pendientes")
-            if seguimientos_pend.empty:
-                st.info("No hay citas de seguimiento pendientes.")
-            else:
+            if not seguimientos_pend.empty:
+                st.markdown("### 🔁 Seguimientos pendientes")
                 cols = [c for c in ["Fecha_Inicio","Cliente_Persona","Empresa_Clinica","Tipo","Prioridad","Estatus","Notas"] if c in seguimientos_pend.columns]
                 st.dataframe(seguimientos_pend[cols], use_container_width=True)
 
