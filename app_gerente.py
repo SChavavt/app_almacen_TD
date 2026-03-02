@@ -2108,6 +2108,8 @@ if "modificar" in tab_map:
 
         df_pedidos = cargar_pedidos_modificables()
         df_casos = cargar_casos_especiales()
+        # Fuente exclusiva para la sección de garantías (sin mezclar otras hojas).
+        df_casos_garantias = df_casos.copy()
 
         # En modificación solo se incluyen casos especiales pendientes de limpieza.
         if "Completados_Limpiado" not in df_casos.columns:
@@ -2136,7 +2138,9 @@ if "modificar" in tab_map:
                     return True
             return False
 
-        df_garantias = df_casos[df_casos.apply(es_garantia, axis=1)].copy()
+        df_garantias = df_casos_garantias[
+            df_casos_garantias.apply(es_garantia, axis=1)
+        ].copy()
 
         mostrar_garantias = st.checkbox(
             "🔘 Mostrar sección de garantías",
