@@ -1473,11 +1473,12 @@ def build_hoy_alerts(hoy: date, df_citas: pd.DataFrame, df_tareas: pd.DataFrame,
 
 
 # --- INTERFAZ ---
-USUARIOS_VALIDOS = ["AlejandroVTD", "CeciliaATD"]
+USUARIOS_VALIDOS = ["AlejandroVTD", "CeciliaATD", "SChava"]
 
 PERMISOS_USUARIO = {
     "AlejandroVTD": {"organizador": True, "modificar": False},
     "CeciliaATD": {"organizador": False, "modificar": True},
+    "SChava": {"organizador": True, "modificar": True},
 }
 
 
@@ -2757,7 +2758,7 @@ if "organizador" in tab_map:
             st.rerun()
 
         # --- Subpestañas internas del organizador ---
-        sub = st.tabs(["Hoy", "Agenda", "Pendientes", "Cotizaciones", "Checklist", "Config"])
+        sub = st.tabs(["📌 Hoy", "🗓️ Agenda", "✅ Pendientes", "💼 Cotizaciones", "📋 Checklist"])
 
         errores_alejandro = []
 
@@ -2798,7 +2799,7 @@ if "organizador" in tab_map:
             df_config = pd.DataFrame(columns=ALE_COLUMNAS.get("CONFIG", []))
 
         if errores_alejandro:
-            st.warning("⚠️ Hay errores leyendo alejandro_data. Ve a Config > Diagnóstico para detalle.")
+            st.warning("⚠️ Hay errores leyendo alejandro_data. Revisa los logs o ejecuta diagnóstico en modo mantenimiento.")
 
         with sub[0]:
             st.subheader("📌 Hoy")
@@ -3112,7 +3113,7 @@ if "organizador" in tab_map:
                 agenda_hoy = agenda_view.iloc[0:0]
                 agenda_semana = agenda_view.iloc[0:0]
 
-            tab_agenda_hoy, tab_agenda_semana, tab_agenda_todo = st.tabs(["Hoy", "Semana", "Todo"])
+            tab_agenda_hoy, tab_agenda_semana, tab_agenda_todo = st.tabs(["📌 Hoy", "🗓️ Semana", "📚 Todo"])
             with tab_agenda_hoy:
                 if agenda_hoy.empty:
                     st.info("Sin citas para hoy.")
@@ -3293,7 +3294,7 @@ if "organizador" in tab_map:
                 tareas_vencidas_tab = tareas_lista.iloc[0:0]
                 tareas_proximas_tab = tareas_lista.iloc[0:0]
 
-            tab_t_hoy, tab_t_venc, tab_t_prox, tab_t_todo = st.tabs(["Hoy", "Vencidas", "Próximas", "Todo"])
+            tab_t_hoy, tab_t_venc, tab_t_prox, tab_t_todo = st.tabs(["📌 Hoy", "⚠️ Vencidas", "⏭️ Próximas", "📚 Todo"])
             with tab_t_hoy:
                 st.dataframe(tareas_hoy_tab, use_container_width=True)
             with tab_t_venc:
@@ -3716,7 +3717,7 @@ if "organizador" in tab_map:
             d2.metric("Vencidas de seguimiento", len(cot_venc_tab))
             d3.metric("Pipeline monto", f"${pipeline_monto:,.2f}")
 
-            tab_c_pend, tab_c_venc, tab_c_seg, tab_c_todo = st.tabs(["Pendientes", "Vencidas", "En seguimiento", "Todo"])
+            tab_c_pend, tab_c_venc, tab_c_seg, tab_c_todo = st.tabs(["📌 Pendientes", "⚠️ Vencidas", "🔁 En seguimiento", "📚 Todo"])
             with tab_c_pend:
                 st.dataframe(cot_pend_tab, use_container_width=True)
             with tab_c_venc:
@@ -3902,45 +3903,3 @@ if "organizador" in tab_map:
                         st.error(f"❌ No se pudieron eliminar los ítems: {e}")
             else:
                 st.info("No hay ítems en plantilla para eliminar.")
-
-        with sub[5]:
-            st.subheader("⚙️ Config")
-            st.dataframe(df_config, use_container_width=True)
-
-            st.markdown("---")
-            st.markdown("### 🧪 Diagnóstico alejandro_data")
-
-            if errores_alejandro:
-                st.error("Errores detectados al leer hojas:")
-                for err in errores_alejandro:
-                    st.code(err)
-
-            if st.button("Ejecutar diagnóstico", key="diag_alejandro_doc"):
-                diag = debug_alejandro_documento()
-                st.json(diag)
-                if diag.get("quota_fallback"):
-                    st.success(
-                        "Drive está en quota/permisos restringidos y el fallback a spreadsheet principal está ACTIVADO por configuración."
-                    )
-                elif diag.get("bootstrap_created"):
-                    st.success(
-                        "No se pudo convertir el Excel por permisos (403). Se creó un Google Sheet bootstrap con tu estructura para esta sesión. "
-                        "Copia resolved_spreadsheet_id a secrets para usarlo de forma permanente."
-                    )
-                elif diag.get("auto_converted"):
-                    st.success(
-                        "Se detectó Excel y se convirtió automáticamente a Google Sheet para esta sesión. "
-                        "Copia el resolved_spreadsheet_id y guárdalo en secrets para hacerlo permanente."
-                    )
-
-                err = str(diag.get("error", ""))
-                mime = str(diag.get("drive_mimeType", ""))
-                if ("not supported for this document" in err.lower()) or (
-                    mime and mime != "application/vnd.google-apps.spreadsheet"
-                ):
-                    st.error(
-                        "El archivo configurado no es Google Sheet nativo. En Drive: Abrir con > Hojas de cálculo de Google "
-                        "(convierte), y después usa el ID del documento convertido en secrets."
-                    )
-                elif diag.get("open_ok") and diag.get("missing_expected_sheets"):
-                    st.warning("Faltan hojas esperadas: " + ", ".join(diag.get("missing_expected_sheets", [])))
