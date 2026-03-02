@@ -2190,6 +2190,16 @@ def check_and_update_demorados(df_to_check, worksheet, headers):
         if row['Estado'] != "🟡 Pendiente":
             continue
 
+        tipo_envio = str(row.get('Tipo_Envio', '')).strip()
+        if tipo_envio == "📍 Pedido Local":
+            fecha_entrega = pd.to_datetime(
+                row.get('Fecha_Entrega', ''),
+                errors='coerce',
+                dayfirst=True,
+            )
+            if pd.notna(fecha_entrega) and fecha_entrega.date() > current_time.date():
+                continue
+
         hora_registro = pd.to_datetime(row.get('Hora_Registro'), errors='coerce')
         gsheet_row_index = row.get('_gsheet_row_index')
 
