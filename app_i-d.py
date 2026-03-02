@@ -2738,73 +2738,14 @@ if selected_tab == 0:
         )
 
     with view_col2:
-        if vendedor_sel != "(Todos)":
-            st.caption("Ventas del mes actual")
-
-            monthly_df = df_metricas_v.copy()
-            monthly_df["Fecha"] = pd.to_datetime(monthly_df.get("Hora_Registro"), errors="coerce")
-            monthly_df["Monto"] = pd.to_numeric(
-                monthly_df.get("Monto_Comprobante", 0), errors="coerce"
-            ).fillna(0)
-            monthly_df = monthly_df.dropna(subset=["Fecha"])
-
-            if monthly_df.empty:
-                st.info("No hay ventas con fecha válida para el vendedor seleccionado.")
-            else:
-                ahora = pd.Timestamp.now()
-                inicio_mes = ahora.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
-                inicio_mes_anterior = (inicio_mes - pd.offsets.MonthBegin(1)).replace(
-                    hour=0, minute=0, second=0, microsecond=0
-                )
-
-                ventas_mes_actual = float(
-                    monthly_df.loc[monthly_df["Fecha"] >= inicio_mes, "Monto"].sum()
-                )
-                ventas_mes_anterior = float(
-                    monthly_df.loc[
-                        (monthly_df["Fecha"] >= inicio_mes_anterior)
-                        & (monthly_df["Fecha"] < inicio_mes),
-                        "Monto",
-                    ].sum()
-                )
-                delta_mes = (
-                    ((ventas_mes_actual - ventas_mes_anterior) / ventas_mes_anterior) * 100
-                    if ventas_mes_anterior > 0
-                    else None
-                )
-
-                dias_transcurridos = max(ahora.day, 1)
-                promedio_diario = ventas_mes_actual / dias_transcurridos
-
-                met1, met2 = st.columns(2)
-                met1.metric("💰 Ventas mes", f"${ventas_mes_actual:,.0f}")
-                met2.metric(
-                    "📈 vs mes anterior",
-                    "N/A" if delta_mes is None else f"{delta_mes:+.1f}%",
-                )
-                st.metric("🗓️ Promedio diario", f"${promedio_diario:,.0f}")
-
-                mes_actual_df = monthly_df[monthly_df["Fecha"] >= inicio_mes].copy()
-                if mes_actual_df.empty:
-                    st.info("Aún no hay ventas registradas en el mes actual.")
-                else:
-                    mes_actual_df["Día"] = mes_actual_df["Fecha"].dt.date
-                    diario = (
-                        mes_actual_df.groupby("Día", as_index=False)["Monto"]
-                        .sum()
-                        .sort_values("Día")
-                    )
-                    diario["Acumulado"] = diario["Monto"].cumsum()
-                    st.area_chart(diario.set_index("Día")[["Monto", "Acumulado"]], height=230)
+        st.caption("Riesgo por vendedor (% de cartera en riesgo)")
+        if resumen_v.empty:
+            st.info("Sin datos de vendedores para el filtro actual.")
         else:
-            st.caption("Riesgo por vendedor (% de cartera en riesgo)")
-            if resumen_v.empty:
-                st.info("Sin datos de vendedores para el filtro actual.")
-            else:
-                riesgo_v = resumen_v[["Vendedor", "%Riesgo", "Ventas"]].copy()
-                riesgo_v["%Riesgo"] = pd.to_numeric(riesgo_v["%Riesgo"], errors="coerce").fillna(0)
-                riesgo_v = riesgo_v.sort_values("%Riesgo", ascending=False).head(8)
-                st.bar_chart(riesgo_v.set_index("Vendedor")[["%Riesgo"]], height=230)
+            riesgo_v = resumen_v[["Vendedor", "%Riesgo", "Ventas"]].copy()
+            riesgo_v["%Riesgo"] = pd.to_numeric(riesgo_v["%Riesgo"], errors="coerce").fillna(0)
+            riesgo_v = riesgo_v.sort_values("%Riesgo", ascending=False).head(8)
+            st.bar_chart(riesgo_v.set_index("Vendedor")[["%Riesgo"]], height=230)
 
     trend_col1, trend_col2 = st.columns([0.7, 0.3])
     with trend_col1:
