@@ -2469,9 +2469,6 @@ if selected_tab == 3:
 if selected_tab == 0:
     st_autorefresh(interval=60000, key="auto_refresh_dashboard")
 
-    st.markdown("## 📈 Dashboard Inteligente (Riesgo + Proyección)")
-    st.caption("Basado en Hora_Registro y patrón real por cliente.")
-
     df_conf = load_confirmados_from_gsheets(
         GSHEETS_CREDENTIALS, GOOGLE_SHEET_ID, SHEET_CONFIRMADOS
     )
@@ -2508,20 +2505,6 @@ if selected_tab == 0:
     pct_activo = (activos / evaluados) if evaluados else 0.0
     pct_riesgo = (riesgo / evaluados) if evaluados else 0.0
 
-    row1_col1, row1_col2, row1_col3, row1_col4 = st.columns(4)
-    row1_col1.metric("💰 Ventas históricas", f"${total_ventas:,.0f}")
-    row1_col2.metric("📦 Pedidos históricos", f"{total_pedidos:,}")
-    row1_col3.metric("% cartera activa", f"{pct_activo * 100:.1f}%")
-    row1_col4.metric("% cartera en riesgo", f"{pct_riesgo * 100:.1f}%")
-
-    row2_col1, row2_col2, row2_col3, row2_col4 = st.columns(4)
-    row2_col1.metric("👥 Clientes con historial", f"{evaluados:,}")
-    row2_col2.metric("🆕 Nuevos/Sin historial", f"{nuevos:,}")
-    row2_col3.metric("👥 Clientes totales actuales", f"{total_clientes_actuales:,}")
-    row2_col4.metric("🎟️ Ticket prom (global)", f"${ticket_prom:,.0f}")
-
-    st.markdown("---")
-
     colf1, colf2 = st.columns([0.6, 0.4])
     with colf1:
         vendedor_options = ["(Todos)"] + _vendedores
@@ -2541,6 +2524,24 @@ if selected_tab == 0:
             options=["Activo", "Alerta", "Riesgo", "Nuevo/SinHistorial"],
             default=["Activo", "Alerta", "Riesgo", "Nuevo/SinHistorial"],
         )
+
+    if vendedor_sel == "(Todos)":
+        st.markdown("## 📈 Dashboard Inteligente (Riesgo + Proyección)")
+        st.caption("Basado en Hora_Registro y patrón real por cliente.")
+
+        row1_col1, row1_col2, row1_col3, row1_col4 = st.columns(4)
+        row1_col1.metric("💰 Ventas históricas", f"${total_ventas:,.0f}")
+        row1_col2.metric("📦 Pedidos históricos", f"{total_pedidos:,}")
+        row1_col3.metric("% cartera activa", f"{pct_activo * 100:.1f}%")
+        row1_col4.metric("% cartera en riesgo", f"{pct_riesgo * 100:.1f}%")
+
+        row2_col1, row2_col2, row2_col3, row2_col4 = st.columns(4)
+        row2_col1.metric("👥 Clientes con historial", f"{evaluados:,}")
+        row2_col2.metric("🆕 Nuevos/Sin historial", f"{nuevos:,}")
+        row2_col3.metric("👥 Clientes totales actuales", f"{total_clientes_actuales:,}")
+        row2_col4.metric("🎟️ Ticket prom (global)", f"${ticket_prom:,.0f}")
+
+        st.markdown("---")
 
     tc = tabla_clientes.copy()
     if vendedor_sel != "(Todos)":
