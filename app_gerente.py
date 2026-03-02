@@ -3175,52 +3175,64 @@ if "organizador" in tab_map:
 
             if not opciones:
                 st.info("No hay pendientes disponibles para actualizar.")
-                tarea_sel = None
             else:
-                tarea_sel = st.selectbox("Selecciona un pendiente:", opciones, format_func=format_tarea, key="tarea_sel_update")
+                with st.form("form_actualizar_pendiente"):
+                    tarea_sel = st.selectbox(
+                        "Selecciona un pendiente:",
+                        opciones,
+                        format_func=format_tarea,
+                        key="tarea_sel_update",
+                    )
 
-            if tarea_sel:
-                colA, colB = st.columns(2)
+                    colA, colB = st.columns(2)
+                    with colA:
+                        enviar_completar = st.form_submit_button(
+                            "✅ Marcar como COMPLETADA",
+                            use_container_width=True,
+                        )
+                    with colB:
+                        enviar_reabrir = st.form_submit_button(
+                            "↩️ Reabrir (PENDIENTE)",
+                            use_container_width=True,
+                        )
 
-                with colA:
-                    if st.button("✅ Marcar como COMPLETADA", use_container_width=True):
-                        try:
-                            ok = safe_update_by_id(
-                                "TAREAS",
-                                id_col="Tarea_ID",
-                                id_value=tarea_sel,
-                                updates={
-                                    "Estatus": "Completada",
-                                    "Fecha_Completado": now_iso(),
-                                    "Last_Updated_At": now_iso(),
-                                    "Last_Updated_By": "ALEJANDRO",
-                                }
-                            )
-                            if ok:
-                                st.success("🎈 Pendiente marcado como completado.")
-                                st.rerun()
-                        except Exception as e:
-                            st.error(f"❌ Error actualizando pendiente: {e}")
+                if enviar_completar:
+                    try:
+                        ok = safe_update_by_id(
+                            "TAREAS",
+                            id_col="Tarea_ID",
+                            id_value=tarea_sel,
+                            updates={
+                                "Estatus": "Completada",
+                                "Fecha_Completado": now_iso(),
+                                "Last_Updated_At": now_iso(),
+                                "Last_Updated_By": "ALEJANDRO",
+                            }
+                        )
+                        if ok:
+                            st.success("🎈 Pendiente marcado como completado.")
+                            st.rerun()
+                    except Exception as e:
+                        st.error(f"❌ Error actualizando pendiente: {e}")
 
-                with colB:
-                    if st.button("↩️ Reabrir (PENDIENTE)", use_container_width=True):
-                        try:
-                            ok = safe_update_by_id(
-                                "TAREAS",
-                                id_col="Tarea_ID",
-                                id_value=tarea_sel,
-                                updates={
-                                    "Estatus": "Pendiente",
-                                    "Fecha_Completado": "",
-                                    "Last_Updated_At": now_iso(),
-                                    "Last_Updated_By": "ALEJANDRO",
-                                }
-                            )
-                            if ok:
-                                st.success("🎈 Pendiente reabierto (Pendiente).")
-                                st.rerun()
-                        except Exception as e:
-                            st.error(f"❌ Error reabriendo pendiente: {e}")
+                if enviar_reabrir:
+                    try:
+                        ok = safe_update_by_id(
+                            "TAREAS",
+                            id_col="Tarea_ID",
+                            id_value=tarea_sel,
+                            updates={
+                                "Estatus": "Pendiente",
+                                "Fecha_Completado": "",
+                                "Last_Updated_At": now_iso(),
+                                "Last_Updated_By": "ALEJANDRO",
+                            }
+                        )
+                        if ok:
+                            st.success("🎈 Pendiente reabierto (Pendiente).")
+                            st.rerun()
+                    except Exception as e:
+                        st.error(f"❌ Error reabriendo pendiente: {e}")
 
             st.markdown("### 📋 Lista")
             tareas_lista = df_tareas.copy()
@@ -3362,20 +3374,26 @@ if "organizador" in tab_map:
                 if not opciones_cierre:
                     st.info("No hay cotizaciones disponibles para cerrar.")
                 else:
-                    cot_sel_cierre = st.selectbox(
-                        "Selecciona una cotización para cerrar:",
-                        opciones_cierre,
-                        format_func=format_cot,
-                        key="cot_sel_cierre"
-                    )
-                    estado_cierre = st.radio(
-                        "Nuevo estatus de cierre:",
-                        ["Cerrada – Ganada", "Cerrada – Perdida"],
-                        horizontal=True,
-                        key="estado_cierre_cot"
-                    )
+                    with st.form("form_cerrar_cotizacion"):
+                        cot_sel_cierre = st.selectbox(
+                            "Selecciona una cotización para cerrar:",
+                            opciones_cierre,
+                            format_func=format_cot,
+                            key="cot_sel_cierre"
+                        )
+                        estado_cierre = st.radio(
+                            "Nuevo estatus de cierre:",
+                            ["Cerrada – Ganada", "Cerrada – Perdida"],
+                            horizontal=True,
+                            key="estado_cierre_cot"
+                        )
 
-                    if st.button("🏁 Actualizar estatus de cotización", key="btn_cerrar_cot", use_container_width=True):
+                        enviar_cierre = st.form_submit_button(
+                            "🏁 Actualizar estatus de cotización",
+                            use_container_width=True,
+                        )
+
+                    if enviar_cierre:
                         try:
                             safe_update_by_id(
                                 "COTIZACIONES",
