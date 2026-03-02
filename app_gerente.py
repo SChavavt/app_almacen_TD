@@ -1473,79 +1473,13 @@ def build_hoy_alerts(hoy: date, df_citas: pd.DataFrame, df_tareas: pd.DataFrame,
 
 
 # --- INTERFAZ ---
-USUARIOS_VALIDOS = ["AlejandroVTD", "CeciliaATD"]
-
-PERMISOS_USUARIO = {
-    "AlejandroVTD": {"organizador": True, "modificar": False},
-    "CeciliaATD": {"organizador": False, "modificar": True},
-}
-
-
-def _query_param_value(nombre_param: str) -> str:
-    valor = st.query_params.get(nombre_param, "")
-    if isinstance(valor, list):
-        return str(valor[0]).strip() if valor else ""
-    return str(valor).strip()
-
-
-def ensure_user_logged_in():
-    usuario_session = st.session_state.get("usuario", "").strip()
-
-    if not usuario_session:
-        usuario_qp = _query_param_value("usuario")
-        if usuario_qp in USUARIOS_VALIDOS:
-            st.session_state.usuario = usuario_qp
-            usuario_session = usuario_qp
-
-    with st.sidebar:
-        st.markdown("### 👤 Acceso")
-        if usuario_session:
-            st.success(f"Sesión activa: **{usuario_session}**")
-            if st.button("🚪 Cerrar sesión", key="cerrar_sesion_usuario"):
-                st.session_state.pop("usuario", None)
-                st.query_params.clear()
-                st.rerun()
-            return usuario_session
-
-        st.caption("Iniciar sesión es opcional. Sin usuario solo podrás usar Buscar Pedido y Descargar Datos.")
-        usuario_input = st.text_input(
-            "Usuario",
-            key="login_usuario_input",
-            placeholder="Ej: AlejandroVTD",
-        ).strip()
-        if st.button("🔐 Iniciar sesión", key="login_usuario_btn"):
-            if usuario_input in USUARIOS_VALIDOS:
-                st.session_state.usuario = usuario_input
-                st.query_params["usuario"] = usuario_input
-                st.rerun()
-            else:
-                st.error("❌ Usuario no autorizado.")
-    return None
-
-
-def usuario_puede(usuario: str | None, permiso: str) -> bool:
-    if not usuario:
-        return False
-    return PERMISOS_USUARIO.get(usuario, {}).get(permiso, False)
-
-
-usuario_actual = ensure_user_logged_in()
-
-tab_specs = [
-    ("buscar", "🔍 Buscar Pedido"),
-    ("descargar", "⬇️ Descargar Datos"),
-]
-
-if usuario_puede(usuario_actual, "organizador"):
-    tab_specs.insert(0, ("organizador", "🗂️ Organizador (Alejandro)"))
-
-if usuario_puede(usuario_actual, "modificar"):
-    tab_specs.append(("modificar", "✏️ Modificar Pedido"))
-
-tabs = st.tabs([titulo for _, titulo in tab_specs])
-tab_map = {clave: tab for (clave, _), tab in zip(tab_specs, tabs)}
-
-with tab_map["buscar"]:
+tabs = st.tabs([
+    "🗂️ Organizador (Alejandro)",
+    "🔍 Buscar Pedido",
+    "⬇️ Descargar Datos",
+    "✏️ Modificar Pedido",
+])
+with tabs[1]:
     modo_busqueda = st.radio("Selecciona el modo de búsqueda:", ["🔢 Por número de guía", "🧑 Por cliente/factura"], key="modo_busqueda_radio")
 
     orden_seleccionado = "Más recientes primero"
@@ -2009,7 +1943,7 @@ with tab_map["buscar"]:
                 mensaje += " Revisa el rango de fechas seleccionado."
             st.warning(mensaje)
 
-with tab_map["descargar"]:
+with tabs[2]:
     st.header("⬇️ Descargar Datos")
 
     if st.button(
@@ -2094,18 +2028,34 @@ with tab_map["descargar"]:
             ordenar_por_id=True,
         )
 
-if "modificar" in tab_map:
-    with tab_map["modificar"]:
-        st.header("✏️ Modificar Pedido Existente")
+CONTRASENA_ADMIN = "Ceci"  # puedes cambiar esta contraseña si lo deseas
 
-        if st.button(
-            "🔄 Actualizar pedidos",
-            key="refresh_modificar_pedido",
-            help="Recarga la información más reciente de la hoja para mostrar nuevos pedidos y cambios.",
-        ):
-            st.cache_data.clear()
-            st.rerun()
+# --- PESTAÑA DE MODIFICACIÓN DE PEDIDOS CON CONTRASEÑA ---
+with tabs[3]:
+    st.header("✏️ Modificar Pedido Existente")
 
+    if st.button(
+        "🔄 Actualizar pedidos",
+        key="refresh_modificar_pedido",
+        help="Recarga la información más reciente de la hoja para mostrar nuevos pedidos y cambios.",
+    ):
+        st.cache_data.clear()
+        st.rerun()
+
+    if "acceso_modificacion" not in st.session_state:
+        st.session_state.acceso_modificacion = False
+
+    if not st.session_state.acceso_modificacion:
+        contrasena_ingresada = st.text_input("🔑 Ingresa la contraseña para modificar pedidos:", type="password")
+        if st.button("🔓 Verificar Contraseña"):
+            if contrasena_ingresada == CONTRASENA_ADMIN:
+                st.session_state.acceso_modificacion = True
+                st.success("✅ Acceso concedido.")
+                st.rerun()
+            else:
+                st.error("❌ Contraseña incorrecta.")
+
+    if st.session_state.acceso_modificacion:
         df_pedidos = cargar_pedidos_modificables()
         df_casos = cargar_casos_especiales()
 
@@ -2743,880 +2693,777 @@ if "modificar" in tab_map:
                     ):
                         st.rerun()
 
-    # ===== ORGANIZADOR ALEJANDRO =====
+# ===== ORGANIZADOR ALEJANDRO (CON CONTRASEÑA) =====
+CONTRASENA_ALEJANDRO = "ale1"
 
-if "organizador" in tab_map:
-    with tab_map["organizador"]:
-        st.header("🗂️ Organizador (Alejandro)")
+with tabs[0]:
+    st.header("🗂️ Organizador (Alejandro)")
 
-        if st.button("🔄 Refrescar Organizador", key="refresh_alejandro"):
-            st.rerun()
+    if "acceso_alejandro" not in st.session_state:
+        st.session_state.acceso_alejandro = False
 
-        # --- Subpestañas internas del organizador ---
-        sub = st.tabs(["Hoy", "Agenda", "Pendientes", "Cotizaciones", "Checklist", "Config"])
-
-        errores_alejandro = []
-
-        try:
-            df_citas = cargar_alejandro_hoja("CITAS")
-        except Exception as e:
-            errores_alejandro.append(f"CITAS: {e}")
-            df_citas = pd.DataFrame(columns=ALE_COLUMNAS.get("CITAS", []))
-
-        try:
-            df_tareas = cargar_alejandro_hoja("TAREAS")
-        except Exception as e:
-            errores_alejandro.append(f"TAREAS: {e}")
-            df_tareas = pd.DataFrame(columns=ALE_COLUMNAS.get("TAREAS", []))
-
-        try:
-            df_cot = cargar_alejandro_hoja("COTIZACIONES")
-        except Exception as e:
-            errores_alejandro.append(f"COTIZACIONES: {e}")
-            df_cot = pd.DataFrame(columns=ALE_COLUMNAS.get("COTIZACIONES", []))
-
-        try:
-            df_checklist_daily = cargar_alejandro_hoja("CHECKLIST_DAILY")
-        except Exception as e:
-            errores_alejandro.append(f"CHECKLIST_DAILY: {e}")
-            df_checklist_daily = pd.DataFrame(columns=ALE_COLUMNAS.get("CHECKLIST_DAILY", []))
-
-        try:
-            df_checklist_template = cargar_alejandro_hoja("CHECKLIST_TEMPLATE")
-        except Exception as e:
-            errores_alejandro.append(f"CHECKLIST_TEMPLATE: {e}")
-            df_checklist_template = pd.DataFrame(columns=ALE_COLUMNAS.get("CHECKLIST_TEMPLATE", []))
-
-        try:
-            df_config = cargar_alejandro_hoja("CONFIG")
-        except Exception as e:
-            errores_alejandro.append(f"CONFIG: {e}")
-            df_config = pd.DataFrame(columns=ALE_COLUMNAS.get("CONFIG", []))
-
-        if errores_alejandro:
-            st.warning("⚠️ Hay errores leyendo alejandro_data. Ve a Config > Diagnóstico para detalle.")
-
-        with sub[0]:
-            st.subheader("📌 Hoy")
-
-            hoy = date.today()
-            # chk_hoy base (por si no se sincroniza en este rerun)
-            chk_hoy = df_checklist_daily.copy()
-            if "Fecha" in chk_hoy.columns:
-                chk_hoy["_f"] = _to_date(chk_hoy["Fecha"])
-                chk_hoy = chk_hoy[chk_hoy["_f"] == hoy].copy()
+    if not st.session_state.acceso_alejandro:
+        pw = st.text_input("🔑 Ingresa la contraseña:", type="password", key="pw_alejandro")
+        if st.button("🔓 Entrar", key="btn_pw_alejandro"):
+            if pw == CONTRASENA_ALEJANDRO:
+                st.session_state.acceso_alejandro = True
+                st.success("✅ Acceso concedido.")
+                st.rerun()
             else:
-                chk_hoy = chk_hoy.iloc[0:0]
+                st.error("❌ Contraseña incorrecta.")
+        st.stop()
 
-            key_sync = f"chk_sync_{hoy.isoformat()}"
-            if key_sync not in st.session_state:
-                st.session_state[key_sync] = False
+    if st.button("🔄 Refrescar Organizador", key="refresh_alejandro"):
+        st.rerun()
 
-            sync_clicked = st.button("🔄 Sincronizar checklist de hoy", key=f"btn_sync_chk_hoy_{hoy.isoformat()}")
+    # --- Subpestañas internas del organizador ---
+    sub = st.tabs(["Hoy", "Agenda", "Pendientes", "Cotizaciones", "Checklist", "Config"])
 
-            # Sincroniza checklist recurrente del día (solo 1 vez por sesión/día o por botón)
-            if sync_clicked or not st.session_state[key_sync]:
-                try:
-                    inserted = ensure_daily_checklist_items(hoy, df_checklist_template, df_checklist_daily)
-                    st.session_state[key_sync] = True
-                    if inserted > 0:
-                        st.success(f"🧾 Se generaron {inserted} ítem(s) de checklist para hoy.")
-                    else:
-                        st.info("🧾 Checklist de hoy ya estaba sincronizado.")
-                    df_checklist_daily = cargar_alejandro_hoja("CHECKLIST_DAILY")
+    errores_alejandro = []
 
-                    # rebuild chk_hoy para dashboard tras recarga
-                    chk_hoy = df_checklist_daily.copy()
-                    if "Fecha" in chk_hoy.columns:
-                        chk_hoy["_f"] = _to_date(chk_hoy["Fecha"])
-                        chk_hoy = chk_hoy[chk_hoy["_f"] == hoy].copy()
-                    else:
-                        chk_hoy = chk_hoy.iloc[0:0]
-                except Exception as e:
-                    st.warning(f"⚠️ No se pudo sincronizar checklist diario: {e}")
+    try:
+        df_citas = cargar_alejandro_hoja("CITAS")
+    except Exception as e:
+        errores_alejandro.append(f"CITAS: {e}")
+        df_citas = pd.DataFrame(columns=ALE_COLUMNAS.get("CITAS", []))
 
-            # --- CITAS HOY + SEGUIMIENTOS PENDIENTES ---
-            citas = df_citas.copy()
-            if "Fecha_Inicio" in citas.columns:
-                citas["_fi"] = _to_dt(citas["Fecha_Inicio"])
-                citas_hoy = citas[citas["_fi"].dt.date == hoy].copy()
-                citas_hoy = citas_hoy.sort_values("_fi", ascending=True)
+    try:
+        df_tareas = cargar_alejandro_hoja("TAREAS")
+    except Exception as e:
+        errores_alejandro.append(f"TAREAS: {e}")
+        df_tareas = pd.DataFrame(columns=ALE_COLUMNAS.get("TAREAS", []))
 
-                tipo_seg = citas.get("Tipo", "").astype(str).str.lower().str.contains("seguimiento", na=False)
-                estatus_ci = citas.get("Estatus", "").astype(str).str.lower()
-                estatus_pend = ~estatus_ci.isin(["realizada", "cancelada"])
-                seguimientos_pend = citas[tipo_seg & estatus_pend].copy()
-                seguimientos_pend = seguimientos_pend.sort_values("_fi", ascending=True)
-            else:
-                citas_hoy = citas.iloc[0:0]
-                seguimientos_pend = citas.iloc[0:0]
+    try:
+        df_cot = cargar_alejandro_hoja("COTIZACIONES")
+    except Exception as e:
+        errores_alejandro.append(f"COTIZACIONES: {e}")
+        df_cot = pd.DataFrame(columns=ALE_COLUMNAS.get("COTIZACIONES", []))
 
-            # --- TAREAS (HOY / VENCIDAS) ---
-            tareas = df_tareas.copy()
-            if "Fecha_Limite" in tareas.columns:
-                tareas["_fl"] = _to_dt(tareas["Fecha_Limite"])
-                tareas_hoy = tareas[tareas["_fl"].dt.date == hoy].copy()
-                tareas_vencidas = tareas[(tareas["_fl"].dt.date < hoy) & (tareas["Estatus"].astype(str).str.lower() != "completada")].copy()
-                tareas_hoy = tareas_hoy.sort_values("_fl", ascending=True)
-                tareas_vencidas = tareas_vencidas.sort_values("_fl", ascending=True)
+    try:
+        df_checklist_daily = cargar_alejandro_hoja("CHECKLIST_DAILY")
+    except Exception as e:
+        errores_alejandro.append(f"CHECKLIST_DAILY: {e}")
+        df_checklist_daily = pd.DataFrame(columns=ALE_COLUMNAS.get("CHECKLIST_DAILY", []))
 
-                tareas_hoy_total = len(tareas_hoy)
-                tareas_hoy_done = (tareas_hoy["Estatus"].astype(str).str.lower() == "completada").sum()
-                tareas_hoy_pct = round((tareas_hoy_done / tareas_hoy_total) * 100, 1) if tareas_hoy_total else 0
-            else:
-                tareas_hoy = tareas.iloc[0:0]
-                tareas_vencidas = tareas.iloc[0:0]
-                tareas_hoy_total, tareas_hoy_done, tareas_hoy_pct = 0, 0, 0
+    try:
+        df_checklist_template = cargar_alejandro_hoja("CHECKLIST_TEMPLATE")
+    except Exception as e:
+        errores_alejandro.append(f"CHECKLIST_TEMPLATE: {e}")
+        df_checklist_template = pd.DataFrame(columns=ALE_COLUMNAS.get("CHECKLIST_TEMPLATE", []))
 
-            # --- COTIZACIONES (PENDIENTES / VENCIDAS DE SEGUIMIENTO) ---
-            cot = df_cot.copy()
-            if "Fecha_Proximo_Seguimiento" in cot.columns:
-                cot["_fps"] = _to_dt(cot["Fecha_Proximo_Seguimiento"])
-                est = cot.get("Estatus", "").astype(str).str.lower()
-                no_cerradas = ~est.str.contains("ganada|perdida", na=False)
-                cot_pend = cot[no_cerradas].copy()
-                cot_venc = cot_pend[cot_pend["_fps"].notna() & (cot_pend["_fps"].dt.date < hoy)].copy()
-                cot_pend = cot_pend.sort_values("_fps", ascending=True)
-                cot_venc = cot_venc.sort_values("_fps", ascending=True)
-            else:
-                cot_pend = cot.iloc[0:0]
-                cot_venc = cot.iloc[0:0]
+    try:
+        df_config = cargar_alejandro_hoja("CONFIG")
+    except Exception as e:
+        errores_alejandro.append(f"CONFIG: {e}")
+        df_config = pd.DataFrame(columns=ALE_COLUMNAS.get("CONFIG", []))
 
-            # --- RECORDATORIOS DE CITA ACTIVOS ---
-            recordatorios_activos = pd.DataFrame()
-            if not df_citas.empty and "Fecha_Inicio" in df_citas.columns:
-                recordatorios_activos = df_citas.copy()
-                recordatorios_activos["_fi"] = _to_dt(recordatorios_activos["Fecha_Inicio"])
-                mins = pd.to_numeric(recordatorios_activos.get("Reminder_Minutes_Before", 0), errors="coerce").fillna(0)
-                recordatorios_activos["_inicio_recordatorio"] = recordatorios_activos["_fi"] - pd.to_timedelta(mins, unit="m")
-                now_ts = pd.Timestamp(datetime.now())
-                estatus_ci = recordatorios_activos.get("Estatus", "").astype(str).str.lower()
-                status_rem = recordatorios_activos.get("Reminder_Status", "").astype(str).str.lower()
-                activos = (
-                    (mins > 0)
-                    & recordatorios_activos["_fi"].notna()
-                    & (recordatorios_activos["_inicio_recordatorio"] <= now_ts)
-                    & (recordatorios_activos["_fi"] >= now_ts)
-                    & (~estatus_ci.isin(["realizada", "cancelada"]))
-                    & (~status_rem.isin(["enviado", "atendido"]))
-                )
-                recordatorios_activos = recordatorios_activos[activos].sort_values("_fi", ascending=True)
+    if errores_alejandro:
+        st.warning("⚠️ Hay errores leyendo alejandro_data. Ve a Config > Diagnóstico para detalle.")
 
-            # --- CHECKLIST (% cumplimiento del día) ---
-            chk = df_checklist_daily.copy()
-            if "Fecha" in chk.columns:
-                chk["_f"] = _to_date(chk["Fecha"])
-                chk_hoy = chk[chk["_f"] == hoy].copy()
-                if not chk_hoy.empty and "Completado" in chk_hoy.columns:
-                    total = len(chk_hoy)
-                    done = (chk_hoy["Completado"].astype(str).str.lower().isin(["1","true","sí","si","x","ok","✅"])).sum()
-                    pct = round((done / total) * 100, 1) if total else 0
+    with sub[0]:
+        st.subheader("📌 Hoy")
+
+        hoy = date.today()
+        # chk_hoy base (por si no se sincroniza en este rerun)
+        chk_hoy = df_checklist_daily.copy()
+        if "Fecha" in chk_hoy.columns:
+            chk_hoy["_f"] = _to_date(chk_hoy["Fecha"])
+            chk_hoy = chk_hoy[chk_hoy["_f"] == hoy].copy()
+        else:
+            chk_hoy = chk_hoy.iloc[0:0]
+
+        key_sync = f"chk_sync_{hoy.isoformat()}"
+        if key_sync not in st.session_state:
+            st.session_state[key_sync] = False
+
+        sync_clicked = st.button("🔄 Sincronizar checklist de hoy", key=f"btn_sync_chk_hoy_{hoy.isoformat()}")
+
+        # Sincroniza checklist recurrente del día (solo 1 vez por sesión/día o por botón)
+        if sync_clicked or not st.session_state[key_sync]:
+            try:
+                inserted = ensure_daily_checklist_items(hoy, df_checklist_template, df_checklist_daily)
+                st.session_state[key_sync] = True
+                if inserted > 0:
+                    st.success(f"🧾 Se generaron {inserted} ítem(s) de checklist para hoy.")
                 else:
-                    total, done, pct = 0, 0, 0
+                    st.info("🧾 Checklist de hoy ya estaba sincronizado.")
+                df_checklist_daily = cargar_alejandro_hoja("CHECKLIST_DAILY")
+
+                # rebuild chk_hoy para dashboard tras recarga
+                chk_hoy = df_checklist_daily.copy()
+                if "Fecha" in chk_hoy.columns:
+                    chk_hoy["_f"] = _to_date(chk_hoy["Fecha"])
+                    chk_hoy = chk_hoy[chk_hoy["_f"] == hoy].copy()
+                else:
+                    chk_hoy = chk_hoy.iloc[0:0]
+            except Exception as e:
+                st.warning(f"⚠️ No se pudo sincronizar checklist diario: {e}")
+
+        # --- CITAS HOY + SEGUIMIENTOS PENDIENTES ---
+        citas = df_citas.copy()
+        if "Fecha_Inicio" in citas.columns:
+            citas["_fi"] = _to_dt(citas["Fecha_Inicio"])
+            citas_hoy = citas[citas["_fi"].dt.date == hoy].copy()
+            citas_hoy = citas_hoy.sort_values("_fi", ascending=True)
+
+            tipo_seg = citas.get("Tipo", "").astype(str).str.lower().str.contains("seguimiento", na=False)
+            estatus_ci = citas.get("Estatus", "").astype(str).str.lower()
+            estatus_pend = ~estatus_ci.isin(["realizada", "cancelada"])
+            seguimientos_pend = citas[tipo_seg & estatus_pend].copy()
+            seguimientos_pend = seguimientos_pend.sort_values("_fi", ascending=True)
+        else:
+            citas_hoy = citas.iloc[0:0]
+            seguimientos_pend = citas.iloc[0:0]
+
+        # --- TAREAS (HOY / VENCIDAS) ---
+        tareas = df_tareas.copy()
+        if "Fecha_Limite" in tareas.columns:
+            tareas["_fl"] = _to_dt(tareas["Fecha_Limite"])
+            tareas_hoy = tareas[tareas["_fl"].dt.date == hoy].copy()
+            tareas_vencidas = tareas[(tareas["_fl"].dt.date < hoy) & (tareas["Estatus"].astype(str).str.lower() != "completada")].copy()
+            tareas_hoy = tareas_hoy.sort_values("_fl", ascending=True)
+            tareas_vencidas = tareas_vencidas.sort_values("_fl", ascending=True)
+
+            tareas_hoy_total = len(tareas_hoy)
+            tareas_hoy_done = (tareas_hoy["Estatus"].astype(str).str.lower() == "completada").sum()
+            tareas_hoy_pct = round((tareas_hoy_done / tareas_hoy_total) * 100, 1) if tareas_hoy_total else 0
+        else:
+            tareas_hoy = tareas.iloc[0:0]
+            tareas_vencidas = tareas.iloc[0:0]
+            tareas_hoy_total, tareas_hoy_done, tareas_hoy_pct = 0, 0, 0
+
+        # --- COTIZACIONES (PENDIENTES / VENCIDAS DE SEGUIMIENTO) ---
+        cot = df_cot.copy()
+        if "Fecha_Proximo_Seguimiento" in cot.columns:
+            cot["_fps"] = _to_dt(cot["Fecha_Proximo_Seguimiento"])
+            est = cot.get("Estatus", "").astype(str).str.lower()
+            no_cerradas = ~est.str.contains("ganada|perdida", na=False)
+            cot_pend = cot[no_cerradas].copy()
+            cot_venc = cot_pend[cot_pend["_fps"].notna() & (cot_pend["_fps"].dt.date < hoy)].copy()
+            cot_pend = cot_pend.sort_values("_fps", ascending=True)
+            cot_venc = cot_venc.sort_values("_fps", ascending=True)
+        else:
+            cot_pend = cot.iloc[0:0]
+            cot_venc = cot.iloc[0:0]
+
+        # --- RECORDATORIOS DE CITA ACTIVOS ---
+        recordatorios_activos = pd.DataFrame()
+        if not df_citas.empty and "Fecha_Inicio" in df_citas.columns:
+            recordatorios_activos = df_citas.copy()
+            recordatorios_activos["_fi"] = _to_dt(recordatorios_activos["Fecha_Inicio"])
+            mins = pd.to_numeric(recordatorios_activos.get("Reminder_Minutes_Before", 0), errors="coerce").fillna(0)
+            recordatorios_activos["_inicio_recordatorio"] = recordatorios_activos["_fi"] - pd.to_timedelta(mins, unit="m")
+            now_ts = pd.Timestamp(datetime.now())
+            estatus_ci = recordatorios_activos.get("Estatus", "").astype(str).str.lower()
+            status_rem = recordatorios_activos.get("Reminder_Status", "").astype(str).str.lower()
+            activos = (
+                (mins > 0)
+                & recordatorios_activos["_fi"].notna()
+                & (recordatorios_activos["_inicio_recordatorio"] <= now_ts)
+                & (recordatorios_activos["_fi"] >= now_ts)
+                & (~estatus_ci.isin(["realizada", "cancelada"]))
+                & (~status_rem.isin(["enviado", "atendido"]))
+            )
+            recordatorios_activos = recordatorios_activos[activos].sort_values("_fi", ascending=True)
+
+        # --- CHECKLIST (% cumplimiento del día) ---
+        chk = df_checklist_daily.copy()
+        if "Fecha" in chk.columns:
+            chk["_f"] = _to_date(chk["Fecha"])
+            chk_hoy = chk[chk["_f"] == hoy].copy()
+            if not chk_hoy.empty and "Completado" in chk_hoy.columns:
+                total = len(chk_hoy)
+                done = (chk_hoy["Completado"].astype(str).str.lower().isin(["1","true","sí","si","x","ok","✅"])).sum()
+                pct = round((done / total) * 100, 1) if total else 0
             else:
-                chk_hoy = chk.iloc[0:0]
                 total, done, pct = 0, 0, 0
+        else:
+            chk_hoy = chk.iloc[0:0]
+            total, done, pct = 0, 0, 0
 
-            # ===== RESUMEN (KPIs) =====
-            k1, k2, k3, k4, k5, k6 = st.columns(6)
-            k1.metric("📅 Citas hoy", len(citas_hoy))
-            k2.metric("✅ Pendientes hoy", len(tareas_hoy))
-            k3.metric("⏰ Pendientes vencidos", len(tareas_vencidas))
-            k4.metric("🔁 Seguimientos pendientes", len(seguimientos_pend))
-            k5.metric("📈 Cumplimiento pendientes de hoy", f"{tareas_hoy_pct}%")
-            k6.metric("💰 Cotizaciones pendientes", len(cot_pend))
+        # ===== RESUMEN (KPIs) =====
+        k1, k2, k3, k4, k5, k6 = st.columns(6)
+        k1.metric("📅 Citas hoy", len(citas_hoy))
+        k2.metric("✅ Pendientes hoy", len(tareas_hoy))
+        k3.metric("⏰ Pendientes vencidos", len(tareas_vencidas))
+        k4.metric("🔁 Seguimientos pendientes", len(seguimientos_pend))
+        k5.metric("📈 Cumplimiento pendientes de hoy", f"{tareas_hoy_pct}%")
+        k6.metric("💰 Cotizaciones pendientes", len(cot_pend))
 
-            k7 = st.columns(1)[0]
-            k7.metric("🧾 Checklist hoy", f"{pct}%")
+        k7 = st.columns(1)[0]
+        k7.metric("🧾 Checklist hoy", f"{pct}%")
 
-            st.markdown("---")
+        st.markdown("---")
 
-            # ===== DETALLES =====
-            st.markdown("### 📅 Citas de hoy")
-            if citas_hoy.empty:
+        # ===== DETALLES =====
+        st.markdown("### 📅 Citas de hoy")
+        if citas_hoy.empty:
+            st.info("Sin citas para hoy.")
+        else:
+            cols = [c for c in ["Fecha_Inicio","Cliente_Persona","Empresa_Clinica","Tipo","Prioridad","Estatus","Notas"] if c in citas_hoy.columns]
+            st.dataframe(citas_hoy[cols], use_container_width=True)
+
+        st.markdown("### 🔁 Seguimientos pendientes")
+        if seguimientos_pend.empty:
+            st.info("No hay citas de seguimiento pendientes.")
+        else:
+            cols = [c for c in ["Fecha_Inicio","Cliente_Persona","Empresa_Clinica","Tipo","Prioridad","Estatus","Notas"] if c in seguimientos_pend.columns]
+            st.dataframe(seguimientos_pend[cols], use_container_width=True)
+
+        st.markdown("### ✅ Pendientes de hoy")
+        if tareas_hoy.empty:
+            st.info("Sin pendientes para hoy.")
+        else:
+            cols = [c for c in ["Fecha_Limite","Titulo","Prioridad","Estatus","Cliente_Relacionado","Cotizacion_Folio_Relacionado"] if c in tareas_hoy.columns]
+            st.dataframe(tareas_hoy[cols], use_container_width=True)
+
+        st.markdown("### ⏰ Pendientes vencidos")
+        if tareas_vencidas.empty:
+            st.info("No hay pendientes vencidos 🎉")
+        else:
+            cols = [c for c in ["Fecha_Limite","Titulo","Prioridad","Estatus","Cliente_Relacionado"] if c in tareas_vencidas.columns]
+            st.dataframe(tareas_vencidas[cols], use_container_width=True)
+
+        st.markdown("### 💰 Cotizaciones vencidas de seguimiento")
+        if cot_venc.empty:
+            st.info("No hay cotizaciones vencidas de seguimiento 🎉")
+        else:
+            cols = [c for c in ["Folio","Fecha_Cotizacion","Cliente","Monto","Estatus","Fecha_Proximo_Seguimiento","Notas"] if c in cot_venc.columns]
+            st.dataframe(cot_venc[cols], use_container_width=True)
+
+        st.markdown("### ⏱️ Recordatorios de citas activos")
+        if recordatorios_activos.empty:
+            st.info("No hay recordatorios activos por atender en este momento.")
+        else:
+            cols = [c for c in ["Cita_ID","Fecha_Inicio","Cliente_Persona","Tipo","Reminder_Minutes_Before","Reminder_Status","Estatus"] if c in recordatorios_activos.columns]
+            st.dataframe(recordatorios_activos[cols], use_container_width=True)
+
+        st.markdown("### 🧾 Checklist de hoy")
+        if chk_hoy.empty:
+            st.info("No hay checklist cargado para hoy (aún).")
+        else:
+            cols = [c for c in ["Item","Completado","Completado_At","Notas"] if c in chk_hoy.columns]
+            st.dataframe(chk_hoy[cols], use_container_width=True)
+
+        st.markdown("### 🔔 Alertas y recordatorios")
+        for level, msg in build_hoy_alerts(hoy, df_citas, df_tareas, df_cot, chk_hoy, df_config):
+            if level == "error":
+                st.error(f"🚨 {msg}")
+            elif level == "warning":
+                st.warning(f"⚠️ {msg}")
+            else:
+                st.info(f"ℹ️ {msg}")
+
+    with sub[1]:
+        st.subheader("📅 Agenda")
+
+        with st.form("form_nueva_cita", clear_on_submit=True):
+            st.markdown("### ➕ Nueva cita")
+
+            col1, col2 = st.columns(2)
+            with col1:
+                fecha = st.date_input("Fecha", value=date.today(), format="DD/MM/YYYY")
+            with col2:
+                hora = st.time_input("Hora", value=datetime.now().time().replace(second=0, microsecond=0))
+
+            col3, col4 = st.columns(2)
+            with col3:
+                duracion_min = st.number_input("Duración (min)", min_value=15, max_value=480, value=60, step=15)
+            with col4:
+                prioridad = st.selectbox("Prioridad", ["Alta", "Media", "Baja"], index=1)
+
+            cliente_persona = st.text_input("Cliente / persona")
+            empresa = st.text_input("Empresa o clínica (opcional)")
+
+            tipo = st.selectbox("Tipo", ["Visita", "Llamada", "Junta", "Seguimiento"], index=2)
+            estatus = st.selectbox("Estatus", ["Programada", "Realizada", "Reprogramada", "Cancelada"], index=0)
+            notas = st.text_area("Notas (opcional)", height=90)
+
+            reminder = st.number_input("Recordatorio (min antes)", min_value=0, max_value=240, value=30, step=5)
+
+            submitted_cita = st.form_submit_button("✅ Crear cita")
+
+        if submitted_cita:
+            if not cliente_persona.strip():
+                st.error("❌ Cliente/persona es obligatorio.")
+            else:
+                try:
+                    start_dt = datetime.combine(fecha, hora)
+                    end_dt = start_dt + timedelta(minutes=int(duracion_min))
+
+                    cita_id = new_id("CITA")
+                    payload = {
+                        "Cita_ID": cita_id,
+                        "Created_At": now_iso(),
+                        "Created_By": "ALEJANDRO",
+                        "Fecha_Inicio": start_dt.strftime("%Y-%m-%d %H:%M:%S"),
+                        "Fecha_Fin": end_dt.strftime("%Y-%m-%d %H:%M:%S"),
+                        "Cliente_Persona": cliente_persona.strip(),
+                        "Empresa_Clinica": empresa.strip(),
+                        "Tipo": tipo,
+                        "Prioridad": prioridad,
+                        "Estatus": estatus,
+                        "Notas": notas.strip(),
+                        "Lugar": "",
+                        "Telefono": "",
+                        "Correo": "",
+                        "Reminder_Minutes_Before": str(int(reminder)),
+                        "Reminder_Status": "Pendiente" if int(reminder) > 0 else "N/A",
+                        "Last_Updated_At": now_iso(),
+                        "Last_Updated_By": "ALEJANDRO",
+                        "Is_Deleted": "0",
+                    }
+                    safe_append("CITAS", payload)
+                    st.success(f"🎈 Cita creada: {cita_id}")
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"❌ Error creando cita: {e}")
+
+        st.markdown("### 📋 Agenda")
+        agenda_view = df_citas.copy()
+        if "Fecha_Inicio" in agenda_view.columns:
+            agenda_view["_fi"] = _to_dt(agenda_view["Fecha_Inicio"])
+            agenda_hoy = agenda_view[agenda_view["_fi"].dt.date == date.today()].copy()
+            fin_semana = date.today() + timedelta(days=7)
+            agenda_semana = agenda_view[
+                agenda_view["_fi"].dt.date.between(date.today(), fin_semana)
+            ].copy()
+            agenda_hoy = agenda_hoy.sort_values("_fi", ascending=True)
+            agenda_semana = agenda_semana.sort_values("_fi", ascending=True)
+        else:
+            agenda_hoy = agenda_view.iloc[0:0]
+            agenda_semana = agenda_view.iloc[0:0]
+
+        tab_agenda_hoy, tab_agenda_semana, tab_agenda_todo = st.tabs(["Hoy", "Semana", "Todo"])
+        with tab_agenda_hoy:
+            if agenda_hoy.empty:
                 st.info("Sin citas para hoy.")
             else:
-                cols = [c for c in ["Fecha_Inicio","Cliente_Persona","Empresa_Clinica","Tipo","Prioridad","Estatus","Notas"] if c in citas_hoy.columns]
-                st.dataframe(citas_hoy[cols], use_container_width=True)
-
-            st.markdown("### 🔁 Seguimientos pendientes")
-            if seguimientos_pend.empty:
-                st.info("No hay citas de seguimiento pendientes.")
+                cols = [c for c in ["Fecha_Inicio","Cliente_Persona","Empresa_Clinica","Tipo","Prioridad","Estatus","Reminder_Minutes_Before","Reminder_Status"] if c in agenda_hoy.columns]
+                st.dataframe(agenda_hoy[cols], use_container_width=True)
+        with tab_agenda_semana:
+            if agenda_semana.empty:
+                st.info("Sin citas para los próximos 7 días.")
             else:
-                cols = [c for c in ["Fecha_Inicio","Cliente_Persona","Empresa_Clinica","Tipo","Prioridad","Estatus","Notas"] if c in seguimientos_pend.columns]
-                st.dataframe(seguimientos_pend[cols], use_container_width=True)
+                cols = [c for c in ["Fecha_Inicio","Cliente_Persona","Empresa_Clinica","Tipo","Prioridad","Estatus","Reminder_Minutes_Before","Reminder_Status"] if c in agenda_semana.columns]
+                st.dataframe(agenda_semana[cols], use_container_width=True)
+        with tab_agenda_todo:
+            st.dataframe(df_citas, use_container_width=True)
 
-            st.markdown("### ✅ Pendientes de hoy")
-            if tareas_hoy.empty:
-                st.info("Sin pendientes para hoy.")
+    with sub[2]:
+        st.subheader("✅ Pendientes")
+
+        # ===== Alta rápida =====
+        with st.form("form_nueva_tarea", clear_on_submit=True):
+            st.markdown("### ➕ Nuevo pendiente")
+            titulo = st.text_input("Título", placeholder="Ej. Llamar a cliente X")
+            descripcion = st.text_area("Descripción", placeholder="Detalles…", height=90)
+
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                fecha_limite = st.date_input("Fecha límite", value=date.today(), format="DD/MM/YYYY")
+            with col2:
+                prioridad = st.selectbox("Prioridad", ["Alta", "Media", "Baja"], index=1)
+            with col3:
+                estatus = st.selectbox("Estatus", ["Pendiente", "Completada"], index=0)
+
+            col4, col5 = st.columns(2)
+            with col4:
+                cliente_rel = st.text_input("Cliente relacionado (opcional)")
+            with col5:
+                folio_cot = st.text_input("Folio cotización (opcional)")
+
+            submitted = st.form_submit_button("✅ Crear pendiente")
+
+        if submitted:
+            if not titulo.strip():
+                st.error("❌ El título es obligatorio.")
             else:
-                cols = [c for c in ["Fecha_Limite","Titulo","Prioridad","Estatus","Cliente_Relacionado","Cotizacion_Folio_Relacionado"] if c in tareas_hoy.columns]
-                st.dataframe(tareas_hoy[cols], use_container_width=True)
+                try:
+                    tarea_id = new_id("TAREA")
+                    payload = {
+                        "Tarea_ID": tarea_id,
+                        "Created_At": now_iso(),
+                        "Created_By": "ALEJANDRO",
+                        "Titulo": titulo.strip(),
+                        "Descripcion": descripcion.strip(),
+                        "Fecha_Limite": fecha_limite.strftime("%Y-%m-%d"),
+                        "Prioridad": prioridad,
+                        "Estatus": estatus,
+                        "Cliente_Relacionado": cliente_rel.strip(),
+                        "Cotizacion_Folio_Relacionado": folio_cot.strip(),
+                        "Tipo": "Pendiente",
+                        "Fecha_Completado": now_iso() if estatus.lower() == "completada" else "",
+                        "Notas_Resultado": "",
+                        "Last_Updated_At": now_iso(),
+                        "Last_Updated_By": "ALEJANDRO",
+                        "Is_Deleted": "0",
+                    }
+                    safe_append("TAREAS", payload)
+                    st.success(f"🎈 Pendiente creado: {tarea_id}")
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"❌ Error creando pendiente: {e}")
 
-            st.markdown("### ⏰ Pendientes vencidos")
-            if tareas_vencidas.empty:
-                st.info("No hay pendientes vencidos 🎉")
-            else:
-                cols = [c for c in ["Fecha_Limite","Titulo","Prioridad","Estatus","Cliente_Relacionado"] if c in tareas_vencidas.columns]
-                st.dataframe(tareas_vencidas[cols], use_container_width=True)
+        st.markdown("---")
+        st.markdown("### ✅ Completar / Reabrir pendiente")
 
-            st.markdown("### 💰 Cotizaciones vencidas de seguimiento")
-            if cot_venc.empty:
-                st.info("No hay cotizaciones vencidas de seguimiento 🎉")
-            else:
-                cols = [c for c in ["Folio","Fecha_Cotizacion","Cliente","Monto","Estatus","Fecha_Proximo_Seguimiento","Notas"] if c in cot_venc.columns]
-                st.dataframe(cot_venc[cols], use_container_width=True)
+        # Normaliza columnas básicas por si vienen vacías
+        df_tareas["_id"] = df_tareas.get("Tarea_ID", "").astype(str)
+        df_tareas["_titulo"] = df_tareas.get("Titulo", "").astype(str)
+        df_tareas["_estatus"] = df_tareas.get("Estatus", "").astype(str)
+        df_tareas["_fecha_limite"] = df_tareas.get("Fecha_Limite", "").astype(str)
 
-            st.markdown("### ⏱️ Recordatorios de citas activos")
-            if recordatorios_activos.empty:
-                st.info("No hay recordatorios activos por atender en este momento.")
-            else:
-                cols = [c for c in ["Cita_ID","Fecha_Inicio","Cliente_Persona","Tipo","Reminder_Minutes_Before","Reminder_Status","Estatus"] if c in recordatorios_activos.columns]
-                st.dataframe(recordatorios_activos[cols], use_container_width=True)
+        # Opcional: filtrar no borradas
+        if "Is_Deleted" in df_tareas.columns:
+            df_tareas = df_tareas[df_tareas["Is_Deleted"].astype(str).fillna("") != "1"]
 
-            st.markdown("### 🧾 Checklist de hoy")
-            if chk_hoy.empty:
-                st.info("No hay checklist cargado para hoy (aún).")
-            else:
-                cols = [c for c in ["Item","Completado","Completado_At","Notas"] if c in chk_hoy.columns]
-                st.dataframe(chk_hoy[cols], use_container_width=True)
+        # Lista ordenada: pendientes primero, luego por fecha límite
+        try:
+            df_tareas["_fecha_dt"] = pd.to_datetime(df_tareas["_fecha_limite"], errors="coerce")
+        except Exception:
+            df_tareas["_fecha_dt"] = pd.NaT
 
-            st.markdown("### 🔔 Alertas y recordatorios")
-            for level, msg in build_hoy_alerts(hoy, df_citas, df_tareas, df_cot, chk_hoy, df_config):
-                if level == "error":
-                    st.error(f"🚨 {msg}")
-                elif level == "warning":
-                    st.warning(f"⚠️ {msg}")
-                else:
-                    st.info(f"ℹ️ {msg}")
+        df_tareas_view = df_tareas.copy()
+        df_tareas_view["_pend"] = df_tareas_view["_estatus"].str.lower().ne("completada")
+        df_tareas_view = df_tareas_view.sort_values(by=["_pend", "_fecha_dt"], ascending=[False, True])
 
-        with sub[1]:
-            st.subheader("📅 Agenda")
+        opciones = [o for o in df_tareas_view["_id"].tolist() if str(o).strip()]
 
-            with st.form("form_nueva_cita", clear_on_submit=True):
-                st.markdown("### ➕ Nueva cita")
+        def format_tarea(tid):
+            r = df_tareas_view[df_tareas_view["_id"] == tid].iloc[0]
+            est = r.get("_estatus", "")
+            fec = r.get("_fecha_limite", "")
+            tit = r.get("_titulo", "")
+            return f"{tid} | {est} | {fec} | {tit}"
 
-                col1, col2 = st.columns(2)
-                with col1:
-                    fecha = st.date_input("Fecha", value=date.today(), format="DD/MM/YYYY")
-                with col2:
-                    hora = st.time_input("Hora", value=datetime.now().time().replace(second=0, microsecond=0))
+        if not opciones:
+            st.info("No hay pendientes disponibles para actualizar.")
+            tarea_sel = None
+        else:
+            tarea_sel = st.selectbox("Selecciona un pendiente:", opciones, format_func=format_tarea, key="tarea_sel_update")
 
-                col3, col4 = st.columns(2)
-                with col3:
-                    duracion_min = st.number_input("Duración (min)", min_value=15, max_value=480, value=60, step=15)
-                with col4:
-                    prioridad = st.selectbox("Prioridad", ["Alta", "Media", "Baja"], index=1)
+        if tarea_sel:
+            colA, colB = st.columns(2)
 
-                cliente_persona = st.text_input("Cliente / persona")
-                empresa = st.text_input("Empresa o clínica (opcional)")
-
-                tipo = st.selectbox("Tipo", ["Visita", "Llamada", "Junta", "Seguimiento"], index=2)
-                estatus = st.selectbox("Estatus", ["Programada", "Realizada", "Reprogramada", "Cancelada"], index=0)
-                notas = st.text_area("Notas (opcional)", height=90)
-
-                reminder = st.number_input("Recordatorio (min antes)", min_value=0, max_value=240, value=30, step=5)
-
-                submitted_cita = st.form_submit_button("✅ Crear cita")
-
-            if submitted_cita:
-                if not cliente_persona.strip():
-                    st.error("❌ Cliente/persona es obligatorio.")
-                else:
+            with colA:
+                if st.button("✅ Marcar como COMPLETADA", use_container_width=True):
                     try:
-                        start_dt = datetime.combine(fecha, hora)
-                        end_dt = start_dt + timedelta(minutes=int(duracion_min))
-
-                        cita_id = new_id("CITA")
-                        payload = {
-                            "Cita_ID": cita_id,
-                            "Created_At": now_iso(),
-                            "Created_By": "ALEJANDRO",
-                            "Fecha_Inicio": start_dt.strftime("%Y-%m-%d %H:%M:%S"),
-                            "Fecha_Fin": end_dt.strftime("%Y-%m-%d %H:%M:%S"),
-                            "Cliente_Persona": cliente_persona.strip(),
-                            "Empresa_Clinica": empresa.strip(),
-                            "Tipo": tipo,
-                            "Prioridad": prioridad,
-                            "Estatus": estatus,
-                            "Notas": notas.strip(),
-                            "Lugar": "",
-                            "Telefono": "",
-                            "Correo": "",
-                            "Reminder_Minutes_Before": str(int(reminder)),
-                            "Reminder_Status": "Pendiente" if int(reminder) > 0 else "N/A",
-                            "Last_Updated_At": now_iso(),
-                            "Last_Updated_By": "ALEJANDRO",
-                            "Is_Deleted": "0",
-                        }
-                        safe_append("CITAS", payload)
-                        st.success(f"🎈 Cita creada: {cita_id}")
-                        st.rerun()
+                        ok = safe_update_by_id(
+                            "TAREAS",
+                            id_col="Tarea_ID",
+                            id_value=tarea_sel,
+                            updates={
+                                "Estatus": "Completada",
+                                "Fecha_Completado": now_iso(),
+                                "Last_Updated_At": now_iso(),
+                                "Last_Updated_By": "ALEJANDRO",
+                            }
+                        )
+                        if ok:
+                            st.success("🎈 Pendiente marcado como completado.")
+                            st.rerun()
                     except Exception as e:
-                        st.error(f"❌ Error creando cita: {e}")
+                        st.error(f"❌ Error actualizando pendiente: {e}")
 
-            st.markdown("### 📋 Agenda")
-            agenda_view = df_citas.copy()
-            if "Fecha_Inicio" in agenda_view.columns:
-                agenda_view["_fi"] = _to_dt(agenda_view["Fecha_Inicio"])
-                agenda_hoy = agenda_view[agenda_view["_fi"].dt.date == date.today()].copy()
-                fin_semana = date.today() + timedelta(days=7)
-                agenda_semana = agenda_view[
-                    agenda_view["_fi"].dt.date.between(date.today(), fin_semana)
-                ].copy()
-                agenda_hoy = agenda_hoy.sort_values("_fi", ascending=True)
-                agenda_semana = agenda_semana.sort_values("_fi", ascending=True)
-            else:
-                agenda_hoy = agenda_view.iloc[0:0]
-                agenda_semana = agenda_view.iloc[0:0]
-
-            tab_agenda_hoy, tab_agenda_semana, tab_agenda_todo = st.tabs(["Hoy", "Semana", "Todo"])
-            with tab_agenda_hoy:
-                if agenda_hoy.empty:
-                    st.info("Sin citas para hoy.")
-                else:
-                    cols = [c for c in ["Fecha_Inicio","Cliente_Persona","Empresa_Clinica","Tipo","Prioridad","Estatus","Reminder_Minutes_Before","Reminder_Status"] if c in agenda_hoy.columns]
-                    st.dataframe(agenda_hoy[cols], use_container_width=True)
-            with tab_agenda_semana:
-                if agenda_semana.empty:
-                    st.info("Sin citas para los próximos 7 días.")
-                else:
-                    cols = [c for c in ["Fecha_Inicio","Cliente_Persona","Empresa_Clinica","Tipo","Prioridad","Estatus","Reminder_Minutes_Before","Reminder_Status"] if c in agenda_semana.columns]
-                    st.dataframe(agenda_semana[cols], use_container_width=True)
-            with tab_agenda_todo:
-                st.dataframe(df_citas, use_container_width=True)
-
-        with sub[2]:
-            st.subheader("✅ Pendientes")
-
-            # ===== Alta rápida =====
-            with st.form("form_nueva_tarea", clear_on_submit=True):
-                st.markdown("### ➕ Nuevo pendiente")
-                titulo = st.text_input("Título", placeholder="Ej. Llamar a cliente X")
-                descripcion = st.text_area("Descripción", placeholder="Detalles…", height=90)
-
-                col1, col2, col3 = st.columns(3)
-                with col1:
-                    fecha_limite = st.date_input("Fecha límite", value=date.today(), format="DD/MM/YYYY")
-                with col2:
-                    prioridad = st.selectbox("Prioridad", ["Alta", "Media", "Baja"], index=1)
-                with col3:
-                    estatus = st.selectbox("Estatus", ["Pendiente", "Completada"], index=0)
-
-                col4, col5 = st.columns(2)
-                with col4:
-                    cliente_rel = st.text_input("Cliente relacionado (opcional)")
-                with col5:
-                    folio_cot = st.text_input("Folio cotización (opcional)")
-
-                submitted = st.form_submit_button("✅ Crear pendiente")
-
-            if submitted:
-                if not titulo.strip():
-                    st.error("❌ El título es obligatorio.")
-                else:
+            with colB:
+                if st.button("↩️ Reabrir (PENDIENTE)", use_container_width=True):
                     try:
-                        tarea_id = new_id("TAREA")
-                        payload = {
-                            "Tarea_ID": tarea_id,
-                            "Created_At": now_iso(),
-                            "Created_By": "ALEJANDRO",
-                            "Titulo": titulo.strip(),
-                            "Descripcion": descripcion.strip(),
-                            "Fecha_Limite": fecha_limite.strftime("%Y-%m-%d"),
-                            "Prioridad": prioridad,
-                            "Estatus": estatus,
-                            "Cliente_Relacionado": cliente_rel.strip(),
-                            "Cotizacion_Folio_Relacionado": folio_cot.strip(),
-                            "Tipo": "Pendiente",
-                            "Fecha_Completado": now_iso() if estatus.lower() == "completada" else "",
-                            "Notas_Resultado": "",
-                            "Last_Updated_At": now_iso(),
-                            "Last_Updated_By": "ALEJANDRO",
-                            "Is_Deleted": "0",
-                        }
-                        safe_append("TAREAS", payload)
-                        st.success(f"🎈 Pendiente creado: {tarea_id}")
-                        st.rerun()
+                        ok = safe_update_by_id(
+                            "TAREAS",
+                            id_col="Tarea_ID",
+                            id_value=tarea_sel,
+                            updates={
+                                "Estatus": "Pendiente",
+                                "Fecha_Completado": "",
+                                "Last_Updated_At": now_iso(),
+                                "Last_Updated_By": "ALEJANDRO",
+                            }
+                        )
+                        if ok:
+                            st.success("🎈 Pendiente reabierto (Pendiente).")
+                            st.rerun()
                     except Exception as e:
-                        st.error(f"❌ Error creando pendiente: {e}")
+                        st.error(f"❌ Error reabriendo pendiente: {e}")
 
-            st.markdown("---")
-            st.markdown("### ✅ Completar / Reabrir pendiente")
+        st.markdown("### 📋 Lista")
+        tareas_lista = df_tareas.copy()
+        if "Fecha_Limite" in tareas_lista.columns:
+            tareas_lista["_fl"] = _to_dt(tareas_lista["Fecha_Limite"])
+            hoy_t = date.today()
+            estado_t = tareas_lista.get("Estatus", "").astype(str).str.lower()
+            tareas_hoy_tab = tareas_lista[tareas_lista["_fl"].dt.date == hoy_t].copy()
+            tareas_vencidas_tab = tareas_lista[(tareas_lista["_fl"].dt.date < hoy_t) & (estado_t != "completada")].copy()
+            tareas_proximas_tab = tareas_lista[(tareas_lista["_fl"].dt.date > hoy_t) & (estado_t != "completada")].copy()
+            tareas_hoy_tab = tareas_hoy_tab.sort_values("_fl", ascending=True)
+            tareas_vencidas_tab = tareas_vencidas_tab.sort_values("_fl", ascending=True)
+            tareas_proximas_tab = tareas_proximas_tab.sort_values("_fl", ascending=True)
+        else:
+            tareas_hoy_tab = tareas_lista.iloc[0:0]
+            tareas_vencidas_tab = tareas_lista.iloc[0:0]
+            tareas_proximas_tab = tareas_lista.iloc[0:0]
 
-            # Normaliza columnas básicas por si vienen vacías
-            df_tareas["_id"] = df_tareas.get("Tarea_ID", "").astype(str)
-            df_tareas["_titulo"] = df_tareas.get("Titulo", "").astype(str)
-            df_tareas["_estatus"] = df_tareas.get("Estatus", "").astype(str)
-            df_tareas["_fecha_limite"] = df_tareas.get("Fecha_Limite", "").astype(str)
+        tab_t_hoy, tab_t_venc, tab_t_prox, tab_t_todo = st.tabs(["Hoy", "Vencidas", "Próximas", "Todo"])
+        with tab_t_hoy:
+            st.dataframe(tareas_hoy_tab, use_container_width=True)
+        with tab_t_venc:
+            st.dataframe(tareas_vencidas_tab, use_container_width=True)
+        with tab_t_prox:
+            st.dataframe(tareas_proximas_tab, use_container_width=True)
+        with tab_t_todo:
+            st.dataframe(df_tareas, use_container_width=True)
 
-            # Opcional: filtrar no borradas
-            if "Is_Deleted" in df_tareas.columns:
-                df_tareas = df_tareas[df_tareas["Is_Deleted"].astype(str).fillna("") != "1"]
+    with sub[3]:
+        st.subheader("💰 Cotizaciones")
 
-            # Lista ordenada: pendientes primero, luego por fecha límite
-            try:
-                df_tareas["_fecha_dt"] = pd.to_datetime(df_tareas["_fecha_limite"], errors="coerce")
-            except Exception:
-                df_tareas["_fecha_dt"] = pd.NaT
+        with st.form("form_nueva_cot", clear_on_submit=True):
+            st.markdown("### ➕ Nueva cotización")
+            folio = st.text_input("Folio")
+            fecha_cot = st.date_input("Fecha", value=date.today(), format="DD/MM/YYYY")
+            cliente = st.text_input("Cliente")
+            monto = st.number_input("Monto", min_value=0.0, value=0.0, step=100.0)
+            vendedor = st.text_input("Vendedor (opcional)", placeholder="Alejandro")
 
-            df_tareas_view = df_tareas.copy()
-            df_tareas_view["_pend"] = df_tareas_view["_estatus"].str.lower().ne("completada")
-            df_tareas_view = df_tareas_view.sort_values(by=["_pend", "_fecha_dt"], ascending=[False, True])
+            estatus = st.selectbox(
+                "Estatus",
+                ["Enviada", "En seguimiento", "Cerrada – Ganada", "Cerrada – Perdida"],
+                index=0
+            )
 
-            opciones = [o for o in df_tareas_view["_id"].tolist() if str(o).strip()]
+            prox_seg = st.date_input("Próximo seguimiento", value=date.today(), format="DD/MM/YYYY")
+            notas = st.text_area("Notas (opcional)", height=90)
 
-            def format_tarea(tid):
-                r = df_tareas_view[df_tareas_view["_id"] == tid].iloc[0]
-                est = r.get("_estatus", "")
-                fec = r.get("_fecha_limite", "")
-                tit = r.get("_titulo", "")
-                return f"{tid} | {est} | {fec} | {tit}"
+            submitted_cot = st.form_submit_button("✅ Crear cotización")
 
-            if not opciones:
-                st.info("No hay pendientes disponibles para actualizar.")
-                tarea_sel = None
+        if submitted_cot:
+            if not folio.strip() or not cliente.strip():
+                st.error("❌ Folio y Cliente son obligatorios.")
             else:
-                tarea_sel = st.selectbox("Selecciona un pendiente:", opciones, format_func=format_tarea, key="tarea_sel_update")
+                try:
+                    cot_id = new_id("COT")
+                    payload = {
+                        "Cotizacion_ID": cot_id,
+                        "Folio": folio.strip(),
+                        "Created_At": now_iso(),
+                        "Created_By": "ALEJANDRO",
+                        "Fecha_Cotizacion": fecha_cot.strftime("%Y-%m-%d"),
+                        "Cliente": cliente.strip(),
+                        "Monto": float(monto),
+                        "Vendedor": vendedor.strip(),
+                        "Estatus": estatus,
+                        "Fecha_Proximo_Seguimiento": prox_seg.strftime("%Y-%m-%d"),
+                        "Ultimo_Seguimiento_Fecha": "",
+                        "Dias_Sin_Seguimiento": "",
+                        "Notas": notas.strip(),
+                        "Resultado_Cierre": "",
+                        "Convertida_A_Tarea_ID": "",
+                        "Convertida_A_Cita_ID": "",
+                        "Last_Updated_At": now_iso(),
+                        "Last_Updated_By": "ALEJANDRO",
+                        "Is_Deleted": "0",
+                    }
+                    safe_append("COTIZACIONES", payload)
+                    st.success(f"🎈 Cotización creada: {cot_id}")
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"❌ Error creando cotización: {e}")
 
-            if tarea_sel:
-                colA, colB = st.columns(2)
+        st.markdown("---")
 
-                with colA:
-                    if st.button("✅ Marcar como COMPLETADA", use_container_width=True):
-                        try:
-                            ok = safe_update_by_id(
-                                "TAREAS",
-                                id_col="Tarea_ID",
-                                id_value=tarea_sel,
-                                updates={
-                                    "Estatus": "Completada",
-                                    "Fecha_Completado": now_iso(),
-                                    "Last_Updated_At": now_iso(),
-                                    "Last_Updated_By": "ALEJANDRO",
-                                }
-                            )
-                            if ok:
-                                st.success("🎈 Pendiente marcado como completado.")
-                                st.rerun()
-                        except Exception as e:
-                            st.error(f"❌ Error actualizando pendiente: {e}")
+        # Normalizar DF por si viene vacío o con tipos raros
+        df_cot["_id"] = df_cot.get("Cotizacion_ID", "").astype(str)
+        df_cot["_folio"] = df_cot.get("Folio", "").astype(str)
+        df_cot["_cliente"] = df_cot.get("Cliente", "").astype(str)
+        df_cot["_monto"] = df_cot.get("Monto", "").astype(str)
+        df_cot["_estatus"] = df_cot.get("Estatus", "").astype(str)
+        df_cot["_prox"] = df_cot.get("Fecha_Proximo_Seguimiento", "").astype(str)
+        df_cot["_notas"] = df_cot.get("Notas", "").astype(str)
 
-                with colB:
-                    if st.button("↩️ Reabrir (PENDIENTE)", use_container_width=True):
-                        try:
-                            ok = safe_update_by_id(
-                                "TAREAS",
-                                id_col="Tarea_ID",
-                                id_value=tarea_sel,
-                                updates={
-                                    "Estatus": "Pendiente",
-                                    "Fecha_Completado": "",
-                                    "Last_Updated_At": now_iso(),
-                                    "Last_Updated_By": "ALEJANDRO",
-                                }
-                            )
-                            if ok:
-                                st.success("🎈 Pendiente reabierto (Pendiente).")
-                                st.rerun()
-                        except Exception as e:
-                            st.error(f"❌ Error reabriendo pendiente: {e}")
+        # Opcional: filtrar no borradas
+        if "Is_Deleted" in df_cot.columns:
+            df_cot = df_cot[df_cot["Is_Deleted"].astype(str).fillna("") != "1"]
 
-            st.markdown("### 📋 Lista")
-            tareas_lista = df_tareas.copy()
-            if "Fecha_Limite" in tareas_lista.columns:
-                tareas_lista["_fl"] = _to_dt(tareas_lista["Fecha_Limite"])
-                hoy_t = date.today()
-                estado_t = tareas_lista.get("Estatus", "").astype(str).str.lower()
-                tareas_hoy_tab = tareas_lista[tareas_lista["_fl"].dt.date == hoy_t].copy()
-                tareas_vencidas_tab = tareas_lista[(tareas_lista["_fl"].dt.date < hoy_t) & (estado_t != "completada")].copy()
-                tareas_proximas_tab = tareas_lista[(tareas_lista["_fl"].dt.date > hoy_t) & (estado_t != "completada")].copy()
-                tareas_hoy_tab = tareas_hoy_tab.sort_values("_fl", ascending=True)
-                tareas_vencidas_tab = tareas_vencidas_tab.sort_values("_fl", ascending=True)
-                tareas_proximas_tab = tareas_proximas_tab.sort_values("_fl", ascending=True)
+        # Ordenar: vencidas primero (prox_seg < hoy), luego por fecha de seguimiento
+        try:
+            df_cot["_prox_dt"] = pd.to_datetime(df_cot["_prox"], errors="coerce")
+        except Exception:
+            df_cot["_prox_dt"] = pd.NaT
+
+        hoy_dt = pd.to_datetime(date.today())
+        df_cot_view = df_cot.copy()
+        df_cot_view["Convertida_A_Tarea_ID"] = df_cot.get("Convertida_A_Tarea_ID", "")
+        df_cot_view["Convertida_A_Cita_ID"] = df_cot.get("Convertida_A_Cita_ID", "")
+        df_cot_view["_vencida"] = df_cot_view["_prox_dt"].notna() & (df_cot_view["_prox_dt"] < hoy_dt)
+        df_cot_view = df_cot_view.sort_values(by=["_vencida", "_prox_dt"], ascending=[False, True])
+
+        opciones_cot = df_cot_view["_id"].tolist()
+
+        def format_cot(cid):
+            r = df_cot_view[df_cot_view["_id"] == cid].iloc[0]
+            fol = r.get("_folio", "")
+            cli = r.get("_cliente", "")
+            est = r.get("_estatus", "")
+            prox = r.get("_prox", "")
+            mon = r.get("_monto", "")
+            return f"{fol} | {cli} | {est} | seg: {prox} | ${mon}"
+
+        def _normaliza_estatus_cotizacion(valor: str) -> str:
+            txt = unicodedata.normalize("NFKD", str(valor or "")).encode("ascii", "ignore").decode("ascii")
+            txt = re.sub(r"[^a-zA-Z0-9]+", " ", txt.lower()).strip()
+            return txt
+
+        with st.expander("🏁 Cerrar cotizaciones", expanded=True):
+            estatus_normalizados = df_cot_view["_estatus"].apply(_normaliza_estatus_cotizacion)
+            estatus_cerrados = {
+                "cerrada ganada",
+                "cerrada perdida",
+                "cerrada ganado",
+                "cerrada perdido",
+            }
+            df_cot_cerrables = df_cot_view[~estatus_normalizados.isin(estatus_cerrados)].copy()
+            opciones_cierre = df_cot_cerrables["_id"].tolist()
+
+            if not opciones_cierre:
+                st.info("No hay cotizaciones disponibles para cerrar.")
             else:
-                tareas_hoy_tab = tareas_lista.iloc[0:0]
-                tareas_vencidas_tab = tareas_lista.iloc[0:0]
-                tareas_proximas_tab = tareas_lista.iloc[0:0]
-
-            tab_t_hoy, tab_t_venc, tab_t_prox, tab_t_todo = st.tabs(["Hoy", "Vencidas", "Próximas", "Todo"])
-            with tab_t_hoy:
-                st.dataframe(tareas_hoy_tab, use_container_width=True)
-            with tab_t_venc:
-                st.dataframe(tareas_vencidas_tab, use_container_width=True)
-            with tab_t_prox:
-                st.dataframe(tareas_proximas_tab, use_container_width=True)
-            with tab_t_todo:
-                st.dataframe(df_tareas, use_container_width=True)
-
-        with sub[3]:
-            st.subheader("💰 Cotizaciones")
-
-            with st.form("form_nueva_cot", clear_on_submit=True):
-                st.markdown("### ➕ Nueva cotización")
-                folio = st.text_input("Folio")
-                fecha_cot = st.date_input("Fecha", value=date.today(), format="DD/MM/YYYY")
-                cliente = st.text_input("Cliente")
-                monto = st.number_input("Monto", min_value=0.0, value=0.0, step=100.0)
-                vendedor = st.text_input("Vendedor (opcional)", placeholder="Alejandro")
-
-                estatus = st.selectbox(
-                    "Estatus",
-                    ["Enviada", "En seguimiento", "Cerrada – Ganada", "Cerrada – Perdida"],
-                    index=0
+                cot_sel_cierre = st.selectbox(
+                    "Selecciona una cotización para cerrar:",
+                    opciones_cierre,
+                    format_func=format_cot,
+                    key="cot_sel_cierre"
+                )
+                estado_cierre = st.radio(
+                    "Nuevo estatus de cierre:",
+                    ["Cerrada – Ganada", "Cerrada – Perdida"],
+                    horizontal=True,
+                    key="estado_cierre_cot"
                 )
 
-                prox_seg = st.date_input("Próximo seguimiento", value=date.today(), format="DD/MM/YYYY")
-                notas = st.text_area("Notas (opcional)", height=90)
-
-                submitted_cot = st.form_submit_button("✅ Crear cotización")
-
-            if submitted_cot:
-                if not folio.strip() or not cliente.strip():
-                    st.error("❌ Folio y Cliente son obligatorios.")
-                else:
+                if st.button("🏁 Actualizar estatus de cotización", key="btn_cerrar_cot", use_container_width=True):
                     try:
-                        cot_id = new_id("COT")
-                        payload = {
-                            "Cotizacion_ID": cot_id,
-                            "Folio": folio.strip(),
-                            "Created_At": now_iso(),
-                            "Created_By": "ALEJANDRO",
-                            "Fecha_Cotizacion": fecha_cot.strftime("%Y-%m-%d"),
-                            "Cliente": cliente.strip(),
-                            "Monto": float(monto),
-                            "Vendedor": vendedor.strip(),
-                            "Estatus": estatus,
-                            "Fecha_Proximo_Seguimiento": prox_seg.strftime("%Y-%m-%d"),
-                            "Ultimo_Seguimiento_Fecha": "",
-                            "Dias_Sin_Seguimiento": "",
-                            "Notas": notas.strip(),
-                            "Resultado_Cierre": "",
-                            "Convertida_A_Tarea_ID": "",
-                            "Convertida_A_Cita_ID": "",
-                            "Last_Updated_At": now_iso(),
-                            "Last_Updated_By": "ALEJANDRO",
-                            "Is_Deleted": "0",
-                        }
-                        safe_append("COTIZACIONES", payload)
-                        st.success(f"🎈 Cotización creada: {cot_id}")
+                        safe_update_by_id(
+                            "COTIZACIONES",
+                            id_col="Cotizacion_ID",
+                            id_value=cot_sel_cierre,
+                            updates={
+                                "Estatus": estado_cierre,
+                                "Resultado_Cierre": "Ganada" if "Ganada" in estado_cierre else "Perdida",
+                                "Last_Updated_At": now_iso(),
+                                "Last_Updated_By": "ALEJANDRO",
+                            }
+                        )
+                        st.success(f"✅ Estatus actualizado a: {estado_cierre}")
                         st.rerun()
                     except Exception as e:
-                        st.error(f"❌ Error creando cotización: {e}")
+                        st.error(f"❌ Error al cerrar cotización: {e}")
 
-            st.markdown("---")
+        with st.expander("🔁 Convertir cotización a pendiente", expanded=False):
+            if not opciones_cot:
+                st.info("No hay cotizaciones disponibles para convertir.")
+            else:
+                cot_sel = st.selectbox(
+                    "Selecciona una cotización:",
+                    opciones_cot,
+                    format_func=format_cot,
+                    key="cot_sel_convert"
+                )
 
-            # Normalizar DF por si viene vacío o con tipos raros
-            df_cot["_id"] = df_cot.get("Cotizacion_ID", "").astype(str)
-            df_cot["_folio"] = df_cot.get("Folio", "").astype(str)
-            df_cot["_cliente"] = df_cot.get("Cliente", "").astype(str)
-            df_cot["_monto"] = df_cot.get("Monto", "").astype(str)
-            df_cot["_estatus"] = df_cot.get("Estatus", "").astype(str)
-            df_cot["_prox"] = df_cot.get("Fecha_Proximo_Seguimiento", "").astype(str)
-            df_cot["_notas"] = df_cot.get("Notas", "").astype(str)
+                if cot_sel:
+                    row_cot = df_cot_view[df_cot_view["_id"] == cot_sel].iloc[0]
+                    folio = str(row_cot.get("_folio", "")).strip()
+                    cliente = str(row_cot.get("_cliente", "")).strip()
+                    estatus = str(row_cot.get("_estatus", "")).strip()
+                    prox = str(row_cot.get("_prox", "")).strip()
+                    notas = str(row_cot.get("_notas", "")).strip()
 
-            # Opcional: filtrar no borradas
-            if "Is_Deleted" in df_cot.columns:
-                df_cot = df_cot[df_cot["Is_Deleted"].astype(str).fillna("") != "1"]
+                    # --- Anti-duplicados: si ya se convirtió, deshabilitar botones ---
+                    tarea_link = str(row_cot.get("Convertida_A_Tarea_ID", "") or "").strip()
+                    cita_link = str(row_cot.get("Convertida_A_Cita_ID", "") or "").strip()
 
-            # Ordenar: vencidas primero (prox_seg < hoy), luego por fecha de seguimiento
-            try:
-                df_cot["_prox_dt"] = pd.to_datetime(df_cot["_prox"], errors="coerce")
-            except Exception:
-                df_cot["_prox_dt"] = pd.NaT
+                    ya_tarea = bool(tarea_link)
+                    ya_cita = bool(cita_link)
 
-            hoy_dt = pd.to_datetime(date.today())
-            df_cot_view = df_cot.copy()
-            df_cot_view["Convertida_A_Tarea_ID"] = df_cot.get("Convertida_A_Tarea_ID", "")
-            df_cot_view["Convertida_A_Cita_ID"] = df_cot.get("Convertida_A_Cita_ID", "")
-            df_cot_view["_vencida"] = df_cot_view["_prox_dt"].notna() & (df_cot_view["_prox_dt"] < hoy_dt)
-            df_cot_view = df_cot_view.sort_values(by=["_vencida", "_prox_dt"], ascending=[False, True])
+                    if ya_tarea:
+                        st.info(f"🧩 Esta cotización ya fue convertida a **Pendiente**: {tarea_link}")
+                    if ya_cita:
+                        st.info(f"📅 Esta cotización ya fue convertida a **Cita**: {cita_link}")
 
-            opciones_cot = df_cot_view["_id"].tolist()
-
-            def format_cot(cid):
-                r = df_cot_view[df_cot_view["_id"] == cid].iloc[0]
-                fol = r.get("_folio", "")
-                cli = r.get("_cliente", "")
-                est = r.get("_estatus", "")
-                prox = r.get("_prox", "")
-                mon = r.get("_monto", "")
-                return f"{fol} | {cli} | {est} | seg: {prox} | ${mon}"
-
-            def _normaliza_estatus_cotizacion(valor: str) -> str:
-                txt = unicodedata.normalize("NFKD", str(valor or "")).encode("ascii", "ignore").decode("ascii")
-                txt = re.sub(r"[^a-zA-Z0-9]+", " ", txt.lower()).strip()
-                return txt
-
-            with st.expander("🏁 Cerrar cotizaciones", expanded=True):
-                estatus_normalizados = df_cot_view["_estatus"].apply(_normaliza_estatus_cotizacion)
-                estatus_cerrados = {
-                    "cerrada ganada",
-                    "cerrada perdida",
-                    "cerrada ganado",
-                    "cerrada perdido",
-                }
-                df_cot_cerrables = df_cot_view[~estatus_normalizados.isin(estatus_cerrados)].copy()
-                opciones_cierre = df_cot_cerrables["_id"].tolist()
-
-                if not opciones_cierre:
-                    st.info("No hay cotizaciones disponibles para cerrar.")
-                else:
-                    cot_sel_cierre = st.selectbox(
-                        "Selecciona una cotización para cerrar:",
-                        opciones_cierre,
-                        format_func=format_cot,
-                        key="cot_sel_cierre"
-                    )
-                    estado_cierre = st.radio(
-                        "Nuevo estatus de cierre:",
-                        ["Cerrada – Ganada", "Cerrada – Perdida"],
+                    st.markdown("#### ➜ Tipo de conversión")
+                    tipo_conv = st.radio(
+                        "¿Qué quieres crear?",
+                        ["🧩 Pendiente", "📅 Cita"],
                         horizontal=True,
-                        key="estado_cierre_cot"
+                        key="tipo_conversion_cot"
                     )
 
-                    if st.button("🏁 Actualizar estatus de cotización", key="btn_cerrar_cot", use_container_width=True):
-                        try:
-                            safe_update_by_id(
-                                "COTIZACIONES",
-                                id_col="Cotizacion_ID",
-                                id_value=cot_sel_cierre,
-                                updates={
-                                    "Estatus": estado_cierre,
-                                    "Resultado_Cierre": "Ganada" if "Ganada" in estado_cierre else "Perdida",
-                                    "Last_Updated_At": now_iso(),
-                                    "Last_Updated_By": "ALEJANDRO",
-                                }
+                    if tipo_conv == "🧩 Pendiente":
+                        colA, colB = st.columns([2, 1])
+
+                        with colA:
+                            titulo_sugerido = st.text_input(
+                                "Título del pendiente (editable):",
+                                value=f"Seguimiento cotización {folio} - {cliente}",
+                                key="titulo_tarea_desde_cot"
                             )
-                            st.success(f"✅ Estatus actualizado a: {estado_cierre}")
-                            st.rerun()
-                        except Exception as e:
-                            st.error(f"❌ Error al cerrar cotización: {e}")
-
-            with st.expander("🔁 Convertir cotización a pendiente", expanded=False):
-                if not opciones_cot:
-                    st.info("No hay cotizaciones disponibles para convertir.")
-                else:
-                    cot_sel = st.selectbox(
-                        "Selecciona una cotización:",
-                        opciones_cot,
-                        format_func=format_cot,
-                        key="cot_sel_convert"
-                    )
-
-                    if cot_sel:
-                        row_cot = df_cot_view[df_cot_view["_id"] == cot_sel].iloc[0]
-                        folio = str(row_cot.get("_folio", "")).strip()
-                        cliente = str(row_cot.get("_cliente", "")).strip()
-                        estatus = str(row_cot.get("_estatus", "")).strip()
-                        prox = str(row_cot.get("_prox", "")).strip()
-                        notas = str(row_cot.get("_notas", "")).strip()
-
-                        # --- Anti-duplicados: si ya se convirtió, deshabilitar botones ---
-                        tarea_link = str(row_cot.get("Convertida_A_Tarea_ID", "") or "").strip()
-                        cita_link = str(row_cot.get("Convertida_A_Cita_ID", "") or "").strip()
-
-                        ya_tarea = bool(tarea_link)
-                        ya_cita = bool(cita_link)
-
-                        if ya_tarea:
-                            st.info(f"🧩 Esta cotización ya fue convertida a **Pendiente**: {tarea_link}")
-                        if ya_cita:
-                            st.info(f"📅 Esta cotización ya fue convertida a **Cita**: {cita_link}")
-
-                        st.markdown("#### ➜ Tipo de conversión")
-                        tipo_conv = st.radio(
-                            "¿Qué quieres crear?",
-                            ["🧩 Pendiente", "📅 Cita"],
-                            horizontal=True,
-                            key="tipo_conversion_cot"
-                        )
-
-                        if tipo_conv == "🧩 Pendiente":
-                            colA, colB = st.columns([2, 1])
-
-                            with colA:
-                                titulo_sugerido = st.text_input(
-                                    "Título del pendiente (editable):",
-                                    value=f"Seguimiento cotización {folio} - {cliente}",
-                                    key="titulo_tarea_desde_cot"
-                                )
-                                desc_sugerida = st.text_area(
-                                    "Descripción (opcional):",
-                                    value=(f"Estatus cotización: {estatus}\n"
-                                           f"Próx. seguimiento: {prox}\n"
-                                           f"Notas: {notas}").strip(),
-                                    height=90,
-                                    key="desc_tarea_desde_cot"
-                                )
-
-                            with colB:
-                                # Fecha límite por defecto = fecha de próximo seguimiento, si es válida; si no, hoy
-                                try:
-                                    prox_dt = pd.to_datetime(prox, errors="coerce")
-                                    fecha_limite_default = prox_dt.date() if pd.notna(prox_dt) else date.today()
-                                except Exception:
-                                    fecha_limite_default = date.today()
-
-                                fecha_limite = st.date_input(
-                                    "Fecha límite",
-                                    value=fecha_limite_default,
-                                    format="DD/MM/YYYY",
-                                    key="fecha_limite_tarea_desde_cot"
-                                )
-                                prioridad = st.selectbox(
-                                    "Prioridad",
-                                    ["Alta", "Media", "Baja"],
-                                    index=1,
-                                    key="prioridad_tarea_desde_cot"
-                                )
-                            if st.button(
-                                "🧩 Convertir a PENDIENTE",
-                                key="btn_convertir_a_tarea",
-                                use_container_width=True,
-                                disabled=ya_tarea,
-                            ):
-                                if not titulo_sugerido.strip():
-                                    st.error("❌ El título del pendiente no puede ir vacío.")
-                                else:
-                                    try:
-                                        tarea_id = new_id("TAREA")
-                                        payload = {
-                                            "Tarea_ID": tarea_id,
-                                            "Created_At": now_iso(),
-                                            "Created_By": "ALEJANDRO",
-                                            "Titulo": titulo_sugerido.strip(),
-                                            "Descripcion": desc_sugerida.strip(),
-                                            "Fecha_Limite": fecha_limite.strftime("%Y-%m-%d"),
-                                            "Prioridad": prioridad,
-                                            "Estatus": "Pendiente",
-                                            "Cliente_Relacionado": cliente,
-                                            "Cotizacion_Folio_Relacionado": folio,
-                                            "Tipo": "Seguimiento Cotización",
-                                            "Fecha_Completado": "",
-                                            "Notas_Resultado": "",
-                                            "Last_Updated_At": now_iso(),
-                                            "Last_Updated_By": "ALEJANDRO",
-                                            "Is_Deleted": "0",
-                                        }
-                                        safe_append("TAREAS", payload)
-
-                                        # Guardar vínculo en cotización (si existe columna)
-                                        try:
-                                            safe_update_by_id(
-                                                "COTIZACIONES",
-                                                id_col="Cotizacion_ID",
-                                                id_value=cot_sel,
-                                                updates={
-                                                    "Convertida_A_Tarea_ID": tarea_id,
-                                                    "Last_Updated_At": now_iso(),
-                                                    "Last_Updated_By": "ALEJANDRO",
-                                                }
-                                            )
-                                        except Exception:
-                                            pass
-
-                                        st.success(f"🎈 Pendiente creado desde cotización: {tarea_id}")
-                                        st.rerun()
-                                    except Exception as e:
-                                        st.error(f"❌ Error al convertir a pendiente: {e}")
-
-                        else:
-                            st.markdown("#### 📅 Configurar cita")
-                            colx, coly = st.columns(2)
-                            with colx:
-                                fecha_cita = st.date_input("Fecha cita", value=date.today(), format="DD/MM/YYYY", key="fecha_cita_desde_cot")
-                            with coly:
-                                hora_cita = st.time_input(
-                                    "Hora cita",
-                                    value=datetime.now().time().replace(second=0, microsecond=0),
-                                    key="hora_cita_desde_cot"
-                                )
-
-                            colx2, coly2 = st.columns(2)
-                            with colx2:
-                                duracion_min = st.number_input(
-                                    "Duración (min)",
-                                    min_value=15,
-                                    max_value=480,
-                                    value=30,
-                                    step=15,
-                                    key="dur_cita_desde_cot"
-                                )
-                            with coly2:
-                                prioridad_cita = st.selectbox(
-                                    "Prioridad",
-                                    ["Alta", "Media", "Baja"],
-                                    index=1,
-                                    key="prioridad_cita_desde_cot"
-                                )
-
-                            tipo_cita = st.selectbox(
-                                "Tipo de cita",
-                                ["Seguimiento", "Llamada", "Visita", "Presentación", "Otro"],
-                                index=0,
-                                key="tipo_cita_desde_cot"
-                            )
-
-                            estatus_cita = st.selectbox(
-                                "Estatus inicial",
-                                ["Pendiente", "Programada", "Confirmada"],
-                                index=0,
-                                key="estatus_cita_desde_cot"
-                            )
-
-                            reminder_cita = st.number_input(
-                                "Recordatorio (min antes)",
-                                min_value=0,
-                                max_value=1440,
-                                value=30,
-                                step=5,
-                                key="reminder_cita_desde_cot"
-                            )
-
-                            notas_cita = st.text_area(
-                                "Notas de cita (opcional)",
-                                value=(f"Seguimiento de cotización {folio}\n"
-                                       f"Cliente: {cliente}\n"
-                                       f"Estatus actual: {estatus}\n"
-                                       f"Notas cotización: {notas}").strip(),
+                            desc_sugerida = st.text_area(
+                                "Descripción (opcional):",
+                                value=(f"Estatus cotización: {estatus}\n"
+                                       f"Próx. seguimiento: {prox}\n"
+                                       f"Notas: {notas}").strip(),
                                 height=90,
-                                key="notas_cita_desde_cot"
+                                key="desc_tarea_desde_cot"
                             )
 
-                            if st.button(
-                                "📅 Convertir a CITA",
-                                key="btn_convertir_a_cita",
-                                use_container_width=True,
-                                disabled=ya_cita,
-                            ):
-                                try:
-                                    start_dt = datetime.combine(fecha_cita, hora_cita)
-                                    end_dt = start_dt + timedelta(minutes=int(duracion_min))
+                        with colB:
+                            # Fecha límite por defecto = fecha de próximo seguimiento, si es válida; si no, hoy
+                            try:
+                                prox_dt = pd.to_datetime(prox, errors="coerce")
+                                fecha_limite_default = prox_dt.date() if pd.notna(prox_dt) else date.today()
+                            except Exception:
+                                fecha_limite_default = date.today()
 
-                                    cita_id = new_id("CITA")
-                                    payload_cita = {
-                                        "Cita_ID": cita_id,
+                            fecha_limite = st.date_input(
+                                "Fecha límite",
+                                value=fecha_limite_default,
+                                format="DD/MM/YYYY",
+                                key="fecha_limite_tarea_desde_cot"
+                            )
+                            prioridad = st.selectbox(
+                                "Prioridad",
+                                ["Alta", "Media", "Baja"],
+                                index=1,
+                                key="prioridad_tarea_desde_cot"
+                            )
+                        if st.button(
+                            "🧩 Convertir a PENDIENTE",
+                            key="btn_convertir_a_tarea",
+                            use_container_width=True,
+                            disabled=ya_tarea,
+                        ):
+                            if not titulo_sugerido.strip():
+                                st.error("❌ El título del pendiente no puede ir vacío.")
+                            else:
+                                try:
+                                    tarea_id = new_id("TAREA")
+                                    payload = {
+                                        "Tarea_ID": tarea_id,
                                         "Created_At": now_iso(),
                                         "Created_By": "ALEJANDRO",
-                                        "Fecha_Inicio": start_dt.strftime("%Y-%m-%d %H:%M:%S"),
-                                        "Fecha_Fin": end_dt.strftime("%Y-%m-%d %H:%M:%S"),
-                                        "Cliente_Persona": cliente,
-                                        "Empresa_Clinica": "",
-                                        "Tipo": tipo_cita,
-                                        "Prioridad": prioridad_cita,
-                                        "Estatus": estatus_cita,
-                                        "Notas": notas_cita.strip(),
-                                        "Lugar": "",
-                                        "Telefono": "",
-                                        "Correo": "",
-                                        "Reminder_Minutes_Before": str(int(reminder_cita)),
-                                        "Reminder_Status": "Pendiente" if int(reminder_cita) > 0 else "N/A",
+                                        "Titulo": titulo_sugerido.strip(),
+                                        "Descripcion": desc_sugerida.strip(),
+                                        "Fecha_Limite": fecha_limite.strftime("%Y-%m-%d"),
+                                        "Prioridad": prioridad,
+                                        "Estatus": "Pendiente",
+                                        "Cliente_Relacionado": cliente,
+                                        "Cotizacion_Folio_Relacionado": folio,
+                                        "Tipo": "Seguimiento Cotización",
+                                        "Fecha_Completado": "",
+                                        "Notas_Resultado": "",
                                         "Last_Updated_At": now_iso(),
                                         "Last_Updated_By": "ALEJANDRO",
                                         "Is_Deleted": "0",
                                     }
-                                    safe_append("CITAS", payload_cita)
+                                    safe_append("TAREAS", payload)
 
                                     # Guardar vínculo en cotización (si existe columna)
                                     try:
@@ -3625,7 +3472,7 @@ if "organizador" in tab_map:
                                             id_col="Cotizacion_ID",
                                             id_value=cot_sel,
                                             updates={
-                                                "Convertida_A_Cita_ID": cita_id,
+                                                "Convertida_A_Tarea_ID": tarea_id,
                                                 "Last_Updated_At": now_iso(),
                                                 "Last_Updated_By": "ALEJANDRO",
                                             }
@@ -3633,248 +3480,365 @@ if "organizador" in tab_map:
                                     except Exception:
                                         pass
 
-                                    st.success(f"🎈 Cita creada desde cotización: {cita_id}")
+                                    st.success(f"🎈 Pendiente creado desde cotización: {tarea_id}")
                                     st.rerun()
-
                                 except Exception as e:
-                                    st.error(f"❌ Error al convertir a cita: {e}")
+                                    st.error(f"❌ Error al convertir a pendiente: {e}")
 
-            st.markdown("### 📋 Lista")
-            cot_dash = df_cot.copy()
-            if "Fecha_Proximo_Seguimiento" in cot_dash.columns:
-                cot_dash["_fps"] = _to_dt(cot_dash["Fecha_Proximo_Seguimiento"])
-            else:
-                cot_dash["_fps"] = pd.NaT
-            estatus_cot = cot_dash.get("Estatus", "").astype(str).str.lower()
-            cot_pend_tab = cot_dash[~estatus_cot.str.contains("ganada|perdida", na=False)].copy()
-            cot_seg_tab = cot_dash[estatus_cot.str.contains("en seguimiento", na=False)].copy()
-            cot_venc_tab = cot_pend_tab[cot_pend_tab["_fps"].notna() & (cot_pend_tab["_fps"].dt.date < date.today())].copy()
-            pipeline_monto = pd.to_numeric(cot_pend_tab.get("Monto", 0), errors="coerce").fillna(0).sum()
-
-            d1, d2, d3 = st.columns(3)
-            d1.metric("Pendientes", len(cot_pend_tab))
-            d2.metric("Vencidas de seguimiento", len(cot_venc_tab))
-            d3.metric("Pipeline monto", f"${pipeline_monto:,.2f}")
-
-            tab_c_pend, tab_c_venc, tab_c_seg, tab_c_todo = st.tabs(["Pendientes", "Vencidas", "En seguimiento", "Todo"])
-            with tab_c_pend:
-                st.dataframe(cot_pend_tab, use_container_width=True)
-            with tab_c_venc:
-                st.dataframe(cot_venc_tab, use_container_width=True)
-            with tab_c_seg:
-                st.dataframe(cot_seg_tab, use_container_width=True)
-            with tab_c_todo:
-                st.dataframe(df_cot, use_container_width=True)
-
-        with sub[4]:
-            st.subheader("🧾 Checklist")
-            hoy = date.today()
-
-            default_orden = 1
-            if not df_checklist_template.empty and "Orden" in df_checklist_template.columns:
-                ordenes_actuales = pd.to_numeric(df_checklist_template["Orden"], errors="coerce").dropna()
-                if not ordenes_actuales.empty:
-                    default_orden = int(min(999, ordenes_actuales.max() + 1))
-
-            with st.expander("➕ Agregar ítem a plantilla recurrente", expanded=False):
-                with st.form("form_add_check_template", clear_on_submit=True):
-                    item_txt = st.text_input("Ítem")
-                    orden = st.number_input("Orden", min_value=1, max_value=999, value=default_orden, step=1)
-                    activo = st.checkbox("Activo", value=True)
-                    submitted_item = st.form_submit_button("Guardar ítem")
-
-                if submitted_item:
-                    if not item_txt.strip():
-                        st.error("❌ El ítem no puede ir vacío.")
                     else:
-                        payload = {
-                            "Item_ID": new_id("CHK"),
-                            "Orden": str(int(orden)),
-                            "Item": item_txt.strip(),
-                            "Activo": "1" if activo else "0",
-                        }
-                        safe_append("CHECKLIST_TEMPLATE", payload)
-                        # Fuerza re-sincronización del checklist diario tras cambios en plantilla.
-                        st.session_state[f"chk_sync_{hoy.isoformat()}"] = False
-                        st.success("✅ Ítem agregado a la plantilla.")
-                        st.rerun()
+                        st.markdown("#### 📅 Configurar cita")
+                        colx, coly = st.columns(2)
+                        with colx:
+                            fecha_cita = st.date_input("Fecha cita", value=date.today(), format="DD/MM/YYYY", key="fecha_cita_desde_cot")
+                        with coly:
+                            hora_cita = st.time_input(
+                                "Hora cita",
+                                value=datetime.now().time().replace(second=0, microsecond=0),
+                                key="hora_cita_desde_cot"
+                            )
 
-            st.markdown("### Plantilla recurrente")
-            st.dataframe(df_checklist_template, use_container_width=True)
+                        colx2, coly2 = st.columns(2)
+                        with colx2:
+                            duracion_min = st.number_input(
+                                "Duración (min)",
+                                min_value=15,
+                                max_value=480,
+                                value=30,
+                                step=15,
+                                key="dur_cita_desde_cot"
+                            )
+                        with coly2:
+                            prioridad_cita = st.selectbox(
+                                "Prioridad",
+                                ["Alta", "Media", "Baja"],
+                                index=1,
+                                key="prioridad_cita_desde_cot"
+                            )
 
-            st.markdown("### Checklist de hoy")
-            chk_hoy_edit = df_checklist_daily.copy()
-            if "Fecha" in chk_hoy_edit.columns:
-                chk_hoy_edit["_f"] = _to_date(chk_hoy_edit["Fecha"])
-                chk_hoy_edit = chk_hoy_edit[chk_hoy_edit["_f"] == hoy].copy()
+                        tipo_cita = st.selectbox(
+                            "Tipo de cita",
+                            ["Seguimiento", "Llamada", "Visita", "Presentación", "Otro"],
+                            index=0,
+                            key="tipo_cita_desde_cot"
+                        )
 
-            done_chk = 0
-            if not chk_hoy_edit.empty and "Completado" in chk_hoy_edit.columns:
-                for _, row in chk_hoy_edit.iterrows():
-                    item_id = _safe_str(row.get("Item_ID", ""))
-                    item = _safe_str(row.get("Item", "(sin item)"))
-                    comp = _to_bool(row.get("Completado", "0"))
-                    item_key = f"{item_id or 'sinid'}_{item}".lower().replace(" ", "_")
-                    chk_key = f"chk_done_{item_key}"
-                    if _to_bool(st.session_state.get(chk_key, comp)):
-                        done_chk += 1
-            total_chk = len(chk_hoy_edit)
-            pct_chk = (done_chk / total_chk * 100) if total_chk else 0
-            st.metric("✅ Cumplimiento hoy", f"{pct_chk:.0f}%")
+                        estatus_cita = st.selectbox(
+                            "Estatus inicial",
+                            ["Pendiente", "Programada", "Confirmada"],
+                            index=0,
+                            key="estatus_cita_desde_cot"
+                        )
 
-            if chk_hoy_edit.empty:
-                st.info("No hay checklist para hoy. Entra a 'Hoy' para sincronizar con plantilla.")
-            else:
-                today_iso = hoy.strftime("%Y-%m-%d")
-                lk_key = f"chk_row_lookup_{today_iso}"
-                if lk_key not in st.session_state:
-                    st.session_state[lk_key] = get_checklist_daily_row_lookup(today_iso)
-                row_lookup = st.session_state[lk_key]
+                        reminder_cita = st.number_input(
+                            "Recordatorio (min antes)",
+                            min_value=0,
+                            max_value=1440,
+                            value=30,
+                            step=5,
+                            key="reminder_cita_desde_cot"
+                        )
 
-                hdr_key = "chk_headers_CHECKLIST_DAILY"
-                if hdr_key not in st.session_state:
-                    sheet_daily = get_alejandro_worksheet("CHECKLIST_DAILY")
-                    st.session_state[hdr_key] = [h.strip() for h in sheet_daily.row_values(1)]
-                checklist_headers = st.session_state[hdr_key]
-                if "Orden" in df_checklist_template.columns and "Item_ID" in chk_hoy_edit.columns:
-                    order_map = {
-                        _safe_str(r.get("Item_ID", "")): pd.to_numeric(r.get("Orden", None), errors="coerce")
-                        for _, r in df_checklist_template.iterrows()
+                        notas_cita = st.text_area(
+                            "Notas de cita (opcional)",
+                            value=(f"Seguimiento de cotización {folio}\n"
+                                   f"Cliente: {cliente}\n"
+                                   f"Estatus actual: {estatus}\n"
+                                   f"Notas cotización: {notas}").strip(),
+                            height=90,
+                            key="notas_cita_desde_cot"
+                        )
+
+                        if st.button(
+                            "📅 Convertir a CITA",
+                            key="btn_convertir_a_cita",
+                            use_container_width=True,
+                            disabled=ya_cita,
+                        ):
+                            try:
+                                start_dt = datetime.combine(fecha_cita, hora_cita)
+                                end_dt = start_dt + timedelta(minutes=int(duracion_min))
+
+                                cita_id = new_id("CITA")
+                                payload_cita = {
+                                    "Cita_ID": cita_id,
+                                    "Created_At": now_iso(),
+                                    "Created_By": "ALEJANDRO",
+                                    "Fecha_Inicio": start_dt.strftime("%Y-%m-%d %H:%M:%S"),
+                                    "Fecha_Fin": end_dt.strftime("%Y-%m-%d %H:%M:%S"),
+                                    "Cliente_Persona": cliente,
+                                    "Empresa_Clinica": "",
+                                    "Tipo": tipo_cita,
+                                    "Prioridad": prioridad_cita,
+                                    "Estatus": estatus_cita,
+                                    "Notas": notas_cita.strip(),
+                                    "Lugar": "",
+                                    "Telefono": "",
+                                    "Correo": "",
+                                    "Reminder_Minutes_Before": str(int(reminder_cita)),
+                                    "Reminder_Status": "Pendiente" if int(reminder_cita) > 0 else "N/A",
+                                    "Last_Updated_At": now_iso(),
+                                    "Last_Updated_By": "ALEJANDRO",
+                                    "Is_Deleted": "0",
+                                }
+                                safe_append("CITAS", payload_cita)
+
+                                # Guardar vínculo en cotización (si existe columna)
+                                try:
+                                    safe_update_by_id(
+                                        "COTIZACIONES",
+                                        id_col="Cotizacion_ID",
+                                        id_value=cot_sel,
+                                        updates={
+                                            "Convertida_A_Cita_ID": cita_id,
+                                            "Last_Updated_At": now_iso(),
+                                            "Last_Updated_By": "ALEJANDRO",
+                                        }
+                                    )
+                                except Exception:
+                                    pass
+
+                                st.success(f"🎈 Cita creada desde cotización: {cita_id}")
+                                st.rerun()
+
+                            except Exception as e:
+                                st.error(f"❌ Error al convertir a cita: {e}")
+
+        st.markdown("### 📋 Lista")
+        cot_dash = df_cot.copy()
+        if "Fecha_Proximo_Seguimiento" in cot_dash.columns:
+            cot_dash["_fps"] = _to_dt(cot_dash["Fecha_Proximo_Seguimiento"])
+        else:
+            cot_dash["_fps"] = pd.NaT
+        estatus_cot = cot_dash.get("Estatus", "").astype(str).str.lower()
+        cot_pend_tab = cot_dash[~estatus_cot.str.contains("ganada|perdida", na=False)].copy()
+        cot_seg_tab = cot_dash[estatus_cot.str.contains("en seguimiento", na=False)].copy()
+        cot_venc_tab = cot_pend_tab[cot_pend_tab["_fps"].notna() & (cot_pend_tab["_fps"].dt.date < date.today())].copy()
+        pipeline_monto = pd.to_numeric(cot_pend_tab.get("Monto", 0), errors="coerce").fillna(0).sum()
+
+        d1, d2, d3 = st.columns(3)
+        d1.metric("Pendientes", len(cot_pend_tab))
+        d2.metric("Vencidas de seguimiento", len(cot_venc_tab))
+        d3.metric("Pipeline monto", f"${pipeline_monto:,.2f}")
+
+        tab_c_pend, tab_c_venc, tab_c_seg, tab_c_todo = st.tabs(["Pendientes", "Vencidas", "En seguimiento", "Todo"])
+        with tab_c_pend:
+            st.dataframe(cot_pend_tab, use_container_width=True)
+        with tab_c_venc:
+            st.dataframe(cot_venc_tab, use_container_width=True)
+        with tab_c_seg:
+            st.dataframe(cot_seg_tab, use_container_width=True)
+        with tab_c_todo:
+            st.dataframe(df_cot, use_container_width=True)
+
+    with sub[4]:
+        st.subheader("🧾 Checklist")
+        hoy = date.today()
+
+        default_orden = 1
+        if not df_checklist_template.empty and "Orden" in df_checklist_template.columns:
+            ordenes_actuales = pd.to_numeric(df_checklist_template["Orden"], errors="coerce").dropna()
+            if not ordenes_actuales.empty:
+                default_orden = int(min(999, ordenes_actuales.max() + 1))
+
+        with st.expander("➕ Agregar ítem a plantilla recurrente", expanded=False):
+            with st.form("form_add_check_template", clear_on_submit=True):
+                item_txt = st.text_input("Ítem")
+                orden = st.number_input("Orden", min_value=1, max_value=999, value=default_orden, step=1)
+                activo = st.checkbox("Activo", value=True)
+                submitted_item = st.form_submit_button("Guardar ítem")
+
+            if submitted_item:
+                if not item_txt.strip():
+                    st.error("❌ El ítem no puede ir vacío.")
+                else:
+                    payload = {
+                        "Item_ID": new_id("CHK"),
+                        "Orden": str(int(orden)),
+                        "Item": item_txt.strip(),
+                        "Activo": "1" if activo else "0",
                     }
-                    chk_hoy_edit["_orden"] = chk_hoy_edit["Item_ID"].map(order_map)
-                    chk_hoy_edit = chk_hoy_edit.sort_values("_orden", ascending=True, na_position="last")
+                    safe_append("CHECKLIST_TEMPLATE", payload)
+                    # Fuerza re-sincronización del checklist diario tras cambios en plantilla.
+                    st.session_state[f"chk_sync_{hoy.isoformat()}"] = False
+                    st.success("✅ Ítem agregado a la plantilla.")
+                    st.rerun()
 
-                for _, row in chk_hoy_edit.iterrows():
-                    item_id = _safe_str(row.get("Item_ID", ""))
-                    item = _safe_str(row.get("Item", "(sin item)"))
-                    comp = _to_bool(row.get("Completado", "0"))
-                    notas_actuales = _safe_str(row.get("Notas", ""))
+        st.markdown("### Plantilla recurrente")
+        st.dataframe(df_checklist_template, use_container_width=True)
 
-                    item_key = f"{item_id or 'sinid'}_{item}".lower().replace(" ", "_")
-                    c1, c2, c3 = st.columns([4, 1.5, 2])
-                    with c1:
-                        nuevo_comp = st.checkbox(item, value=comp, key=f"chk_done_{item_key}")
-                    with c2:
-                        nuevo_notas = st.text_input("Notas", value=notas_actuales, key=f"chk_note_{item_key}")
-                    with c3:
-                        guardar_chk = st.button("💾 Guardar", key=f"chk_save_{item_key}")
+        st.markdown("### Checklist de hoy")
+        chk_hoy_edit = df_checklist_daily.copy()
+        if "Fecha" in chk_hoy_edit.columns:
+            chk_hoy_edit["_f"] = _to_date(chk_hoy_edit["Fecha"])
+            chk_hoy_edit = chk_hoy_edit[chk_hoy_edit["_f"] == hoy].copy()
 
-                    if guardar_chk:
-                        try:
-                            row_number = None
-                            if item_id:
-                                row_number = row_lookup.get((hoy.strftime("%Y-%m-%d"), item_id, ""))
-                            if row_number is None:
-                                row_number = row_lookup.get((hoy.strftime("%Y-%m-%d"), "", item.lower()))
+        done_chk = 0
+        if not chk_hoy_edit.empty and "Completado" in chk_hoy_edit.columns:
+            for _, row in chk_hoy_edit.iterrows():
+                item_id = _safe_str(row.get("Item_ID", ""))
+                item = _safe_str(row.get("Item", "(sin item)"))
+                comp = _to_bool(row.get("Completado", "0"))
+                item_key = f"{item_id or 'sinid'}_{item}".lower().replace(" ", "_")
+                chk_key = f"chk_done_{item_key}"
+                if _to_bool(st.session_state.get(chk_key, comp)):
+                    done_chk += 1
+        total_chk = len(chk_hoy_edit)
+        pct_chk = (done_chk / total_chk * 100) if total_chk else 0
+        st.metric("✅ Cumplimiento hoy", f"{pct_chk:.0f}%")
 
-                            update_checklist_daily_item(
-                                fecha_iso=today_iso,
-                                item_id=item_id,
-                                item=item,
-                                completado=nuevo_comp,
-                                notas=nuevo_notas,
-                                row_number=row_number,
-                                headers=checklist_headers,
-                            )
-                            # refrescar lookup cache tras cambios
-                            st.session_state[lk_key] = get_checklist_daily_row_lookup(today_iso)
-                            st.success(f"✅ Actualizado: {item}")
-                            st.rerun()
-                        except Exception as e:
-                            st.error(f"❌ No se pudo actualizar '{item}': {e}")
+        if chk_hoy_edit.empty:
+            st.info("No hay checklist para hoy. Entra a 'Hoy' para sincronizar con plantilla.")
+        else:
+            today_iso = hoy.strftime("%Y-%m-%d")
+            lk_key = f"chk_row_lookup_{today_iso}"
+            if lk_key not in st.session_state:
+                st.session_state[lk_key] = get_checklist_daily_row_lookup(today_iso)
+            row_lookup = st.session_state[lk_key]
 
-            st.markdown("---")
-            st.markdown("### 🗑️ Eliminar ítem (al final)")
-            st.caption("Este borrado elimina el ítem de CHECKLIST_TEMPLATE y también de CHECKLIST_DAILY en todas las fechas.")
-            if not df_checklist_template.empty:
-                template_opts = []
-                for _, r in df_checklist_template.iterrows():
-                    item_id_opt = _safe_str(r.get("Item_ID", ""))
-                    item_txt_opt = _safe_str(r.get("Item", "(sin nombre)"))
-                    label = f"{item_txt_opt} · {item_id_opt or 'SIN_ID'}"
-                    template_opts.append((label, item_id_opt, item_txt_opt))
+            hdr_key = "chk_headers_CHECKLIST_DAILY"
+            if hdr_key not in st.session_state:
+                sheet_daily = get_alejandro_worksheet("CHECKLIST_DAILY")
+                st.session_state[hdr_key] = [h.strip() for h in sheet_daily.row_values(1)]
+            checklist_headers = st.session_state[hdr_key]
+            if "Orden" in df_checklist_template.columns and "Item_ID" in chk_hoy_edit.columns:
+                order_map = {
+                    _safe_str(r.get("Item_ID", "")): pd.to_numeric(r.get("Orden", None), errors="coerce")
+                    for _, r in df_checklist_template.iterrows()
+                }
+                chk_hoy_edit["_orden"] = chk_hoy_edit["Item_ID"].map(order_map)
+                chk_hoy_edit = chk_hoy_edit.sort_values("_orden", ascending=True, na_position="last")
 
-                selected_template_labels = st.multiselect(
-                    "Selecciona uno o varios ítems a eliminar por completo",
-                    options=[o[0] for o in template_opts],
-                    key="chk_template_delete_select_multi",
-                )
+            for _, row in chk_hoy_edit.iterrows():
+                item_id = _safe_str(row.get("Item_ID", ""))
+                item = _safe_str(row.get("Item", "(sin item)"))
+                comp = _to_bool(row.get("Completado", "0"))
+                notas_actuales = _safe_str(row.get("Notas", ""))
 
-                if st.button("🗑️ Eliminar seleccionados de plantilla y daily (todas las fechas)", key="btn_delete_chk_template", type="secondary"):
+                item_key = f"{item_id or 'sinid'}_{item}".lower().replace(" ", "_")
+                c1, c2, c3 = st.columns([4, 1.5, 2])
+                with c1:
+                    nuevo_comp = st.checkbox(item, value=comp, key=f"chk_done_{item_key}")
+                with c2:
+                    nuevo_notas = st.text_input("Notas", value=notas_actuales, key=f"chk_note_{item_key}")
+                with c3:
+                    guardar_chk = st.button("💾 Guardar", key=f"chk_save_{item_key}")
+
+                if guardar_chk:
                     try:
-                        if not selected_template_labels:
-                            raise Exception("Selecciona al menos un ítem para eliminar.")
+                        row_number = None
+                        if item_id:
+                            row_number = row_lookup.get((hoy.strftime("%Y-%m-%d"), item_id, ""))
+                        if row_number is None:
+                            row_number = row_lookup.get((hoy.strftime("%Y-%m-%d"), "", item.lower()))
 
-                        selected_rows = [o for o in template_opts if o[0] in selected_template_labels]
-                        if not selected_rows:
-                            raise Exception("No se pudieron identificar los ítems seleccionados.")
-
-                        ids_to_delete = {_safe_str(item_id) for _, item_id, _ in selected_rows if _safe_str(item_id)}
-                        names_to_delete = {_safe_str(item_txt).lower() for _, item_id, item_txt in selected_rows if not _safe_str(item_id)}
-
-                        deleted_template = safe_delete_rows_by_filter(
-                            "CHECKLIST_TEMPLATE",
-                            lambda rec: (
-                                (_safe_str(rec.get("Item_ID", "")) in ids_to_delete)
-                                or ((not _safe_str(rec.get("Item_ID", ""))) and (_safe_str(rec.get("Item", "")).lower() in names_to_delete))
-                            )
+                        update_checklist_daily_item(
+                            fecha_iso=today_iso,
+                            item_id=item_id,
+                            item=item,
+                            completado=nuevo_comp,
+                            notas=nuevo_notas,
+                            row_number=row_number,
+                            headers=checklist_headers,
                         )
-                        deleted_daily = safe_delete_rows_by_filter(
-                            "CHECKLIST_DAILY",
-                            lambda rec: (
-                                (_safe_str(rec.get("Item_ID", "")) in ids_to_delete)
-                                or ((not _safe_str(rec.get("Item_ID", ""))) and (_safe_str(rec.get("Item", "")).lower() in names_to_delete))
-                            )
-                        )
-
-                        st.success(
-                            f"✅ Ítems eliminados por completo ({len(selected_rows)} seleccionados). "
-                            f"Plantilla: {deleted_template} fila(s), daily (todas las fechas): {deleted_daily} fila(s)."
-                        )
+                        # refrescar lookup cache tras cambios
+                        st.session_state[lk_key] = get_checklist_daily_row_lookup(today_iso)
+                        st.success(f"✅ Actualizado: {item}")
                         st.rerun()
                     except Exception as e:
-                        st.error(f"❌ No se pudieron eliminar los ítems: {e}")
-            else:
-                st.info("No hay ítems en plantilla para eliminar.")
+                        st.error(f"❌ No se pudo actualizar '{item}': {e}")
 
-        with sub[5]:
-            st.subheader("⚙️ Config")
-            st.dataframe(df_config, use_container_width=True)
+        st.markdown("---")
+        st.markdown("### 🗑️ Eliminar ítem (al final)")
+        st.caption("Este borrado elimina el ítem de CHECKLIST_TEMPLATE y también de CHECKLIST_DAILY en todas las fechas.")
+        if not df_checklist_template.empty:
+            template_opts = []
+            for _, r in df_checklist_template.iterrows():
+                item_id_opt = _safe_str(r.get("Item_ID", ""))
+                item_txt_opt = _safe_str(r.get("Item", "(sin nombre)"))
+                label = f"{item_txt_opt} · {item_id_opt or 'SIN_ID'}"
+                template_opts.append((label, item_id_opt, item_txt_opt))
 
-            st.markdown("---")
-            st.markdown("### 🧪 Diagnóstico alejandro_data")
+            selected_template_labels = st.multiselect(
+                "Selecciona uno o varios ítems a eliminar por completo",
+                options=[o[0] for o in template_opts],
+                key="chk_template_delete_select_multi",
+            )
 
-            if errores_alejandro:
-                st.error("Errores detectados al leer hojas:")
-                for err in errores_alejandro:
-                    st.code(err)
+            if st.button("🗑️ Eliminar seleccionados de plantilla y daily (todas las fechas)", key="btn_delete_chk_template", type="secondary"):
+                try:
+                    if not selected_template_labels:
+                        raise Exception("Selecciona al menos un ítem para eliminar.")
 
-            if st.button("Ejecutar diagnóstico", key="diag_alejandro_doc"):
-                diag = debug_alejandro_documento()
-                st.json(diag)
-                if diag.get("quota_fallback"):
+                    selected_rows = [o for o in template_opts if o[0] in selected_template_labels]
+                    if not selected_rows:
+                        raise Exception("No se pudieron identificar los ítems seleccionados.")
+
+                    ids_to_delete = {_safe_str(item_id) for _, item_id, _ in selected_rows if _safe_str(item_id)}
+                    names_to_delete = {_safe_str(item_txt).lower() for _, item_id, item_txt in selected_rows if not _safe_str(item_id)}
+
+                    deleted_template = safe_delete_rows_by_filter(
+                        "CHECKLIST_TEMPLATE",
+                        lambda rec: (
+                            (_safe_str(rec.get("Item_ID", "")) in ids_to_delete)
+                            or ((not _safe_str(rec.get("Item_ID", ""))) and (_safe_str(rec.get("Item", "")).lower() in names_to_delete))
+                        )
+                    )
+                    deleted_daily = safe_delete_rows_by_filter(
+                        "CHECKLIST_DAILY",
+                        lambda rec: (
+                            (_safe_str(rec.get("Item_ID", "")) in ids_to_delete)
+                            or ((not _safe_str(rec.get("Item_ID", ""))) and (_safe_str(rec.get("Item", "")).lower() in names_to_delete))
+                        )
+                    )
+
                     st.success(
-                        "Drive está en quota/permisos restringidos y el fallback a spreadsheet principal está ACTIVADO por configuración."
+                        f"✅ Ítems eliminados por completo ({len(selected_rows)} seleccionados). "
+                        f"Plantilla: {deleted_template} fila(s), daily (todas las fechas): {deleted_daily} fila(s)."
                     )
-                elif diag.get("bootstrap_created"):
-                    st.success(
-                        "No se pudo convertir el Excel por permisos (403). Se creó un Google Sheet bootstrap con tu estructura para esta sesión. "
-                        "Copia resolved_spreadsheet_id a secrets para usarlo de forma permanente."
-                    )
-                elif diag.get("auto_converted"):
-                    st.success(
-                        "Se detectó Excel y se convirtió automáticamente a Google Sheet para esta sesión. "
-                        "Copia el resolved_spreadsheet_id y guárdalo en secrets para hacerlo permanente."
-                    )
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"❌ No se pudieron eliminar los ítems: {e}")
+        else:
+            st.info("No hay ítems en plantilla para eliminar.")
 
-                err = str(diag.get("error", ""))
-                mime = str(diag.get("drive_mimeType", ""))
-                if ("not supported for this document" in err.lower()) or (
-                    mime and mime != "application/vnd.google-apps.spreadsheet"
-                ):
-                    st.error(
-                        "El archivo configurado no es Google Sheet nativo. En Drive: Abrir con > Hojas de cálculo de Google "
-                        "(convierte), y después usa el ID del documento convertido en secrets."
-                    )
-                elif diag.get("open_ok") and diag.get("missing_expected_sheets"):
-                    st.warning("Faltan hojas esperadas: " + ", ".join(diag.get("missing_expected_sheets", [])))
+    with sub[5]:
+        st.subheader("⚙️ Config")
+        st.dataframe(df_config, use_container_width=True)
+
+        st.markdown("---")
+        st.markdown("### 🧪 Diagnóstico alejandro_data")
+
+        if errores_alejandro:
+            st.error("Errores detectados al leer hojas:")
+            for err in errores_alejandro:
+                st.code(err)
+
+        if st.button("Ejecutar diagnóstico", key="diag_alejandro_doc"):
+            diag = debug_alejandro_documento()
+            st.json(diag)
+            if diag.get("quota_fallback"):
+                st.success(
+                    "Drive está en quota/permisos restringidos y el fallback a spreadsheet principal está ACTIVADO por configuración."
+                )
+            elif diag.get("bootstrap_created"):
+                st.success(
+                    "No se pudo convertir el Excel por permisos (403). Se creó un Google Sheet bootstrap con tu estructura para esta sesión. "
+                    "Copia resolved_spreadsheet_id a secrets para usarlo de forma permanente."
+                )
+            elif diag.get("auto_converted"):
+                st.success(
+                    "Se detectó Excel y se convirtió automáticamente a Google Sheet para esta sesión. "
+                    "Copia el resolved_spreadsheet_id y guárdalo en secrets para hacerlo permanente."
+                )
+
+            err = str(diag.get("error", ""))
+            mime = str(diag.get("drive_mimeType", ""))
+            if ("not supported for this document" in err.lower()) or (
+                mime and mime != "application/vnd.google-apps.spreadsheet"
+            ):
+                st.error(
+                    "El archivo configurado no es Google Sheet nativo. En Drive: Abrir con > Hojas de cálculo de Google "
+                    "(convierte), y después usa el ID del documento convertido en secrets."
+                )
+            elif diag.get("open_ok") and diag.get("missing_expected_sheets"):
+                st.warning("Faltan hojas esperadas: " + ", ".join(diag.get("missing_expected_sheets", [])))
