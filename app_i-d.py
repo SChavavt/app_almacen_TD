@@ -2587,7 +2587,7 @@ if selected_tab == 0:
         )
 
         pedido_idx = st.selectbox(
-            "Selecciona un pedido para ver más información",
+            "🧭 Selecciona un pedido para ver más información",
             options=selector_df.index.tolist(),
             format_func=lambda idx: selector_df.loc[idx, "_pedido_label"],
             key="dashboard_detalle_pedido_idx",
@@ -2598,26 +2598,27 @@ if selected_tab == 0:
             st.markdown("**🧾 Info general**")
             c1, c2 = st.columns(2)
             with c1:
-                _render_detail_row("id_vendedor", pedido_sel.get("id_vendedor", ""))
+                _render_detail_row("👤 id_vendedor", pedido_sel.get("id_vendedor", ""))
                 turno_val = sanitize_text(pedido_sel.get("Turno", ""))
                 if turno_val:
-                    _render_detail_row("Turno", turno_val)
-                _render_detail_row("Comentario", pedido_sel.get("Comentario", ""))
+                    _render_detail_row("🕒 Turno", turno_val)
+                _render_detail_row("💬 Comentario", pedido_sel.get("Comentario", ""))
             with c2:
-                _render_detail_row("Estado_Pago", pedido_sel.get("Estado_Pago", ""))
-                _render_detail_row("Adjuntos", display_attachments(pedido_sel.get("Adjuntos", "")))
+                _render_detail_row("💳 Estado_Pago", pedido_sel.get("Estado_Pago", ""))
+                _render_detail_row("🚚 Tipo_Envio", pedido_sel.get("Tipo_Envio", ""))
+                _render_detail_row("📎 Adjuntos", display_attachments(pedido_sel.get("Adjuntos", "")))
 
             st.markdown("---")
             st.markdown("**📦 Sección de guías**")
             g1, g2 = st.columns(2)
             with g1:
                 _render_detail_row(
-                    "Direccion_Guia_Retorno",
+                    "📍 Direccion_Guia_Retorno",
                     pedido_sel.get("Direccion_Guia_Retorno", ""),
                 )
             with g2:
                 _render_detail_row(
-                    "Adjuntos_Guia",
+                    "🧷 Adjuntos_Guia",
                     display_attachments(pedido_sel.get("Adjuntos_Guia", "")),
                 )
 
@@ -2628,12 +2629,12 @@ if selected_tab == 0:
                 st.markdown("**🛠️ Sección de modificación**")
                 m1, m2, m3 = st.columns(3)
                 with m1:
-                    _render_detail_row("id_vendedor_Mod", pedido_sel.get("id_vendedor_Mod", ""))
+                    _render_detail_row("👷 id_vendedor_Mod", pedido_sel.get("id_vendedor_Mod", ""))
                 with m2:
-                    _render_detail_row("Modificacion_Surtido", pedido_sel.get("Modificacion_Surtido", ""))
+                    _render_detail_row("🛠️ Modificacion_Surtido", pedido_sel.get("Modificacion_Surtido", ""))
                 with m3:
                     _render_detail_row(
-                        "Adjuntos_Surtido",
+                        "📎 Adjuntos_Surtido",
                         display_attachments(pedido_sel.get("Adjuntos_Surtido", "")),
                     )
 
