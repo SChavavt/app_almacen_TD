@@ -2305,7 +2305,7 @@ if selected_tab == 2:
         next_number = render_auto_list(
             ant,
             title="🚚 FORÁNEOS • ANTERIORES",
-            subtitle="Fechas previas (sin completados)",
+            subtitle="Fechas previas de registro",
             max_rows=140,
             panel_height=220,
         )
