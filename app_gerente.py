@@ -19,6 +19,55 @@ import time
 st.set_page_config(page_title="🔍 Buscador de Guías y Descargas", layout="wide")
 st.title("🔍 Buscador de Pedidos por Guía o Cliente")
 
+USUARIOS_VALIDOS = [
+    {
+        "usuario": "AlejandroVTD",
+        "tabs": {"organizador", "buscar", "descargar"},
+    },
+    {
+        "usuario": "CeciliaATD",
+        "tabs": {"modificar", "buscar", "descargar"},
+    },
+]
+
+
+def ensure_user_logged_in():
+    """Lee sesión/query params y devuelve el usuario activo (o invitado)."""
+    whitelist = {u["usuario"]: u for u in USUARIOS_VALIDOS}
+
+    usuario_sesion = st.session_state.get("usuario_logeado", "")
+    if usuario_sesion and usuario_sesion in whitelist:
+        return whitelist[usuario_sesion]
+
+    usuario_qp = st.query_params.get("usuario", "")
+    if isinstance(usuario_qp, list):
+        usuario_qp = usuario_qp[0] if usuario_qp else ""
+    usuario_qp = str(usuario_qp).strip()
+    if usuario_qp and usuario_qp in whitelist:
+        st.session_state["usuario_logeado"] = usuario_qp
+        return whitelist[usuario_qp]
+
+    with st.sidebar:
+        st.markdown("### 👤 Iniciar sesión (opcional)")
+        usuario_ingresado = st.text_input("Usuario", key="usuario_login_input")
+        if st.button("🔐 Ingresar", key="usuario_login_btn"):
+            usuario_limpio = usuario_ingresado.strip()
+            if usuario_limpio in whitelist:
+                st.session_state["usuario_logeado"] = usuario_limpio
+                st.query_params["usuario"] = usuario_limpio
+                st.rerun()
+            else:
+                st.error("❌ Usuario no autorizado.")
+
+        if st.session_state.get("usuario_logeado"):
+            if st.button("🚪 Cerrar sesión", key="cerrar_sesion_btn"):
+                st.session_state.pop("usuario_logeado", None)
+                if "usuario" in st.query_params:
+                    del st.query_params["usuario"]
+                st.rerun()
+
+    return {"usuario": "Invitado", "tabs": {"buscar", "descargar"}}
+
 # ===== SPREADSHEETS =====
 SPREADSHEET_ID_MAIN = "1aWkSelodaz0nWfQx7FZAysGnIYGQFJxAN7RO3YgCiZY"
 SPREADSHEET_ID_ALEJANDRO = "1lWZEL228boUMH_tAdQ3_ZGkYHZZuEkfv"
@@ -1473,13 +1522,17 @@ def build_hoy_alerts(hoy: date, df_citas: pd.DataFrame, df_tareas: pd.DataFrame,
 
 
 # --- INTERFAZ ---
-tabs = st.tabs([
-    "🗂️ Organizador (Alejandro)",
-    "🔍 Buscar Pedido",
-    "⬇️ Descargar Datos",
-    "✏️ Modificar Pedido",
-])
-with tabs[1]:
+usuario_activo = ensure_user_logged_in()
+tabs_disponibles = []
+if "organizador" in usuario_activo["tabs"]:
+    tabs_disponibles.append("🗂️ Organizador (Alejandro)")
+tabs_disponibles.extend(["🔍 Buscar Pedido", "⬇️ Descargar Datos"])
+if "modificar" in usuario_activo["tabs"]:
+    tabs_disponibles.append("✏️ Modificar Pedido")
+
+tabs_render = {nombre: tab for nombre, tab in zip(tabs_disponibles, st.tabs(tabs_disponibles))}
+
+with tabs_render["🔍 Buscar Pedido"]:
     modo_busqueda = st.radio("Selecciona el modo de búsqueda:", ["🔢 Por número de guía", "🧑 Por cliente/factura"], key="modo_busqueda_radio")
 
     orden_seleccionado = "Más recientes primero"
@@ -1943,7 +1996,7 @@ with tabs[1]:
                 mensaje += " Revisa el rango de fechas seleccionado."
             st.warning(mensaje)
 
-with tabs[2]:
+with tabs_render["⬇️ Descargar Datos"]:
     st.header("⬇️ Descargar Datos")
 
     if st.button(
@@ -2028,1389 +2081,1480 @@ with tabs[2]:
             ordenar_por_id=True,
         )
 
-CONTRASENA_ADMIN = "Ceci"  # puedes cambiar esta contraseña si lo deseas
+if "✏️ Modificar Pedido" in tabs_render:
+    # --- PESTAÑA DE MODIFICACIÓN DE PEDIDOS ---
+    with tabs_render["✏️ Modificar Pedido"]:
+        st.header("✏️ Modificar Pedido Existente")
 
-# --- PESTAÑA DE MODIFICACIÓN DE PEDIDOS CON CONTRASEÑA ---
-with tabs[3]:
-    st.header("✏️ Modificar Pedido Existente")
+        if st.button(
+            "🔄 Actualizar pedidos",
+            key="refresh_modificar_pedido",
+            help="Recarga la información más reciente de la hoja para mostrar nuevos pedidos y cambios.",
+        ):
+            st.cache_data.clear()
+            st.rerun()
 
-    if st.button(
-        "🔄 Actualizar pedidos",
-        key="refresh_modificar_pedido",
-        help="Recarga la información más reciente de la hoja para mostrar nuevos pedidos y cambios.",
-    ):
-        st.cache_data.clear()
-        st.rerun()
+        acceso_modificacion = "modificar" in usuario_activo["tabs"]
+        if acceso_modificacion:
+            df_pedidos = cargar_pedidos_modificables()
+            df_casos = cargar_casos_especiales()
 
-    if "acceso_modificacion" not in st.session_state:
-        st.session_state.acceso_modificacion = False
+            # En modificación solo se incluyen casos especiales pendientes de limpieza.
+            if "Completados_Limpiado" not in df_casos.columns:
+                df_casos["Completados_Limpiado"] = ""
+            df_casos = df_casos[
+                df_casos["Completados_Limpiado"].astype(str).str.strip() == ""
+            ]
 
-    if not st.session_state.acceso_modificacion:
-        contrasena_ingresada = st.text_input("🔑 Ingresa la contraseña para modificar pedidos:", type="password")
-        if st.button("🔓 Verificar Contraseña"):
-            if contrasena_ingresada == CONTRASENA_ADMIN:
-                st.session_state.acceso_modificacion = True
-                st.success("✅ Acceso concedido.")
-                st.rerun()
-            else:
-                st.error("❌ Contraseña incorrecta.")
+            for d in (df_pedidos, df_casos):
+                d["Hora_Registro"] = pd.to_datetime(d["Hora_Registro"], errors="coerce")
 
-    if st.session_state.acceso_modificacion:
-        df_pedidos = cargar_pedidos_modificables()
-        df_casos = cargar_casos_especiales()
+            df_pedidos["__source"] = "pedidos"
+            df_casos["__source"] = "casos"
+            df = pd.concat([df_pedidos, df_casos], ignore_index=True, sort=False)
+            df = df[df["ID_Pedido"].notna()]
+            df = df.sort_values(by="Hora_Registro", ascending=False)
 
-        # En modificación solo se incluyen casos especiales pendientes de limpieza.
-        if "Completados_Limpiado" not in df_casos.columns:
-            df_casos["Completados_Limpiado"] = ""
-        df_casos = df_casos[
-            df_casos["Completados_Limpiado"].astype(str).str.strip() == ""
-        ]
+            pedido_sel = None
+            source_sel = None
 
-        for d in (df_pedidos, df_casos):
-            d["Hora_Registro"] = pd.to_datetime(d["Hora_Registro"], errors="coerce")
+            def es_garantia(row):
+                """Determina si un caso corresponde a una garantía."""
+                for col in ("Tipo_Envio", "Tipo_Caso"):
+                    valor = normalizar(str(row.get(col, "")))
+                    if valor and "garant" in valor:
+                        return True
+                return False
 
-        df_pedidos["__source"] = "pedidos"
-        df_casos["__source"] = "casos"
-        df = pd.concat([df_pedidos, df_casos], ignore_index=True, sort=False)
-        df = df[df["ID_Pedido"].notna()]
-        df = df.sort_values(by="Hora_Registro", ascending=False)
+            df_garantias = df_casos[df_casos.apply(es_garantia, axis=1)].copy()
 
-        pedido_sel = None
-        source_sel = None
-
-        def es_garantia(row):
-            """Determina si un caso corresponde a una garantía."""
-            for col in ("Tipo_Envio", "Tipo_Caso"):
-                valor = normalizar(str(row.get(col, "")))
-                if valor and "garant" in valor:
-                    return True
-            return False
-
-        df_garantias = df_casos[df_casos.apply(es_garantia, axis=1)].copy()
-
-        mostrar_garantias = st.checkbox(
-            "🔘 Mostrar sección de garantías",
-            help="Activa esta opción para consultar únicamente la información de garantías.",
-        )
-
-        if mostrar_garantias:
-            st.markdown("### 🛡️ Garantías registradas")
-            termino_busqueda_garantia = st.text_input(
-                "Buscar por cliente o folio",
-                key="busqueda_garantias",
-                placeholder="Cliente o folio",
+            mostrar_garantias = st.checkbox(
+                "🔘 Mostrar sección de garantías",
+                help="Activa esta opción para consultar únicamente la información de garantías.",
             )
 
-            termino_normalizado = normalizar(termino_busqueda_garantia or "")
-            termino_folio = (
-                normalizar_folio(termino_busqueda_garantia)
-                if termino_busqueda_garantia
-                else ""
-            )
-
-            if termino_normalizado:
-
-                def coincide_garantia(row):
-                    cliente = normalizar(str(row.get("Cliente", "")))
-                    folio = normalizar_folio(
-                        row.get("Folio_Factura") or row.get("Folio") or ""
-                    )
-                    return termino_normalizado in cliente or (
-                        termino_folio and termino_folio in folio
-                    )
-
-                df_garantias_filtrado = df_garantias[
-                    df_garantias.apply(coincide_garantia, axis=1)
-                ]
-            else:
-                df_garantias_filtrado = df_garantias
-
-            if df_garantias_filtrado.empty:
-                st.info(
-                    "No se encontraron garantías con el criterio de búsqueda proporcionado."
+            if mostrar_garantias:
+                st.markdown("### 🛡️ Garantías registradas")
+                termino_busqueda_garantia = st.text_input(
+                    "Buscar por cliente o folio",
+                    key="busqueda_garantias",
+                    placeholder="Cliente o folio",
                 )
-                st.stop()
-            else:
 
-                def formatear_fecha(valor, formato):
-                    if pd.isna(valor):
-                        return ""
-                    if isinstance(valor, pd.Timestamp):
-                        return valor.strftime(formato)
-                    try:
-                        fecha = pd.to_datetime(valor)
-                        if pd.isna(fecha):
+                termino_normalizado = normalizar(termino_busqueda_garantia or "")
+                termino_folio = (
+                    normalizar_folio(termino_busqueda_garantia)
+                    if termino_busqueda_garantia
+                    else ""
+                )
+
+                if termino_normalizado:
+
+                    def coincide_garantia(row):
+                        cliente = normalizar(str(row.get("Cliente", "")))
+                        folio = normalizar_folio(
+                            row.get("Folio_Factura") or row.get("Folio") or ""
+                        )
+                        return termino_normalizado in cliente or (
+                            termino_folio and termino_folio in folio
+                        )
+
+                    df_garantias_filtrado = df_garantias[
+                        df_garantias.apply(coincide_garantia, axis=1)
+                    ]
+                else:
+                    df_garantias_filtrado = df_garantias
+
+                if df_garantias_filtrado.empty:
+                    st.info(
+                        "No se encontraron garantías con el criterio de búsqueda proporcionado."
+                    )
+                    st.stop()
+                else:
+
+                    def formatear_fecha(valor, formato):
+                        if pd.isna(valor):
                             return ""
-                        return fecha.strftime(formato)
+                        if isinstance(valor, pd.Timestamp):
+                            return valor.strftime(formato)
+                        try:
+                            fecha = pd.to_datetime(valor)
+                            if pd.isna(fecha):
+                                return ""
+                            return fecha.strftime(formato)
+                        except Exception:
+                            return str(valor)
+
+                    columnas_tabla = {
+                        "ID_Pedido": "Pedido",
+                        "Hora_Registro": "Hora Registro",
+                        "Vendedor_Registro": "Vendedor Registro",
+                        "Cliente": "Cliente",
+                        "Folio_Factura": "Folio / Factura",
+                        "Numero_Serie": "Número Serie",
+                        "Fecha_Compra": "Fecha Compra",
+                        "Tipo_Envio": "Tipo Envío",
+                        "Estado": "Estado",
+                        "Estado_Caso": "Estado Caso",
+                        "Seguimiento": "Seguimiento",
+                    }
+
+                    tabla_garantias = df_garantias_filtrado[list(columnas_tabla.keys())].copy()
+                    tabla_garantias["Hora_Registro"] = tabla_garantias["Hora_Registro"].apply(
+                        lambda v: formatear_fecha(v, "%d/%m/%Y %H:%M")
+                    )
+                    tabla_garantias["Fecha_Compra"] = tabla_garantias["Fecha_Compra"].apply(
+                        lambda v: formatear_fecha(v, "%d/%m/%Y") if str(v).strip() else ""
+                    )
+
+                    tabla_garantias = tabla_garantias.rename(columns=columnas_tabla)
+                    st.dataframe(tabla_garantias, use_container_width=True)
+
+                    opciones_select = [None] + df_garantias_filtrado.index.tolist()
+
+                    def format_garantia(idx):
+                        if idx is None:
+                            return "Selecciona una garantía"
+                        row = df_garantias_filtrado.loc[idx]
+                        hora = formatear_fecha(row.get("Hora_Registro"), "%d/%m/%Y %H:%M")
+                        estado = row.get("Estado_Caso") or row.get("Estado") or ""
+                        return (
+                            f"📦 {row.get('ID_Pedido', '')} | 🧾 {row.get('Folio_Factura', '')} | "
+                            f"👤 {row.get('Cliente', '')} | 🚚 {row.get('Tipo_Envio', '')} | "
+                            f"🔍 {estado} | 🕒 {hora}"
+                        )
+
+                    idx_garantia = st.selectbox(
+                        "Selecciona una garantía para ver detalles o modificarla:",
+                        opciones_select,
+                        format_func=format_garantia,
+                        key="select_garantia",
+                    )
+
+                    if idx_garantia is not None and idx_garantia in df_garantias_filtrado.index:
+                        row_garantia = df_garantias_filtrado.loc[idx_garantia]
+                        pedido_sel = row_garantia.get("ID_Pedido")
+                        source_sel = "casos"
+                        st.markdown("#### 📘 Detalles de la garantía seleccionada")
+
+                        def limpiar(valor):
+                            if valor is None:
+                                return ""
+                            if isinstance(valor, str):
+                                return "" if not valor.strip() or valor.strip().lower() == "nan" else valor.strip()
+                            try:
+                                if pd.isna(valor):
+                                    return ""
+                            except Exception:
+                                pass
+                            return valor
+
+                        def formatear_monto(valor):
+                            try:
+                                if valor is None or str(valor).strip() == "":
+                                    return ""
+                                valor_float = float(valor)
+                                valor_formateado = f"{valor_float:,.2f}"
+                                valor_formateado = (
+                                    valor_formateado.replace(",", "_")
+                                    .replace(".", ",")
+                                    .replace("_", ".")
+                                )
+                                return f"${valor_formateado}"
+                            except Exception:
+                                valor_limpio = limpiar(valor)
+                                return f"${valor_limpio}" if valor_limpio else ""
+
+                        col_izq, col_der = st.columns(2)
+
+                        detalles_izq = [
+                            ("📦 Pedido", row_garantia.get("ID_Pedido", "")),
+                            ("👤 Cliente", row_garantia.get("Cliente", "")),
+                            ("🧾 Folio / Factura", row_garantia.get("Folio_Factura", "")),
+                            ("🚚 Tipo de envío", row_garantia.get("Tipo_Envio", "")),
+                            ("📊 Estado", row_garantia.get("Estado", "")),
+                            ("🧮 Estado del caso", row_garantia.get("Estado_Caso", "")),
+                            ("🕵️ Seguimiento", row_garantia.get("Seguimiento", "")),
+                            ("🧑‍💼 Vendedor", row_garantia.get("Vendedor_Registro", "")),
+                            (
+                                "🕒 Hora de registro",
+                                formatear_fecha(row_garantia.get("Hora_Registro"), "%d/%m/%Y %H:%M"),
+                            ),
+                        ]
+
+                        detalles_der = [
+                            ("🔢 Número de serie", row_garantia.get("Numero_Serie", "")),
+                            (
+                                "🗓️ Fecha de compra",
+                                formatear_fecha(row_garantia.get("Fecha_Compra"), "%d/%m/%Y"),
+                            ),
+                            ("🎯 Resultado esperado", row_garantia.get("Resultado_Esperado", "")),
+                            ("📦 Material devuelto", row_garantia.get("Material_Devuelto", "")),
+                            ("💵 Monto devuelto", formatear_monto(row_garantia.get("Monto_Devuelto", ""))),
+                            ("📝 Motivo detallado", row_garantia.get("Motivo_Detallado", "")),
+                            ("🏢 Área responsable", row_garantia.get("Area_Responsable", "")),
+                            ("👥 Responsable", row_garantia.get("Nombre_Responsable", "")),
+                            ("🧾 Nota de venta", row_garantia.get("Nota_Venta", "")),
+                            ("❓ ¿Tiene nota de venta?", row_garantia.get("Tiene_Nota_Venta", "")),
+                            ("🧾 Motivo nota de venta", row_garantia.get("Motivo_NotaVenta", "")),
+                            ("📍 Dirección guía retorno", row_garantia.get("Direccion_Guia_Retorno", "")),
+                        ]
+
+                        etiquetas_resaltadas = {"🕵️ Seguimiento", "📝 Motivo detallado"}
+
+                        for columna, items in ((col_izq, detalles_izq), (col_der, detalles_der)):
+                            for etiqueta, valor in items:
+                                valor_limpio = limpiar(valor)
+                                if not valor_limpio:
+                                    continue
+                                if etiqueta in etiquetas_resaltadas:
+                                    columna.info(f"{etiqueta}: {valor_limpio}")
+                                else:
+                                    columna.markdown(f"**{etiqueta}:** {valor_limpio}")
+
+                        comentarios = str(row_garantia.get("Comentario", "")).strip()
+                        comentarios_adicionales = str(row_garantia.get("Comentarios", "")).strip()
+                        if comentarios or comentarios_adicionales:
+                            st.markdown("#### 💬 Comentarios")
+                            if comentarios:
+                                st.info(comentarios)
+                            if comentarios_adicionales:
+                                st.info(comentarios_adicionales)
+
+                        secciones_adjuntos = []
+
+                        def agregar_adjuntos(titulo, valores):
+                            urls = partir_urls(valores)
+                            urls_limpias = []
+                            for u in urls:
+                                url_limpio = limpiar(u)
+                                if url_limpio:
+                                    urls_limpias.append(url_limpio)
+                            if urls_limpias:
+                                secciones_adjuntos.append((titulo, urls_limpias))
+
+                        agregar_adjuntos("📎 Archivos adjuntos", row_garantia.get("Adjuntos", ""))
+                        agregar_adjuntos("🧾 Guías asociadas", row_garantia.get("Adjuntos_Guia", ""))
+                        agregar_adjuntos("📬 Hoja de ruta", row_garantia.get("Hoja_Ruta_Mensajero", ""))
+                        agregar_adjuntos("🛠 Archivos de surtido", row_garantia.get("Adjuntos_Surtido", ""))
+                        agregar_adjuntos("💳 Notas de crédito", row_garantia.get("Nota_Credito_URL", ""))
+                        agregar_adjuntos("📄 Documentos adicionales", row_garantia.get("Documento_Adicional_URL", ""))
+
+                        if secciones_adjuntos:
+                            st.markdown("#### 🗂️ Archivos de la garantía")
+                            for titulo, urls in secciones_adjuntos:
+                                st.markdown(f"**{titulo}:**")
+                                for idx, raw_url in enumerate(urls, start=1):
+                                    nombre, enlace = resolver_nombre_y_enlace(raw_url, f"{titulo} #{idx}")
+                                    if not enlace:
+                                        continue
+                                    st.markdown(
+                                        f'- <a href="{enlace}" target="_blank">{nombre}</a>',
+                                        unsafe_allow_html=True,
+                                    )
+                    else:
+                        pedido_sel = None
+                        source_sel = None
+                        st.info("Selecciona una garantía para ver detalles o modificarla.")
+                        st.stop()
+
+
+            if "pedido_modificado" in st.session_state:
+                pedido_sel = st.session_state["pedido_modificado"]
+                source_sel = st.session_state.get(
+                    "pedido_modificado_source", source_sel or "pedidos"
+                )
+                del st.session_state["pedido_modificado"]  # ✅ limpia la variable tras usarla
+                if "pedido_modificado_source" in st.session_state:
+                    del st.session_state["pedido_modificado_source"]
+
+
+            if pedido_sel is None:
+                st.markdown("### 📋 Lista completa de pedidos y casos disponibles")
+
+                if df.empty:
+                    st.warning("⚠️ No hay pedidos disponibles para modificar.")
+                    st.stop()
+
+                def _fmt_hora_mod(valor):
+                    if pd.isna(valor):
+                        return "Sin fecha"
+                    if isinstance(valor, pd.Timestamp):
+                        return valor.strftime('%d/%m %H:%M')
+                    try:
+                        return pd.to_datetime(valor).strftime('%d/%m %H:%M')
                     except Exception:
                         return str(valor)
 
-                columnas_tabla = {
-                    "ID_Pedido": "Pedido",
-                    "Hora_Registro": "Hora Registro",
-                    "Vendedor_Registro": "Vendedor Registro",
-                    "Cliente": "Cliente",
-                    "Folio_Factura": "Folio / Factura",
-                    "Numero_Serie": "Número Serie",
-                    "Fecha_Compra": "Fecha Compra",
-                    "Tipo_Envio": "Tipo Envío",
-                    "Estado": "Estado",
-                    "Estado_Caso": "Estado Caso",
-                    "Seguimiento": "Seguimiento",
-                }
-
-                tabla_garantias = df_garantias_filtrado[list(columnas_tabla.keys())].copy()
-                tabla_garantias["Hora_Registro"] = tabla_garantias["Hora_Registro"].apply(
-                    lambda v: formatear_fecha(v, "%d/%m/%Y %H:%M")
-                )
-                tabla_garantias["Fecha_Compra"] = tabla_garantias["Fecha_Compra"].apply(
-                    lambda v: formatear_fecha(v, "%d/%m/%Y") if str(v).strip() else ""
+                df_lista = df.copy()
+                df_lista["display"] = df_lista.apply(
+                    lambda row: (
+                        f"🧾 {row.get('Folio_Factura', row.get('Folio',''))} – {row.get('Tipo_Envio','')} "
+                        f"– 👤 {row.get('Cliente','')} – 🔍 {row.get('Estado', row.get('Estado_Caso',''))} "
+                        f"– 🧑‍💼 {row.get('Vendedor_Registro','')} – 🕒 {_fmt_hora_mod(row.get('Hora_Registro'))}"
+                    ),
+                    axis=1,
                 )
 
-                tabla_garantias = tabla_garantias.rename(columns=columnas_tabla)
-                st.dataframe(tabla_garantias, use_container_width=True)
-
-                opciones_select = [None] + df_garantias_filtrado.index.tolist()
-
-                def format_garantia(idx):
-                    if idx is None:
-                        return "Selecciona una garantía"
-                    row = df_garantias_filtrado.loc[idx]
-                    hora = formatear_fecha(row.get("Hora_Registro"), "%d/%m/%Y %H:%M")
-                    estado = row.get("Estado_Caso") or row.get("Estado") or ""
-                    return (
-                        f"📦 {row.get('ID_Pedido', '')} | 🧾 {row.get('Folio_Factura', '')} | "
-                        f"👤 {row.get('Cliente', '')} | 🚚 {row.get('Tipo_Envio', '')} | "
-                        f"🔍 {estado} | 🕒 {hora}"
-                    )
-
-                idx_garantia = st.selectbox(
-                    "Selecciona una garantía para ver detalles o modificarla:",
-                    opciones_select,
-                    format_func=format_garantia,
-                    key="select_garantia",
+                idx_seleccion = st.selectbox(
+                    "⬇️ Selecciona el pedido a modificar:",
+                    df_lista.index.tolist(),
+                    format_func=lambda i: df_lista.loc[i, "display"],
                 )
-
-                if idx_garantia is not None and idx_garantia in df_garantias_filtrado.index:
-                    row_garantia = df_garantias_filtrado.loc[idx_garantia]
-                    pedido_sel = row_garantia.get("ID_Pedido")
-                    source_sel = "casos"
-                    st.markdown("#### 📘 Detalles de la garantía seleccionada")
-
-                    def limpiar(valor):
-                        if valor is None:
-                            return ""
-                        if isinstance(valor, str):
-                            return "" if not valor.strip() or valor.strip().lower() == "nan" else valor.strip()
-                        try:
-                            if pd.isna(valor):
-                                return ""
-                        except Exception:
-                            pass
-                        return valor
-
-                    def formatear_monto(valor):
-                        try:
-                            if valor is None or str(valor).strip() == "":
-                                return ""
-                            valor_float = float(valor)
-                            valor_formateado = f"{valor_float:,.2f}"
-                            valor_formateado = (
-                                valor_formateado.replace(",", "_")
-                                .replace(".", ",")
-                                .replace("_", ".")
-                            )
-                            return f"${valor_formateado}"
-                        except Exception:
-                            valor_limpio = limpiar(valor)
-                            return f"${valor_limpio}" if valor_limpio else ""
-
-                    col_izq, col_der = st.columns(2)
-
-                    detalles_izq = [
-                        ("📦 Pedido", row_garantia.get("ID_Pedido", "")),
-                        ("👤 Cliente", row_garantia.get("Cliente", "")),
-                        ("🧾 Folio / Factura", row_garantia.get("Folio_Factura", "")),
-                        ("🚚 Tipo de envío", row_garantia.get("Tipo_Envio", "")),
-                        ("📊 Estado", row_garantia.get("Estado", "")),
-                        ("🧮 Estado del caso", row_garantia.get("Estado_Caso", "")),
-                        ("🕵️ Seguimiento", row_garantia.get("Seguimiento", "")),
-                        ("🧑‍💼 Vendedor", row_garantia.get("Vendedor_Registro", "")),
-                        (
-                            "🕒 Hora de registro",
-                            formatear_fecha(row_garantia.get("Hora_Registro"), "%d/%m/%Y %H:%M"),
-                        ),
-                    ]
-
-                    detalles_der = [
-                        ("🔢 Número de serie", row_garantia.get("Numero_Serie", "")),
-                        (
-                            "🗓️ Fecha de compra",
-                            formatear_fecha(row_garantia.get("Fecha_Compra"), "%d/%m/%Y"),
-                        ),
-                        ("🎯 Resultado esperado", row_garantia.get("Resultado_Esperado", "")),
-                        ("📦 Material devuelto", row_garantia.get("Material_Devuelto", "")),
-                        ("💵 Monto devuelto", formatear_monto(row_garantia.get("Monto_Devuelto", ""))),
-                        ("📝 Motivo detallado", row_garantia.get("Motivo_Detallado", "")),
-                        ("🏢 Área responsable", row_garantia.get("Area_Responsable", "")),
-                        ("👥 Responsable", row_garantia.get("Nombre_Responsable", "")),
-                        ("🧾 Nota de venta", row_garantia.get("Nota_Venta", "")),
-                        ("❓ ¿Tiene nota de venta?", row_garantia.get("Tiene_Nota_Venta", "")),
-                        ("🧾 Motivo nota de venta", row_garantia.get("Motivo_NotaVenta", "")),
-                        ("📍 Dirección guía retorno", row_garantia.get("Direccion_Guia_Retorno", "")),
-                    ]
-
-                    etiquetas_resaltadas = {"🕵️ Seguimiento", "📝 Motivo detallado"}
-
-                    for columna, items in ((col_izq, detalles_izq), (col_der, detalles_der)):
-                        for etiqueta, valor in items:
-                            valor_limpio = limpiar(valor)
-                            if not valor_limpio:
-                                continue
-                            if etiqueta in etiquetas_resaltadas:
-                                columna.info(f"{etiqueta}: {valor_limpio}")
-                            else:
-                                columna.markdown(f"**{etiqueta}:** {valor_limpio}")
-
-                    comentarios = str(row_garantia.get("Comentario", "")).strip()
-                    comentarios_adicionales = str(row_garantia.get("Comentarios", "")).strip()
-                    if comentarios or comentarios_adicionales:
-                        st.markdown("#### 💬 Comentarios")
-                        if comentarios:
-                            st.info(comentarios)
-                        if comentarios_adicionales:
-                            st.info(comentarios_adicionales)
-
-                    secciones_adjuntos = []
-
-                    def agregar_adjuntos(titulo, valores):
-                        urls = partir_urls(valores)
-                        urls_limpias = []
-                        for u in urls:
-                            url_limpio = limpiar(u)
-                            if url_limpio:
-                                urls_limpias.append(url_limpio)
-                        if urls_limpias:
-                            secciones_adjuntos.append((titulo, urls_limpias))
-
-                    agregar_adjuntos("📎 Archivos adjuntos", row_garantia.get("Adjuntos", ""))
-                    agregar_adjuntos("🧾 Guías asociadas", row_garantia.get("Adjuntos_Guia", ""))
-                    agregar_adjuntos("📬 Hoja de ruta", row_garantia.get("Hoja_Ruta_Mensajero", ""))
-                    agregar_adjuntos("🛠 Archivos de surtido", row_garantia.get("Adjuntos_Surtido", ""))
-                    agregar_adjuntos("💳 Notas de crédito", row_garantia.get("Nota_Credito_URL", ""))
-                    agregar_adjuntos("📄 Documentos adicionales", row_garantia.get("Documento_Adicional_URL", ""))
-
-                    if secciones_adjuntos:
-                        st.markdown("#### 🗂️ Archivos de la garantía")
-                        for titulo, urls in secciones_adjuntos:
-                            st.markdown(f"**{titulo}:**")
-                            for idx, raw_url in enumerate(urls, start=1):
-                                nombre, enlace = resolver_nombre_y_enlace(raw_url, f"{titulo} #{idx}")
-                                if not enlace:
-                                    continue
-                                st.markdown(
-                                    f'- <a href="{enlace}" target="_blank">{nombre}</a>',
-                                    unsafe_allow_html=True,
-                                )
-                else:
-                    pedido_sel = None
-                    source_sel = None
-                    st.info("Selecciona una garantía para ver detalles o modificarla.")
-                    st.stop()
+                pedido_sel = df_lista.loc[idx_seleccion, "ID_Pedido"]
+                source_sel = df_lista.loc[idx_seleccion, "__source"]
 
 
-        if "pedido_modificado" in st.session_state:
-            pedido_sel = st.session_state["pedido_modificado"]
-            source_sel = st.session_state.get(
-                "pedido_modificado_source", source_sel or "pedidos"
-            )
-            del st.session_state["pedido_modificado"]  # ✅ limpia la variable tras usarla
-            if "pedido_modificado_source" in st.session_state:
-                del st.session_state["pedido_modificado_source"]
+            # --- Cargar datos del pedido seleccionado ---
+            st.markdown("---")
 
-
-        if pedido_sel is None:
-            st.markdown("### 📋 Lista completa de pedidos y casos disponibles")
-
-            if df.empty:
-                st.warning("⚠️ No hay pedidos disponibles para modificar.")
+            if pedido_sel is None:
+                st.warning("⚠️ No se ha seleccionado ningún pedido válido.")
                 st.stop()
 
-            def _fmt_hora_mod(valor):
-                if pd.isna(valor):
-                    return "Sin fecha"
-                if isinstance(valor, pd.Timestamp):
-                    return valor.strftime('%d/%m %H:%M')
-                try:
-                    return pd.to_datetime(valor).strftime('%d/%m %H:%M')
-                except Exception:
-                    return str(valor)
-
-            df_lista = df.copy()
-            df_lista["display"] = df_lista.apply(
-                lambda row: (
-                    f"🧾 {row.get('Folio_Factura', row.get('Folio',''))} – {row.get('Tipo_Envio','')} "
-                    f"– 👤 {row.get('Cliente','')} – 🔍 {row.get('Estado', row.get('Estado_Caso',''))} "
-                    f"– 🧑‍💼 {row.get('Vendedor_Registro','')} – 🕒 {_fmt_hora_mod(row.get('Hora_Registro'))}"
-                ),
-                axis=1,
-            )
-
-            idx_seleccion = st.selectbox(
-                "⬇️ Selecciona el pedido a modificar:",
-                df_lista.index.tolist(),
-                format_func=lambda i: df_lista.loc[i, "display"],
-            )
-            pedido_sel = df_lista.loc[idx_seleccion, "ID_Pedido"]
-            source_sel = df_lista.loc[idx_seleccion, "__source"]
-
-
-        # --- Cargar datos del pedido seleccionado ---
-        st.markdown("---")
-
-        if pedido_sel is None:
-            st.warning("⚠️ No se ha seleccionado ningún pedido válido.")
-            st.stop()
-
-        row_df = df_pedidos if source_sel == "pedidos" else df_casos
-        row_sel = row_df[row_df["ID_Pedido"].astype(str) == str(pedido_sel)]
-        if row_sel.empty:
-            st.session_state.pop("pedido_modificado", None)
-            st.session_state.pop("pedido_modificado_source", None)
-            st.warning(
-                "⚠️ El pedido seleccionado ya no está disponible en la lista actual. Selecciona otro pedido."
-            )
-            st.rerun()
-        row = row_sel.iloc[0]
-        gspread_row_idx = int(row.get("__sheet_row", row_sel.index[0] + 2))
-        if "mensaje_exito" in st.session_state:
-            st.success(st.session_state["mensaje_exito"])
-            del st.session_state["mensaje_exito"]  # ✅ eliminar para que no se repita
-        if "mensaje_error" in st.session_state:
-            st.error(st.session_state["mensaje_error"])
-            del st.session_state["mensaje_error"]
-
-
-        # Definir la hoja de Google Sheets para modificación
-        if source_sel == "pedidos":
-            hoja_nombre = str(row.get("__hoja_origen", "")).strip() or "datos_pedidos"
-        else:
-            hoja_nombre = "casos_especiales"
-        hoja = get_main_worksheet(hoja_nombre)
-
-        def actualizar_celdas_y_confirmar(cambios, mensaje_exito):
-            """Actualiza celdas en lote y valida lectura de los nuevos valores."""
-            try:
-                headers = hoja.row_values(1)
-                mapa_columnas_hoja = {
-                    str(nombre).strip(): idx + 1
-                    for idx, nombre in enumerate(headers)
-                    if str(nombre).strip()
-                }
-
-                updates = []
-                celdas = []
-                for nombre_col, valor in cambios:
-                    if nombre_col not in mapa_columnas_hoja:
-                        raise ValueError(
-                            f"No existe la columna '{nombre_col}' en la hoja {hoja_nombre}."
-                        )
-                    col_idx = mapa_columnas_hoja[nombre_col]
-                    updates.append({
-                        "range": gspread.utils.rowcol_to_a1(gspread_row_idx, col_idx),
-                        "values": [[valor]],
-                    })
-                    celdas.append(gspread.Cell(row=gspread_row_idx, col=col_idx, value=valor))
-
-                if hasattr(hoja, "batch_update"):
-                    hoja.batch_update(updates, value_input_option="USER_ENTERED")
-                else:
-                    hoja.update_cells(celdas, value_input_option="USER_ENTERED")
-
-                for nombre_col, valor_esperado in cambios:
-                    col_idx = mapa_columnas_hoja[nombre_col]
-                    valor_real = hoja.cell(gspread_row_idx, col_idx).value
-                    esperado = "" if valor_esperado is None else str(valor_esperado).strip()
-                    real = "" if valor_real is None else str(valor_real).strip()
-                    if esperado != real:
-                        raise ValueError(
-                            f"La columna '{nombre_col}' no se confirmó. Esperado: '{esperado}' | Guardado: '{real}'."
-                        )
-
-                st.session_state["pedido_modificado"] = pedido_sel
-                st.session_state["pedido_modificado_source"] = source_sel
-                st.session_state["mensaje_exito"] = mensaje_exito
-                return True
-            except Exception as e:
-                st.session_state["mensaje_error"] = f"❌ No se pudo guardar en Excel: {e}"
-                return False
-
-        st.markdown(
-            f"📦 **Cliente:** {row['Cliente']} &nbsp;&nbsp;&nbsp;&nbsp; 🧾 **Folio Factura:** {row.get('Folio_Factura', 'N/A')}"
-        )
-
-        with st.expander("📎 Adjuntar Archivos — Gestionar guías y documentos", expanded=False):
-            col_guias = "Adjuntos_Guia" if source_sel == "pedidos" else "Hoja_Ruta_Mensajero"
-            existentes_guias = partir_urls(row.get(col_guias, ""))
-            existentes_otros = partir_urls(row.get("Adjuntos", ""))
-
-            if existentes_guias or existentes_otros:
-                with st.expander("📥 Archivos existentes", expanded=False):
-                    if existentes_guias:
-                        st.markdown("**Guías:**")
-                        for u in existentes_guias:
-                            tmp = get_s3_file_download_url(s3_client, u)
-                            nombre = extract_s3_key(u).split("/")[-1]
-                            st.markdown(f'- <a href="{tmp}" target="_blank">{nombre}</a>', unsafe_allow_html=True)
-                    if existentes_otros:
-                        st.markdown("**Otros:**")
-                        for u in existentes_otros:
-                            tmp = get_s3_file_download_url(s3_client, u)
-                            nombre = extract_s3_key(u).split("/")[-1]
-                            st.markdown(f'- <a href="{tmp}" target="_blank">{nombre}</a>', unsafe_allow_html=True)
-
-            uploaded_guias = st.file_uploader("📄 Guías", accept_multiple_files=True)
-            uploaded_otros = st.file_uploader("📁 Otros", accept_multiple_files=True)
-
-            if st.button("⬆️ Subir archivos"):
-                nuevas_guias_urls, nuevas_otros_urls = [], []
-                for file in uploaded_guias or []:
-                    key = f"adjuntos_pedidos/{pedido_sel}/{file.name}"
-                    success, url_subida = upload_file_to_s3(s3_client, S3_BUCKET, file, key)
-                    if success:
-                        nuevas_guias_urls.append(url_subida)
-                for file in uploaded_otros or []:
-                    key = f"adjuntos_pedidos/{pedido_sel}/{file.name}"
-                    success, url_subida = upload_file_to_s3(s3_client, S3_BUCKET, file, key)
-                    if success:
-                        nuevas_otros_urls.append(url_subida)
-
-                cambios_archivos = []
-                if nuevas_guias_urls:
-                    existente = row.get(col_guias, "")
-                    nuevo_valor = combinar_urls_existentes(existente, nuevas_guias_urls)
-                    cambios_archivos.append((col_guias, nuevo_valor))
-                if nuevas_otros_urls:
-                    existente = row.get("Adjuntos", "")
-                    nuevo_valor = combinar_urls_existentes(existente, nuevas_otros_urls)
-                    cambios_archivos.append(("Adjuntos", nuevo_valor))
-
-                if cambios_archivos:
-                    if actualizar_celdas_y_confirmar(cambios_archivos, "📎 Archivos subidos correctamente."):
-                        st.rerun()
-                else:
-                    st.warning("⚠️ No se cargaron archivos nuevos para actualizar en Excel.")
-
-
-        # --- CAMPOS MODIFICABLES ---
-        if source_sel == "casos":
-            tipo_envio_val = str(row.get("Tipo_Envio", "") or "")
-            tipo_caso_val = str(row.get("Tipo_Caso", "") or "")
-            es_garantia = any("garant" in valor.lower() for valor in (tipo_envio_val, tipo_caso_val))
-
-            if es_garantia:
-                opciones_seguimiento = [
-                    "llegó el material",
-                    "en prueba",
-                    "aprobada",
-                    "rechazada",
-                ]
-                seguimiento_actual = str(row.get("Seguimiento", "") or "").strip()
-                try:
-                    index_preseleccion = next(
-                        i for i, opcion in enumerate(opciones_seguimiento) if opcion.lower() == seguimiento_actual.lower()
-                    )
-                except StopIteration:
-                    index_preseleccion = 0
-
-                seguimiento_sel = st.selectbox(
-                    "Seguimiento de garantía",
-                    opciones_seguimiento,
-                    index=index_preseleccion,
+            row_df = df_pedidos if source_sel == "pedidos" else df_casos
+            row_sel = row_df[row_df["ID_Pedido"].astype(str) == str(pedido_sel)]
+            if row_sel.empty:
+                st.session_state.pop("pedido_modificado", None)
+                st.session_state.pop("pedido_modificado_source", None)
+                st.warning(
+                    "⚠️ El pedido seleccionado ya no está disponible en la lista actual. Selecciona otro pedido."
                 )
+                st.rerun()
+            row = row_sel.iloc[0]
+            gspread_row_idx = int(row.get("__sheet_row", row_sel.index[0] + 2))
+            if "mensaje_exito" in st.session_state:
+                st.success(st.session_state["mensaje_exito"])
+                del st.session_state["mensaje_exito"]  # ✅ eliminar para que no se repita
+            if "mensaje_error" in st.session_state:
+                st.error(st.session_state["mensaje_error"])
+                del st.session_state["mensaje_error"]
 
-                if st.button("Guardar seguimiento"):
-                    if actualizar_celdas_y_confirmar(
-                        [("Seguimiento", seguimiento_sel)],
-                        "🔄 Seguimiento de garantía guardado correctamente.",
-                    ):
-                        st.rerun()
 
-        comentario_usuario = st.text_area("📝 Comentario desde almacén", key="comentario_almacen")
-        if st.button("Guardar comentario"):
-            comentario_limpio = comentario_usuario.strip()
-            if not comentario_limpio:
-                st.warning("⚠️ Debes ingresar un comentario antes de guardarlo.")
+            # Definir la hoja de Google Sheets para modificación
+            if source_sel == "pedidos":
+                hoja_nombre = str(row.get("__hoja_origen", "")).strip() or "datos_pedidos"
             else:
-                existente = str(row.get("Comentario", "") or "")
-                nuevo_comentario = f"[ALMACÉN 🏷️] {comentario_limpio}"
-                if existente.strip():
-                    valor_final = f"{existente.rstrip()}\n{nuevo_comentario}"
-                else:
-                    valor_final = nuevo_comentario
-                if actualizar_celdas_y_confirmar(
-                    [("Comentario", valor_final)],
-                    "📝 Comentario guardado correctamente.",
-                ):
-                    st.session_state["comentario_almacen"] = ""
-                    st.rerun()
+                hoja_nombre = "casos_especiales"
+            hoja = get_main_worksheet(hoja_nombre)
 
-        vendedores = [
-            "ALEJANDRO RODRIGUEZ",
-            "ANA KAREN ORTEGA MAHUAD",
-            "DANIELA LOPEZ RAMIREZ",
-            "EDGAR ORLANDO GOMEZ VILLAGRAN",
-            "GLORIA MICHELLE GARCIA TORRES",
-            "GRISELDA CAROLINA SANCHEZ GARCIA",
-            "HECTOR DEL ANGEL AREVALO ALCALA",
-            "JOSELIN TRUJILLO PATRACA",
-            "NORA ALEJANDRA MARTINEZ MORENO",
-            "PAULINA TREJO"
-        ]
-        vendedor_actual = row.get("Vendedor_Registro", "").strip()
+            def actualizar_celdas_y_confirmar(cambios, mensaje_exito):
+                """Actualiza celdas en lote y valida lectura de los nuevos valores."""
+                try:
+                    headers = hoja.row_values(1)
+                    mapa_columnas_hoja = {
+                        str(nombre).strip(): idx + 1
+                        for idx, nombre in enumerate(headers)
+                        if str(nombre).strip()
+                    }
 
-        with st.expander("🧑‍💼 Cambio de Vendedor — Reasignar responsable", expanded=False):
-            st.markdown(f"**Actual:** {vendedor_actual}")
+                    updates = []
+                    celdas = []
+                    for nombre_col, valor in cambios:
+                        if nombre_col not in mapa_columnas_hoja:
+                            raise ValueError(
+                                f"No existe la columna '{nombre_col}' en la hoja {hoja_nombre}."
+                            )
+                        col_idx = mapa_columnas_hoja[nombre_col]
+                        updates.append({
+                            "range": gspread.utils.rowcol_to_a1(gspread_row_idx, col_idx),
+                            "values": [[valor]],
+                        })
+                        celdas.append(gspread.Cell(row=gspread_row_idx, col=col_idx, value=valor))
 
-            opcion_manual = "✍️ Escribir vendedor manualmente"
-            vendedores_opciones = [v for v in vendedores if v != vendedor_actual] or [vendedor_actual]
-            vendedores_opciones = vendedores_opciones + [opcion_manual]
-            nuevo_vendedor = st.selectbox("➡️ Cambiar a:", vendedores_opciones)
+                    if hasattr(hoja, "batch_update"):
+                        hoja.batch_update(updates, value_input_option="USER_ENTERED")
+                    else:
+                        hoja.update_cells(celdas, value_input_option="USER_ENTERED")
 
-            vendedor_manual = ""
-            if nuevo_vendedor == opcion_manual:
-                vendedor_manual = st.text_input(
-                    "📝 Nombre del vendedor",
-                    placeholder="Ej. JUAN PÉREZ",
-                    key="vendedor_manual_modificar",
-                )
+                    for nombre_col, valor_esperado in cambios:
+                        col_idx = mapa_columnas_hoja[nombre_col]
+                        valor_real = hoja.cell(gspread_row_idx, col_idx).value
+                        esperado = "" if valor_esperado is None else str(valor_esperado).strip()
+                        real = "" if valor_real is None else str(valor_real).strip()
+                        if esperado != real:
+                            raise ValueError(
+                                f"La columna '{nombre_col}' no se confirmó. Esperado: '{esperado}' | Guardado: '{real}'."
+                            )
 
-            vendedor_destino = (
-                vendedor_manual.strip().upper()
-                if nuevo_vendedor == opcion_manual
-                else nuevo_vendedor
+                    st.session_state["pedido_modificado"] = pedido_sel
+                    st.session_state["pedido_modificado_source"] = source_sel
+                    st.session_state["mensaje_exito"] = mensaje_exito
+                    return True
+                except Exception as e:
+                    st.session_state["mensaje_error"] = f"❌ No se pudo guardar en Excel: {e}"
+                    return False
+
+            st.markdown(
+                f"📦 **Cliente:** {row['Cliente']} &nbsp;&nbsp;&nbsp;&nbsp; 🧾 **Folio Factura:** {row.get('Folio_Factura', 'N/A')}"
             )
 
-            if st.button("🧑‍💼 Guardar cambio de vendedor"):
-                if not vendedor_destino:
-                    st.warning("⚠️ Escribe un nombre de vendedor válido para continuar.")
-                    st.stop()
-                if actualizar_celdas_y_confirmar(
-                    [("Vendedor_Registro", vendedor_destino)],
-                    "🎈 Vendedor actualizado correctamente.",
-                ):
-                    st.rerun()
+            with st.expander("📎 Adjuntar Archivos — Gestionar guías y documentos", expanded=False):
+                col_guias = "Adjuntos_Guia" if source_sel == "pedidos" else "Hoja_Ruta_Mensajero"
+                existentes_guias = partir_urls(row.get(col_guias, ""))
+                existentes_otros = partir_urls(row.get("Adjuntos", ""))
+
+                if existentes_guias or existentes_otros:
+                    with st.expander("📥 Archivos existentes", expanded=False):
+                        if existentes_guias:
+                            st.markdown("**Guías:**")
+                            for u in existentes_guias:
+                                tmp = get_s3_file_download_url(s3_client, u)
+                                nombre = extract_s3_key(u).split("/")[-1]
+                                st.markdown(f'- <a href="{tmp}" target="_blank">{nombre}</a>', unsafe_allow_html=True)
+                        if existentes_otros:
+                            st.markdown("**Otros:**")
+                            for u in existentes_otros:
+                                tmp = get_s3_file_download_url(s3_client, u)
+                                nombre = extract_s3_key(u).split("/")[-1]
+                                st.markdown(f'- <a href="{tmp}" target="_blank">{nombre}</a>', unsafe_allow_html=True)
+
+                uploaded_guias = st.file_uploader("📄 Guías", accept_multiple_files=True)
+                uploaded_otros = st.file_uploader("📁 Otros", accept_multiple_files=True)
+
+                if st.button("⬆️ Subir archivos"):
+                    nuevas_guias_urls, nuevas_otros_urls = [], []
+                    for file in uploaded_guias or []:
+                        key = f"adjuntos_pedidos/{pedido_sel}/{file.name}"
+                        success, url_subida = upload_file_to_s3(s3_client, S3_BUCKET, file, key)
+                        if success:
+                            nuevas_guias_urls.append(url_subida)
+                    for file in uploaded_otros or []:
+                        key = f"adjuntos_pedidos/{pedido_sel}/{file.name}"
+                        success, url_subida = upload_file_to_s3(s3_client, S3_BUCKET, file, key)
+                        if success:
+                            nuevas_otros_urls.append(url_subida)
+
+                    cambios_archivos = []
+                    if nuevas_guias_urls:
+                        existente = row.get(col_guias, "")
+                        nuevo_valor = combinar_urls_existentes(existente, nuevas_guias_urls)
+                        cambios_archivos.append((col_guias, nuevo_valor))
+                    if nuevas_otros_urls:
+                        existente = row.get("Adjuntos", "")
+                        nuevo_valor = combinar_urls_existentes(existente, nuevas_otros_urls)
+                        cambios_archivos.append(("Adjuntos", nuevo_valor))
+
+                    if cambios_archivos:
+                        if actualizar_celdas_y_confirmar(cambios_archivos, "📎 Archivos subidos correctamente."):
+                            st.rerun()
+                    else:
+                        st.warning("⚠️ No se cargaron archivos nuevos para actualizar en Excel.")
 
 
-        if source_sel == "pedidos":
-            tipo_envio_actual = row["Tipo_Envio"].strip()
-            with st.expander("🚚 Cambio de Tipo de Envío — Ajustar logística", expanded=False):
-                st.markdown(f"**Actual:** {tipo_envio_actual}")
+            # --- CAMPOS MODIFICABLES ---
+            if source_sel == "casos":
+                tipo_envio_val = str(row.get("Tipo_Envio", "") or "")
+                tipo_caso_val = str(row.get("Tipo_Caso", "") or "")
+                es_garantia = any("garant" in valor.lower() for valor in (tipo_envio_val, tipo_caso_val))
 
-                opcion_contraria = "📍 Pedido Local" if "Foráneo" in tipo_envio_actual else "🚚 Pedido Foráneo"
-                tipo_envio = st.selectbox("➡️ Cambiar a:", [opcion_contraria])
-
-                if tipo_envio == "📍 Pedido Local":
-                    nuevo_turno = st.selectbox("⏰ Turno", ["☀️ Local Mañana", "🌙 Local Tarde", "🌵 Saltillo", "📦 Pasa a Bodega"])
-                    fecha_entrega_actual_raw = str(row.get("Fecha_Entrega", "") or "").strip()
-                    fecha_entrega_actual_dt = pd.to_datetime(fecha_entrega_actual_raw, errors="coerce")
-                    fecha_entrega_actual_mostrar = (
-                        fecha_entrega_actual_dt.strftime("%d/%m/%Y")
-                        if pd.notna(fecha_entrega_actual_dt)
-                        else "Sin fecha"
-                    )
-                    st.markdown(f"**📅 Fecha de entrega actual:** {fecha_entrega_actual_mostrar}")
-
-                    fecha_entrega_nueva = st.date_input(
-                        "📅 Fecha de entrega",
-                        value=(
-                            fecha_entrega_actual_dt.date()
-                            if pd.notna(fecha_entrega_actual_dt)
-                            else date.today()
-                        ),
-                        min_value=min(
-                            fecha_entrega_actual_dt.date(),
-                            date.today(),
-                        )
-                        if pd.notna(fecha_entrega_actual_dt)
-                        else date.today(),
-                        max_value=date.today() + timedelta(days=365),
-                        format="DD/MM/YYYY",
-                    )
-                    fecha_entrega_nueva_str = fecha_entrega_nueva.strftime("%Y-%m-%d")
-                else:
-                    nuevo_turno = ""
-                    fecha_entrega_nueva_str = str(row.get("Fecha_Entrega", "") or "").strip()
-
-                if st.button("📦 Guardar cambio de tipo de envío"):
-                    if actualizar_celdas_y_confirmar(
-                        [
-                            ("Tipo_Envio", tipo_envio),
-                            ("Turno", nuevo_turno),
-                            ("Fecha_Entrega", fecha_entrega_nueva_str),
-                        ],
-                        "📦 Tipo de envío, turno y fecha de entrega actualizados correctamente.",
-                    ):
-                        st.rerun()
-
-
-        # --- NUEVO: CAMBIO DE ESTADO A CANCELADO ---
-        estado_actual = row.get("Estado", "").strip()
-        with st.expander("🟣 Cancelar Pedido — Marcar como no procesable", expanded=False):
-            st.markdown(f"**Estado Actual:** {estado_actual}")
-
-            # Solo mostrar la opción de cancelar si el pedido no está ya cancelado
-            if "Cancelado" not in estado_actual:
-                if st.button("🟣 Cambiar Estado a CANCELADO"):
+                if es_garantia:
+                    opciones_seguimiento = [
+                        "llegó el material",
+                        "en prueba",
+                        "aprobada",
+                        "rechazada",
+                    ]
+                    seguimiento_actual = str(row.get("Seguimiento", "") or "").strip()
                     try:
-                        # Actualizar el estado en la hoja de cálculo
-                        nuevo_estado = "🟣 Cancelado"
+                        index_preseleccion = next(
+                            i for i, opcion in enumerate(opciones_seguimiento) if opcion.lower() == seguimiento_actual.lower()
+                        )
+                    except StopIteration:
+                        index_preseleccion = 0
+
+                    seguimiento_sel = st.selectbox(
+                        "Seguimiento de garantía",
+                        opciones_seguimiento,
+                        index=index_preseleccion,
+                    )
+
+                    if st.button("Guardar seguimiento"):
                         if actualizar_celdas_y_confirmar(
-                            [("Estado", nuevo_estado)],
-                            "🟣 Pedido marcado como CANCELADO correctamente.",
+                            [("Seguimiento", seguimiento_sel)],
+                            "🔄 Seguimiento de garantía guardado correctamente.",
                         ):
                             st.rerun()
-                    except Exception as e:
-                        st.error(f"❌ Error al cancelar el pedido: {str(e)}")
-            else:
-                st.info("ℹ️ Este pedido ya está marcado como CANCELADO.")
 
-
-        if source_sel == "casos":
-            completado = row.get("Completados_Limpiado", "")
-            with st.expander("👁 Visibilidad en Pantalla de Producción — Mostrar u ocultar", expanded=False):
-                opciones_visibilidad = {"Sí": "", "No": "sí"}
-                valor_actual = completado.strip().lower()
-                valor_preseleccionado = "No" if valor_actual == "sí" else "Sí"
-                seleccion = st.selectbox("¿Mostrar este pedido en el Panel?", list(opciones_visibilidad.keys()), index=list(opciones_visibilidad.keys()).index(valor_preseleccionado))
-                nuevo_valor_completado = opciones_visibilidad[seleccion]
-
-
-                if st.button("👁 Guardar visibilidad en Panel"):
+            comentario_usuario = st.text_area("📝 Comentario desde almacén", key="comentario_almacen")
+            if st.button("Guardar comentario"):
+                comentario_limpio = comentario_usuario.strip()
+                if not comentario_limpio:
+                    st.warning("⚠️ Debes ingresar un comentario antes de guardarlo.")
+                else:
+                    existente = str(row.get("Comentario", "") or "")
+                    nuevo_comentario = f"[ALMACÉN 🏷️] {comentario_limpio}"
+                    if existente.strip():
+                        valor_final = f"{existente.rstrip()}\n{nuevo_comentario}"
+                    else:
+                        valor_final = nuevo_comentario
                     if actualizar_celdas_y_confirmar(
-                        [("Completados_Limpiado", nuevo_valor_completado)],
-                        "👁 Visibilidad en pantalla de producción actualizada.",
+                        [("Comentario", valor_final)],
+                        "📝 Comentario guardado correctamente.",
+                    ):
+                        st.session_state["comentario_almacen"] = ""
+                        st.rerun()
+
+            vendedores = [
+                "ALEJANDRO RODRIGUEZ",
+                "ANA KAREN ORTEGA MAHUAD",
+                "DANIELA LOPEZ RAMIREZ",
+                "EDGAR ORLANDO GOMEZ VILLAGRAN",
+                "GLORIA MICHELLE GARCIA TORRES",
+                "GRISELDA CAROLINA SANCHEZ GARCIA",
+                "HECTOR DEL ANGEL AREVALO ALCALA",
+                "JOSELIN TRUJILLO PATRACA",
+                "NORA ALEJANDRA MARTINEZ MORENO",
+                "PAULINA TREJO"
+            ]
+            vendedor_actual = row.get("Vendedor_Registro", "").strip()
+
+            with st.expander("🧑‍💼 Cambio de Vendedor — Reasignar responsable", expanded=False):
+                st.markdown(f"**Actual:** {vendedor_actual}")
+
+                opcion_manual = "✍️ Escribir vendedor manualmente"
+                vendedores_opciones = [v for v in vendedores if v != vendedor_actual] or [vendedor_actual]
+                vendedores_opciones = vendedores_opciones + [opcion_manual]
+                nuevo_vendedor = st.selectbox("➡️ Cambiar a:", vendedores_opciones)
+
+                vendedor_manual = ""
+                if nuevo_vendedor == opcion_manual:
+                    vendedor_manual = st.text_input(
+                        "📝 Nombre del vendedor",
+                        placeholder="Ej. JUAN PÉREZ",
+                        key="vendedor_manual_modificar",
+                    )
+
+                vendedor_destino = (
+                    vendedor_manual.strip().upper()
+                    if nuevo_vendedor == opcion_manual
+                    else nuevo_vendedor
+                )
+
+                if st.button("🧑‍💼 Guardar cambio de vendedor"):
+                    if not vendedor_destino:
+                        st.warning("⚠️ Escribe un nombre de vendedor válido para continuar.")
+                        st.stop()
+                    if actualizar_celdas_y_confirmar(
+                        [("Vendedor_Registro", vendedor_destino)],
+                        "🎈 Vendedor actualizado correctamente.",
                     ):
                         st.rerun()
 
-# ===== ORGANIZADOR ALEJANDRO (CON CONTRASEÑA) =====
-CONTRASENA_ALEJANDRO = "ale1"
 
-with tabs[0]:
-    st.header("🗂️ Organizador (Alejandro)")
+            if source_sel == "pedidos":
+                tipo_envio_actual = row["Tipo_Envio"].strip()
+                with st.expander("🚚 Cambio de Tipo de Envío — Ajustar logística", expanded=False):
+                    st.markdown(f"**Actual:** {tipo_envio_actual}")
 
-    if "acceso_alejandro" not in st.session_state:
-        st.session_state.acceso_alejandro = False
+                    opcion_contraria = "📍 Pedido Local" if "Foráneo" in tipo_envio_actual else "🚚 Pedido Foráneo"
+                    tipo_envio = st.selectbox("➡️ Cambiar a:", [opcion_contraria])
 
-    if not st.session_state.acceso_alejandro:
-        pw = st.text_input("🔑 Ingresa la contraseña:", type="password", key="pw_alejandro")
-        if st.button("🔓 Entrar", key="btn_pw_alejandro"):
-            if pw == CONTRASENA_ALEJANDRO:
-                st.session_state.acceso_alejandro = True
-                st.success("✅ Acceso concedido.")
-                st.rerun()
-            else:
-                st.error("❌ Contraseña incorrecta.")
-        st.stop()
+                    if tipo_envio == "📍 Pedido Local":
+                        nuevo_turno = st.selectbox("⏰ Turno", ["☀️ Local Mañana", "🌙 Local Tarde", "🌵 Saltillo", "📦 Pasa a Bodega"])
+                        fecha_entrega_actual_raw = str(row.get("Fecha_Entrega", "") or "").strip()
+                        fecha_entrega_actual_dt = pd.to_datetime(fecha_entrega_actual_raw, errors="coerce")
+                        fecha_entrega_actual_mostrar = (
+                            fecha_entrega_actual_dt.strftime("%d/%m/%Y")
+                            if pd.notna(fecha_entrega_actual_dt)
+                            else "Sin fecha"
+                        )
+                        st.markdown(f"**📅 Fecha de entrega actual:** {fecha_entrega_actual_mostrar}")
 
-    if st.button("🔄 Refrescar Organizador", key="refresh_alejandro"):
-        st.rerun()
+                        fecha_entrega_nueva = st.date_input(
+                            "📅 Fecha de entrega",
+                            value=(
+                                fecha_entrega_actual_dt.date()
+                                if pd.notna(fecha_entrega_actual_dt)
+                                else date.today()
+                            ),
+                            min_value=min(
+                                fecha_entrega_actual_dt.date(),
+                                date.today(),
+                            )
+                            if pd.notna(fecha_entrega_actual_dt)
+                            else date.today(),
+                            max_value=date.today() + timedelta(days=365),
+                            format="DD/MM/YYYY",
+                        )
+                        fecha_entrega_nueva_str = fecha_entrega_nueva.strftime("%Y-%m-%d")
+                    else:
+                        nuevo_turno = ""
+                        fecha_entrega_nueva_str = str(row.get("Fecha_Entrega", "") or "").strip()
 
-    # --- Subpestañas internas del organizador ---
-    sub = st.tabs(["Hoy", "Agenda", "Pendientes", "Cotizaciones", "Checklist", "Config"])
+                    if st.button("📦 Guardar cambio de tipo de envío"):
+                        if actualizar_celdas_y_confirmar(
+                            [
+                                ("Tipo_Envio", tipo_envio),
+                                ("Turno", nuevo_turno),
+                                ("Fecha_Entrega", fecha_entrega_nueva_str),
+                            ],
+                            "📦 Tipo de envío, turno y fecha de entrega actualizados correctamente.",
+                        ):
+                            st.rerun()
 
-    errores_alejandro = []
 
-    try:
-        df_citas = cargar_alejandro_hoja("CITAS")
-    except Exception as e:
-        errores_alejandro.append(f"CITAS: {e}")
-        df_citas = pd.DataFrame(columns=ALE_COLUMNAS.get("CITAS", []))
+            # --- NUEVO: CAMBIO DE ESTADO A CANCELADO ---
+            estado_actual = row.get("Estado", "").strip()
+            with st.expander("🟣 Cancelar Pedido — Marcar como no procesable", expanded=False):
+                st.markdown(f"**Estado Actual:** {estado_actual}")
 
-    try:
-        df_tareas = cargar_alejandro_hoja("TAREAS")
-    except Exception as e:
-        errores_alejandro.append(f"TAREAS: {e}")
-        df_tareas = pd.DataFrame(columns=ALE_COLUMNAS.get("TAREAS", []))
-
-    try:
-        df_cot = cargar_alejandro_hoja("COTIZACIONES")
-    except Exception as e:
-        errores_alejandro.append(f"COTIZACIONES: {e}")
-        df_cot = pd.DataFrame(columns=ALE_COLUMNAS.get("COTIZACIONES", []))
-
-    try:
-        df_checklist_daily = cargar_alejandro_hoja("CHECKLIST_DAILY")
-    except Exception as e:
-        errores_alejandro.append(f"CHECKLIST_DAILY: {e}")
-        df_checklist_daily = pd.DataFrame(columns=ALE_COLUMNAS.get("CHECKLIST_DAILY", []))
-
-    try:
-        df_checklist_template = cargar_alejandro_hoja("CHECKLIST_TEMPLATE")
-    except Exception as e:
-        errores_alejandro.append(f"CHECKLIST_TEMPLATE: {e}")
-        df_checklist_template = pd.DataFrame(columns=ALE_COLUMNAS.get("CHECKLIST_TEMPLATE", []))
-
-    try:
-        df_config = cargar_alejandro_hoja("CONFIG")
-    except Exception as e:
-        errores_alejandro.append(f"CONFIG: {e}")
-        df_config = pd.DataFrame(columns=ALE_COLUMNAS.get("CONFIG", []))
-
-    if errores_alejandro:
-        st.warning("⚠️ Hay errores leyendo alejandro_data. Ve a Config > Diagnóstico para detalle.")
-
-    with sub[0]:
-        st.subheader("📌 Hoy")
-
-        hoy = date.today()
-        # chk_hoy base (por si no se sincroniza en este rerun)
-        chk_hoy = df_checklist_daily.copy()
-        if "Fecha" in chk_hoy.columns:
-            chk_hoy["_f"] = _to_date(chk_hoy["Fecha"])
-            chk_hoy = chk_hoy[chk_hoy["_f"] == hoy].copy()
-        else:
-            chk_hoy = chk_hoy.iloc[0:0]
-
-        key_sync = f"chk_sync_{hoy.isoformat()}"
-        if key_sync not in st.session_state:
-            st.session_state[key_sync] = False
-
-        sync_clicked = st.button("🔄 Sincronizar checklist de hoy", key=f"btn_sync_chk_hoy_{hoy.isoformat()}")
-
-        # Sincroniza checklist recurrente del día (solo 1 vez por sesión/día o por botón)
-        if sync_clicked or not st.session_state[key_sync]:
-            try:
-                inserted = ensure_daily_checklist_items(hoy, df_checklist_template, df_checklist_daily)
-                st.session_state[key_sync] = True
-                if inserted > 0:
-                    st.success(f"🧾 Se generaron {inserted} ítem(s) de checklist para hoy.")
+                # Solo mostrar la opción de cancelar si el pedido no está ya cancelado
+                if "Cancelado" not in estado_actual:
+                    if st.button("🟣 Cambiar Estado a CANCELADO"):
+                        try:
+                            # Actualizar el estado en la hoja de cálculo
+                            nuevo_estado = "🟣 Cancelado"
+                            if actualizar_celdas_y_confirmar(
+                                [("Estado", nuevo_estado)],
+                                "🟣 Pedido marcado como CANCELADO correctamente.",
+                            ):
+                                st.rerun()
+                        except Exception as e:
+                            st.error(f"❌ Error al cancelar el pedido: {str(e)}")
                 else:
-                    st.info("🧾 Checklist de hoy ya estaba sincronizado.")
-                df_checklist_daily = cargar_alejandro_hoja("CHECKLIST_DAILY")
+                    st.info("ℹ️ Este pedido ya está marcado como CANCELADO.")
 
-                # rebuild chk_hoy para dashboard tras recarga
-                chk_hoy = df_checklist_daily.copy()
-                if "Fecha" in chk_hoy.columns:
-                    chk_hoy["_f"] = _to_date(chk_hoy["Fecha"])
-                    chk_hoy = chk_hoy[chk_hoy["_f"] == hoy].copy()
-                else:
-                    chk_hoy = chk_hoy.iloc[0:0]
-            except Exception as e:
-                st.warning(f"⚠️ No se pudo sincronizar checklist diario: {e}")
 
-        # --- CITAS HOY + SEGUIMIENTOS PENDIENTES ---
-        citas = df_citas.copy()
-        if "Fecha_Inicio" in citas.columns:
-            citas["_fi"] = _to_dt(citas["Fecha_Inicio"])
-            citas_hoy = citas[citas["_fi"].dt.date == hoy].copy()
-            citas_hoy = citas_hoy.sort_values("_fi", ascending=True)
+            if source_sel == "casos":
+                completado = row.get("Completados_Limpiado", "")
+                with st.expander("👁 Visibilidad en Pantalla de Producción — Mostrar u ocultar", expanded=False):
+                    opciones_visibilidad = {"Sí": "", "No": "sí"}
+                    valor_actual = completado.strip().lower()
+                    valor_preseleccionado = "No" if valor_actual == "sí" else "Sí"
+                    seleccion = st.selectbox("¿Mostrar este pedido en el Panel?", list(opciones_visibilidad.keys()), index=list(opciones_visibilidad.keys()).index(valor_preseleccionado))
+                    nuevo_valor_completado = opciones_visibilidad[seleccion]
 
-            tipo_seg = citas.get("Tipo", "").astype(str).str.lower().str.contains("seguimiento", na=False)
-            estatus_ci = citas.get("Estatus", "").astype(str).str.lower()
-            estatus_pend = ~estatus_ci.isin(["realizada", "cancelada"])
-            seguimientos_pend = citas[tipo_seg & estatus_pend].copy()
-            seguimientos_pend = seguimientos_pend.sort_values("_fi", ascending=True)
-        else:
-            citas_hoy = citas.iloc[0:0]
-            seguimientos_pend = citas.iloc[0:0]
 
-        # --- TAREAS (HOY / VENCIDAS) ---
-        tareas = df_tareas.copy()
-        if "Fecha_Limite" in tareas.columns:
-            tareas["_fl"] = _to_dt(tareas["Fecha_Limite"])
-            tareas_hoy = tareas[tareas["_fl"].dt.date == hoy].copy()
-            tareas_vencidas = tareas[(tareas["_fl"].dt.date < hoy) & (tareas["Estatus"].astype(str).str.lower() != "completada")].copy()
-            tareas_hoy = tareas_hoy.sort_values("_fl", ascending=True)
-            tareas_vencidas = tareas_vencidas.sort_values("_fl", ascending=True)
+                    if st.button("👁 Guardar visibilidad en Panel"):
+                        if actualizar_celdas_y_confirmar(
+                            [("Completados_Limpiado", nuevo_valor_completado)],
+                            "👁 Visibilidad en pantalla de producción actualizada.",
+                        ):
+                            st.rerun()
 
-            tareas_hoy_total = len(tareas_hoy)
-            tareas_hoy_done = (tareas_hoy["Estatus"].astype(str).str.lower() == "completada").sum()
-            tareas_hoy_pct = round((tareas_hoy_done / tareas_hoy_total) * 100, 1) if tareas_hoy_total else 0
-        else:
-            tareas_hoy = tareas.iloc[0:0]
-            tareas_vencidas = tareas.iloc[0:0]
-            tareas_hoy_total, tareas_hoy_done, tareas_hoy_pct = 0, 0, 0
 
-        # --- COTIZACIONES (PENDIENTES / VENCIDAS DE SEGUIMIENTO) ---
-        cot = df_cot.copy()
-        if "Fecha_Proximo_Seguimiento" in cot.columns:
-            cot["_fps"] = _to_dt(cot["Fecha_Proximo_Seguimiento"])
-            est = cot.get("Estatus", "").astype(str).str.lower()
-            no_cerradas = ~est.str.contains("ganada|perdida", na=False)
-            cot_pend = cot[no_cerradas].copy()
-            cot_venc = cot_pend[cot_pend["_fps"].notna() & (cot_pend["_fps"].dt.date < hoy)].copy()
-            cot_pend = cot_pend.sort_values("_fps", ascending=True)
-            cot_venc = cot_venc.sort_values("_fps", ascending=True)
-        else:
-            cot_pend = cot.iloc[0:0]
-            cot_venc = cot.iloc[0:0]
+if "🗂️ Organizador (Alejandro)" in tabs_render:
+    # ===== ORGANIZADOR ALEJANDRO =====
+    with tabs_render["🗂️ Organizador (Alejandro)"]:
+        st.header("🗂️ Organizador (Alejandro)")
 
-        # --- RECORDATORIOS DE CITA ACTIVOS ---
-        recordatorios_activos = pd.DataFrame()
-        if not df_citas.empty and "Fecha_Inicio" in df_citas.columns:
-            recordatorios_activos = df_citas.copy()
-            recordatorios_activos["_fi"] = _to_dt(recordatorios_activos["Fecha_Inicio"])
-            mins = pd.to_numeric(recordatorios_activos.get("Reminder_Minutes_Before", 0), errors="coerce").fillna(0)
-            recordatorios_activos["_inicio_recordatorio"] = recordatorios_activos["_fi"] - pd.to_timedelta(mins, unit="m")
-            now_ts = pd.Timestamp(datetime.now())
-            estatus_ci = recordatorios_activos.get("Estatus", "").astype(str).str.lower()
-            status_rem = recordatorios_activos.get("Reminder_Status", "").astype(str).str.lower()
-            activos = (
-                (mins > 0)
-                & recordatorios_activos["_fi"].notna()
-                & (recordatorios_activos["_inicio_recordatorio"] <= now_ts)
-                & (recordatorios_activos["_fi"] >= now_ts)
-                & (~estatus_ci.isin(["realizada", "cancelada"]))
-                & (~status_rem.isin(["enviado", "atendido"]))
-            )
-            recordatorios_activos = recordatorios_activos[activos].sort_values("_fi", ascending=True)
+        st.caption(f"Usuario activo: {usuario_activo['usuario']}")
 
-        # --- CHECKLIST (% cumplimiento del día) ---
-        chk = df_checklist_daily.copy()
-        if "Fecha" in chk.columns:
-            chk["_f"] = _to_date(chk["Fecha"])
-            chk_hoy = chk[chk["_f"] == hoy].copy()
-            if not chk_hoy.empty and "Completado" in chk_hoy.columns:
-                total = len(chk_hoy)
-                done = (chk_hoy["Completado"].astype(str).str.lower().isin(["1","true","sí","si","x","ok","✅"])).sum()
-                pct = round((done / total) * 100, 1) if total else 0
+        if st.button("🔄 Refrescar Organizador", key="refresh_alejandro"):
+            st.rerun()
+
+        # --- Subpestañas internas del organizador ---
+        sub = st.tabs(["Hoy", "Agenda", "Pendientes", "Cotizaciones", "Checklist", "Config"])
+
+        errores_alejandro = []
+
+        try:
+            df_citas = cargar_alejandro_hoja("CITAS")
+        except Exception as e:
+            errores_alejandro.append(f"CITAS: {e}")
+            df_citas = pd.DataFrame(columns=ALE_COLUMNAS.get("CITAS", []))
+
+        try:
+            df_tareas = cargar_alejandro_hoja("TAREAS")
+        except Exception as e:
+            errores_alejandro.append(f"TAREAS: {e}")
+            df_tareas = pd.DataFrame(columns=ALE_COLUMNAS.get("TAREAS", []))
+
+        try:
+            df_cot = cargar_alejandro_hoja("COTIZACIONES")
+        except Exception as e:
+            errores_alejandro.append(f"COTIZACIONES: {e}")
+            df_cot = pd.DataFrame(columns=ALE_COLUMNAS.get("COTIZACIONES", []))
+
+        try:
+            df_checklist_daily = cargar_alejandro_hoja("CHECKLIST_DAILY")
+        except Exception as e:
+            errores_alejandro.append(f"CHECKLIST_DAILY: {e}")
+            df_checklist_daily = pd.DataFrame(columns=ALE_COLUMNAS.get("CHECKLIST_DAILY", []))
+
+        try:
+            df_checklist_template = cargar_alejandro_hoja("CHECKLIST_TEMPLATE")
+        except Exception as e:
+            errores_alejandro.append(f"CHECKLIST_TEMPLATE: {e}")
+            df_checklist_template = pd.DataFrame(columns=ALE_COLUMNAS.get("CHECKLIST_TEMPLATE", []))
+
+        try:
+            df_config = cargar_alejandro_hoja("CONFIG")
+        except Exception as e:
+            errores_alejandro.append(f"CONFIG: {e}")
+            df_config = pd.DataFrame(columns=ALE_COLUMNAS.get("CONFIG", []))
+
+        if errores_alejandro:
+            st.warning("⚠️ Hay errores leyendo alejandro_data. Ve a Config > Diagnóstico para detalle.")
+
+        with sub[0]:
+            st.subheader("📌 Hoy")
+
+            hoy = date.today()
+            # chk_hoy base (por si no se sincroniza en este rerun)
+            chk_hoy = df_checklist_daily.copy()
+            if "Fecha" in chk_hoy.columns:
+                chk_hoy["_f"] = _to_date(chk_hoy["Fecha"])
+                chk_hoy = chk_hoy[chk_hoy["_f"] == hoy].copy()
             else:
-                total, done, pct = 0, 0, 0
-        else:
-            chk_hoy = chk.iloc[0:0]
-            total, done, pct = 0, 0, 0
+                chk_hoy = chk_hoy.iloc[0:0]
 
-        # ===== RESUMEN (KPIs) =====
-        k1, k2, k3, k4, k5, k6 = st.columns(6)
-        k1.metric("📅 Citas hoy", len(citas_hoy))
-        k2.metric("✅ Pendientes hoy", len(tareas_hoy))
-        k3.metric("⏰ Pendientes vencidos", len(tareas_vencidas))
-        k4.metric("🔁 Seguimientos pendientes", len(seguimientos_pend))
-        k5.metric("📈 Cumplimiento pendientes de hoy", f"{tareas_hoy_pct}%")
-        k6.metric("💰 Cotizaciones pendientes", len(cot_pend))
+            key_sync = f"chk_sync_{hoy.isoformat()}"
+            if key_sync not in st.session_state:
+                st.session_state[key_sync] = False
 
-        k7 = st.columns(1)[0]
-        k7.metric("🧾 Checklist hoy", f"{pct}%")
+            sync_clicked = st.button("🔄 Sincronizar checklist de hoy", key=f"btn_sync_chk_hoy_{hoy.isoformat()}")
 
-        st.markdown("---")
-
-        # ===== DETALLES =====
-        st.markdown("### 📅 Citas de hoy")
-        if citas_hoy.empty:
-            st.info("Sin citas para hoy.")
-        else:
-            cols = [c for c in ["Fecha_Inicio","Cliente_Persona","Empresa_Clinica","Tipo","Prioridad","Estatus","Notas"] if c in citas_hoy.columns]
-            st.dataframe(citas_hoy[cols], use_container_width=True)
-
-        st.markdown("### 🔁 Seguimientos pendientes")
-        if seguimientos_pend.empty:
-            st.info("No hay citas de seguimiento pendientes.")
-        else:
-            cols = [c for c in ["Fecha_Inicio","Cliente_Persona","Empresa_Clinica","Tipo","Prioridad","Estatus","Notas"] if c in seguimientos_pend.columns]
-            st.dataframe(seguimientos_pend[cols], use_container_width=True)
-
-        st.markdown("### ✅ Pendientes de hoy")
-        if tareas_hoy.empty:
-            st.info("Sin pendientes para hoy.")
-        else:
-            cols = [c for c in ["Fecha_Limite","Titulo","Prioridad","Estatus","Cliente_Relacionado","Cotizacion_Folio_Relacionado"] if c in tareas_hoy.columns]
-            st.dataframe(tareas_hoy[cols], use_container_width=True)
-
-        st.markdown("### ⏰ Pendientes vencidos")
-        if tareas_vencidas.empty:
-            st.info("No hay pendientes vencidos 🎉")
-        else:
-            cols = [c for c in ["Fecha_Limite","Titulo","Prioridad","Estatus","Cliente_Relacionado"] if c in tareas_vencidas.columns]
-            st.dataframe(tareas_vencidas[cols], use_container_width=True)
-
-        st.markdown("### 💰 Cotizaciones vencidas de seguimiento")
-        if cot_venc.empty:
-            st.info("No hay cotizaciones vencidas de seguimiento 🎉")
-        else:
-            cols = [c for c in ["Folio","Fecha_Cotizacion","Cliente","Monto","Estatus","Fecha_Proximo_Seguimiento","Notas"] if c in cot_venc.columns]
-            st.dataframe(cot_venc[cols], use_container_width=True)
-
-        st.markdown("### ⏱️ Recordatorios de citas activos")
-        if recordatorios_activos.empty:
-            st.info("No hay recordatorios activos por atender en este momento.")
-        else:
-            cols = [c for c in ["Cita_ID","Fecha_Inicio","Cliente_Persona","Tipo","Reminder_Minutes_Before","Reminder_Status","Estatus"] if c in recordatorios_activos.columns]
-            st.dataframe(recordatorios_activos[cols], use_container_width=True)
-
-        st.markdown("### 🧾 Checklist de hoy")
-        if chk_hoy.empty:
-            st.info("No hay checklist cargado para hoy (aún).")
-        else:
-            cols = [c for c in ["Item","Completado","Completado_At","Notas"] if c in chk_hoy.columns]
-            st.dataframe(chk_hoy[cols], use_container_width=True)
-
-        st.markdown("### 🔔 Alertas y recordatorios")
-        for level, msg in build_hoy_alerts(hoy, df_citas, df_tareas, df_cot, chk_hoy, df_config):
-            if level == "error":
-                st.error(f"🚨 {msg}")
-            elif level == "warning":
-                st.warning(f"⚠️ {msg}")
-            else:
-                st.info(f"ℹ️ {msg}")
-
-    with sub[1]:
-        st.subheader("📅 Agenda")
-
-        with st.form("form_nueva_cita", clear_on_submit=True):
-            st.markdown("### ➕ Nueva cita")
-
-            col1, col2 = st.columns(2)
-            with col1:
-                fecha = st.date_input("Fecha", value=date.today(), format="DD/MM/YYYY")
-            with col2:
-                hora = st.time_input("Hora", value=datetime.now().time().replace(second=0, microsecond=0))
-
-            col3, col4 = st.columns(2)
-            with col3:
-                duracion_min = st.number_input("Duración (min)", min_value=15, max_value=480, value=60, step=15)
-            with col4:
-                prioridad = st.selectbox("Prioridad", ["Alta", "Media", "Baja"], index=1)
-
-            cliente_persona = st.text_input("Cliente / persona")
-            empresa = st.text_input("Empresa o clínica (opcional)")
-
-            tipo = st.selectbox("Tipo", ["Visita", "Llamada", "Junta", "Seguimiento"], index=2)
-            estatus = st.selectbox("Estatus", ["Programada", "Realizada", "Reprogramada", "Cancelada"], index=0)
-            notas = st.text_area("Notas (opcional)", height=90)
-
-            reminder = st.number_input("Recordatorio (min antes)", min_value=0, max_value=240, value=30, step=5)
-
-            submitted_cita = st.form_submit_button("✅ Crear cita")
-
-        if submitted_cita:
-            if not cliente_persona.strip():
-                st.error("❌ Cliente/persona es obligatorio.")
-            else:
+            # Sincroniza checklist recurrente del día (solo 1 vez por sesión/día o por botón)
+            if sync_clicked or not st.session_state[key_sync]:
                 try:
-                    start_dt = datetime.combine(fecha, hora)
-                    end_dt = start_dt + timedelta(minutes=int(duracion_min))
+                    inserted = ensure_daily_checklist_items(hoy, df_checklist_template, df_checklist_daily)
+                    st.session_state[key_sync] = True
+                    if inserted > 0:
+                        st.success(f"🧾 Se generaron {inserted} ítem(s) de checklist para hoy.")
+                    else:
+                        st.info("🧾 Checklist de hoy ya estaba sincronizado.")
+                    df_checklist_daily = cargar_alejandro_hoja("CHECKLIST_DAILY")
 
-                    cita_id = new_id("CITA")
-                    payload = {
-                        "Cita_ID": cita_id,
-                        "Created_At": now_iso(),
-                        "Created_By": "ALEJANDRO",
-                        "Fecha_Inicio": start_dt.strftime("%Y-%m-%d %H:%M:%S"),
-                        "Fecha_Fin": end_dt.strftime("%Y-%m-%d %H:%M:%S"),
-                        "Cliente_Persona": cliente_persona.strip(),
-                        "Empresa_Clinica": empresa.strip(),
-                        "Tipo": tipo,
-                        "Prioridad": prioridad,
-                        "Estatus": estatus,
-                        "Notas": notas.strip(),
-                        "Lugar": "",
-                        "Telefono": "",
-                        "Correo": "",
-                        "Reminder_Minutes_Before": str(int(reminder)),
-                        "Reminder_Status": "Pendiente" if int(reminder) > 0 else "N/A",
-                        "Last_Updated_At": now_iso(),
-                        "Last_Updated_By": "ALEJANDRO",
-                        "Is_Deleted": "0",
-                    }
-                    safe_append("CITAS", payload)
-                    st.success(f"🎈 Cita creada: {cita_id}")
-                    st.rerun()
+                    # rebuild chk_hoy para dashboard tras recarga
+                    chk_hoy = df_checklist_daily.copy()
+                    if "Fecha" in chk_hoy.columns:
+                        chk_hoy["_f"] = _to_date(chk_hoy["Fecha"])
+                        chk_hoy = chk_hoy[chk_hoy["_f"] == hoy].copy()
+                    else:
+                        chk_hoy = chk_hoy.iloc[0:0]
                 except Exception as e:
-                    st.error(f"❌ Error creando cita: {e}")
+                    st.warning(f"⚠️ No se pudo sincronizar checklist diario: {e}")
 
-        st.markdown("### 📋 Agenda")
-        agenda_view = df_citas.copy()
-        if "Fecha_Inicio" in agenda_view.columns:
-            agenda_view["_fi"] = _to_dt(agenda_view["Fecha_Inicio"])
-            agenda_hoy = agenda_view[agenda_view["_fi"].dt.date == date.today()].copy()
-            fin_semana = date.today() + timedelta(days=7)
-            agenda_semana = agenda_view[
-                agenda_view["_fi"].dt.date.between(date.today(), fin_semana)
-            ].copy()
-            agenda_hoy = agenda_hoy.sort_values("_fi", ascending=True)
-            agenda_semana = agenda_semana.sort_values("_fi", ascending=True)
-        else:
-            agenda_hoy = agenda_view.iloc[0:0]
-            agenda_semana = agenda_view.iloc[0:0]
+            # --- CITAS HOY + SEGUIMIENTOS PENDIENTES ---
+            citas = df_citas.copy()
+            if "Fecha_Inicio" in citas.columns:
+                citas["_fi"] = _to_dt(citas["Fecha_Inicio"])
+                citas_hoy = citas[citas["_fi"].dt.date == hoy].copy()
+                citas_hoy = citas_hoy.sort_values("_fi", ascending=True)
 
-        tab_agenda_hoy, tab_agenda_semana, tab_agenda_todo = st.tabs(["Hoy", "Semana", "Todo"])
-        with tab_agenda_hoy:
-            if agenda_hoy.empty:
+                tipo_seg = citas.get("Tipo", "").astype(str).str.lower().str.contains("seguimiento", na=False)
+                estatus_ci = citas.get("Estatus", "").astype(str).str.lower()
+                estatus_pend = ~estatus_ci.isin(["realizada", "cancelada"])
+                seguimientos_pend = citas[tipo_seg & estatus_pend].copy()
+                seguimientos_pend = seguimientos_pend.sort_values("_fi", ascending=True)
+            else:
+                citas_hoy = citas.iloc[0:0]
+                seguimientos_pend = citas.iloc[0:0]
+
+            # --- TAREAS (HOY / VENCIDAS) ---
+            tareas = df_tareas.copy()
+            if "Fecha_Limite" in tareas.columns:
+                tareas["_fl"] = _to_dt(tareas["Fecha_Limite"])
+                tareas_hoy = tareas[tareas["_fl"].dt.date == hoy].copy()
+                tareas_vencidas = tareas[(tareas["_fl"].dt.date < hoy) & (tareas["Estatus"].astype(str).str.lower() != "completada")].copy()
+                tareas_hoy = tareas_hoy.sort_values("_fl", ascending=True)
+                tareas_vencidas = tareas_vencidas.sort_values("_fl", ascending=True)
+
+                tareas_hoy_total = len(tareas_hoy)
+                tareas_hoy_done = (tareas_hoy["Estatus"].astype(str).str.lower() == "completada").sum()
+                tareas_hoy_pct = round((tareas_hoy_done / tareas_hoy_total) * 100, 1) if tareas_hoy_total else 0
+            else:
+                tareas_hoy = tareas.iloc[0:0]
+                tareas_vencidas = tareas.iloc[0:0]
+                tareas_hoy_total, tareas_hoy_done, tareas_hoy_pct = 0, 0, 0
+
+            # --- COTIZACIONES (PENDIENTES / VENCIDAS DE SEGUIMIENTO) ---
+            cot = df_cot.copy()
+            if "Fecha_Proximo_Seguimiento" in cot.columns:
+                cot["_fps"] = _to_dt(cot["Fecha_Proximo_Seguimiento"])
+                est = cot.get("Estatus", "").astype(str).str.lower()
+                no_cerradas = ~est.str.contains("ganada|perdida", na=False)
+                cot_pend = cot[no_cerradas].copy()
+                cot_venc = cot_pend[cot_pend["_fps"].notna() & (cot_pend["_fps"].dt.date < hoy)].copy()
+                cot_pend = cot_pend.sort_values("_fps", ascending=True)
+                cot_venc = cot_venc.sort_values("_fps", ascending=True)
+            else:
+                cot_pend = cot.iloc[0:0]
+                cot_venc = cot.iloc[0:0]
+
+            # --- RECORDATORIOS DE CITA ACTIVOS ---
+            recordatorios_activos = pd.DataFrame()
+            if not df_citas.empty and "Fecha_Inicio" in df_citas.columns:
+                recordatorios_activos = df_citas.copy()
+                recordatorios_activos["_fi"] = _to_dt(recordatorios_activos["Fecha_Inicio"])
+                mins = pd.to_numeric(recordatorios_activos.get("Reminder_Minutes_Before", 0), errors="coerce").fillna(0)
+                recordatorios_activos["_inicio_recordatorio"] = recordatorios_activos["_fi"] - pd.to_timedelta(mins, unit="m")
+                now_ts = pd.Timestamp(datetime.now())
+                estatus_ci = recordatorios_activos.get("Estatus", "").astype(str).str.lower()
+                status_rem = recordatorios_activos.get("Reminder_Status", "").astype(str).str.lower()
+                activos = (
+                    (mins > 0)
+                    & recordatorios_activos["_fi"].notna()
+                    & (recordatorios_activos["_inicio_recordatorio"] <= now_ts)
+                    & (recordatorios_activos["_fi"] >= now_ts)
+                    & (~estatus_ci.isin(["realizada", "cancelada"]))
+                    & (~status_rem.isin(["enviado", "atendido"]))
+                )
+                recordatorios_activos = recordatorios_activos[activos].sort_values("_fi", ascending=True)
+
+            # --- CHECKLIST (% cumplimiento del día) ---
+            chk = df_checklist_daily.copy()
+            if "Fecha" in chk.columns:
+                chk["_f"] = _to_date(chk["Fecha"])
+                chk_hoy = chk[chk["_f"] == hoy].copy()
+                if not chk_hoy.empty and "Completado" in chk_hoy.columns:
+                    total = len(chk_hoy)
+                    done = (chk_hoy["Completado"].astype(str).str.lower().isin(["1","true","sí","si","x","ok","✅"])).sum()
+                    pct = round((done / total) * 100, 1) if total else 0
+                else:
+                    total, done, pct = 0, 0, 0
+            else:
+                chk_hoy = chk.iloc[0:0]
+                total, done, pct = 0, 0, 0
+
+            # ===== RESUMEN (KPIs) =====
+            k1, k2, k3, k4, k5, k6 = st.columns(6)
+            k1.metric("📅 Citas hoy", len(citas_hoy))
+            k2.metric("✅ Pendientes hoy", len(tareas_hoy))
+            k3.metric("⏰ Pendientes vencidos", len(tareas_vencidas))
+            k4.metric("🔁 Seguimientos pendientes", len(seguimientos_pend))
+            k5.metric("📈 Cumplimiento pendientes de hoy", f"{tareas_hoy_pct}%")
+            k6.metric("💰 Cotizaciones pendientes", len(cot_pend))
+
+            k7 = st.columns(1)[0]
+            k7.metric("🧾 Checklist hoy", f"{pct}%")
+
+            st.markdown("---")
+
+            # ===== DETALLES =====
+            st.markdown("### 📅 Citas de hoy")
+            if citas_hoy.empty:
                 st.info("Sin citas para hoy.")
             else:
-                cols = [c for c in ["Fecha_Inicio","Cliente_Persona","Empresa_Clinica","Tipo","Prioridad","Estatus","Reminder_Minutes_Before","Reminder_Status"] if c in agenda_hoy.columns]
-                st.dataframe(agenda_hoy[cols], use_container_width=True)
-        with tab_agenda_semana:
-            if agenda_semana.empty:
-                st.info("Sin citas para los próximos 7 días.")
+                cols = [c for c in ["Fecha_Inicio","Cliente_Persona","Empresa_Clinica","Tipo","Prioridad","Estatus","Notas"] if c in citas_hoy.columns]
+                st.dataframe(citas_hoy[cols], use_container_width=True)
+
+            st.markdown("### 🔁 Seguimientos pendientes")
+            if seguimientos_pend.empty:
+                st.info("No hay citas de seguimiento pendientes.")
             else:
-                cols = [c for c in ["Fecha_Inicio","Cliente_Persona","Empresa_Clinica","Tipo","Prioridad","Estatus","Reminder_Minutes_Before","Reminder_Status"] if c in agenda_semana.columns]
-                st.dataframe(agenda_semana[cols], use_container_width=True)
-        with tab_agenda_todo:
-            st.dataframe(df_citas, use_container_width=True)
+                cols = [c for c in ["Fecha_Inicio","Cliente_Persona","Empresa_Clinica","Tipo","Prioridad","Estatus","Notas"] if c in seguimientos_pend.columns]
+                st.dataframe(seguimientos_pend[cols], use_container_width=True)
 
-    with sub[2]:
-        st.subheader("✅ Pendientes")
-
-        # ===== Alta rápida =====
-        with st.form("form_nueva_tarea", clear_on_submit=True):
-            st.markdown("### ➕ Nuevo pendiente")
-            titulo = st.text_input("Título", placeholder="Ej. Llamar a cliente X")
-            descripcion = st.text_area("Descripción", placeholder="Detalles…", height=90)
-
-            col1, col2, col3 = st.columns(3)
-            with col1:
-                fecha_limite = st.date_input("Fecha límite", value=date.today(), format="DD/MM/YYYY")
-            with col2:
-                prioridad = st.selectbox("Prioridad", ["Alta", "Media", "Baja"], index=1)
-            with col3:
-                estatus = st.selectbox("Estatus", ["Pendiente", "Completada"], index=0)
-
-            col4, col5 = st.columns(2)
-            with col4:
-                cliente_rel = st.text_input("Cliente relacionado (opcional)")
-            with col5:
-                folio_cot = st.text_input("Folio cotización (opcional)")
-
-            submitted = st.form_submit_button("✅ Crear pendiente")
-
-        if submitted:
-            if not titulo.strip():
-                st.error("❌ El título es obligatorio.")
+            st.markdown("### ✅ Pendientes de hoy")
+            if tareas_hoy.empty:
+                st.info("Sin pendientes para hoy.")
             else:
-                try:
-                    tarea_id = new_id("TAREA")
-                    payload = {
-                        "Tarea_ID": tarea_id,
-                        "Created_At": now_iso(),
-                        "Created_By": "ALEJANDRO",
-                        "Titulo": titulo.strip(),
-                        "Descripcion": descripcion.strip(),
-                        "Fecha_Limite": fecha_limite.strftime("%Y-%m-%d"),
-                        "Prioridad": prioridad,
-                        "Estatus": estatus,
-                        "Cliente_Relacionado": cliente_rel.strip(),
-                        "Cotizacion_Folio_Relacionado": folio_cot.strip(),
-                        "Tipo": "Pendiente",
-                        "Fecha_Completado": now_iso() if estatus.lower() == "completada" else "",
-                        "Notas_Resultado": "",
-                        "Last_Updated_At": now_iso(),
-                        "Last_Updated_By": "ALEJANDRO",
-                        "Is_Deleted": "0",
-                    }
-                    safe_append("TAREAS", payload)
-                    st.success(f"🎈 Pendiente creado: {tarea_id}")
-                    st.rerun()
-                except Exception as e:
-                    st.error(f"❌ Error creando pendiente: {e}")
+                cols = [c for c in ["Fecha_Limite","Titulo","Prioridad","Estatus","Cliente_Relacionado","Cotizacion_Folio_Relacionado"] if c in tareas_hoy.columns]
+                st.dataframe(tareas_hoy[cols], use_container_width=True)
 
-        st.markdown("---")
-        st.markdown("### ✅ Completar / Reabrir pendiente")
+            st.markdown("### ⏰ Pendientes vencidos")
+            if tareas_vencidas.empty:
+                st.info("No hay pendientes vencidos 🎉")
+            else:
+                cols = [c for c in ["Fecha_Limite","Titulo","Prioridad","Estatus","Cliente_Relacionado"] if c in tareas_vencidas.columns]
+                st.dataframe(tareas_vencidas[cols], use_container_width=True)
 
-        # Normaliza columnas básicas por si vienen vacías
-        df_tareas["_id"] = df_tareas.get("Tarea_ID", "").astype(str)
-        df_tareas["_titulo"] = df_tareas.get("Titulo", "").astype(str)
-        df_tareas["_estatus"] = df_tareas.get("Estatus", "").astype(str)
-        df_tareas["_fecha_limite"] = df_tareas.get("Fecha_Limite", "").astype(str)
+            st.markdown("### 💰 Cotizaciones vencidas de seguimiento")
+            if cot_venc.empty:
+                st.info("No hay cotizaciones vencidas de seguimiento 🎉")
+            else:
+                cols = [c for c in ["Folio","Fecha_Cotizacion","Cliente","Monto","Estatus","Fecha_Proximo_Seguimiento","Notas"] if c in cot_venc.columns]
+                st.dataframe(cot_venc[cols], use_container_width=True)
 
-        # Opcional: filtrar no borradas
-        if "Is_Deleted" in df_tareas.columns:
-            df_tareas = df_tareas[df_tareas["Is_Deleted"].astype(str).fillna("") != "1"]
+            st.markdown("### ⏱️ Recordatorios de citas activos")
+            if recordatorios_activos.empty:
+                st.info("No hay recordatorios activos por atender en este momento.")
+            else:
+                cols = [c for c in ["Cita_ID","Fecha_Inicio","Cliente_Persona","Tipo","Reminder_Minutes_Before","Reminder_Status","Estatus"] if c in recordatorios_activos.columns]
+                st.dataframe(recordatorios_activos[cols], use_container_width=True)
 
-        # Lista ordenada: pendientes primero, luego por fecha límite
-        try:
-            df_tareas["_fecha_dt"] = pd.to_datetime(df_tareas["_fecha_limite"], errors="coerce")
-        except Exception:
-            df_tareas["_fecha_dt"] = pd.NaT
+            st.markdown("### 🧾 Checklist de hoy")
+            if chk_hoy.empty:
+                st.info("No hay checklist cargado para hoy (aún).")
+            else:
+                cols = [c for c in ["Item","Completado","Completado_At","Notas"] if c in chk_hoy.columns]
+                st.dataframe(chk_hoy[cols], use_container_width=True)
 
-        df_tareas_view = df_tareas.copy()
-        df_tareas_view["_pend"] = df_tareas_view["_estatus"].str.lower().ne("completada")
-        df_tareas_view = df_tareas_view.sort_values(by=["_pend", "_fecha_dt"], ascending=[False, True])
+            st.markdown("### 🔔 Alertas y recordatorios")
+            for level, msg in build_hoy_alerts(hoy, df_citas, df_tareas, df_cot, chk_hoy, df_config):
+                if level == "error":
+                    st.error(f"🚨 {msg}")
+                elif level == "warning":
+                    st.warning(f"⚠️ {msg}")
+                else:
+                    st.info(f"ℹ️ {msg}")
 
-        opciones = [o for o in df_tareas_view["_id"].tolist() if str(o).strip()]
+        with sub[1]:
+            st.subheader("📅 Agenda")
 
-        def format_tarea(tid):
-            r = df_tareas_view[df_tareas_view["_id"] == tid].iloc[0]
-            est = r.get("_estatus", "")
-            fec = r.get("_fecha_limite", "")
-            tit = r.get("_titulo", "")
-            return f"{tid} | {est} | {fec} | {tit}"
+            with st.form("form_nueva_cita", clear_on_submit=True):
+                st.markdown("### ➕ Nueva cita")
 
-        if not opciones:
-            st.info("No hay pendientes disponibles para actualizar.")
-            tarea_sel = None
-        else:
-            tarea_sel = st.selectbox("Selecciona un pendiente:", opciones, format_func=format_tarea, key="tarea_sel_update")
+                col1, col2 = st.columns(2)
+                with col1:
+                    fecha = st.date_input("Fecha", value=date.today(), format="DD/MM/YYYY")
+                with col2:
+                    hora = st.time_input("Hora", value=datetime.now().time().replace(second=0, microsecond=0))
 
-        if tarea_sel:
-            colA, colB = st.columns(2)
+                col3, col4 = st.columns(2)
+                with col3:
+                    duracion_min = st.number_input("Duración (min)", min_value=15, max_value=480, value=60, step=15)
+                with col4:
+                    prioridad = st.selectbox("Prioridad", ["Alta", "Media", "Baja"], index=1)
 
-            with colA:
-                if st.button("✅ Marcar como COMPLETADA", use_container_width=True):
+                cliente_persona = st.text_input("Cliente / persona")
+                empresa = st.text_input("Empresa o clínica (opcional)")
+
+                tipo = st.selectbox("Tipo", ["Visita", "Llamada", "Junta", "Seguimiento"], index=2)
+                estatus = st.selectbox("Estatus", ["Programada", "Realizada", "Reprogramada", "Cancelada"], index=0)
+                notas = st.text_area("Notas (opcional)", height=90)
+
+                reminder = st.number_input("Recordatorio (min antes)", min_value=0, max_value=240, value=30, step=5)
+
+                submitted_cita = st.form_submit_button("✅ Crear cita")
+
+            if submitted_cita:
+                if not cliente_persona.strip():
+                    st.error("❌ Cliente/persona es obligatorio.")
+                else:
                     try:
-                        ok = safe_update_by_id(
-                            "TAREAS",
-                            id_col="Tarea_ID",
-                            id_value=tarea_sel,
-                            updates={
-                                "Estatus": "Completada",
-                                "Fecha_Completado": now_iso(),
-                                "Last_Updated_At": now_iso(),
-                                "Last_Updated_By": "ALEJANDRO",
-                            }
-                        )
-                        if ok:
-                            st.success("🎈 Pendiente marcado como completado.")
-                            st.rerun()
+                        start_dt = datetime.combine(fecha, hora)
+                        end_dt = start_dt + timedelta(minutes=int(duracion_min))
+
+                        cita_id = new_id("CITA")
+                        payload = {
+                            "Cita_ID": cita_id,
+                            "Created_At": now_iso(),
+                            "Created_By": "ALEJANDRO",
+                            "Fecha_Inicio": start_dt.strftime("%Y-%m-%d %H:%M:%S"),
+                            "Fecha_Fin": end_dt.strftime("%Y-%m-%d %H:%M:%S"),
+                            "Cliente_Persona": cliente_persona.strip(),
+                            "Empresa_Clinica": empresa.strip(),
+                            "Tipo": tipo,
+                            "Prioridad": prioridad,
+                            "Estatus": estatus,
+                            "Notas": notas.strip(),
+                            "Lugar": "",
+                            "Telefono": "",
+                            "Correo": "",
+                            "Reminder_Minutes_Before": str(int(reminder)),
+                            "Reminder_Status": "Pendiente" if int(reminder) > 0 else "N/A",
+                            "Last_Updated_At": now_iso(),
+                            "Last_Updated_By": "ALEJANDRO",
+                            "Is_Deleted": "0",
+                        }
+                        safe_append("CITAS", payload)
+                        st.success(f"🎈 Cita creada: {cita_id}")
+                        st.rerun()
                     except Exception as e:
-                        st.error(f"❌ Error actualizando pendiente: {e}")
+                        st.error(f"❌ Error creando cita: {e}")
 
-            with colB:
-                if st.button("↩️ Reabrir (PENDIENTE)", use_container_width=True):
-                    try:
-                        ok = safe_update_by_id(
-                            "TAREAS",
-                            id_col="Tarea_ID",
-                            id_value=tarea_sel,
-                            updates={
-                                "Estatus": "Pendiente",
-                                "Fecha_Completado": "",
-                                "Last_Updated_At": now_iso(),
-                                "Last_Updated_By": "ALEJANDRO",
-                            }
-                        )
-                        if ok:
-                            st.success("🎈 Pendiente reabierto (Pendiente).")
-                            st.rerun()
-                    except Exception as e:
-                        st.error(f"❌ Error reabriendo pendiente: {e}")
-
-        st.markdown("### 📋 Lista")
-        tareas_lista = df_tareas.copy()
-        if "Fecha_Limite" in tareas_lista.columns:
-            tareas_lista["_fl"] = _to_dt(tareas_lista["Fecha_Limite"])
-            hoy_t = date.today()
-            estado_t = tareas_lista.get("Estatus", "").astype(str).str.lower()
-            tareas_hoy_tab = tareas_lista[tareas_lista["_fl"].dt.date == hoy_t].copy()
-            tareas_vencidas_tab = tareas_lista[(tareas_lista["_fl"].dt.date < hoy_t) & (estado_t != "completada")].copy()
-            tareas_proximas_tab = tareas_lista[(tareas_lista["_fl"].dt.date > hoy_t) & (estado_t != "completada")].copy()
-            tareas_hoy_tab = tareas_hoy_tab.sort_values("_fl", ascending=True)
-            tareas_vencidas_tab = tareas_vencidas_tab.sort_values("_fl", ascending=True)
-            tareas_proximas_tab = tareas_proximas_tab.sort_values("_fl", ascending=True)
-        else:
-            tareas_hoy_tab = tareas_lista.iloc[0:0]
-            tareas_vencidas_tab = tareas_lista.iloc[0:0]
-            tareas_proximas_tab = tareas_lista.iloc[0:0]
-
-        tab_t_hoy, tab_t_venc, tab_t_prox, tab_t_todo = st.tabs(["Hoy", "Vencidas", "Próximas", "Todo"])
-        with tab_t_hoy:
-            st.dataframe(tareas_hoy_tab, use_container_width=True)
-        with tab_t_venc:
-            st.dataframe(tareas_vencidas_tab, use_container_width=True)
-        with tab_t_prox:
-            st.dataframe(tareas_proximas_tab, use_container_width=True)
-        with tab_t_todo:
-            st.dataframe(df_tareas, use_container_width=True)
-
-    with sub[3]:
-        st.subheader("💰 Cotizaciones")
-
-        with st.form("form_nueva_cot", clear_on_submit=True):
-            st.markdown("### ➕ Nueva cotización")
-            folio = st.text_input("Folio")
-            fecha_cot = st.date_input("Fecha", value=date.today(), format="DD/MM/YYYY")
-            cliente = st.text_input("Cliente")
-            monto = st.number_input("Monto", min_value=0.0, value=0.0, step=100.0)
-            vendedor = st.text_input("Vendedor (opcional)", placeholder="Alejandro")
-
-            estatus = st.selectbox(
-                "Estatus",
-                ["Enviada", "En seguimiento", "Cerrada – Ganada", "Cerrada – Perdida"],
-                index=0
-            )
-
-            prox_seg = st.date_input("Próximo seguimiento", value=date.today(), format="DD/MM/YYYY")
-            notas = st.text_area("Notas (opcional)", height=90)
-
-            submitted_cot = st.form_submit_button("✅ Crear cotización")
-
-        if submitted_cot:
-            if not folio.strip() or not cliente.strip():
-                st.error("❌ Folio y Cliente son obligatorios.")
+            st.markdown("### 📋 Agenda")
+            agenda_view = df_citas.copy()
+            if "Fecha_Inicio" in agenda_view.columns:
+                agenda_view["_fi"] = _to_dt(agenda_view["Fecha_Inicio"])
+                agenda_hoy = agenda_view[agenda_view["_fi"].dt.date == date.today()].copy()
+                fin_semana = date.today() + timedelta(days=7)
+                agenda_semana = agenda_view[
+                    agenda_view["_fi"].dt.date.between(date.today(), fin_semana)
+                ].copy()
+                agenda_hoy = agenda_hoy.sort_values("_fi", ascending=True)
+                agenda_semana = agenda_semana.sort_values("_fi", ascending=True)
             else:
-                try:
-                    cot_id = new_id("COT")
-                    payload = {
-                        "Cotizacion_ID": cot_id,
-                        "Folio": folio.strip(),
-                        "Created_At": now_iso(),
-                        "Created_By": "ALEJANDRO",
-                        "Fecha_Cotizacion": fecha_cot.strftime("%Y-%m-%d"),
-                        "Cliente": cliente.strip(),
-                        "Monto": float(monto),
-                        "Vendedor": vendedor.strip(),
-                        "Estatus": estatus,
-                        "Fecha_Proximo_Seguimiento": prox_seg.strftime("%Y-%m-%d"),
-                        "Ultimo_Seguimiento_Fecha": "",
-                        "Dias_Sin_Seguimiento": "",
-                        "Notas": notas.strip(),
-                        "Resultado_Cierre": "",
-                        "Convertida_A_Tarea_ID": "",
-                        "Convertida_A_Cita_ID": "",
-                        "Last_Updated_At": now_iso(),
-                        "Last_Updated_By": "ALEJANDRO",
-                        "Is_Deleted": "0",
-                    }
-                    safe_append("COTIZACIONES", payload)
-                    st.success(f"🎈 Cotización creada: {cot_id}")
-                    st.rerun()
-                except Exception as e:
-                    st.error(f"❌ Error creando cotización: {e}")
+                agenda_hoy = agenda_view.iloc[0:0]
+                agenda_semana = agenda_view.iloc[0:0]
 
-        st.markdown("---")
-        st.markdown("### 🔁 Convertir cotización a pendiente")
+            tab_agenda_hoy, tab_agenda_semana, tab_agenda_todo = st.tabs(["Hoy", "Semana", "Todo"])
+            with tab_agenda_hoy:
+                if agenda_hoy.empty:
+                    st.info("Sin citas para hoy.")
+                else:
+                    cols = [c for c in ["Fecha_Inicio","Cliente_Persona","Empresa_Clinica","Tipo","Prioridad","Estatus","Reminder_Minutes_Before","Reminder_Status"] if c in agenda_hoy.columns]
+                    st.dataframe(agenda_hoy[cols], use_container_width=True)
+            with tab_agenda_semana:
+                if agenda_semana.empty:
+                    st.info("Sin citas para los próximos 7 días.")
+                else:
+                    cols = [c for c in ["Fecha_Inicio","Cliente_Persona","Empresa_Clinica","Tipo","Prioridad","Estatus","Reminder_Minutes_Before","Reminder_Status"] if c in agenda_semana.columns]
+                    st.dataframe(agenda_semana[cols], use_container_width=True)
+            with tab_agenda_todo:
+                st.dataframe(df_citas, use_container_width=True)
 
-        # Normalizar DF por si viene vacío o con tipos raros
-        df_cot["_id"] = df_cot.get("Cotizacion_ID", "").astype(str)
-        df_cot["_folio"] = df_cot.get("Folio", "").astype(str)
-        df_cot["_cliente"] = df_cot.get("Cliente", "").astype(str)
-        df_cot["_monto"] = df_cot.get("Monto", "").astype(str)
-        df_cot["_estatus"] = df_cot.get("Estatus", "").astype(str)
-        df_cot["_prox"] = df_cot.get("Fecha_Proximo_Seguimiento", "").astype(str)
-        df_cot["_notas"] = df_cot.get("Notas", "").astype(str)
+        with sub[2]:
+            st.subheader("✅ Pendientes")
 
-        # Opcional: filtrar no borradas
-        if "Is_Deleted" in df_cot.columns:
-            df_cot = df_cot[df_cot["Is_Deleted"].astype(str).fillna("") != "1"]
+            # ===== Alta rápida =====
+            with st.form("form_nueva_tarea", clear_on_submit=True):
+                st.markdown("### ➕ Nuevo pendiente")
+                titulo = st.text_input("Título", placeholder="Ej. Llamar a cliente X")
+                descripcion = st.text_area("Descripción", placeholder="Detalles…", height=90)
 
-        # Ordenar: vencidas primero (prox_seg < hoy), luego por fecha de seguimiento
-        try:
-            df_cot["_prox_dt"] = pd.to_datetime(df_cot["_prox"], errors="coerce")
-        except Exception:
-            df_cot["_prox_dt"] = pd.NaT
+                col1, col2, col3 = st.columns(3)
+                with col1:
+                    fecha_limite = st.date_input("Fecha límite", value=date.today(), format="DD/MM/YYYY")
+                with col2:
+                    prioridad = st.selectbox("Prioridad", ["Alta", "Media", "Baja"], index=1)
+                with col3:
+                    estatus = st.selectbox("Estatus", ["Pendiente", "Completada"], index=0)
 
-        hoy_dt = pd.to_datetime(date.today())
-        df_cot_view = df_cot.copy()
-        df_cot_view["Convertida_A_Tarea_ID"] = df_cot.get("Convertida_A_Tarea_ID", "")
-        df_cot_view["Convertida_A_Cita_ID"] = df_cot.get("Convertida_A_Cita_ID", "")
-        df_cot_view["_vencida"] = df_cot_view["_prox_dt"].notna() & (df_cot_view["_prox_dt"] < hoy_dt)
-        df_cot_view = df_cot_view.sort_values(by=["_vencida", "_prox_dt"], ascending=[False, True])
+                col4, col5 = st.columns(2)
+                with col4:
+                    cliente_rel = st.text_input("Cliente relacionado (opcional)")
+                with col5:
+                    folio_cot = st.text_input("Folio cotización (opcional)")
 
-        opciones_cot = df_cot_view["_id"].tolist()
+                submitted = st.form_submit_button("✅ Crear pendiente")
 
-        def format_cot(cid):
-            r = df_cot_view[df_cot_view["_id"] == cid].iloc[0]
-            fol = r.get("_folio", "")
-            cli = r.get("_cliente", "")
-            est = r.get("_estatus", "")
-            prox = r.get("_prox", "")
-            mon = r.get("_monto", "")
-            return f"{fol} | {cli} | {est} | seg: {prox} | ${mon}"
+            if submitted:
+                if not titulo.strip():
+                    st.error("❌ El título es obligatorio.")
+                else:
+                    try:
+                        tarea_id = new_id("TAREA")
+                        payload = {
+                            "Tarea_ID": tarea_id,
+                            "Created_At": now_iso(),
+                            "Created_By": "ALEJANDRO",
+                            "Titulo": titulo.strip(),
+                            "Descripcion": descripcion.strip(),
+                            "Fecha_Limite": fecha_limite.strftime("%Y-%m-%d"),
+                            "Prioridad": prioridad,
+                            "Estatus": estatus,
+                            "Cliente_Relacionado": cliente_rel.strip(),
+                            "Cotizacion_Folio_Relacionado": folio_cot.strip(),
+                            "Tipo": "Pendiente",
+                            "Fecha_Completado": now_iso() if estatus.lower() == "completada" else "",
+                            "Notas_Resultado": "",
+                            "Last_Updated_At": now_iso(),
+                            "Last_Updated_By": "ALEJANDRO",
+                            "Is_Deleted": "0",
+                        }
+                        safe_append("TAREAS", payload)
+                        st.success(f"🎈 Pendiente creado: {tarea_id}")
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"❌ Error creando pendiente: {e}")
 
-        cot_sel = st.selectbox(
-            "Selecciona una cotización:",
-            opciones_cot,
-            format_func=format_cot,
-            key="cot_sel_convert"
-        )
+            st.markdown("---")
+            st.markdown("### ✅ Completar / Reabrir pendiente")
 
-        if cot_sel:
-            row_cot = df_cot_view[df_cot_view["_id"] == cot_sel].iloc[0]
-            folio = str(row_cot.get("_folio", "")).strip()
-            cliente = str(row_cot.get("_cliente", "")).strip()
-            estatus = str(row_cot.get("_estatus", "")).strip()
-            prox = str(row_cot.get("_prox", "")).strip()
-            notas = str(row_cot.get("_notas", "")).strip()
+            # Normaliza columnas básicas por si vienen vacías
+            df_tareas["_id"] = df_tareas.get("Tarea_ID", "").astype(str)
+            df_tareas["_titulo"] = df_tareas.get("Titulo", "").astype(str)
+            df_tareas["_estatus"] = df_tareas.get("Estatus", "").astype(str)
+            df_tareas["_fecha_limite"] = df_tareas.get("Fecha_Limite", "").astype(str)
 
-            # --- Anti-duplicados: si ya se convirtió, deshabilitar botones ---
-            tarea_link = str(row_cot.get("Convertida_A_Tarea_ID", "") or "").strip()
-            cita_link = str(row_cot.get("Convertida_A_Cita_ID", "") or "").strip()
+            # Opcional: filtrar no borradas
+            if "Is_Deleted" in df_tareas.columns:
+                df_tareas = df_tareas[df_tareas["Is_Deleted"].astype(str).fillna("") != "1"]
 
-            ya_tarea = bool(tarea_link)
-            ya_cita = bool(cita_link)
+            # Lista ordenada: pendientes primero, luego por fecha límite
+            try:
+                df_tareas["_fecha_dt"] = pd.to_datetime(df_tareas["_fecha_limite"], errors="coerce")
+            except Exception:
+                df_tareas["_fecha_dt"] = pd.NaT
 
-            if ya_tarea:
-                st.info(f"🧩 Esta cotización ya fue convertida a **Pendiente**: {tarea_link}")
-            if ya_cita:
-                st.info(f"📅 Esta cotización ya fue convertida a **Cita**: {cita_link}")
+            df_tareas_view = df_tareas.copy()
+            df_tareas_view["_pend"] = df_tareas_view["_estatus"].str.lower().ne("completada")
+            df_tareas_view = df_tareas_view.sort_values(by=["_pend", "_fecha_dt"], ascending=[False, True])
 
-            st.markdown("#### ➜ Tipo de conversión")
-            tipo_conv = st.radio(
-                "¿Qué quieres crear?",
-                ["🧩 Pendiente", "📅 Cita"],
-                horizontal=True,
-                key="tipo_conversion_cot"
-            )
+            opciones = [o for o in df_tareas_view["_id"].tolist() if str(o).strip()]
 
-            if tipo_conv == "🧩 Pendiente":
-                colA, colB = st.columns([2, 1])
+            def format_tarea(tid):
+                r = df_tareas_view[df_tareas_view["_id"] == tid].iloc[0]
+                est = r.get("_estatus", "")
+                fec = r.get("_fecha_limite", "")
+                tit = r.get("_titulo", "")
+                return f"{tid} | {est} | {fec} | {tit}"
+
+            if not opciones:
+                st.info("No hay pendientes disponibles para actualizar.")
+                tarea_sel = None
+            else:
+                tarea_sel = st.selectbox("Selecciona un pendiente:", opciones, format_func=format_tarea, key="tarea_sel_update")
+
+            if tarea_sel:
+                colA, colB = st.columns(2)
 
                 with colA:
-                    titulo_sugerido = st.text_input(
-                        "Título del pendiente (editable):",
-                        value=f"Seguimiento cotización {folio} - {cliente}",
-                        key="titulo_tarea_desde_cot"
-                    )
-                    desc_sugerida = st.text_area(
-                        "Descripción (opcional):",
-                        value=(f"Estatus cotización: {estatus}\n"
-                               f"Próx. seguimiento: {prox}\n"
-                               f"Notas: {notas}").strip(),
-                        height=90,
-                        key="desc_tarea_desde_cot"
-                    )
+                    if st.button("✅ Marcar como COMPLETADA", use_container_width=True):
+                        try:
+                            ok = safe_update_by_id(
+                                "TAREAS",
+                                id_col="Tarea_ID",
+                                id_value=tarea_sel,
+                                updates={
+                                    "Estatus": "Completada",
+                                    "Fecha_Completado": now_iso(),
+                                    "Last_Updated_At": now_iso(),
+                                    "Last_Updated_By": "ALEJANDRO",
+                                }
+                            )
+                            if ok:
+                                st.success("🎈 Pendiente marcado como completado.")
+                                st.rerun()
+                        except Exception as e:
+                            st.error(f"❌ Error actualizando pendiente: {e}")
 
                 with colB:
-                    # Fecha límite por defecto = fecha de próximo seguimiento, si es válida; si no, hoy
-                    try:
-                        prox_dt = pd.to_datetime(prox, errors="coerce")
-                        fecha_limite_default = prox_dt.date() if pd.notna(prox_dt) else date.today()
-                    except Exception:
-                        fecha_limite_default = date.today()
-
-                    fecha_limite = st.date_input(
-                        "Fecha límite",
-                        value=fecha_limite_default,
-                        format="DD/MM/YYYY",
-                        key="fecha_limite_tarea_desde_cot"
-                    )
-                    prioridad = st.selectbox(
-                        "Prioridad",
-                        ["Alta", "Media", "Baja"],
-                        index=1,
-                        key="prioridad_tarea_desde_cot"
-                    )
-                if st.button(
-                    "🧩 Convertir a PENDIENTE",
-                    key="btn_convertir_a_tarea",
-                    use_container_width=True,
-                    disabled=ya_tarea,
-                ):
-                    if not titulo_sugerido.strip():
-                        st.error("❌ El título del pendiente no puede ir vacío.")
-                    else:
+                    if st.button("↩️ Reabrir (PENDIENTE)", use_container_width=True):
                         try:
-                            tarea_id = new_id("TAREA")
-                            payload = {
-                                "Tarea_ID": tarea_id,
+                            ok = safe_update_by_id(
+                                "TAREAS",
+                                id_col="Tarea_ID",
+                                id_value=tarea_sel,
+                                updates={
+                                    "Estatus": "Pendiente",
+                                    "Fecha_Completado": "",
+                                    "Last_Updated_At": now_iso(),
+                                    "Last_Updated_By": "ALEJANDRO",
+                                }
+                            )
+                            if ok:
+                                st.success("🎈 Pendiente reabierto (Pendiente).")
+                                st.rerun()
+                        except Exception as e:
+                            st.error(f"❌ Error reabriendo pendiente: {e}")
+
+            st.markdown("### 📋 Lista")
+            tareas_lista = df_tareas.copy()
+            if "Fecha_Limite" in tareas_lista.columns:
+                tareas_lista["_fl"] = _to_dt(tareas_lista["Fecha_Limite"])
+                hoy_t = date.today()
+                estado_t = tareas_lista.get("Estatus", "").astype(str).str.lower()
+                tareas_hoy_tab = tareas_lista[tareas_lista["_fl"].dt.date == hoy_t].copy()
+                tareas_vencidas_tab = tareas_lista[(tareas_lista["_fl"].dt.date < hoy_t) & (estado_t != "completada")].copy()
+                tareas_proximas_tab = tareas_lista[(tareas_lista["_fl"].dt.date > hoy_t) & (estado_t != "completada")].copy()
+                tareas_hoy_tab = tareas_hoy_tab.sort_values("_fl", ascending=True)
+                tareas_vencidas_tab = tareas_vencidas_tab.sort_values("_fl", ascending=True)
+                tareas_proximas_tab = tareas_proximas_tab.sort_values("_fl", ascending=True)
+            else:
+                tareas_hoy_tab = tareas_lista.iloc[0:0]
+                tareas_vencidas_tab = tareas_lista.iloc[0:0]
+                tareas_proximas_tab = tareas_lista.iloc[0:0]
+
+            tab_t_hoy, tab_t_venc, tab_t_prox, tab_t_todo = st.tabs(["Hoy", "Vencidas", "Próximas", "Todo"])
+            with tab_t_hoy:
+                st.dataframe(tareas_hoy_tab, use_container_width=True)
+            with tab_t_venc:
+                st.dataframe(tareas_vencidas_tab, use_container_width=True)
+            with tab_t_prox:
+                st.dataframe(tareas_proximas_tab, use_container_width=True)
+            with tab_t_todo:
+                st.dataframe(df_tareas, use_container_width=True)
+
+        with sub[3]:
+            st.subheader("💰 Cotizaciones")
+
+            with st.form("form_nueva_cot", clear_on_submit=True):
+                st.markdown("### ➕ Nueva cotización")
+                folio = st.text_input("Folio")
+                fecha_cot = st.date_input("Fecha", value=date.today(), format="DD/MM/YYYY")
+                cliente = st.text_input("Cliente")
+                monto = st.number_input("Monto", min_value=0.0, value=0.0, step=100.0)
+                vendedor = st.text_input("Vendedor (opcional)", placeholder="Alejandro")
+
+                estatus = st.selectbox(
+                    "Estatus",
+                    ["Enviada", "En seguimiento", "Cerrada – Ganada", "Cerrada – Perdida"],
+                    index=0
+                )
+
+                prox_seg = st.date_input("Próximo seguimiento", value=date.today(), format="DD/MM/YYYY")
+                notas = st.text_area("Notas (opcional)", height=90)
+
+                submitted_cot = st.form_submit_button("✅ Crear cotización")
+
+            if submitted_cot:
+                if not folio.strip() or not cliente.strip():
+                    st.error("❌ Folio y Cliente son obligatorios.")
+                else:
+                    try:
+                        cot_id = new_id("COT")
+                        payload = {
+                            "Cotizacion_ID": cot_id,
+                            "Folio": folio.strip(),
+                            "Created_At": now_iso(),
+                            "Created_By": "ALEJANDRO",
+                            "Fecha_Cotizacion": fecha_cot.strftime("%Y-%m-%d"),
+                            "Cliente": cliente.strip(),
+                            "Monto": float(monto),
+                            "Vendedor": vendedor.strip(),
+                            "Estatus": estatus,
+                            "Fecha_Proximo_Seguimiento": prox_seg.strftime("%Y-%m-%d"),
+                            "Ultimo_Seguimiento_Fecha": "",
+                            "Dias_Sin_Seguimiento": "",
+                            "Notas": notas.strip(),
+                            "Resultado_Cierre": "",
+                            "Convertida_A_Tarea_ID": "",
+                            "Convertida_A_Cita_ID": "",
+                            "Last_Updated_At": now_iso(),
+                            "Last_Updated_By": "ALEJANDRO",
+                            "Is_Deleted": "0",
+                        }
+                        safe_append("COTIZACIONES", payload)
+                        st.success(f"🎈 Cotización creada: {cot_id}")
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"❌ Error creando cotización: {e}")
+
+            st.markdown("---")
+            st.markdown("### 🔁 Convertir cotización a pendiente")
+
+            # Normalizar DF por si viene vacío o con tipos raros
+            df_cot["_id"] = df_cot.get("Cotizacion_ID", "").astype(str)
+            df_cot["_folio"] = df_cot.get("Folio", "").astype(str)
+            df_cot["_cliente"] = df_cot.get("Cliente", "").astype(str)
+            df_cot["_monto"] = df_cot.get("Monto", "").astype(str)
+            df_cot["_estatus"] = df_cot.get("Estatus", "").astype(str)
+            df_cot["_prox"] = df_cot.get("Fecha_Proximo_Seguimiento", "").astype(str)
+            df_cot["_notas"] = df_cot.get("Notas", "").astype(str)
+
+            # Opcional: filtrar no borradas
+            if "Is_Deleted" in df_cot.columns:
+                df_cot = df_cot[df_cot["Is_Deleted"].astype(str).fillna("") != "1"]
+
+            # Ordenar: vencidas primero (prox_seg < hoy), luego por fecha de seguimiento
+            try:
+                df_cot["_prox_dt"] = pd.to_datetime(df_cot["_prox"], errors="coerce")
+            except Exception:
+                df_cot["_prox_dt"] = pd.NaT
+
+            hoy_dt = pd.to_datetime(date.today())
+            df_cot_view = df_cot.copy()
+            df_cot_view["Convertida_A_Tarea_ID"] = df_cot.get("Convertida_A_Tarea_ID", "")
+            df_cot_view["Convertida_A_Cita_ID"] = df_cot.get("Convertida_A_Cita_ID", "")
+            df_cot_view["_vencida"] = df_cot_view["_prox_dt"].notna() & (df_cot_view["_prox_dt"] < hoy_dt)
+            df_cot_view = df_cot_view.sort_values(by=["_vencida", "_prox_dt"], ascending=[False, True])
+
+            opciones_cot = df_cot_view["_id"].tolist()
+
+            def format_cot(cid):
+                r = df_cot_view[df_cot_view["_id"] == cid].iloc[0]
+                fol = r.get("_folio", "")
+                cli = r.get("_cliente", "")
+                est = r.get("_estatus", "")
+                prox = r.get("_prox", "")
+                mon = r.get("_monto", "")
+                return f"{fol} | {cli} | {est} | seg: {prox} | ${mon}"
+
+            cot_sel = st.selectbox(
+                "Selecciona una cotización:",
+                opciones_cot,
+                format_func=format_cot,
+                key="cot_sel_convert"
+            )
+
+            if cot_sel:
+                row_cot = df_cot_view[df_cot_view["_id"] == cot_sel].iloc[0]
+                folio = str(row_cot.get("_folio", "")).strip()
+                cliente = str(row_cot.get("_cliente", "")).strip()
+                estatus = str(row_cot.get("_estatus", "")).strip()
+                prox = str(row_cot.get("_prox", "")).strip()
+                notas = str(row_cot.get("_notas", "")).strip()
+
+                # --- Anti-duplicados: si ya se convirtió, deshabilitar botones ---
+                tarea_link = str(row_cot.get("Convertida_A_Tarea_ID", "") or "").strip()
+                cita_link = str(row_cot.get("Convertida_A_Cita_ID", "") or "").strip()
+
+                ya_tarea = bool(tarea_link)
+                ya_cita = bool(cita_link)
+
+                if ya_tarea:
+                    st.info(f"🧩 Esta cotización ya fue convertida a **Pendiente**: {tarea_link}")
+                if ya_cita:
+                    st.info(f"📅 Esta cotización ya fue convertida a **Cita**: {cita_link}")
+
+                st.markdown("#### ➜ Tipo de conversión")
+                tipo_conv = st.radio(
+                    "¿Qué quieres crear?",
+                    ["🧩 Pendiente", "📅 Cita"],
+                    horizontal=True,
+                    key="tipo_conversion_cot"
+                )
+
+                if tipo_conv == "🧩 Pendiente":
+                    colA, colB = st.columns([2, 1])
+
+                    with colA:
+                        titulo_sugerido = st.text_input(
+                            "Título del pendiente (editable):",
+                            value=f"Seguimiento cotización {folio} - {cliente}",
+                            key="titulo_tarea_desde_cot"
+                        )
+                        desc_sugerida = st.text_area(
+                            "Descripción (opcional):",
+                            value=(f"Estatus cotización: {estatus}\n"
+                                   f"Próx. seguimiento: {prox}\n"
+                                   f"Notas: {notas}").strip(),
+                            height=90,
+                            key="desc_tarea_desde_cot"
+                        )
+
+                    with colB:
+                        # Fecha límite por defecto = fecha de próximo seguimiento, si es válida; si no, hoy
+                        try:
+                            prox_dt = pd.to_datetime(prox, errors="coerce")
+                            fecha_limite_default = prox_dt.date() if pd.notna(prox_dt) else date.today()
+                        except Exception:
+                            fecha_limite_default = date.today()
+
+                        fecha_limite = st.date_input(
+                            "Fecha límite",
+                            value=fecha_limite_default,
+                            format="DD/MM/YYYY",
+                            key="fecha_limite_tarea_desde_cot"
+                        )
+                        prioridad = st.selectbox(
+                            "Prioridad",
+                            ["Alta", "Media", "Baja"],
+                            index=1,
+                            key="prioridad_tarea_desde_cot"
+                        )
+                    if st.button(
+                        "🧩 Convertir a PENDIENTE",
+                        key="btn_convertir_a_tarea",
+                        use_container_width=True,
+                        disabled=ya_tarea,
+                    ):
+                        if not titulo_sugerido.strip():
+                            st.error("❌ El título del pendiente no puede ir vacío.")
+                        else:
+                            try:
+                                tarea_id = new_id("TAREA")
+                                payload = {
+                                    "Tarea_ID": tarea_id,
+                                    "Created_At": now_iso(),
+                                    "Created_By": "ALEJANDRO",
+                                    "Titulo": titulo_sugerido.strip(),
+                                    "Descripcion": desc_sugerida.strip(),
+                                    "Fecha_Limite": fecha_limite.strftime("%Y-%m-%d"),
+                                    "Prioridad": prioridad,
+                                    "Estatus": "Pendiente",
+                                    "Cliente_Relacionado": cliente,
+                                    "Cotizacion_Folio_Relacionado": folio,
+                                    "Tipo": "Seguimiento Cotización",
+                                    "Fecha_Completado": "",
+                                    "Notas_Resultado": "",
+                                    "Last_Updated_At": now_iso(),
+                                    "Last_Updated_By": "ALEJANDRO",
+                                    "Is_Deleted": "0",
+                                }
+                                safe_append("TAREAS", payload)
+
+                                # Guardar vínculo en cotización (si existe columna)
+                                try:
+                                    safe_update_by_id(
+                                        "COTIZACIONES",
+                                        id_col="Cotizacion_ID",
+                                        id_value=cot_sel,
+                                        updates={
+                                            "Convertida_A_Tarea_ID": tarea_id,
+                                            "Last_Updated_At": now_iso(),
+                                            "Last_Updated_By": "ALEJANDRO",
+                                        }
+                                    )
+                                except Exception:
+                                    pass
+
+                                st.success(f"🎈 Pendiente creado desde cotización: {tarea_id}")
+                                st.rerun()
+                            except Exception as e:
+                                st.error(f"❌ Error al convertir a pendiente: {e}")
+
+                else:
+                    st.markdown("#### 📅 Configurar cita")
+                    colx, coly = st.columns(2)
+                    with colx:
+                        fecha_cita = st.date_input("Fecha cita", value=date.today(), format="DD/MM/YYYY", key="fecha_cita_desde_cot")
+                    with coly:
+                        hora_cita = st.time_input(
+                            "Hora cita",
+                            value=datetime.now().time().replace(second=0, microsecond=0),
+                            key="hora_cita_desde_cot"
+                        )
+
+                    colx2, coly2 = st.columns(2)
+                    with colx2:
+                        duracion_min = st.number_input(
+                            "Duración (min)",
+                            min_value=15,
+                            max_value=480,
+                            value=30,
+                            step=15,
+                            key="dur_cita_desde_cot"
+                        )
+                    with coly2:
+                        prioridad_cita = st.selectbox(
+                            "Prioridad",
+                            ["Alta", "Media", "Baja"],
+                            index=1,
+                            key="prioridad_cita_desde_cot"
+                        )
+
+                    tipo_cita = st.selectbox(
+                        "Tipo de cita",
+                        ["Visita", "Llamada", "Junta", "Seguimiento"],
+                        index=3,
+                        key="tipo_cita_desde_cot"
+                    )
+                    estatus_cita = st.selectbox(
+                        "Estatus",
+                        ["Programada", "Realizada", "Reprogramada", "Cancelada"],
+                        index=0,
+                        key="estatus_cita_desde_cot"
+                    )
+                    reminder_cita = st.number_input(
+                        "Recordatorio (min antes)",
+                        min_value=0,
+                        max_value=240,
+                        value=30,
+                        step=5,
+                        key="reminder_cita_desde_cot"
+                    )
+
+                    # Usamos título/desc sugeridos para notas
+                    notas_cita = st.text_area(
+                        "Notas de la cita",
+                        value=(f"Seguimiento cotización {folio}\n"
+                               f"Estatus: {estatus}\n"
+                               f"Próx. seguimiento: {prox}\n"
+                               f"Notas cotización: {notas}").strip(),
+                        height=100,
+                        key="notas_cita_desde_cot"
+                    )
+
+                    if st.button(
+                        "📅 Convertir a CITA",
+                        key="btn_convertir_a_cita",
+                        use_container_width=True,
+                        disabled=ya_cita,
+                    ):
+                        try:
+                            start_dt = datetime.combine(fecha_cita, hora_cita)
+                            end_dt = start_dt + timedelta(minutes=int(duracion_min))
+
+                            cita_id = new_id("CITA")
+                            payload_cita = {
+                                "Cita_ID": cita_id,
                                 "Created_At": now_iso(),
                                 "Created_By": "ALEJANDRO",
-                                "Titulo": titulo_sugerido.strip(),
-                                "Descripcion": desc_sugerida.strip(),
-                                "Fecha_Limite": fecha_limite.strftime("%Y-%m-%d"),
-                                "Prioridad": prioridad,
-                                "Estatus": "Pendiente",
-                                "Cliente_Relacionado": cliente,
-                                "Cotizacion_Folio_Relacionado": folio,
-                                "Tipo": "Seguimiento Cotización",
-                                "Fecha_Completado": "",
-                                "Notas_Resultado": "",
+                                "Fecha_Inicio": start_dt.strftime("%Y-%m-%d %H:%M:%S"),
+                                "Fecha_Fin": end_dt.strftime("%Y-%m-%d %H:%M:%S"),
+                                "Cliente_Persona": cliente,
+                                "Empresa_Clinica": "",
+                                "Tipo": tipo_cita,
+                                "Prioridad": prioridad_cita,
+                                "Estatus": estatus_cita,
+                                "Notas": notas_cita.strip(),
+                                "Lugar": "",
+                                "Telefono": "",
+                                "Correo": "",
+                                "Reminder_Minutes_Before": str(int(reminder_cita)),
+                                "Reminder_Status": "Pendiente" if int(reminder_cita) > 0 else "N/A",
                                 "Last_Updated_At": now_iso(),
                                 "Last_Updated_By": "ALEJANDRO",
                                 "Is_Deleted": "0",
                             }
-                            safe_append("TAREAS", payload)
+                            safe_append("CITAS", payload_cita)
 
                             # Guardar vínculo en cotización (si existe columna)
                             try:
@@ -3419,7 +3563,7 @@ with tabs[0]:
                                     id_col="Cotizacion_ID",
                                     id_value=cot_sel,
                                     updates={
-                                        "Convertida_A_Tarea_ID": tarea_id,
+                                        "Convertida_A_Cita_ID": cita_id,
                                         "Last_Updated_At": now_iso(),
                                         "Last_Updated_By": "ALEJANDRO",
                                     }
@@ -3427,364 +3571,248 @@ with tabs[0]:
                             except Exception:
                                 pass
 
-                            st.success(f"🎈 Pendiente creado desde cotización: {tarea_id}")
+                            st.success(f"🎈 Cita creada desde cotización: {cita_id}")
+                            st.rerun()
+
+                        except Exception as e:
+                            st.error(f"❌ Error al convertir a cita: {e}")
+
+            st.markdown("### 📋 Lista")
+            cot_dash = df_cot.copy()
+            if "Fecha_Proximo_Seguimiento" in cot_dash.columns:
+                cot_dash["_fps"] = _to_dt(cot_dash["Fecha_Proximo_Seguimiento"])
+            else:
+                cot_dash["_fps"] = pd.NaT
+            estatus_cot = cot_dash.get("Estatus", "").astype(str).str.lower()
+            cot_pend_tab = cot_dash[~estatus_cot.str.contains("ganada|perdida", na=False)].copy()
+            cot_seg_tab = cot_dash[estatus_cot.str.contains("en seguimiento", na=False)].copy()
+            cot_venc_tab = cot_pend_tab[cot_pend_tab["_fps"].notna() & (cot_pend_tab["_fps"].dt.date < date.today())].copy()
+            pipeline_monto = pd.to_numeric(cot_pend_tab.get("Monto", 0), errors="coerce").fillna(0).sum()
+
+            d1, d2, d3 = st.columns(3)
+            d1.metric("Pendientes", len(cot_pend_tab))
+            d2.metric("Vencidas de seguimiento", len(cot_venc_tab))
+            d3.metric("Pipeline monto", f"${pipeline_monto:,.2f}")
+
+            tab_c_pend, tab_c_venc, tab_c_seg, tab_c_todo = st.tabs(["Pendientes", "Vencidas", "En seguimiento", "Todo"])
+            with tab_c_pend:
+                st.dataframe(cot_pend_tab, use_container_width=True)
+            with tab_c_venc:
+                st.dataframe(cot_venc_tab, use_container_width=True)
+            with tab_c_seg:
+                st.dataframe(cot_seg_tab, use_container_width=True)
+            with tab_c_todo:
+                st.dataframe(df_cot, use_container_width=True)
+
+        with sub[4]:
+            st.subheader("🧾 Checklist")
+            hoy = date.today()
+
+            default_orden = 1
+            if not df_checklist_template.empty and "Orden" in df_checklist_template.columns:
+                ordenes_actuales = pd.to_numeric(df_checklist_template["Orden"], errors="coerce").dropna()
+                if not ordenes_actuales.empty:
+                    default_orden = int(min(999, ordenes_actuales.max() + 1))
+
+            with st.expander("➕ Agregar ítem a plantilla recurrente", expanded=False):
+                with st.form("form_add_check_template", clear_on_submit=True):
+                    item_txt = st.text_input("Ítem")
+                    orden = st.number_input("Orden", min_value=1, max_value=999, value=default_orden, step=1)
+                    activo = st.checkbox("Activo", value=True)
+                    submitted_item = st.form_submit_button("Guardar ítem")
+
+                if submitted_item:
+                    if not item_txt.strip():
+                        st.error("❌ El ítem no puede ir vacío.")
+                    else:
+                        payload = {
+                            "Item_ID": new_id("CHK"),
+                            "Orden": str(int(orden)),
+                            "Item": item_txt.strip(),
+                            "Activo": "1" if activo else "0",
+                        }
+                        safe_append("CHECKLIST_TEMPLATE", payload)
+                        # Fuerza re-sincronización del checklist diario tras cambios en plantilla.
+                        st.session_state[f"chk_sync_{hoy.isoformat()}"] = False
+                        st.success("✅ Ítem agregado a la plantilla.")
+                        st.rerun()
+
+            st.markdown("### Plantilla recurrente")
+            st.dataframe(df_checklist_template, use_container_width=True)
+
+            st.markdown("### Checklist de hoy")
+            chk_hoy_edit = df_checklist_daily.copy()
+            if "Fecha" in chk_hoy_edit.columns:
+                chk_hoy_edit["_f"] = _to_date(chk_hoy_edit["Fecha"])
+                chk_hoy_edit = chk_hoy_edit[chk_hoy_edit["_f"] == hoy].copy()
+
+            done_chk = 0
+            if not chk_hoy_edit.empty and "Completado" in chk_hoy_edit.columns:
+                for _, row in chk_hoy_edit.iterrows():
+                    item_id = _safe_str(row.get("Item_ID", ""))
+                    item = _safe_str(row.get("Item", "(sin item)"))
+                    comp = _to_bool(row.get("Completado", "0"))
+                    item_key = f"{item_id or 'sinid'}_{item}".lower().replace(" ", "_")
+                    chk_key = f"chk_done_{item_key}"
+                    if _to_bool(st.session_state.get(chk_key, comp)):
+                        done_chk += 1
+            total_chk = len(chk_hoy_edit)
+            pct_chk = (done_chk / total_chk * 100) if total_chk else 0
+            st.metric("✅ Cumplimiento hoy", f"{pct_chk:.0f}%")
+
+            if chk_hoy_edit.empty:
+                st.info("No hay checklist para hoy. Entra a 'Hoy' para sincronizar con plantilla.")
+            else:
+                today_iso = hoy.strftime("%Y-%m-%d")
+                lk_key = f"chk_row_lookup_{today_iso}"
+                if lk_key not in st.session_state:
+                    st.session_state[lk_key] = get_checklist_daily_row_lookup(today_iso)
+                row_lookup = st.session_state[lk_key]
+
+                hdr_key = "chk_headers_CHECKLIST_DAILY"
+                if hdr_key not in st.session_state:
+                    sheet_daily = get_alejandro_worksheet("CHECKLIST_DAILY")
+                    st.session_state[hdr_key] = [h.strip() for h in sheet_daily.row_values(1)]
+                checklist_headers = st.session_state[hdr_key]
+                if "Orden" in df_checklist_template.columns and "Item_ID" in chk_hoy_edit.columns:
+                    order_map = {
+                        _safe_str(r.get("Item_ID", "")): pd.to_numeric(r.get("Orden", None), errors="coerce")
+                        for _, r in df_checklist_template.iterrows()
+                    }
+                    chk_hoy_edit["_orden"] = chk_hoy_edit["Item_ID"].map(order_map)
+                    chk_hoy_edit = chk_hoy_edit.sort_values("_orden", ascending=True, na_position="last")
+
+                for _, row in chk_hoy_edit.iterrows():
+                    item_id = _safe_str(row.get("Item_ID", ""))
+                    item = _safe_str(row.get("Item", "(sin item)"))
+                    comp = _to_bool(row.get("Completado", "0"))
+                    notas_actuales = _safe_str(row.get("Notas", ""))
+
+                    item_key = f"{item_id or 'sinid'}_{item}".lower().replace(" ", "_")
+                    c1, c2, c3 = st.columns([4, 1.5, 2])
+                    with c1:
+                        nuevo_comp = st.checkbox(item, value=comp, key=f"chk_done_{item_key}")
+                    with c2:
+                        nuevo_notas = st.text_input("Notas", value=notas_actuales, key=f"chk_note_{item_key}")
+                    with c3:
+                        guardar_chk = st.button("💾 Guardar", key=f"chk_save_{item_key}")
+
+                    if guardar_chk:
+                        try:
+                            row_number = None
+                            if item_id:
+                                row_number = row_lookup.get((hoy.strftime("%Y-%m-%d"), item_id, ""))
+                            if row_number is None:
+                                row_number = row_lookup.get((hoy.strftime("%Y-%m-%d"), "", item.lower()))
+
+                            update_checklist_daily_item(
+                                fecha_iso=today_iso,
+                                item_id=item_id,
+                                item=item,
+                                completado=nuevo_comp,
+                                notas=nuevo_notas,
+                                row_number=row_number,
+                                headers=checklist_headers,
+                            )
+                            # refrescar lookup cache tras cambios
+                            st.session_state[lk_key] = get_checklist_daily_row_lookup(today_iso)
+                            st.success(f"✅ Actualizado: {item}")
                             st.rerun()
                         except Exception as e:
-                            st.error(f"❌ Error al convertir a pendiente: {e}")
+                            st.error(f"❌ No se pudo actualizar '{item}': {e}")
 
-            else:
-                st.markdown("#### 📅 Configurar cita")
-                colx, coly = st.columns(2)
-                with colx:
-                    fecha_cita = st.date_input("Fecha cita", value=date.today(), format="DD/MM/YYYY", key="fecha_cita_desde_cot")
-                with coly:
-                    hora_cita = st.time_input(
-                        "Hora cita",
-                        value=datetime.now().time().replace(second=0, microsecond=0),
-                        key="hora_cita_desde_cot"
-                    )
+            st.markdown("---")
+            st.markdown("### 🗑️ Eliminar ítem (al final)")
+            st.caption("Este borrado elimina el ítem de CHECKLIST_TEMPLATE y también de CHECKLIST_DAILY en todas las fechas.")
+            if not df_checklist_template.empty:
+                template_opts = []
+                for _, r in df_checklist_template.iterrows():
+                    item_id_opt = _safe_str(r.get("Item_ID", ""))
+                    item_txt_opt = _safe_str(r.get("Item", "(sin nombre)"))
+                    label = f"{item_txt_opt} · {item_id_opt or 'SIN_ID'}"
+                    template_opts.append((label, item_id_opt, item_txt_opt))
 
-                colx2, coly2 = st.columns(2)
-                with colx2:
-                    duracion_min = st.number_input(
-                        "Duración (min)",
-                        min_value=15,
-                        max_value=480,
-                        value=30,
-                        step=15,
-                        key="dur_cita_desde_cot"
-                    )
-                with coly2:
-                    prioridad_cita = st.selectbox(
-                        "Prioridad",
-                        ["Alta", "Media", "Baja"],
-                        index=1,
-                        key="prioridad_cita_desde_cot"
-                    )
-
-                tipo_cita = st.selectbox(
-                    "Tipo de cita",
-                    ["Visita", "Llamada", "Junta", "Seguimiento"],
-                    index=3,
-                    key="tipo_cita_desde_cot"
-                )
-                estatus_cita = st.selectbox(
-                    "Estatus",
-                    ["Programada", "Realizada", "Reprogramada", "Cancelada"],
-                    index=0,
-                    key="estatus_cita_desde_cot"
-                )
-                reminder_cita = st.number_input(
-                    "Recordatorio (min antes)",
-                    min_value=0,
-                    max_value=240,
-                    value=30,
-                    step=5,
-                    key="reminder_cita_desde_cot"
+                selected_template_labels = st.multiselect(
+                    "Selecciona uno o varios ítems a eliminar por completo",
+                    options=[o[0] for o in template_opts],
+                    key="chk_template_delete_select_multi",
                 )
 
-                # Usamos título/desc sugeridos para notas
-                notas_cita = st.text_area(
-                    "Notas de la cita",
-                    value=(f"Seguimiento cotización {folio}\n"
-                           f"Estatus: {estatus}\n"
-                           f"Próx. seguimiento: {prox}\n"
-                           f"Notas cotización: {notas}").strip(),
-                    height=100,
-                    key="notas_cita_desde_cot"
-                )
-
-                if st.button(
-                    "📅 Convertir a CITA",
-                    key="btn_convertir_a_cita",
-                    use_container_width=True,
-                    disabled=ya_cita,
-                ):
+                if st.button("🗑️ Eliminar seleccionados de plantilla y daily (todas las fechas)", key="btn_delete_chk_template", type="secondary"):
                     try:
-                        start_dt = datetime.combine(fecha_cita, hora_cita)
-                        end_dt = start_dt + timedelta(minutes=int(duracion_min))
+                        if not selected_template_labels:
+                            raise Exception("Selecciona al menos un ítem para eliminar.")
 
-                        cita_id = new_id("CITA")
-                        payload_cita = {
-                            "Cita_ID": cita_id,
-                            "Created_At": now_iso(),
-                            "Created_By": "ALEJANDRO",
-                            "Fecha_Inicio": start_dt.strftime("%Y-%m-%d %H:%M:%S"),
-                            "Fecha_Fin": end_dt.strftime("%Y-%m-%d %H:%M:%S"),
-                            "Cliente_Persona": cliente,
-                            "Empresa_Clinica": "",
-                            "Tipo": tipo_cita,
-                            "Prioridad": prioridad_cita,
-                            "Estatus": estatus_cita,
-                            "Notas": notas_cita.strip(),
-                            "Lugar": "",
-                            "Telefono": "",
-                            "Correo": "",
-                            "Reminder_Minutes_Before": str(int(reminder_cita)),
-                            "Reminder_Status": "Pendiente" if int(reminder_cita) > 0 else "N/A",
-                            "Last_Updated_At": now_iso(),
-                            "Last_Updated_By": "ALEJANDRO",
-                            "Is_Deleted": "0",
-                        }
-                        safe_append("CITAS", payload_cita)
+                        selected_rows = [o for o in template_opts if o[0] in selected_template_labels]
+                        if not selected_rows:
+                            raise Exception("No se pudieron identificar los ítems seleccionados.")
 
-                        # Guardar vínculo en cotización (si existe columna)
-                        try:
-                            safe_update_by_id(
-                                "COTIZACIONES",
-                                id_col="Cotizacion_ID",
-                                id_value=cot_sel,
-                                updates={
-                                    "Convertida_A_Cita_ID": cita_id,
-                                    "Last_Updated_At": now_iso(),
-                                    "Last_Updated_By": "ALEJANDRO",
-                                }
+                        ids_to_delete = {_safe_str(item_id) for _, item_id, _ in selected_rows if _safe_str(item_id)}
+                        names_to_delete = {_safe_str(item_txt).lower() for _, item_id, item_txt in selected_rows if not _safe_str(item_id)}
+
+                        deleted_template = safe_delete_rows_by_filter(
+                            "CHECKLIST_TEMPLATE",
+                            lambda rec: (
+                                (_safe_str(rec.get("Item_ID", "")) in ids_to_delete)
+                                or ((not _safe_str(rec.get("Item_ID", ""))) and (_safe_str(rec.get("Item", "")).lower() in names_to_delete))
                             )
-                        except Exception:
-                            pass
-
-                        st.success(f"🎈 Cita creada desde cotización: {cita_id}")
-                        st.rerun()
-
-                    except Exception as e:
-                        st.error(f"❌ Error al convertir a cita: {e}")
-
-        st.markdown("### 📋 Lista")
-        cot_dash = df_cot.copy()
-        if "Fecha_Proximo_Seguimiento" in cot_dash.columns:
-            cot_dash["_fps"] = _to_dt(cot_dash["Fecha_Proximo_Seguimiento"])
-        else:
-            cot_dash["_fps"] = pd.NaT
-        estatus_cot = cot_dash.get("Estatus", "").astype(str).str.lower()
-        cot_pend_tab = cot_dash[~estatus_cot.str.contains("ganada|perdida", na=False)].copy()
-        cot_seg_tab = cot_dash[estatus_cot.str.contains("en seguimiento", na=False)].copy()
-        cot_venc_tab = cot_pend_tab[cot_pend_tab["_fps"].notna() & (cot_pend_tab["_fps"].dt.date < date.today())].copy()
-        pipeline_monto = pd.to_numeric(cot_pend_tab.get("Monto", 0), errors="coerce").fillna(0).sum()
-
-        d1, d2, d3 = st.columns(3)
-        d1.metric("Pendientes", len(cot_pend_tab))
-        d2.metric("Vencidas de seguimiento", len(cot_venc_tab))
-        d3.metric("Pipeline monto", f"${pipeline_monto:,.2f}")
-
-        tab_c_pend, tab_c_venc, tab_c_seg, tab_c_todo = st.tabs(["Pendientes", "Vencidas", "En seguimiento", "Todo"])
-        with tab_c_pend:
-            st.dataframe(cot_pend_tab, use_container_width=True)
-        with tab_c_venc:
-            st.dataframe(cot_venc_tab, use_container_width=True)
-        with tab_c_seg:
-            st.dataframe(cot_seg_tab, use_container_width=True)
-        with tab_c_todo:
-            st.dataframe(df_cot, use_container_width=True)
-
-    with sub[4]:
-        st.subheader("🧾 Checklist")
-        hoy = date.today()
-
-        default_orden = 1
-        if not df_checklist_template.empty and "Orden" in df_checklist_template.columns:
-            ordenes_actuales = pd.to_numeric(df_checklist_template["Orden"], errors="coerce").dropna()
-            if not ordenes_actuales.empty:
-                default_orden = int(min(999, ordenes_actuales.max() + 1))
-
-        with st.expander("➕ Agregar ítem a plantilla recurrente", expanded=False):
-            with st.form("form_add_check_template", clear_on_submit=True):
-                item_txt = st.text_input("Ítem")
-                orden = st.number_input("Orden", min_value=1, max_value=999, value=default_orden, step=1)
-                activo = st.checkbox("Activo", value=True)
-                submitted_item = st.form_submit_button("Guardar ítem")
-
-            if submitted_item:
-                if not item_txt.strip():
-                    st.error("❌ El ítem no puede ir vacío.")
-                else:
-                    payload = {
-                        "Item_ID": new_id("CHK"),
-                        "Orden": str(int(orden)),
-                        "Item": item_txt.strip(),
-                        "Activo": "1" if activo else "0",
-                    }
-                    safe_append("CHECKLIST_TEMPLATE", payload)
-                    # Fuerza re-sincronización del checklist diario tras cambios en plantilla.
-                    st.session_state[f"chk_sync_{hoy.isoformat()}"] = False
-                    st.success("✅ Ítem agregado a la plantilla.")
-                    st.rerun()
-
-        st.markdown("### Plantilla recurrente")
-        st.dataframe(df_checklist_template, use_container_width=True)
-
-        st.markdown("### Checklist de hoy")
-        chk_hoy_edit = df_checklist_daily.copy()
-        if "Fecha" in chk_hoy_edit.columns:
-            chk_hoy_edit["_f"] = _to_date(chk_hoy_edit["Fecha"])
-            chk_hoy_edit = chk_hoy_edit[chk_hoy_edit["_f"] == hoy].copy()
-
-        done_chk = 0
-        if not chk_hoy_edit.empty and "Completado" in chk_hoy_edit.columns:
-            for _, row in chk_hoy_edit.iterrows():
-                item_id = _safe_str(row.get("Item_ID", ""))
-                item = _safe_str(row.get("Item", "(sin item)"))
-                comp = _to_bool(row.get("Completado", "0"))
-                item_key = f"{item_id or 'sinid'}_{item}".lower().replace(" ", "_")
-                chk_key = f"chk_done_{item_key}"
-                if _to_bool(st.session_state.get(chk_key, comp)):
-                    done_chk += 1
-        total_chk = len(chk_hoy_edit)
-        pct_chk = (done_chk / total_chk * 100) if total_chk else 0
-        st.metric("✅ Cumplimiento hoy", f"{pct_chk:.0f}%")
-
-        if chk_hoy_edit.empty:
-            st.info("No hay checklist para hoy. Entra a 'Hoy' para sincronizar con plantilla.")
-        else:
-            today_iso = hoy.strftime("%Y-%m-%d")
-            lk_key = f"chk_row_lookup_{today_iso}"
-            if lk_key not in st.session_state:
-                st.session_state[lk_key] = get_checklist_daily_row_lookup(today_iso)
-            row_lookup = st.session_state[lk_key]
-
-            hdr_key = "chk_headers_CHECKLIST_DAILY"
-            if hdr_key not in st.session_state:
-                sheet_daily = get_alejandro_worksheet("CHECKLIST_DAILY")
-                st.session_state[hdr_key] = [h.strip() for h in sheet_daily.row_values(1)]
-            checklist_headers = st.session_state[hdr_key]
-            if "Orden" in df_checklist_template.columns and "Item_ID" in chk_hoy_edit.columns:
-                order_map = {
-                    _safe_str(r.get("Item_ID", "")): pd.to_numeric(r.get("Orden", None), errors="coerce")
-                    for _, r in df_checklist_template.iterrows()
-                }
-                chk_hoy_edit["_orden"] = chk_hoy_edit["Item_ID"].map(order_map)
-                chk_hoy_edit = chk_hoy_edit.sort_values("_orden", ascending=True, na_position="last")
-
-            for _, row in chk_hoy_edit.iterrows():
-                item_id = _safe_str(row.get("Item_ID", ""))
-                item = _safe_str(row.get("Item", "(sin item)"))
-                comp = _to_bool(row.get("Completado", "0"))
-                notas_actuales = _safe_str(row.get("Notas", ""))
-
-                item_key = f"{item_id or 'sinid'}_{item}".lower().replace(" ", "_")
-                c1, c2, c3 = st.columns([4, 1.5, 2])
-                with c1:
-                    nuevo_comp = st.checkbox(item, value=comp, key=f"chk_done_{item_key}")
-                with c2:
-                    nuevo_notas = st.text_input("Notas", value=notas_actuales, key=f"chk_note_{item_key}")
-                with c3:
-                    guardar_chk = st.button("💾 Guardar", key=f"chk_save_{item_key}")
-
-                if guardar_chk:
-                    try:
-                        row_number = None
-                        if item_id:
-                            row_number = row_lookup.get((hoy.strftime("%Y-%m-%d"), item_id, ""))
-                        if row_number is None:
-                            row_number = row_lookup.get((hoy.strftime("%Y-%m-%d"), "", item.lower()))
-
-                        update_checklist_daily_item(
-                            fecha_iso=today_iso,
-                            item_id=item_id,
-                            item=item,
-                            completado=nuevo_comp,
-                            notas=nuevo_notas,
-                            row_number=row_number,
-                            headers=checklist_headers,
                         )
-                        # refrescar lookup cache tras cambios
-                        st.session_state[lk_key] = get_checklist_daily_row_lookup(today_iso)
-                        st.success(f"✅ Actualizado: {item}")
+                        deleted_daily = safe_delete_rows_by_filter(
+                            "CHECKLIST_DAILY",
+                            lambda rec: (
+                                (_safe_str(rec.get("Item_ID", "")) in ids_to_delete)
+                                or ((not _safe_str(rec.get("Item_ID", ""))) and (_safe_str(rec.get("Item", "")).lower() in names_to_delete))
+                            )
+                        )
+
+                        st.success(
+                            f"✅ Ítems eliminados por completo ({len(selected_rows)} seleccionados). "
+                            f"Plantilla: {deleted_template} fila(s), daily (todas las fechas): {deleted_daily} fila(s)."
+                        )
                         st.rerun()
                     except Exception as e:
-                        st.error(f"❌ No se pudo actualizar '{item}': {e}")
+                        st.error(f"❌ No se pudieron eliminar los ítems: {e}")
+            else:
+                st.info("No hay ítems en plantilla para eliminar.")
 
-        st.markdown("---")
-        st.markdown("### 🗑️ Eliminar ítem (al final)")
-        st.caption("Este borrado elimina el ítem de CHECKLIST_TEMPLATE y también de CHECKLIST_DAILY en todas las fechas.")
-        if not df_checklist_template.empty:
-            template_opts = []
-            for _, r in df_checklist_template.iterrows():
-                item_id_opt = _safe_str(r.get("Item_ID", ""))
-                item_txt_opt = _safe_str(r.get("Item", "(sin nombre)"))
-                label = f"{item_txt_opt} · {item_id_opt or 'SIN_ID'}"
-                template_opts.append((label, item_id_opt, item_txt_opt))
+        with sub[5]:
+            st.subheader("⚙️ Config")
+            st.dataframe(df_config, use_container_width=True)
 
-            selected_template_labels = st.multiselect(
-                "Selecciona uno o varios ítems a eliminar por completo",
-                options=[o[0] for o in template_opts],
-                key="chk_template_delete_select_multi",
-            )
+            st.markdown("---")
+            st.markdown("### 🧪 Diagnóstico alejandro_data")
 
-            if st.button("🗑️ Eliminar seleccionados de plantilla y daily (todas las fechas)", key="btn_delete_chk_template", type="secondary"):
-                try:
-                    if not selected_template_labels:
-                        raise Exception("Selecciona al menos un ítem para eliminar.")
+            if errores_alejandro:
+                st.error("Errores detectados al leer hojas:")
+                for err in errores_alejandro:
+                    st.code(err)
 
-                    selected_rows = [o for o in template_opts if o[0] in selected_template_labels]
-                    if not selected_rows:
-                        raise Exception("No se pudieron identificar los ítems seleccionados.")
-
-                    ids_to_delete = {_safe_str(item_id) for _, item_id, _ in selected_rows if _safe_str(item_id)}
-                    names_to_delete = {_safe_str(item_txt).lower() for _, item_id, item_txt in selected_rows if not _safe_str(item_id)}
-
-                    deleted_template = safe_delete_rows_by_filter(
-                        "CHECKLIST_TEMPLATE",
-                        lambda rec: (
-                            (_safe_str(rec.get("Item_ID", "")) in ids_to_delete)
-                            or ((not _safe_str(rec.get("Item_ID", ""))) and (_safe_str(rec.get("Item", "")).lower() in names_to_delete))
-                        )
-                    )
-                    deleted_daily = safe_delete_rows_by_filter(
-                        "CHECKLIST_DAILY",
-                        lambda rec: (
-                            (_safe_str(rec.get("Item_ID", "")) in ids_to_delete)
-                            or ((not _safe_str(rec.get("Item_ID", ""))) and (_safe_str(rec.get("Item", "")).lower() in names_to_delete))
-                        )
-                    )
-
+            if st.button("Ejecutar diagnóstico", key="diag_alejandro_doc"):
+                diag = debug_alejandro_documento()
+                st.json(diag)
+                if diag.get("quota_fallback"):
                     st.success(
-                        f"✅ Ítems eliminados por completo ({len(selected_rows)} seleccionados). "
-                        f"Plantilla: {deleted_template} fila(s), daily (todas las fechas): {deleted_daily} fila(s)."
+                        "Drive está en quota/permisos restringidos y el fallback a spreadsheet principal está ACTIVADO por configuración."
                     )
-                    st.rerun()
-                except Exception as e:
-                    st.error(f"❌ No se pudieron eliminar los ítems: {e}")
-        else:
-            st.info("No hay ítems en plantilla para eliminar.")
+                elif diag.get("bootstrap_created"):
+                    st.success(
+                        "No se pudo convertir el Excel por permisos (403). Se creó un Google Sheet bootstrap con tu estructura para esta sesión. "
+                        "Copia resolved_spreadsheet_id a secrets para usarlo de forma permanente."
+                    )
+                elif diag.get("auto_converted"):
+                    st.success(
+                        "Se detectó Excel y se convirtió automáticamente a Google Sheet para esta sesión. "
+                        "Copia el resolved_spreadsheet_id y guárdalo en secrets para hacerlo permanente."
+                    )
 
-    with sub[5]:
-        st.subheader("⚙️ Config")
-        st.dataframe(df_config, use_container_width=True)
-
-        st.markdown("---")
-        st.markdown("### 🧪 Diagnóstico alejandro_data")
-
-        if errores_alejandro:
-            st.error("Errores detectados al leer hojas:")
-            for err in errores_alejandro:
-                st.code(err)
-
-        if st.button("Ejecutar diagnóstico", key="diag_alejandro_doc"):
-            diag = debug_alejandro_documento()
-            st.json(diag)
-            if diag.get("quota_fallback"):
-                st.success(
-                    "Drive está en quota/permisos restringidos y el fallback a spreadsheet principal está ACTIVADO por configuración."
-                )
-            elif diag.get("bootstrap_created"):
-                st.success(
-                    "No se pudo convertir el Excel por permisos (403). Se creó un Google Sheet bootstrap con tu estructura para esta sesión. "
-                    "Copia resolved_spreadsheet_id a secrets para usarlo de forma permanente."
-                )
-            elif diag.get("auto_converted"):
-                st.success(
-                    "Se detectó Excel y se convirtió automáticamente a Google Sheet para esta sesión. "
-                    "Copia el resolved_spreadsheet_id y guárdalo en secrets para hacerlo permanente."
-                )
-
-            err = str(diag.get("error", ""))
-            mime = str(diag.get("drive_mimeType", ""))
-            if ("not supported for this document" in err.lower()) or (
-                mime and mime != "application/vnd.google-apps.spreadsheet"
-            ):
-                st.error(
-                    "El archivo configurado no es Google Sheet nativo. En Drive: Abrir con > Hojas de cálculo de Google "
-                    "(convierte), y después usa el ID del documento convertido en secrets."
-                )
-            elif diag.get("open_ok") and diag.get("missing_expected_sheets"):
-                st.warning("Faltan hojas esperadas: " + ", ".join(diag.get("missing_expected_sheets", [])))
+                err = str(diag.get("error", ""))
+                mime = str(diag.get("drive_mimeType", ""))
+                if ("not supported for this document" in err.lower()) or (
+                    mime and mime != "application/vnd.google-apps.spreadsheet"
+                ):
+                    st.error(
+                        "El archivo configurado no es Google Sheet nativo. En Drive: Abrir con > Hojas de cálculo de Google "
+                        "(convierte), y después usa el ID del documento convertido en secrets."
+                    )
+                elif diag.get("open_ok") and diag.get("missing_expected_sheets"):
+                    st.warning("Faltan hojas esperadas: " + ", ".join(diag.get("missing_expected_sheets", [])))
