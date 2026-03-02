@@ -1083,15 +1083,6 @@ def get_case_envio_assignments(
 
     return df_local, df_foraneo
 
-
-def _pedido_selector_envio_emoji(tipo_envio: str) -> str:
-    normalized = _normalize_envio_original(tipo_envio)
-    if "foraneo" in normalized:
-        return "🚚"
-    if "local" in normalized:
-        return "📍"
-    return ""
-
 st.markdown(
     """
     <style>
@@ -2591,16 +2582,8 @@ if selected_tab == 0:
         selector_df.loc[selector_df["_label_folio"] == "", "_label_folio"] = "Sin folio"
         selector_df["_label_cliente"] = selector_df["Cliente"].map(sanitize_text)
         selector_df.loc[selector_df["_label_cliente"] == "", "_label_cliente"] = "Sin cliente"
-        if "Tipo_Envio" in selector_df.columns:
-            selector_df["_label_envio"] = selector_df["Tipo_Envio"].map(_pedido_selector_envio_emoji)
-        else:
-            selector_df["_label_envio"] = ""
         selector_df["_pedido_label"] = selector_df.apply(
-            lambda r: (
-                f"{r['_label_folio']} · {r['_label_cliente']} · {r['_label_hora']}"
-                f" {r['_label_envio']}" if r["_label_envio"] else f"{r['_label_folio']} · {r['_label_cliente']} · {r['_label_hora']}"
-            ),
-            axis=1,
+            lambda r: f"{r['_label_folio']} · {r['_label_cliente']} · {r['_label_hora']}", axis=1
         )
 
         pedido_idx = st.selectbox(
@@ -2622,6 +2605,7 @@ if selected_tab == 0:
                 _render_detail_row("💬 Comentario", pedido_sel.get("Comentario", ""))
             with c2:
                 _render_detail_row("💳 Estado_Pago", pedido_sel.get("Estado_Pago", ""))
+                _render_detail_row("🚚 Tipo_Envio", pedido_sel.get("Tipo_Envio", ""))
                 _render_detail_row("📎 Adjuntos", display_attachments(pedido_sel.get("Adjuntos", "")))
 
             st.markdown("---")
