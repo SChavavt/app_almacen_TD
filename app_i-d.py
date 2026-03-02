@@ -2738,14 +2738,129 @@ if selected_tab == 0:
         )
 
     with view_col2:
-        st.caption("Riesgo por vendedor (% de cartera en riesgo)")
-        if resumen_v.empty:
-            st.info("Sin datos de vendedores para el filtro actual.")
+        if vendedor_sel != "(Todos)":
+            st.caption("Ventas del mes actual")
+
+            monthly_df = df_metricas_v.copy()
+            monthly_df["Fecha"] = pd.to_datetime(monthly_df.get("Hora_Registro"), errors="coerce")
+            monthly_df["Monto"] = pd.to_numeric(
+                monthly_df.get("Monto_Comprobante", 0), errors="coerce"
+            ).fillna(0)
+            monthly_df = monthly_df.dropna(subset=["Fecha"])
+
+            if monthly_df.empty:
+                st.info("No hay ventas con fecha válida para el vendedor seleccionado.")
+            else:
+                ahora = pd.Timestamp.now()
+                inicio_mes = ahora.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+                inicio_mes_anterior = (inicio_mes - pd.offsets.MonthBegin(1)).replace(
+                    hour=0, minute=0, second=0, microsecond=0
+                )
+
+                ventas_mes_actual = float(
+                    monthly_df.loc[monthly_df["Fecha"] >= inicio_mes, "Monto"].sum()
+                )
+                ventas_mes_anterior = float(
+                    monthly_df.loc[
+                        (monthly_df["Fecha"] >= inicio_mes_anterior)
+                        & (monthly_df["Fecha"] < inicio_mes),
+                        "Monto",
+                    ].sum()
+                )
+                ventas_hoy = float(
+                    monthly_df.loc[monthly_df["Fecha"].dt.date == ahora.date(), "Monto"].sum()
+                )
+
+                met1, met2 = st.columns(2)
+                met1.metric("💰 Ventas mes", f"${ventas_mes_actual:,.0f}")
+                met2.metric("📅 Ventas de hoy", f"${ventas_hoy:,.0f}")
+
+                if ventas_mes_anterior > 0:
+                    ratio_avance = ventas_mes_actual / ventas_mes_anterior
+                    avance_pct = max(0.0, min(ratio_avance * 100, 100.0))
+                    faltante_pct = max(0.0, 100.0 - (ratio_avance * 100))
+                    monto_faltante = max(0.0, ventas_mes_anterior - ventas_mes_actual)
+
+                    st.caption("Progreso para alcanzar ventas del mes anterior")
+                    st.progress(int(avance_pct))
+                    if ratio_avance < 1:
+                        st.markdown(
+                            f"Te falta **{faltante_pct:.1f}%** (≈ **${monto_faltante:,.0f}**) para igualar el mes anterior."
+                        )
+                    else:
+                        excedente = ventas_mes_actual - ventas_mes_anterior
+                        st.success(
+                            f"¡Meta superada! Ya vas **{ratio_avance * 100:.1f}%** del mes anterior (+${excedente:,.0f})."
+                        )
+                else:
+                    st.info("No hay referencia de ventas del mes anterior para calcular avance.")
+
+                mes_actual_df = monthly_df[monthly_df["Fecha"] >= inicio_mes].copy()
+                if mes_actual_df.empty:
+                    st.info("Aún no hay ventas registradas en el mes actual.")
+                else:
+                    mes_actual_df["DiaMes"] = mes_actual_df["Fecha"].dt.day
+                    mes_actual_df["SemanaMes"] = ((mes_actual_df["DiaMes"] - 1) // 7) + 1
+                    mes_actual_df["DiaSemanaNum"] = mes_actual_df["Fecha"].dt.dayofweek
+                    day_labels = {
+                        0: "Lun",
+                        1: "Mar",
+                        2: "Mié",
+                        3: "Jue",
+                        4: "Vie",
+                        5: "Sáb",
+                        6: "Dom",
+                    }
+                    mes_actual_df["DiaSemana"] = mes_actual_df["DiaSemanaNum"].map(day_labels)
+                    heat = (
+                        mes_actual_df.groupby(["SemanaMes", "DiaSemanaNum", "DiaSemana"], as_index=False)["Monto"]
+                        .sum()
+                    )
+
+                    st.caption(
+                        "Mapa de calor semanal del mes: más oscuro = día con mayor venta para este vendedor."
+                    )
+                    st.vega_lite_chart(
+                        heat,
+                        {
+                            "mark": {"type": "rect", "cornerRadius": 4},
+                            "encoding": {
+                                "x": {
+                                    "field": "DiaSemana",
+                                    "type": "ordinal",
+                                    "sort": ["Lun", "Mar", "Mié", "Jue", "Vie", "Sáb", "Dom"],
+                                    "title": "Día de la semana",
+                                },
+                                "y": {
+                                    "field": "SemanaMes",
+                                    "type": "ordinal",
+                                    "title": "Semana del mes",
+                                },
+                                "color": {
+                                    "field": "Monto",
+                                    "type": "quantitative",
+                                    "title": "Venta",
+                                    "scale": {"scheme": "blues"},
+                                },
+                                "tooltip": [
+                                    {"field": "SemanaMes", "title": "Semana"},
+                                    {"field": "DiaSemana", "title": "Día"},
+                                    {"field": "Monto", "type": "quantitative", "title": "Ventas"},
+                                ],
+                            },
+                            "height": 230,
+                        },
+                        use_container_width=True,
+                    )
         else:
-            riesgo_v = resumen_v[["Vendedor", "%Riesgo", "Ventas"]].copy()
-            riesgo_v["%Riesgo"] = pd.to_numeric(riesgo_v["%Riesgo"], errors="coerce").fillna(0)
-            riesgo_v = riesgo_v.sort_values("%Riesgo", ascending=False).head(8)
-            st.bar_chart(riesgo_v.set_index("Vendedor")[["%Riesgo"]], height=230)
+            st.caption("Riesgo por vendedor (% de cartera en riesgo)")
+            if resumen_v.empty:
+                st.info("Sin datos de vendedores para el filtro actual.")
+            else:
+                riesgo_v = resumen_v[["Vendedor", "%Riesgo", "Ventas"]].copy()
+                riesgo_v["%Riesgo"] = pd.to_numeric(riesgo_v["%Riesgo"], errors="coerce").fillna(0)
+                riesgo_v = riesgo_v.sort_values("%Riesgo", ascending=False).head(8)
+                st.bar_chart(riesgo_v.set_index("Vendedor")[["%Riesgo"]], height=230)
 
     trend_col1, trend_col2 = st.columns([0.7, 0.3])
     with trend_col1:
