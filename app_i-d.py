@@ -1511,8 +1511,9 @@ def load_confirmados_from_gsheets(credentials_dict: dict, sheet_id: str, sheet_n
     # Fecha real (cuando se registró el pedido)
     if "Hora_Registro" in df.columns:
         df["Hora_Registro"] = pd.to_datetime(df["Hora_Registro"], errors="coerce")
-        df["AñoMes"] = df["Hora_Registro"].dt.to_period("M").astype(str)
-        df["FechaDia"] = df["Hora_Registro"].dt.date.astype(str)
+        fecha_ventas = _resolve_sales_datetime(df)
+        df["AñoMes"] = fecha_ventas.dt.to_period("M").astype(str)
+        df["FechaDia"] = fecha_ventas.dt.date.astype(str)
     else:
         df["Hora_Registro"] = pd.NaT
         df["AñoMes"] = ""
@@ -1533,6 +1534,30 @@ def _clean_cliente_name(x: str) -> str:
 
 def _normalize_vendedor_name(value) -> str:
     return sanitize_text(value).casefold()
+
+
+def _resolve_sales_datetime(df: pd.DataFrame) -> pd.Series:
+    """Fecha base para métricas de ventas: prioriza Fecha_Pago_Comprobante."""
+
+    def _parse_pago(series: pd.Series) -> pd.Series:
+        raw = series.fillna("").astype(str).str.strip()
+        # Casos como "2026-02-16 y 2026-02-17" o con ruido: tomar la primera fecha válida.
+        first_date = raw.str.extract(r"(\d{4}-\d{2}-\d{2}(?:[ T]\d{2}:\d{2}(?::\d{2})?)?)", expand=False)
+        parsed_first = pd.to_datetime(first_date, errors="coerce")
+        parsed_raw = pd.to_datetime(raw, errors="coerce")
+        return parsed_first.fillna(parsed_raw)
+
+    if "Fecha_Pago_Comprobante" in df.columns:
+        fecha_pago = _parse_pago(df["Fecha_Pago_Comprobante"])
+        if "Hora_Registro" in df.columns:
+            hora_registro = pd.to_datetime(df["Hora_Registro"], errors="coerce")
+            return fecha_pago.fillna(hora_registro)
+        return fecha_pago
+
+    if "Hora_Registro" in df.columns:
+        return pd.to_datetime(df["Hora_Registro"], errors="coerce")
+
+    return pd.Series(pd.NaT, index=df.index)
 
 
 @st.cache_data(ttl=600)
@@ -2742,7 +2767,7 @@ if selected_tab == 0:
             st.caption("Ventas del mes actual")
 
             monthly_df = df_metricas_v.copy()
-            monthly_df["Fecha"] = pd.to_datetime(monthly_df.get("Hora_Registro"), errors="coerce")
+            monthly_df["Fecha"] = _resolve_sales_datetime(monthly_df)
             monthly_df["Monto"] = pd.to_numeric(
                 monthly_df.get("Monto_Comprobante", 0), errors="coerce"
             ).fillna(0)
@@ -2866,7 +2891,7 @@ if selected_tab == 0:
     with trend_col1:
         st.caption("Tendencia semanal de ventas (basada en confirmados)")
         trend_df = df_metricas_v.copy()
-        trend_df["Fecha"] = pd.to_datetime(trend_df.get("Hora_Registro"), errors="coerce")
+        trend_df["Fecha"] = _resolve_sales_datetime(trend_df)
         trend_df["Monto"] = pd.to_numeric(
             trend_df.get("Monto_Comprobante", 0), errors="coerce"
         ).fillna(0)
