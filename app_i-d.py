@@ -2613,7 +2613,7 @@ if selected_tab == 0:
             g1, g2 = st.columns(2)
             with g1:
                 _render_detail_row(
-                    "📍 Direccion_Guia_Retorno",
+                    "📬 ",
                     pedido_sel.get("Direccion_Guia_Retorno", ""),
                 )
             with g2:
