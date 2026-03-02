@@ -2900,9 +2900,14 @@ if selected_tab == 0:
             st.info("No hay fechas válidas para graficar tendencia.")
         else:
             trend_df["Semana"] = trend_df["Fecha"].dt.to_period("W").dt.start_time
-            weekly = trend_df.groupby("Semana", as_index=False)["Monto"].sum().sort_values("Semana")
-            weekly = weekly.tail(10)
-            st.line_chart(weekly.set_index("Semana")["Monto"], height=220)
+            semana_actual = pd.Timestamp.now().to_period("W").start_time
+            trend_df = trend_df[trend_df["Semana"] < semana_actual]
+            if trend_df.empty:
+                st.info("No hay semanas cerradas para graficar tendencia.")
+            else:
+                weekly = trend_df.groupby("Semana", as_index=False)["Monto"].sum().sort_values("Semana")
+                weekly = weekly.tail(10)
+                st.line_chart(weekly.set_index("Semana")["Monto"], height=220)
     with trend_col2:
         st.info(
             "\n".join(
