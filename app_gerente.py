@@ -3415,7 +3415,7 @@ if "organizador" in tab_map:
                         except Exception as e:
                             st.error(f"❌ Error al cerrar cotización: {e}")
 
-            with st.expander("🔁 Convertir cotización a pendiente", expanded=False):
+            with st.expander("🔁 Convertir cotización a: Pendiente o Cita", expanded=False):
                 if not opciones_cot:
                     st.info("No hay cotizaciones disponibles para convertir.")
                 else:
