@@ -812,10 +812,7 @@ def resolve_flow_display_number(row: pd.Series, fallback_order: Any) -> str:
 
 
 def resolve_case_foraneo_display_number(row: pd.Series, fallback_order: Any) -> str:
-    """Resuelve número visible de casos foráneos priorizando número persistido/mapa."""
-    numero_guardado = _parse_foraneo_number(row.get("Numero_Foraneo", ""))
-    if numero_guardado is not None:
-        return f"{numero_guardado:02d}"
+    """Resuelve número visible de casos foráneos alineado al flujo visible de app_i."""
 
     id_key = _flow_key(row.get("ID_Pedido", ""))
     folio_key = _flow_key(row.get("Folio_Factura", ""))
@@ -5526,9 +5523,9 @@ if df_main is not None:
                 else:
                     emoji_estado = "⏳"
                     aviso_extra  = " | Pendiente de confirmación final"
-                expander_title = f"🔁 #{numero_foraneo_visible} {folio or 's/folio'} – {cliente or 's/cliente'} | Estado: {estado} | Estado_Recepcion: {estado_rec} {emoji_estado}{aviso_extra}"
+                expander_title = f"🔁 {folio or 's/folio'} – {cliente or 's/cliente'} | Estado: {estado} | Estado_Recepcion: {estado_rec} {emoji_estado}{aviso_extra}"
             else:
-                expander_title = f"🔁 #{numero_foraneo_visible} {folio or 's/folio'} – {cliente or 's/cliente'} | Estado: {estado} | Estado_Recepcion: {estado_rec}"
+                expander_title = f"🔁 {folio or 's/folio'} – {cliente or 's/cliente'} | Estado: {estado} | Estado_Recepcion: {estado_rec}"
     
             with st.expander(expander_title, expanded=st.session_state["expanded_devoluciones"].get(row_key, False)):
                 st.markdown(f"**🔢 Número foráneo asignado:** `{numero_foraneo_visible}`")
@@ -7033,7 +7030,7 @@ if df_main is not None:
                     for orden_dev_comp, (_, row) in enumerate(comp_dev.iterrows(), start=1):
                         numero_foraneo_visible = resolve_case_foraneo_display_number(row, orden_dev_comp)
                         with st.expander(
-                            f"🔁 #{numero_foraneo_visible} {row.get('Folio_Factura', 'N/A')} – {row.get('Cliente', 'N/A')}"
+                            f"🔁 {row.get('Folio_Factura', 'N/A')} – {row.get('Cliente', 'N/A')}"
                         ):
                             st.markdown(f"**🔢 Número foráneo asignado:** `{numero_foraneo_visible}`")
                             render_caso_especial_devolucion(row)
