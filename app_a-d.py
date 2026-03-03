@@ -633,10 +633,27 @@ def _flow_key(value: Any) -> str:
     return normalize_sheet_text(value).lower()
 
 
-def build_flow_number_maps(df_source: pd.DataFrame) -> tuple[dict[str, str], dict[str, str]]:
+def _parse_foraneo_number(raw: Any) -> Optional[int]:
+    text = str(raw or "").strip()
+    if not text:
+        return None
+    digits = "".join(ch for ch in text if ch.isdigit())
+    if not digits:
+        return None
+    try:
+        value = int(digits)
+    except ValueError:
+        return None
+    return value if value > 0 else None
+
+
+def build_flow_number_maps(
+    df_source: pd.DataFrame,
+    df_casos: Optional[pd.DataFrame] = None,
+) -> tuple[dict[str, str], dict[str, str], list[tuple[int, str]]]:
     """Construye mapas de numeración de flujo: foráneos 01+, locales 101+."""
     if df_source is None or df_source.empty:
-        return {}, {}
+        return {}, {}, []
 
     work = df_source.copy()
     for col in ("Tipo_Envio", "ID_Pedido", "Folio_Factura"):
@@ -661,7 +678,63 @@ def build_flow_number_maps(df_source: pd.DataFrame) -> tuple[dict[str, str], dic
 
     map_foraneo = _build_map(df_foraneo, lambda idx: f"{idx + 1:02d}")
     map_local = _build_map(df_local, lambda idx: str(idx + 101))
-    return map_local, map_foraneo
+
+    pending_case_updates: list[tuple[int, str]] = []
+    if df_casos is None or df_casos.empty:
+        return map_local, map_foraneo, pending_case_updates
+
+    casos_work = df_casos.copy()
+    for col in ("Tipo_Envio_Original", "Tipo_Envio", "ID_Pedido", "Folio_Factura", "Numero_Foraneo"):
+        if col not in casos_work.columns:
+            casos_work[col] = ""
+
+    envio_norm = (
+        casos_work["Tipo_Envio_Original"].astype(str).map(_normalize_text_for_matching)
+        + " "
+        + casos_work["Tipo_Envio"].astype(str).map(_normalize_text_for_matching)
+    )
+    casos_foraneo = casos_work[envio_norm.str.contains("foraneo", na=False)].copy()
+    if casos_foraneo.empty:
+        return map_local, map_foraneo, pending_case_updates
+
+    used_numbers = {
+        int(v)
+        for v in map_foraneo.values()
+        if str(v).isdigit() and int(v) > 0
+    }
+    next_number = (max(used_numbers) + 1) if used_numbers else 1
+
+    for _, row in casos_foraneo.iterrows():
+        keys = [_flow_key(row.get("ID_Pedido", "")), _flow_key(row.get("Folio_Factura", ""))]
+        existing = None
+        for key in keys:
+            if key and key in map_foraneo:
+                existing = map_foraneo[key]
+                break
+
+        if existing is not None:
+            continue
+
+        parsed = _parse_foraneo_number(row.get("Numero_Foraneo", ""))
+        if parsed is None:
+            parsed = next_number
+            next_number += 1
+            row_idx = row.get("_gsheet_row_index", row.get("gsheet_row_index"))
+            try:
+                if row_idx is not None and not pd.isna(row_idx):
+                    pending_case_updates.append((int(row_idx), f"{parsed:02d}"))
+            except Exception:
+                pass
+
+        numero_fmt = f"{parsed:02d}"
+        used_numbers.add(parsed)
+        while next_number in used_numbers:
+            next_number += 1
+        for key in keys:
+            if key and key not in map_foraneo:
+                map_foraneo[key] = numero_fmt
+
+    return map_local, map_foraneo, pending_case_updates
 
 
 def resolve_flow_display_number(row: pd.Series, fallback_order: Any) -> str:
@@ -4110,9 +4183,10 @@ if df_main is not None:
 
             st.rerun()
 
-    flow_map_local, flow_map_foraneo = build_flow_number_maps(df_main)
+    flow_map_local, flow_map_foraneo, pending_case_number_updates = build_flow_number_maps(df_main, df_casos)
     st.session_state["flow_number_map_local"] = flow_map_local
     st.session_state["flow_number_map_foraneo"] = flow_map_foraneo
+
 
     # --- 🔔 Alerta de Modificación de Surtido ---
     mod_surtido_main_df = _pending_modificaciones(df_main)
@@ -4334,7 +4408,7 @@ if df_main is not None:
         "Tipo_Envio_Original", "Turno",
         # Campos específicos de garantías
         "Numero_Serie", "Fecha_Compra",
-        "Completados_Limpiado",
+        "Completados_Limpiado", "Numero_Foraneo",
     ]
     headers_casos = ensure_columns(worksheet_casos, headers_casos, required_cols_casos)
     fill_empty_cols = [
@@ -4349,6 +4423,25 @@ if df_main is not None:
             df_casos[c] = ""
         else:
             df_casos[c] = df_casos[c].fillna("")
+
+    if pending_case_number_updates and "Numero_Foraneo" in headers_casos:
+        col_num_foraneo = headers_casos.index("Numero_Foraneo") + 1
+        updates_num_foraneo = [
+            {
+                "range": gspread.utils.rowcol_to_a1(row_idx, col_num_foraneo),
+                "values": [[numero]],
+            }
+            for row_idx, numero in pending_case_number_updates
+            if row_idx and numero
+        ]
+        if updates_num_foraneo:
+            if batch_update_gsheet_cells(worksheet_casos, updates_num_foraneo, headers=headers_casos):
+                for row_idx, numero in pending_case_number_updates:
+                    mask_row = df_casos.get("_gsheet_row_index", pd.Series(dtype=int)) == row_idx
+                    if hasattr(mask_row, "any") and mask_row.any():
+                        df_casos.loc[mask_row, "Numero_Foraneo"] = numero
+            else:
+                st.warning("⚠️ No se pudo guardar Numero_Foraneo en algunos casos foráneos.")
 
     # 📊 Resumen de Estados combinando datos_pedidos y casos_especiales
     st.markdown("### 📊 Resumen de Estados")
