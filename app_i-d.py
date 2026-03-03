@@ -244,6 +244,8 @@ def _build_flow_number_maps(df_all: pd.DataFrame) -> tuple[dict[str, str], dict[
     work = df_all.copy()
     if "Tipo_Envio" not in work.columns:
         work["Tipo_Envio"] = ""
+    if "Tipo_Envio_Original" not in work.columns:
+        work["Tipo_Envio_Original"] = ""
     if "ID_Pedido" not in work.columns:
         work["ID_Pedido"] = ""
     if "Folio_Factura" not in work.columns:
@@ -252,7 +254,8 @@ def _build_flow_number_maps(df_all: pd.DataFrame) -> tuple[dict[str, str], dict[
         work["Numero_Foraneo"] = ""
 
     tipo_norm = work["Tipo_Envio"].astype(str).apply(_normalize_envio_original)
-    mask_foraneo = tipo_norm.str.contains("foraneo", na=False)
+    tipo_original_norm = work["Tipo_Envio_Original"].astype(str).apply(_normalize_envio_original)
+    mask_foraneo = tipo_norm.str.contains("foraneo", na=False) | tipo_original_norm.str.contains("foraneo", na=False)
 
     df_foraneo = work[mask_foraneo].reset_index(drop=True)
     df_local = work[~mask_foraneo].reset_index(drop=True)
