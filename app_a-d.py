@@ -756,22 +756,25 @@ def resolve_flow_display_number(row: pd.Series, fallback_order: Any) -> str:
 
 
 def resolve_case_foraneo_display_number(row: pd.Series, fallback_order: Any) -> str:
-    tipo_envio = _normalize_text_for_matching(str(row.get("Tipo_Envio", "")))
-    tipo_original = _normalize_text_for_matching(str(row.get("Tipo_Envio_Original", "")))
-    if "foraneo" not in f"{tipo_envio} {tipo_original}":
-        return str(fallback_order)
-
-    numero_guardado = _parse_foraneo_number(row.get("Numero_Foraneo", ""))
-    if numero_guardado is not None:
-        return f"{numero_guardado:02d}"
-
     id_key = _flow_key(row.get("ID_Pedido", ""))
     folio_key = _flow_key(row.get("Folio_Factura", ""))
     map_foraneo = st.session_state.get("flow_number_map_foraneo", {})
+    map_local = st.session_state.get("flow_number_map_local", {})
 
     for key in (id_key, folio_key):
         if key and key in map_foraneo:
             return map_foraneo[key]
+
+    for key in (id_key, folio_key):
+        if key and key in map_local:
+            return map_local[key]
+
+    tipo_envio = _normalize_text_for_matching(str(row.get("Tipo_Envio", "")))
+    tipo_original = _normalize_text_for_matching(str(row.get("Tipo_Envio_Original", "")))
+    if "foraneo" in f"{tipo_envio} {tipo_original}":
+        numero_guardado = _parse_foraneo_number(row.get("Numero_Foraneo", ""))
+        if numero_guardado is not None:
+            return f"{numero_guardado:02d}"
 
     return str(fallback_order)
 
@@ -5469,12 +5472,21 @@ if df_main is not None:
                 else:
                     emoji_estado = "⏳"
                     aviso_extra  = " | Pendiente de confirmación final"
-                expander_title = f"🔁 #{numero_foraneo_visible} {folio or 's/folio'} – {cliente or 's/cliente'} | Estado: {estado} | Estado_Recepcion: {estado_rec} {emoji_estado}{aviso_extra}"
+                expander_title = (
+                    f"🔁 #{numero_foraneo_visible} | Pedido: {idp or 's/pedido'} | "
+                    f"Folio: {folio or 's/folio'} – {cliente or 's/cliente'} | "
+                    f"Estado: {estado} | Estado_Recepcion: {estado_rec} {emoji_estado}{aviso_extra}"
+                )
             else:
-                expander_title = f"🔁 #{numero_foraneo_visible} {folio or 's/folio'} – {cliente or 's/cliente'} | Estado: {estado} | Estado_Recepcion: {estado_rec}"
-    
+                expander_title = (
+                    f"🔁 #{numero_foraneo_visible} | Pedido: {idp or 's/pedido'} | "
+                    f"Folio: {folio or 's/folio'} – {cliente or 's/cliente'} | "
+                    f"Estado: {estado} | Estado_Recepcion: {estado_rec}"
+                )
+
             with st.expander(expander_title, expanded=st.session_state["expanded_devoluciones"].get(row_key, False)):
                 st.markdown(f"**🔢 Número foráneo asignado:** `{numero_foraneo_visible}`")
+                st.markdown(f"**🧾 Pedido:** `{idp or 's/pedido'}`")
                 render_caso_especial_devolucion(row)
     
                 # === 🆕 NUEVO: Clasificar Tipo_Envio_Original, Turno y Fecha_Entrega (sin opción vacía y sin recargar) ===
