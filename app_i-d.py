@@ -219,20 +219,6 @@ def assign_shared_numbers(entries_local, entries_foraneo):
 _AUTO_LIST_COUNTER = count(1)
 
 
-def _parse_foraneo_number(raw) -> Optional[int]:
-    text = sanitize_text(raw)
-    if not text:
-        return None
-    digits = "".join(ch for ch in text if ch.isdigit())
-    if not digits:
-        return None
-    try:
-        value = int(digits)
-    except Exception:
-        return None
-    return value if value > 0 else None
-
-
 def _flow_match_key(value) -> str:
     return sanitize_text(value).lower()
 
@@ -248,8 +234,6 @@ def _build_flow_number_maps(df_all: pd.DataFrame) -> tuple[dict[str, str], dict[
         work["ID_Pedido"] = ""
     if "Folio_Factura" not in work.columns:
         work["Folio_Factura"] = ""
-    if "Numero_Foraneo" not in work.columns:
-        work["Numero_Foraneo"] = ""
 
     tipo_norm = work["Tipo_Envio"].astype(str).apply(_normalize_envio_original)
     mask_foraneo = tipo_norm.str.contains("foraneo", na=False)
@@ -269,38 +253,6 @@ def _build_flow_number_maps(df_all: pd.DataFrame) -> tuple[dict[str, str], dict[
 
     foraneo_map = build_map(df_foraneo, lambda idx: f"{idx + 1:02d}")
     local_map = build_map(df_local, lambda idx: str(idx + 101))
-
-    used_numbers = {
-        int(v)
-        for v in foraneo_map.values()
-        if str(v).isdigit() and int(v) > 0
-    }
-    next_number = (max(used_numbers) + 1) if used_numbers else 1
-
-    for _, row in df_foraneo.iterrows():
-        keys = [_flow_match_key(row.get("ID_Pedido", "")), _flow_match_key(row.get("Folio_Factura", ""))]
-        existing = None
-        for key in keys:
-            if key and key in foraneo_map:
-                existing = foraneo_map[key]
-                break
-        if existing is not None:
-            continue
-
-        parsed = _parse_foraneo_number(row.get("Numero_Foraneo", ""))
-        if parsed is None:
-            parsed = next_number
-            next_number += 1
-
-        used_numbers.add(parsed)
-        while next_number in used_numbers:
-            next_number += 1
-
-        numero_fmt = f"{parsed:02d}"
-        for key in keys:
-            if key and key not in foraneo_map:
-                foraneo_map[key] = numero_fmt
-
     return local_map, foraneo_map
 
 
@@ -1516,7 +1468,6 @@ def load_casos_from_gsheets():
         "Tipo_Envio",
         "Tipo_Envio_Original",
         "Turno",
-        "Numero_Foraneo",
     ]:
         if base in df.columns:
             df[base] = df[base].astype(str).fillna("").str.strip()
