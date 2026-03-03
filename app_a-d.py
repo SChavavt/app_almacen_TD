@@ -3245,6 +3245,14 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
                                 "Estado",
                                 "🔵 En Proceso",
                             )
+                        if success and "Hora_Registro" in headers:
+                            success = update_gsheet_cell(
+                                worksheet,
+                                headers,
+                                gsheet_row_index,
+                                "Hora_Registro",
+                                mx_now_str(),
+                            )
                         if success:
                             row["Estado"] = "🔵 En Proceso"
                             st.success("✅ Cambios de surtido confirmados y pedido en '🔵 En Proceso'.")
@@ -3291,6 +3299,14 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
                                     gsheet_row_index,
                                     "Estado",
                                     "🔵 En Proceso",
+                                )
+                            if success and "Hora_Registro" in headers:
+                                success = update_gsheet_cell(
+                                    worksheet,
+                                    headers,
+                                    gsheet_row_index,
+                                    "Hora_Registro",
+                                    mx_now_str(),
                                 )
                             if success:
                                 row["Estado"] = "🔵 En Proceso"
@@ -5586,7 +5602,15 @@ if df_main is not None:
                                                 "Estado",
                                                 "🔵 En Proceso",
                                             )
-    
+                                        if ok and "Hora_Registro" in headers_casos:
+                                            ok = update_gsheet_cell(
+                                                worksheet_casos,
+                                                headers_casos,
+                                                gsheet_row_idx,
+                                                "Hora_Registro",
+                                                mx_now_str(),
+                                            )
+
                                         if ok:
                                             row["Estado"] = "🔵 En Proceso"
                                             st.success("✅ Cambios de surtido confirmados y pedido en '🔵 En Proceso'.")
@@ -6246,7 +6270,15 @@ if df_main is not None:
                                                 "Estado",
                                                 "🔵 En Proceso",
                                             )
-    
+                                        if ok and "Hora_Registro" in headers_casos:
+                                            ok = update_gsheet_cell(
+                                                worksheet_casos,
+                                                headers_casos,
+                                                gsheet_row_idx,
+                                                "Hora_Registro",
+                                                mx_now_str(),
+                                            )
+
                                         if ok:
                                             row["Estado"] = "🔵 En Proceso"
                                             st.success("✅ Cambios de surtido confirmados y pedido en '🔵 En Proceso'.")
