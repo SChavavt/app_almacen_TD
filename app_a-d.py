@@ -3366,12 +3366,12 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
                                 "Estado",
                                 "🔵 En Proceso",
                             )
-                        if success and "Hora_Registro" in headers:
+                        if success and "Hora_Proceso" in headers:
                             success = update_gsheet_cell(
                                 worksheet,
                                 headers,
                                 gsheet_row_index,
-                                "Hora_Registro",
+                                "Hora_Proceso",
                                 mx_now_str(),
                             )
                         if success:
@@ -3421,12 +3421,12 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
                                     "Estado",
                                     "🔵 En Proceso",
                                 )
-                            if success and "Hora_Registro" in headers:
+                            if success and "Hora_Proceso" in headers:
                                 success = update_gsheet_cell(
                                     worksheet,
                                     headers,
                                     gsheet_row_index,
-                                    "Hora_Registro",
+                                    "Hora_Proceso",
                                     mx_now_str(),
                                 )
                             if success:
@@ -5749,12 +5749,12 @@ if df_main is not None:
                                                 "Estado",
                                                 "🔵 En Proceso",
                                             )
-                                        if ok and "Hora_Registro" in headers_casos:
+                                        if ok and "Hora_Proceso" in headers_casos:
                                             ok = update_gsheet_cell(
                                                 worksheet_casos,
                                                 headers_casos,
                                                 gsheet_row_idx,
-                                                "Hora_Registro",
+                                                "Hora_Proceso",
                                                 mx_now_str(),
                                             )
 
@@ -6420,12 +6420,12 @@ if df_main is not None:
                                                 "Estado",
                                                 "🔵 En Proceso",
                                             )
-                                        if ok and "Hora_Registro" in headers_casos:
+                                        if ok and "Hora_Proceso" in headers_casos:
                                             ok = update_gsheet_cell(
                                                 worksheet_casos,
                                                 headers_casos,
                                                 gsheet_row_idx,
-                                                "Hora_Registro",
+                                                "Hora_Proceso",
                                                 mx_now_str(),
                                             )
 
