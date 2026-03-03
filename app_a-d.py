@@ -647,6 +647,59 @@ def _parse_foraneo_number(raw: Any) -> Optional[int]:
     return value if value > 0 else None
 
 
+def _parse_row_sort_datetime(row: pd.Series) -> pd.Timestamp:
+    """Replica el sort_key operativo de app_i para numeración foránea."""
+
+    for field in (
+        "Hora_Registro",
+        "Fecha_Entrega",
+        "Fecha_Completado",
+        "Fecha_Pago_Comprobante",
+        "Hora_Proceso",
+        "Fecha_Registro",
+    ):
+        parsed = pd.to_datetime(row.get(field, ""), errors="coerce")
+        if pd.notna(parsed):
+            return parsed
+
+    row_idx = row.get("_gsheet_row_index", row.get("gsheet_row_index"))
+    try:
+        if row_idx is not None and not pd.isna(row_idx):
+            base = pd.Timestamp("1970-01-01")
+            return base + pd.to_timedelta(int(float(row_idx)), unit="s")
+    except Exception:
+        pass
+
+    return pd.Timestamp.max
+
+
+def _format_foraneo_fallback_number(fallback_order: Any) -> str:
+    try:
+        parsed = int(str(fallback_order).strip())
+        if parsed > 0:
+            return f"{parsed:02d}"
+    except Exception:
+        pass
+    return str(fallback_order)
+
+
+def _exclude_cleaned_completed(df: pd.DataFrame) -> pd.DataFrame:
+    if df is None or df.empty:
+        return pd.DataFrame() if df is None else df.copy()
+
+    out = df.copy()
+    if "Completados_Limpiado" not in out.columns:
+        out["Completados_Limpiado"] = ""
+    if "Estado" not in out.columns:
+        out["Estado"] = ""
+
+    mask_cleaned_completed = (
+        out["Estado"].astype(str).str.strip().isin(["🟢 Completado", "🟣 Cancelado", "✅ Viajó"])
+        & (out["Completados_Limpiado"].astype(str).str.lower() == "sí")
+    )
+    return out[~mask_cleaned_completed].copy()
+
+
 def build_flow_number_maps(
     df_source: pd.DataFrame,
     df_casos: Optional[pd.DataFrame] = None,
@@ -655,15 +708,16 @@ def build_flow_number_maps(
     if df_source is None or df_source.empty:
         return {}, {}, []
 
-    work = df_source.copy()
-    for col in ("Tipo_Envio", "ID_Pedido", "Folio_Factura"):
+    work = _exclude_cleaned_completed(df_source)
+    for col in ("Tipo_Envio", "Tipo_Envio_Original", "ID_Pedido", "Folio_Factura"):
         if col not in work.columns:
             work[col] = ""
 
     tipo_norm = work["Tipo_Envio"].astype(str).map(_normalize_text_for_matching)
-    mask_foraneo = tipo_norm.str.contains("foraneo", na=False)
+    tipo_original_norm = work["Tipo_Envio_Original"].astype(str).map(_normalize_text_for_matching)
+    mask_foraneo = tipo_norm.str.contains("foraneo", na=False) | tipo_original_norm.str.contains("foraneo", na=False)
 
-    df_foraneo = work[mask_foraneo].reset_index(drop=True)
+    df_foraneo = work[mask_foraneo].copy()
     df_local = work[~mask_foraneo].reset_index(drop=True)
 
     def _build_map(df_block: pd.DataFrame, formatter) -> dict[str, str]:
@@ -676,64 +730,66 @@ def build_flow_number_maps(
                     out[key] = numero
         return out
 
-    map_foraneo = _build_map(df_foraneo, lambda idx: f"{idx + 1:02d}")
+    map_foraneo: dict[str, str] = {}
     map_local = _build_map(df_local, lambda idx: str(idx + 101))
 
     pending_case_updates: list[tuple[int, str]] = []
-    if df_casos is None or df_casos.empty:
-        return map_local, map_foraneo, pending_case_updates
 
-    casos_work = df_casos.copy()
-    for col in ("Tipo_Envio_Original", "Tipo_Envio", "ID_Pedido", "Folio_Factura", "Numero_Foraneo"):
-        if col not in casos_work.columns:
-            casos_work[col] = ""
+    casos_foraneo = pd.DataFrame()
+    if df_casos is not None and not df_casos.empty:
+        casos_work = _exclude_cleaned_completed(df_casos)
+        for col in ("Tipo_Envio_Original", "Tipo_Envio", "ID_Pedido", "Folio_Factura", "Numero_Foraneo"):
+            if col not in casos_work.columns:
+                casos_work[col] = ""
 
-    envio_norm = (
-        casos_work["Tipo_Envio_Original"].astype(str).map(_normalize_text_for_matching)
-        + " "
-        + casos_work["Tipo_Envio"].astype(str).map(_normalize_text_for_matching)
-    )
-    casos_foraneo = casos_work[envio_norm.str.contains("foraneo", na=False)].copy()
-    if casos_foraneo.empty:
-        return map_local, map_foraneo, pending_case_updates
+        envio_norm = (
+            casos_work["Tipo_Envio_Original"].astype(str).map(_normalize_text_for_matching)
+            + " "
+            + casos_work["Tipo_Envio"].astype(str).map(_normalize_text_for_matching)
+        )
+        casos_foraneo = casos_work[envio_norm.str.contains("foraneo", na=False)].copy()
 
-    used_numbers = {
-        int(v)
-        for v in map_foraneo.values()
-        if str(v).isdigit() and int(v) > 0
-    }
-    next_number = (max(used_numbers) + 1) if used_numbers else 1
+    # Igualar app_i: numeración foránea por flujo combinado y orden sort_key.
+    combined_rows: list[tuple[pd.Timestamp, int, str, pd.Series]] = []
+    if not df_foraneo.empty:
+        for _, row in df_foraneo.iterrows():
+            combined_rows.append((_parse_row_sort_datetime(row), 0, "main", row))
 
-    for _, row in casos_foraneo.iterrows():
+    if not casos_foraneo.empty:
+        for _, row in casos_foraneo.iterrows():
+            combined_rows.append((_parse_row_sort_datetime(row), 1, "caso", row))
+
+    combined_rows.sort(key=lambda item: (item[0], item[1]))
+
+    next_number = 1
+    case_missing_number_by_row: dict[int, str] = {}
+    for _, _, source_kind, row in combined_rows:
         keys = [_flow_key(row.get("ID_Pedido", "")), _flow_key(row.get("Folio_Factura", ""))]
+
         existing = None
         for key in keys:
             if key and key in map_foraneo:
                 existing = map_foraneo[key]
                 break
-
         if existing is not None:
             continue
 
-        parsed = _parse_foraneo_number(row.get("Numero_Foraneo", ""))
-        if parsed is None:
-            parsed = next_number
-            next_number += 1
-            row_idx = row.get("_gsheet_row_index", row.get("gsheet_row_index"))
-            try:
-                if row_idx is not None and not pd.isna(row_idx):
-                    pending_case_updates.append((int(row_idx), f"{parsed:02d}"))
-            except Exception:
-                pass
+        numero_fmt = f"{next_number:02d}"
+        next_number += 1
 
-        numero_fmt = f"{parsed:02d}"
-        used_numbers.add(parsed)
-        while next_number in used_numbers:
-            next_number += 1
         for key in keys:
             if key and key not in map_foraneo:
                 map_foraneo[key] = numero_fmt
 
+        if source_kind == "caso" and _parse_foraneo_number(row.get("Numero_Foraneo", "")) is None:
+            row_idx = row.get("_gsheet_row_index", row.get("gsheet_row_index"))
+            try:
+                if row_idx is not None and not pd.isna(row_idx):
+                    case_missing_number_by_row[int(row_idx)] = numero_fmt
+            except Exception:
+                pass
+
+    pending_case_updates = sorted(case_missing_number_by_row.items(), key=lambda item: item[0])
     return map_local, map_foraneo, pending_case_updates
 
 
@@ -752,15 +808,11 @@ def resolve_flow_display_number(row: pd.Series, fallback_order: Any) -> str:
         if key and key in map_foraneo:
             return map_foraneo[key]
 
-    return str(fallback_order)
+    return _format_foraneo_fallback_number(fallback_order)
 
 
 def resolve_case_foraneo_display_number(row: pd.Series, fallback_order: Any) -> str:
-    tipo_envio = _normalize_text_for_matching(str(row.get("Tipo_Envio", "")))
-    tipo_original = _normalize_text_for_matching(str(row.get("Tipo_Envio_Original", "")))
-    if "foraneo" not in f"{tipo_envio} {tipo_original}":
-        return str(fallback_order)
-
+    """Resuelve número visible de casos foráneos priorizando número persistido/mapa."""
     numero_guardado = _parse_foraneo_number(row.get("Numero_Foraneo", ""))
     if numero_guardado is not None:
         return f"{numero_guardado:02d}"
@@ -772,6 +824,11 @@ def resolve_case_foraneo_display_number(row: pd.Series, fallback_order: Any) -> 
     for key in (id_key, folio_key):
         if key and key in map_foraneo:
             return map_foraneo[key]
+
+    tipo_envio = _normalize_text_for_matching(str(row.get("Tipo_Envio", "")))
+    tipo_original = _normalize_text_for_matching(str(row.get("Tipo_Envio_Original", "")))
+    if "foraneo" in f"{tipo_envio} {tipo_original}":
+        return _format_foraneo_fallback_number(fallback_order)
 
     return str(fallback_order)
 
@@ -6973,8 +7030,12 @@ if df_main is not None:
                             set_active_main_tab(7)
                             st.rerun()
                     comp_dev = comp_dev.sort_values(by="Fecha_Completado", ascending=False)
-                    for _, row in comp_dev.iterrows():
-                        with st.expander(f"🔁 {row.get('Folio_Factura', 'N/A')} – {row.get('Cliente', 'N/A')}"):
+                    for orden_dev_comp, (_, row) in enumerate(comp_dev.iterrows(), start=1):
+                        numero_foraneo_visible = resolve_case_foraneo_display_number(row, orden_dev_comp)
+                        with st.expander(
+                            f"🔁 #{numero_foraneo_visible} {row.get('Folio_Factura', 'N/A')} – {row.get('Cliente', 'N/A')}"
+                        ):
+                            st.markdown(f"**🔢 Número foráneo asignado:** `{numero_foraneo_visible}`")
                             render_caso_especial_devolucion(row)
     
                 # Garantías completadas/canceladas
