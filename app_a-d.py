@@ -395,6 +395,33 @@ def _clear_offscreen_guide_flags(visible_ids: set[str]) -> None:
             continue
 
 
+def _render_confirmar_modificacion_flow(context_key: str, button_label: str) -> bool:
+    """Renderiza una confirmación en 2 pasos para evitar clics accidentales."""
+    flag_key = f"confirm_mod_surtido_{context_key}"
+    awaiting_confirmation = st.session_state.get(flag_key, False)
+
+    if not awaiting_confirmation:
+        if st.button(button_label, key=f"{flag_key}_trigger"):
+            st.session_state[flag_key] = True
+            st.info("⚠️ Vuelve a confirmar para aplicar los cambios de surtido.")
+            st.rerun()
+        return False
+
+    st.warning("¿Confirmas que deseas marcar esta modificación de surtido como confirmada?")
+    confirm_col, cancel_col = st.columns(2)
+    with confirm_col:
+        if st.button("✅ Sí, confirmar ahora", key=f"{flag_key}_approve"):
+            st.session_state[flag_key] = False
+            return True
+    with cancel_col:
+        if st.button("❌ Cancelar", key=f"{flag_key}_cancel"):
+            st.session_state[flag_key] = False
+            st.info("Confirmación cancelada.")
+            st.rerun()
+
+    return False
+
+
 def _get_first_query_value(params: Any, key: str) -> Optional[str]:
     """Return the first value for ``key`` from Streamlit query params."""
 
@@ -3227,9 +3254,9 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
                     st.info(f"🟡 Modificación de Surtido:\n{mod_texto}")
                 else:
                     st.warning(f"🟡 Modificación de Surtido:\n{mod_texto}")
-                    if st.button(
-                        "✅ Confirmar Cambios de Surtido",
-                        key=f"confirm_mod_{row['ID_Pedido']}_{idx}_{origen_tab}",
+                    if _render_confirmar_modificacion_flow(
+                        context_key=f"{row['ID_Pedido']}_{idx}_{origen_tab}",
+                        button_label="✅ Confirmar Cambios de Surtido",
                     ):
                         st.session_state["expanded_pedidos"][row['ID_Pedido']] = True
                         st.session_state["scroll_to_pedido_id"] = row["ID_Pedido"]
@@ -3278,9 +3305,9 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
                         st.info(f"✉️ Modificación (Datos Fiscales):\n{mod_texto}")
                     else:
                         st.warning(f"✉️ Modificación (Datos Fiscales):\n{mod_texto}")
-                        if st.button(
-                            "✅ Confirmar Cambios de Surtido",
-                            key=f"confirm_mod_df_{row['ID_Pedido']}_{idx}_{origen_tab}",
+                        if _render_confirmar_modificacion_flow(
+                            context_key=f"df_{row['ID_Pedido']}_{idx}_{origen_tab}",
+                            button_label="✅ Confirmar Cambios de Surtido",
                         ):
                             st.session_state["expanded_pedidos"][row["ID_Pedido"]] = True
                             st.session_state["scroll_to_pedido_id"] = row["ID_Pedido"]
@@ -5573,7 +5600,10 @@ if df_main is not None:
                             st.info(mod_texto)
                         else:
                             st.warning(mod_texto)
-                            if st.button("✅ Confirmar Cambios de Surtido", key=f"confirm_mod_caso_{idp or folio or cliente}"):
+                            if _render_confirmar_modificacion_flow(
+                                context_key=f"caso_{idp or folio or cliente}",
+                                button_label="✅ Confirmar Cambios de Surtido",
+                            ):
                                 try:
                                     gsheet_row_idx = None
                                     if "ID_Pedido" in df_casos.columns and idp:
@@ -6241,7 +6271,10 @@ if df_main is not None:
                             st.info(mod_texto)
                         else:
                             st.warning(mod_texto)
-                            if st.button("✅ Confirmar Cambios de Surtido (Garantía)", key=f"confirm_mod_g_{unique_suffix}"):
+                            if _render_confirmar_modificacion_flow(
+                                context_key=f"garantia_{unique_suffix}",
+                                button_label="✅ Confirmar Cambios de Surtido (Garantía)",
+                            ):
                                 try:
                                     gsheet_row_idx = None
                                     if "ID_Pedido" in df_casos.columns and idp:
