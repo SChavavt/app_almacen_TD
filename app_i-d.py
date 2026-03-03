@@ -244,6 +244,8 @@ def _build_flow_number_maps(df_all: pd.DataFrame) -> tuple[dict[str, str], dict[
     work = df_all.copy()
     if "Tipo_Envio" not in work.columns:
         work["Tipo_Envio"] = ""
+    if "Tipo_Envio_Original" not in work.columns:
+        work["Tipo_Envio_Original"] = ""
     if "ID_Pedido" not in work.columns:
         work["ID_Pedido"] = ""
     if "Folio_Factura" not in work.columns:
@@ -252,7 +254,8 @@ def _build_flow_number_maps(df_all: pd.DataFrame) -> tuple[dict[str, str], dict[
         work["Numero_Foraneo"] = ""
 
     tipo_norm = work["Tipo_Envio"].astype(str).apply(_normalize_envio_original)
-    mask_foraneo = tipo_norm.str.contains("foraneo", na=False)
+    tipo_original_norm = work["Tipo_Envio_Original"].astype(str).apply(_normalize_envio_original)
+    mask_foraneo = tipo_norm.str.contains("foraneo", na=False) | tipo_original_norm.str.contains("foraneo", na=False)
 
     df_foraneo = work[mask_foraneo].reset_index(drop=True)
     df_local = work[~mask_foraneo].reset_index(drop=True)
@@ -305,7 +308,30 @@ def _build_flow_number_maps(df_all: pd.DataFrame) -> tuple[dict[str, str], dict[
 
 
 def assign_flow_numbers(entries_local, entries_foraneo, df_all: pd.DataFrame) -> None:
-    local_map, foraneo_map = _build_flow_number_maps(df_all)
+    local_map, _ = _build_flow_number_maps(df_all)
+
+    # Foráneo: consecutivo real por orden de registro visible en app_i
+    # (incluye pedidos y devoluciones/casos ya cargados en entries_foraneo).
+    foraneo_map: dict[str, str] = {}
+    next_foraneo = 1
+    for entry in sorted(entries_foraneo, key=lambda e: e.get("sort_key", pd.Timestamp.max)):
+        keys = [
+            _flow_match_key(entry.get("id_pedido", "")),
+            _flow_match_key(entry.get("folio", "")),
+        ]
+        existing = None
+        for key in keys:
+            if key and key in foraneo_map:
+                existing = foraneo_map[key]
+                break
+        if existing is not None:
+            continue
+
+        numero_fmt = f"{next_foraneo:02d}"
+        next_foraneo += 1
+        for key in keys:
+            if key and key not in foraneo_map:
+                foraneo_map[key] = numero_fmt
 
     def assign(entries, primary_map: dict[str, str], fallback_map: dict[str, str]) -> None:
         for entry in entries:
