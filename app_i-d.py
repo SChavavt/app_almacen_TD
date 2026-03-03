@@ -244,6 +244,8 @@ def _build_flow_number_maps(df_all: pd.DataFrame) -> tuple[dict[str, str], dict[
     work = df_all.copy()
     if "Tipo_Envio" not in work.columns:
         work["Tipo_Envio"] = ""
+    if "Tipo_Envio_Original" not in work.columns:
+        work["Tipo_Envio_Original"] = ""
     if "ID_Pedido" not in work.columns:
         work["ID_Pedido"] = ""
     if "Folio_Factura" not in work.columns:
@@ -252,7 +254,8 @@ def _build_flow_number_maps(df_all: pd.DataFrame) -> tuple[dict[str, str], dict[
         work["Numero_Foraneo"] = ""
 
     tipo_norm = work["Tipo_Envio"].astype(str).apply(_normalize_envio_original)
-    mask_foraneo = tipo_norm.str.contains("foraneo", na=False)
+    tipo_original_norm = work["Tipo_Envio_Original"].astype(str).apply(_normalize_envio_original)
+    mask_foraneo = tipo_norm.str.contains("foraneo", na=False) | tipo_original_norm.str.contains("foraneo", na=False)
 
     df_foraneo = work[mask_foraneo].reset_index(drop=True)
     df_local = work[~mask_foraneo].reset_index(drop=True)
@@ -305,7 +308,12 @@ def _build_flow_number_maps(df_all: pd.DataFrame) -> tuple[dict[str, str], dict[
 
 
 def assign_flow_numbers(entries_local, entries_foraneo, df_all: pd.DataFrame) -> None:
-    local_map, foraneo_map = _build_flow_number_maps(df_all)
+    numbering_source = df_all
+    df_casos_raw = load_casos_from_gsheets()
+    if not df_casos_raw.empty:
+        numbering_source = pd.concat([df_all, df_casos_raw], ignore_index=True, sort=False)
+
+    local_map, foraneo_map = _build_flow_number_maps(numbering_source)
 
     def assign(entries, primary_map: dict[str, str], fallback_map: dict[str, str]) -> None:
         for entry in entries:
