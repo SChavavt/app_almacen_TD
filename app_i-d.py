@@ -2381,30 +2381,23 @@ if selected_tab == 2:
     ant = [e for e in ant if _is_visible_auto_entry(e)]
     ant = sort_entries_by_flow_number_desc(ant)
 
-    hoy_entries = filter_entries_on_or_after(combined_entries, hoy)
     sin_fecha = filter_entries_no_entrega_date(combined_entries)
+    sin_fecha = [e for e in sin_fecha if _is_visible_auto_entry(e)]
+    sin_fecha = sort_entries_by_flow_number_desc(sin_fecha)
 
-    seen = set()
-    merged = []
-    for e in (hoy_entries + sin_fecha):
-        key = sanitize_text(e.get("id_pedido", "")) or (
-            sanitize_text(e.get("cliente", "")) + "|" + sanitize_text(e.get("hora", ""))
-        )
-        if key in seen:
-            continue
-        seen.add(key)
-        merged.append(e)
+    hoy_entries = filter_entries_on_or_after(combined_entries, hoy)
+    hoy_entries = [e for e in hoy_entries if _is_visible_auto_entry(e)]
+    hoy_entries = sort_entries_by_flow_number_desc(hoy_entries)
 
-    merged = [e for e in merged if _is_visible_auto_entry(e)]
-    merged = sort_entries_by_flow_number_desc(merged)
+    anteriores = ant + sin_fecha
 
     # Distribución inteligente: usar el espacio libre de "Anteriores"
     # para continuar la lista de "Hoy" y evitar columnas desbalanceadas.
-    ant_count = len(ant)
-    hoy_count = len(merged)
+    ant_count = len(anteriores)
+    hoy_count = len(hoy_entries)
     objetivo_derecha = int(np.ceil((ant_count + hoy_count) / 2.0))
-    hoy_primarios = merged[:objetivo_derecha]
-    hoy_continuacion = merged[objetivo_derecha:]
+    hoy_primarios = hoy_entries[:objetivo_derecha]
+    hoy_continuacion = hoy_entries[objetivo_derecha:]
 
     # 2) Layout: izquierda/derecha
     col_left, col_right = st.columns(2, gap="large")
@@ -2412,9 +2405,9 @@ if selected_tab == 2:
     # --- IZQUIERDA: ANTERIORES + CONTINUACIÓN DE HOY ---
     with col_left:
         next_number = render_auto_list(
-            ant,
+            anteriores,
             title="🚚 FORÁNEOS • ANTERIORES",
-            subtitle="Fechas previas de registro",
+            subtitle=f"Fechas previas + pedidos sin Fecha_Entrega + continuación de HOY ({hoy.strftime('%d/%m')})",
             max_rows=140,
             panel_height=220,
         )
@@ -2435,7 +2428,7 @@ if selected_tab == 2:
         render_auto_list(
             hoy_primarios,
             title=f"🚚 FORÁNEOS • HOY ({hoy.strftime('%d/%m')})",
-            subtitle="Todos los de hoy y fechas futuras + pedidos sin Fecha_Entrega",
+            subtitle="Todos los de hoy y fechas futuras",
             max_rows=140,
             start_number=next_number,
         )
