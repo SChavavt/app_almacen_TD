@@ -647,26 +647,6 @@ def _parse_foraneo_number(raw: Any) -> Optional[int]:
     return value if value > 0 else None
 
 
-def _parse_row_sort_datetime(row: pd.Series) -> pd.Timestamp:
-    """Obtiene una fecha/hora utilizable para ordenar flujo entre pedidos y casos."""
-    for field in ("Hora_Registro", "Fecha_Registro"):
-        value = row.get(field, "")
-        parsed = pd.to_datetime(value, errors="coerce")
-        if pd.notna(parsed):
-            return parsed
-    return pd.Timestamp.max
-
-
-def _format_foraneo_fallback_number(fallback_order: Any) -> str:
-    try:
-        parsed = int(str(fallback_order).strip())
-        if parsed > 0:
-            return f"{parsed:02d}"
-    except Exception:
-        pass
-    return str(fallback_order)
-
-
 def build_flow_number_maps(
     df_source: pd.DataFrame,
     df_casos: Optional[pd.DataFrame] = None,
@@ -680,12 +660,8 @@ def build_flow_number_maps(
         if col not in work.columns:
             work[col] = ""
 
-    if "Tipo_Envio_Original" not in work.columns:
-        work["Tipo_Envio_Original"] = ""
-
     tipo_norm = work["Tipo_Envio"].astype(str).map(_normalize_text_for_matching)
-    tipo_original_norm = work["Tipo_Envio_Original"].astype(str).map(_normalize_text_for_matching)
-    mask_foraneo = tipo_norm.str.contains("foraneo", na=False) | tipo_original_norm.str.contains("foraneo", na=False)
+    mask_foraneo = tipo_norm.str.contains("foraneo", na=False)
 
     df_foraneo = work[mask_foraneo].reset_index(drop=True)
     df_local = work[~mask_foraneo].reset_index(drop=True)
@@ -700,7 +676,7 @@ def build_flow_number_maps(
                     out[key] = numero
         return out
 
-    map_foraneo: dict[str, str] = {}
+    map_foraneo = _build_map(df_foraneo, lambda idx: f"{idx + 1:02d}")
     map_local = _build_map(df_local, lambda idx: str(idx + 101))
 
     pending_case_updates: list[tuple[int, str]] = []
@@ -718,46 +694,45 @@ def build_flow_number_maps(
         + casos_work["Tipo_Envio"].astype(str).map(_normalize_text_for_matching)
     )
     casos_foraneo = casos_work[envio_norm.str.contains("foraneo", na=False)].copy()
+    if casos_foraneo.empty:
+        return map_local, map_foraneo, pending_case_updates
 
-    # Igualar lógica de app_i: consecutivo foráneo por orden visible (pedidos + casos).
-    combined_foraneo_entries: list[tuple[pd.Timestamp, int, str, pd.Series]] = []
-    for _, row in df_foraneo.iterrows():
-        combined_foraneo_entries.append((_parse_row_sort_datetime(row), 0, "main", row))
-    if not casos_foraneo.empty:
-        for _, row in casos_foraneo.iterrows():
-            combined_foraneo_entries.append((_parse_row_sort_datetime(row), 1, "caso", row))
+    used_numbers = {
+        int(v)
+        for v in map_foraneo.values()
+        if str(v).isdigit() and int(v) > 0
+    }
+    next_number = (max(used_numbers) + 1) if used_numbers else 1
 
-    combined_foraneo_entries.sort(key=lambda item: (item[0], item[1]))
-
-    next_number = 1
-    case_missing_number_by_row: dict[int, str] = {}
-    for _, _, source_kind, row in combined_foraneo_entries:
+    for _, row in casos_foraneo.iterrows():
         keys = [_flow_key(row.get("ID_Pedido", "")), _flow_key(row.get("Folio_Factura", ""))]
-
         existing = None
         for key in keys:
             if key and key in map_foraneo:
                 existing = map_foraneo[key]
                 break
+
         if existing is not None:
             continue
 
-        numero_fmt = f"{next_number:02d}"
-        next_number += 1
-
-        for key in keys:
-            if key and key not in map_foraneo:
-                map_foraneo[key] = numero_fmt
-
-        if source_kind == "caso" and _parse_foraneo_number(row.get("Numero_Foraneo", "")) is None:
+        parsed = _parse_foraneo_number(row.get("Numero_Foraneo", ""))
+        if parsed is None:
+            parsed = next_number
+            next_number += 1
             row_idx = row.get("_gsheet_row_index", row.get("gsheet_row_index"))
             try:
                 if row_idx is not None and not pd.isna(row_idx):
-                    case_missing_number_by_row[int(row_idx)] = numero_fmt
+                    pending_case_updates.append((int(row_idx), f"{parsed:02d}"))
             except Exception:
                 pass
 
-    pending_case_updates = sorted(case_missing_number_by_row.items(), key=lambda item: item[0])
+        numero_fmt = f"{parsed:02d}"
+        used_numbers.add(parsed)
+        while next_number in used_numbers:
+            next_number += 1
+        for key in keys:
+            if key and key not in map_foraneo:
+                map_foraneo[key] = numero_fmt
 
     return map_local, map_foraneo, pending_case_updates
 
@@ -777,7 +752,7 @@ def resolve_flow_display_number(row: pd.Series, fallback_order: Any) -> str:
         if key and key in map_foraneo:
             return map_foraneo[key]
 
-    return _format_foraneo_fallback_number(fallback_order)
+    return str(fallback_order)
 
 
 def resolve_case_foraneo_display_number(row: pd.Series, fallback_order: Any) -> str:
@@ -798,7 +773,7 @@ def resolve_case_foraneo_display_number(row: pd.Series, fallback_order: Any) -> 
         if key and key in map_foraneo:
             return map_foraneo[key]
 
-    return _format_foraneo_fallback_number(fallback_order)
+    return str(fallback_order)
 
 
 _GUIDE_REQUEST_PHRASES = (
