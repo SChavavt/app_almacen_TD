@@ -1576,33 +1576,22 @@ def cobranza_load_records_with_rows(ws) -> list[dict]:
 def cobranza_upsert_rows_by_key(ws, df: pd.DataFrame, key_cols: list[str], update_cols: list[str]):
     if df.empty:
         return
-    headers = [str(h).strip() for h in _retry_gspread_api_call(lambda: ws.row_values(1), retries=4, base_delay=0.9)]
+    headers = [str(h).strip() for h in ws.row_values(1)]
     recs = cobranza_load_records_with_rows(ws)
-    # Guardamos índice por posición para poder escribir todo en un solo update
-    # y evitar exceder cuota por demasiados writes por minuto.
-    idx = {
-        tuple(_cobranza_clean_text(r.get(k, "")) for k in key_cols): i
-        for i, r in enumerate(recs)
-    }
+    idx = {tuple(_cobranza_clean_text(r.get(k, "")) for k in key_cols): r for r in recs}
     for _, r in df.iterrows():
         key = tuple(_cobranza_clean_text(r.get(k, "")) for k in key_cols)
         payload = {h: _cobranza_clean_text(r.get(h, "")) for h in headers}
         if key in idx:
-            old = recs[idx[key]]
+            old = idx[key]
+            row_num = old["__row_number__"]
+            row_vals = [old.get(h, "") for h in headers]
             for c in set(key_cols + update_cols):
                 if c in headers:
-                    old[c] = payload.get(c, "")
+                    row_vals[headers.index(c)] = payload.get(c, "")
+            cobranza_update_row_values(ws, row_num, row_vals)
         else:
-            recs.append({h: payload.get(h, "") for h in headers})
-            idx[key] = len(recs) - 1
-
-    matrix = [headers] + [[rec.get(h, "") for h in headers] for rec in recs]
-    end_a1 = gspread.utils.rowcol_to_a1(len(matrix), len(headers))
-    _retry_gspread_api_call(
-        lambda: ws.update(f"A1:{end_a1}", matrix, value_input_option="USER_ENTERED"),
-        retries=4,
-        base_delay=1.0,
-    )
+            ws.append_row([payload.get(h, "") for h in headers], value_input_option="USER_ENTERED")
 
 
 def parse_reporte_cobranza_excel(file, mes: str) -> pd.DataFrame:
