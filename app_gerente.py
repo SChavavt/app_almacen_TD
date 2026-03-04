@@ -1886,6 +1886,7 @@ def render_cobranza_tab_gerente():
         st.dataframe(missing, use_container_width=True, hide_index=True)
 
     base_df = pd.DataFrame(cobranza_load_records_with_rows(ws_base))
+    venc_df = pd.DataFrame(cobranza_load_records_with_rows(ws_venc))
     st.markdown("### Comentarios")
     anio_actual = datetime.now().year
     mes_actual = datetime.now().strftime("%Y-%m")
@@ -1920,9 +1921,43 @@ def render_cobranza_tab_gerente():
         clientes_mes = clientes_mes[["Codigo", "Razon_Social"]].drop_duplicates().sort_values(["Razon_Social", "Codigo"])
         opciones = [f"{r.Codigo} - {r.Razon_Social}" for r in clientes_mes.itertuples(index=False)]
         cliente_sel = st.selectbox("Cliente", opciones, key="ger_cob_cliente")
+
+        codigo = cliente_sel.split(" - ")[0].strip()
+        venc_cliente = pd.DataFrame()
+        if not venc_df.empty:
+            venc_cliente = venc_df[
+                (venc_df.get("Mes", "").astype(str) == mes_com)
+                & (venc_df.get("Codigo", "").astype(str) == codigo)
+            ].copy()
+
+        dias_venc = []
+        if not venc_cliente.empty and "Fecha_Vencimiento" in venc_cliente.columns:
+            fechas_venc = pd.to_datetime(venc_cliente["Fecha_Vencimiento"], errors="coerce")
+            dias_venc = sorted({int(f.day) for f in fechas_venc.dropna()})
+
+        if dias_venc:
+            dias_txt = ", ".join(str(d) for d in dias_venc)
+            total_folios = int(venc_cliente[["Folio", "Fecha_Vencimiento"]].drop_duplicates().shape[0])
+            st.info(
+                f"🗓️ **Vencimientos del cliente en {mes_com}:** días **{dias_txt}** · "
+                f"folios activos: **{total_folios}**."
+            )
+            with st.expander("Ver detalle de folios y vencimientos", expanded=False):
+                detalle_cols = [c for c in ["Folio", "Fecha_Factura", "Fecha_Vencimiento", "Saldo_Vence", "Moneda"] if c in venc_cliente.columns]
+                if detalle_cols:
+                    detalle = venc_cliente[detalle_cols].drop_duplicates().sort_values(
+                        by=[c for c in ["Fecha_Vencimiento", "Folio"] if c in detalle_cols]
+                    )
+                    st.dataframe(detalle, use_container_width=True, hide_index=True)
+        else:
+            st.caption("ℹ️ Este cliente no tiene vencimientos detectados en ese mes. Puedes capturar comentario manualmente.")
+
         dias_opciones = list(range(1, 32))
         dia_actual = datetime.now().day
-        dia_sel = st.selectbox("Día", dias_opciones, index=dias_opciones.index(dia_actual), key="ger_cob_dia")
+        dia_sugerido = dias_venc[0] if dias_venc else dia_actual
+        if dia_sugerido not in dias_opciones:
+            dia_sugerido = dia_actual
+        dia_sel = st.selectbox("Día", dias_opciones, index=dias_opciones.index(dia_sugerido), key="ger_cob_dia")
         comentario = st.text_area("Comentario", key="ger_cob_comentario")
         usuario = st.text_input("Actualizado_por", value=_safe_str(usuario_actual), key="ger_cob_user")
 
@@ -1930,7 +1965,6 @@ def render_cobranza_tab_gerente():
             if not comentario.strip():
                 st.warning("Escribe un comentario.")
                 return
-            codigo = cliente_sel.split(" - ")[0].strip()
             com_df = pd.DataFrame([{
                 "Mes": mes_com,
                 "Codigo": codigo,
