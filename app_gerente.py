@@ -1802,6 +1802,37 @@ def get_cobranza_worksheets_safe():
         st.caption(f"Detalle técnico: {e}")
         return None, None, None
 
+
+def _cobranza_meses_disponibles(base_df: pd.DataFrame) -> list[str]:
+    """Devuelve meses YYYY-MM ordenados (incluyendo mes actual)."""
+    mes_actual = datetime.now().strftime("%Y-%m")
+    meses = []
+    if not base_df.empty and "Mes" in base_df.columns:
+        meses = sorted({
+            m for m in base_df["Mes"].astype(str)
+            if re.match(r"^\d{4}-\d{2}$", m)
+        })
+    if mes_actual not in meses:
+        meses.append(mes_actual)
+    return sorted(meses)
+
+
+def _cobranza_sheet_title_safe(title: str) -> str:
+    t = re.sub(r"[\[\]\*\?/\\:]", "-", str(title or "").strip())
+    return (t[:100] if t else f"Cobranza_{datetime.now().strftime('%Y%m%d_%H%M%S')}")
+
+
+def _cobranza_guardar_en_drive_nueva_hoja(spreadsheet_id: str, sheet_name: str, out_df: pd.DataFrame) -> str:
+    """Crea una worksheet nueva en Drive y guarda el reporte generado."""
+    ss = gspread_client.open_by_key(spreadsheet_id)
+    title = _cobranza_sheet_title_safe(sheet_name)
+    ws_new = ss.add_worksheet(title=title, rows=max(len(out_df) + 5, 50), cols=max(len(out_df.columns) + 2, 20))
+
+    encabezado = [f"Fecha De Generación: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"] + [""] * (len(out_df.columns) - 1)
+    matrix = [encabezado, list(out_df.columns)] + out_df.fillna("").astype(str).values.tolist()
+    cobranza_replace_matrix_values(ws_new, matrix)
+    return title
+
 def render_cobranza_tab_gerente():
     st.subheader("📒 Cobranza")
 
@@ -1888,17 +1919,8 @@ def render_cobranza_tab_gerente():
     base_df = pd.DataFrame(cobranza_load_records_with_rows(ws_base))
     venc_df = pd.DataFrame(cobranza_load_records_with_rows(ws_venc))
     st.markdown("### Comentarios")
-    anio_actual = datetime.now().year
+    meses_disponibles = _cobranza_meses_disponibles(base_df)
     mes_actual = datetime.now().strftime("%Y-%m")
-    meses_disponibles = []
-    if not base_df.empty and "Mes" in base_df.columns:
-        meses_disponibles = sorted({
-            m for m in base_df["Mes"].astype(str)
-            if re.match(r"^\d{4}-\d{2}$", m) and m.startswith(f"{anio_actual}-")
-        })
-    if mes_actual not in meses_disponibles:
-        meses_disponibles.append(mes_actual)
-    meses_disponibles = sorted(meses_disponibles)
     mes_com = st.selectbox(
         "Mes comentarios (YYYY-MM)",
         options=meses_disponibles,
@@ -1977,17 +1999,90 @@ def render_cobranza_tab_gerente():
             st.success("✅ Comentario guardado.")
 
     st.markdown("### Descargar")
-    mes_dl = st.text_input("Mes descarga (YYYY-MM)", value=mes_sel, key="ger_cob_mes_dl")
+    mes_dl = st.selectbox(
+        "Mes descarga (YYYY-MM)",
+        options=meses_disponibles,
+        index=meses_disponibles.index(mes_actual) if mes_actual in meses_disponibles else 0,
+        key="ger_cob_mes_dl",
+    )
     if st.button("Generar y descargar Excel", key="ger_cob_excel"):
         base_df = pd.DataFrame(cobranza_load_records_with_rows(ws_base))
+        venc_df = pd.DataFrame(cobranza_load_records_with_rows(ws_venc))
         com_df = pd.DataFrame(cobranza_load_records_with_rows(ws_com))
         base_df = base_df[base_df.get("Mes", "").astype(str) == mes_dl] if not base_df.empty else pd.DataFrame()
+        if not base_df.empty and "Tipo_Pago" in base_df.columns:
+            tipo_pago = base_df["Tipo_Pago"].astype(str).str.strip().str.upper()
+            base_df = base_df[tipo_pago != "CONTADO"]
         if base_df.empty:
-            st.error("No hay registros en cobranza_base para ese mes.")
+            st.error("No hay registros en cobranza_base para ese mes (excluyendo CONTADO).")
         else:
             out = base_df[["Codigo", "Razon_Social"]].drop_duplicates().copy()
+            base_saldos = base_df[["Codigo", "Saldo"]].copy() if "Saldo" in base_df.columns else pd.DataFrame(columns=["Codigo", "Saldo"])
+            if not base_saldos.empty:
+                base_saldos["Saldo"] = pd.to_numeric(base_saldos["Saldo"], errors="coerce").fillna(0.0)
+                base_saldos = base_saldos.groupby("Codigo", as_index=False)["Saldo"].sum()
+                out = out.merge(base_saldos, on="Codigo", how="left")
+            else:
+                out["Saldo"] = 0.0
+            if not venc_df.empty:
+                venc_mes = venc_df[venc_df.get("Mes", "").astype(str) == mes_dl].copy()
+                venc_mes = venc_mes[venc_mes.get("Codigo", "").astype(str).isin(out["Codigo"].astype(str))]
+            else:
+                venc_mes = pd.DataFrame()
+
+            extra_cols = ["Folio", "Saldo_Vence", "Fecha_Vencimiento", "Condicion", "Moneda", "Estatus_Cobranza"]
+            for c in extra_cols:
+                out[c] = ""
+
+            if not venc_mes.empty:
+                venc_mes["Saldo_Vence"] = pd.to_numeric(venc_mes.get("Saldo_Vence", ""), errors="coerce")
+                venc_ag = venc_mes.groupby("Codigo", as_index=False).agg({
+                    "Folio": lambda s: " | ".join(sorted({str(x).strip() for x in s if str(x).strip()})),
+                    "Saldo_Vence": "sum",
+                    "Fecha_Vencimiento": lambda s: " | ".join(sorted({str(x).strip() for x in s if str(x).strip()})),
+                    "Condicion": lambda s: " | ".join(sorted({str(x).strip() for x in s if str(x).strip()})),
+                    "Moneda": lambda s: " | ".join(sorted({str(x).strip() for x in s if str(x).strip()})),
+                })
+                out = out.merge(venc_ag, on="Codigo", how="left", suffixes=("", "_agg"))
+                out["Folio"] = out["Folio_agg"].fillna("")
+                out["Saldo_Vence"] = out["Saldo_Vence_agg"].fillna(0.0)
+                out["Fecha_Vencimiento"] = out["Fecha_Vencimiento_agg"].fillna("")
+                out["Condicion"] = out["Condicion_agg"].fillna("")
+                out["Moneda"] = out["Moneda_agg"].fillna("")
+                out = out.drop(columns=[c for c in ["Folio_agg", "Saldo_Vence_agg", "Fecha_Vencimiento_agg", "Condicion_agg", "Moneda_agg"] if c in out.columns])
+
+            out["Saldo"] = pd.to_numeric(out.get("Saldo", 0.0), errors="coerce").fillna(0.0)
+            out["Saldo_Vence"] = pd.to_numeric(out.get("Saldo_Vence", 0.0), errors="coerce").fillna(0.0)
+            out["Estatus_Cobranza"] = np.where(
+                (out["Saldo"] <= 0.0) & (out["Saldo_Vence"] <= 0.0),
+                "PAGADO",
+                "CON SALDO",
+            )
+
             for d in range(1, 32):
                 out[str(d)] = ""
+
+            if not venc_mes.empty and "Fecha_Vencimiento" in venc_mes.columns:
+                fechas = pd.to_datetime(venc_mes["Fecha_Vencimiento"], errors="coerce", dayfirst=False)
+                saldos_vence = pd.to_numeric(venc_mes.get("Saldo_Vence", 0), errors="coerce").fillna(0.0)
+                for codigo, fecha, saldo_vence in zip(venc_mes.get("Codigo", "").astype(str), fechas, saldos_vence):
+                    if pd.isna(fecha):
+                        continue
+                    dia_col = str(int(fecha.day))
+                    nota = (
+                        f"{fecha.strftime('%d/%m/%Y')} factura pagada."
+                        if float(saldo_vence) <= 0.0
+                        else f"{fecha.strftime('%d/%m/%Y')} hoy vence su factura."
+                    )
+                    if dia_col in out.columns:
+                        mask = out["Codigo"].astype(str) == codigo
+                        previo = out.loc[mask, dia_col].astype(str).fillna("")
+                        out.loc[mask, dia_col] = np.where(
+                            previo.str.strip() == "",
+                            nota,
+                            previo + " | " + nota,
+                        )
+
             if not com_df.empty:
                 com_df = com_df[com_df.get("Mes", "").astype(str) == mes_dl]
                 for r in com_df.itertuples(index=False):
@@ -1995,7 +2090,16 @@ def render_cobranza_tab_gerente():
                     cod = _cobranza_clean_text(getattr(r, "Codigo", ""))
                     txt = _cobranza_clean_text(getattr(r, "Comentario", ""))
                     if dia in out.columns:
-                        out.loc[out["Codigo"].astype(str) == cod, dia] = txt
+                        mask = out["Codigo"].astype(str) == cod
+                        previo = out.loc[mask, dia].astype(str).fillna("")
+                        out.loc[mask, dia] = np.where(
+                            previo.str.strip() == "",
+                            txt,
+                            np.where(txt.strip() == "", previo, previo + " | " + txt),
+                        )
+
+            cols_orden = ["Codigo", "Razon_Social", "Folio", "Saldo_Vence", "Fecha_Vencimiento", "Condicion", "Moneda", "Estatus_Cobranza"] + [str(d) for d in range(1, 32)]
+            out = out[cols_orden]
 
             year_i = int(mes_dl.split("-")[0]) if "-" in mes_dl else now_dt.year
             month_i = int(mes_dl.split("-")[1]) if "-" in mes_dl else now_dt.month
@@ -2005,6 +2109,18 @@ def render_cobranza_tab_gerente():
                 ws = writer.sheets["Cobranza"]
                 ws.write(0, 0, f"Fecha De Generación: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}   Año: {year_i}   Mes: {MESES_ES[month_i] if 1 <= month_i <= 12 else str(month_i)}")
             bio.seek(0)
+
+            try:
+                spreadsheet_id = get_cobranza_spreadsheet_id()
+                nombre_hoja = _cobranza_guardar_en_drive_nueva_hoja(
+                    spreadsheet_id,
+                    f"Cobranza_{mes_dl}_{datetime.now().strftime('%Y%m%d_%H%M%S')}",
+                    out,
+                )
+                st.success(f"✅ También se guardó en Drive en la hoja: {nombre_hoja}")
+            except Exception as e:
+                st.warning(f"⚠️ Se generó el Excel local, pero no se pudo guardar en Drive: {e}")
+
             st.download_button(
                 "Descargar Excel de cobranza",
                 data=bio.getvalue(),
