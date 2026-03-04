@@ -1,5 +1,6 @@
 import streamlit as st
 import pandas as pd
+import numpy as np
 import boto3
 import gspread
 import pdfplumber
@@ -14,10 +15,13 @@ import uuid
 import urllib.parse
 import urllib.request
 import time
+import calendar
 
 # --- CONFIGURACIÓN DE STREAMLIT ---
 st.set_page_config(page_title="🔍 Buscador de Guías y Descargas", layout="wide")
 st.title("🔍 Buscador de Pedidos por Guía o Cliente")
+
+MESES_ES = ["", "Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"]
 
 # ===== SPREADSHEETS =====
 SPREADSHEET_ID_MAIN = "1aWkSelodaz0nWfQx7FZAysGnIYGQFJxAN7RO3YgCiZY"
@@ -1472,6 +1476,402 @@ def build_hoy_alerts(hoy: date, df_citas: pd.DataFrame, df_tareas: pd.DataFrame,
     return alerts
 
 
+
+def _cobranza_clean_text(v) -> str:
+    if v is None:
+        return ""
+    try:
+        if pd.isna(v):
+            return ""
+    except Exception:
+        pass
+    return str(v).strip()
+
+
+def _cobranza_norm_code(v) -> str:
+    t = _cobranza_clean_text(v)
+    if not t:
+        return ""
+    try:
+        return str(int(float(t.replace(",", ""))))
+    except Exception:
+        return t
+
+
+def _cobranza_to_float(v) -> float:
+    t = _cobranza_clean_text(v).replace(",", "").replace("$", "")
+    if not t:
+        return 0.0
+    try:
+        return float(t)
+    except Exception:
+        return 0.0
+
+
+def _cobranza_to_date(v) -> str:
+    dt = pd.to_datetime(v, errors="coerce", dayfirst=True)
+    if pd.isna(dt):
+        return ""
+    return dt.strftime("%Y-%m-%d")
+
+
+def get_cobranza_spreadsheet_id() -> str:
+    gs = st.secrets.get("gsheets", {})
+    spreadsheet_id = (
+        gs.get("spreadsheet_id_cobranza")
+        or gs.get("SPREADSHEET_ID_COBRANZA")
+        or gs.get("spreadsheet_id")
+    )
+    if not spreadsheet_id:
+        raise KeyError(
+            "Falta definir gsheets.spreadsheet_id_cobranza o gsheets.spreadsheet_id en secrets."
+        )
+    return str(spreadsheet_id)
+
+
+def get_cobranza_worksheet(nombre_hoja: str):
+    spreadsheet_id = get_cobranza_spreadsheet_id()
+    return gspread_client.open_by_key(spreadsheet_id).worksheet(nombre_hoja)
+
+
+
+
+def cobranza_update_row_values(ws, row_number: int, values: list):
+    """Actualiza una fila completa con compatibilidad para versiones viejas de gspread."""
+    if hasattr(ws, "update"):
+        start = gspread.utils.rowcol_to_a1(row_number, 1)
+        end = gspread.utils.rowcol_to_a1(row_number, len(values))
+        ws.update(f"{start}:{end}", [values])
+        return
+
+    cells = [
+        gspread.Cell(row=row_number, col=idx + 1, value=values[idx])
+        for idx in range(len(values))
+    ]
+    ws.update_cells(cells, value_input_option="USER_ENTERED")
+
+def cobranza_ensure_headers(ws, expected_headers: list[str]):
+    current = [str(x).strip() for x in ws.row_values(1)]
+    if current != expected_headers:
+        if not any(current):
+            ws.append_row(expected_headers, value_input_option="USER_ENTERED")
+        else:
+            cobranza_update_row_values(ws, 1, expected_headers)
+
+
+def cobranza_load_records_with_rows(ws) -> list[dict]:
+    values = ws.get_all_values()
+    if not values:
+        return []
+    headers = values[0]
+    out = []
+    for i, row in enumerate(values[1:], start=2):
+        row = row + [""] * (len(headers) - len(row))
+        rec = {headers[j]: row[j] for j in range(len(headers))}
+        rec["__row_number__"] = i
+        out.append(rec)
+    return out
+
+
+def cobranza_upsert_rows_by_key(ws, df: pd.DataFrame, key_cols: list[str], update_cols: list[str]):
+    if df.empty:
+        return
+    headers = [str(h).strip() for h in ws.row_values(1)]
+    recs = cobranza_load_records_with_rows(ws)
+    idx = {tuple(_cobranza_clean_text(r.get(k, "")) for k in key_cols): r for r in recs}
+    for _, r in df.iterrows():
+        key = tuple(_cobranza_clean_text(r.get(k, "")) for k in key_cols)
+        payload = {h: _cobranza_clean_text(r.get(h, "")) for h in headers}
+        if key in idx:
+            old = idx[key]
+            row_num = old["__row_number__"]
+            row_vals = [old.get(h, "") for h in headers]
+            for c in set(key_cols + update_cols):
+                if c in headers:
+                    row_vals[headers.index(c)] = payload.get(c, "")
+            cobranza_update_row_values(ws, row_num, row_vals)
+        else:
+            ws.append_row([payload.get(h, "") for h in headers], value_input_option="USER_ENTERED")
+
+
+def parse_reporte_cobranza_excel(file, mes: str) -> pd.DataFrame:
+    raw = pd.read_excel(file, header=None)
+    header_idx = None
+    for i in range(len(raw)):
+        vals = [_cobranza_clean_text(x).lower() for x in raw.iloc[i].tolist()]
+        if any("codigo" in v or "código" in v for v in vals):
+            header_idx = i
+            break
+    if header_idx is None:
+        raise Exception("No se encontró encabezado 'Código' en REPORTE.xlsx")
+
+    df = pd.read_excel(file, header=header_idx)
+    rename = {}
+    for c in df.columns:
+        n = _cobranza_clean_text(c).lower().replace("ó", "o")
+        if n == "codigo" or n == "código":
+            rename[c] = "Codigo"
+        elif "razon" in n and "social" in n:
+            rename[c] = "Razon_Social"
+        elif n == "saldo":
+            rename[c] = "Saldo"
+        elif "no vencido" in n:
+            rename[c] = "No_Vencido"
+        elif "vencido" in n:
+            rename[c] = "Vencido"
+    df = df.rename(columns=rename)
+    for req in ["Codigo", "Razon_Social", "Saldo", "No_Vencido"]:
+        if req not in df.columns:
+            raise Exception(f"Falta columna requerida en REPORTE: {req}")
+    if "Vencido" not in df.columns:
+        df["Vencido"] = 0.0
+    df = df[["Codigo", "Razon_Social", "Saldo", "No_Vencido", "Vencido"]].copy()
+    df["Codigo"] = df["Codigo"].apply(_cobranza_norm_code)
+    df = df[df["Codigo"].astype(str).str.strip() != ""]
+    for c in ["Saldo", "No_Vencido", "Vencido"]:
+        df[c] = df[c].apply(_cobranza_to_float)
+    df["Mes"] = mes
+    return df[["Mes", "Codigo", "Razon_Social", "Saldo", "No_Vencido", "Vencido"]]
+
+
+def parse_antiguedad_cobranza_excel(file, mes: str) -> pd.DataFrame:
+    raw = pd.read_excel(file, header=None)
+    rows = raw.fillna("").values.tolist()
+    codigo = ""
+    headers_idx = None
+    out = []
+    for row in rows:
+        c0 = _cobranza_clean_text(row[0] if len(row) > 0 else "")
+        c1 = _cobranza_clean_text(row[1] if len(row) > 1 else "")
+        try:
+            if c0 and c1 and float(c0.replace(",", "")) > 0:
+                codigo = _cobranza_norm_code(c0)
+                headers_idx = None
+                continue
+        except Exception:
+            pass
+
+        vals = [_cobranza_clean_text(x).lower() for x in row]
+        if "folio" in vals and any("fecha venc" in v for v in vals):
+            headers_idx = {i: v for i, v in enumerate(vals)}
+            continue
+        if not codigo or headers_idx is None:
+            continue
+        row_text = " ".join(vals)
+        if "envio" in row_text or "total:" in row_text:
+            continue
+
+        i_folio = next((k for k, v in headers_idx.items() if v == "folio"), None)
+        i_fv = next((k for k, v in headers_idx.items() if "fecha venc" in v), None)
+        i_ff = next((k for k, v in headers_idx.items() if v == "fecha" or "fecha factura" in v), None)
+        i_sal = next((k for k, v in headers_idx.items() if v.strip() == "saldo"), None)
+        if i_sal is None:
+            i_sal = next(
+                (k for k, v in headers_idx.items() if "saldo" in v and "acumul" not in v),
+                None,
+            )
+        i_cond = next((k for k, v in headers_idx.items() if "condicion" in v or "condición" in v), None)
+        i_mon = next((k for k, v in headers_idx.items() if "moneda" in v), None)
+
+        folio = _cobranza_clean_text(row[i_folio]) if i_folio is not None and i_folio < len(row) else ""
+        fv = _cobranza_to_date(row[i_fv]) if i_fv is not None and i_fv < len(row) else ""
+        ff = _cobranza_to_date(row[i_ff]) if i_ff is not None and i_ff < len(row) else ""
+        saldo = _cobranza_to_float(row[i_sal]) if i_sal is not None and i_sal < len(row) else 0.0
+        cond = _cobranza_clean_text(row[i_cond]) if i_cond is not None and i_cond < len(row) else ""
+        mon = _cobranza_clean_text(row[i_mon]) if i_mon is not None and i_mon < len(row) else ""
+
+        if not folio or not fv or saldo <= 0:
+            continue
+        out.append({
+            "Mes": mes,
+            "Codigo": codigo,
+            "Folio": folio,
+            "Fecha_Factura": ff,
+            "Fecha_Vencimiento": fv,
+            "Saldo_Vence": saldo,
+            "Condicion": cond,
+            "Moneda": mon,
+        })
+
+    cols = ["Mes", "Codigo", "Folio", "Fecha_Factura", "Fecha_Vencimiento", "Saldo_Vence", "Condicion", "Moneda"]
+    return pd.DataFrame(out, columns=cols)
+
+
+
+
+def get_cobranza_worksheets_safe():
+    """Abre hojas de cobranza con manejo robusto de APIError para no romper la app."""
+    spreadsheet_id = get_cobranza_spreadsheet_id()
+    service_email = str(credentials_dict.get("client_email", "(sin client_email en secrets)"))
+    try:
+        ws_base = get_cobranza_worksheet("cobranza_base")
+        ws_venc = get_cobranza_worksheet("cobranza_vencimientos")
+        ws_com = get_cobranza_worksheet("cobranza_comentarios")
+        return ws_base, ws_venc, ws_com
+    except gspread.exceptions.WorksheetNotFound:
+        st.error("❌ Faltan pestañas requeridas en el Google Sheet de Cobranza.")
+        st.caption(
+            "Revisa que existan exactamente: cobranza_base, cobranza_vencimientos y cobranza_comentarios."
+        )
+        st.caption(f"Spreadsheet usado: {spreadsheet_id}")
+        return None, None, None
+    except gspread.exceptions.APIError as e:
+        st.error(
+            "❌ No fue posible abrir las hojas de Cobranza en Google Sheets (permiso o ID)."
+        )
+        st.caption(f"Spreadsheet usado: {spreadsheet_id}")
+        st.caption(f"Comparte el archivo con esta cuenta de servicio: {service_email}")
+        st.caption(f"Detalle técnico: {e}")
+        return None, None, None
+    except Exception as e:
+        st.error("❌ Error inesperado al abrir las hojas de Cobranza.")
+        st.caption(f"Spreadsheet usado: {spreadsheet_id}")
+        st.caption(f"Detalle técnico: {e}")
+        return None, None, None
+
+def render_cobranza_tab_gerente():
+    st.subheader("📒 Cobranza")
+
+    ws_base, ws_venc, ws_com = get_cobranza_worksheets_safe()
+    if not ws_base or not ws_venc or not ws_com:
+        st.info("La pestaña permanece visible, pero sin conexión activa a Google Sheets.")
+        return
+
+    base_headers = ["Mes", "Codigo", "Razon_Social", "Saldo", "No_Vencido", "Vencido", "Tipo_Pago", "Ultima_Actualizacion"]
+    venc_headers = ["Mes", "Codigo", "Folio", "Fecha_Factura", "Fecha_Vencimiento", "Saldo_Vence", "Condicion", "Moneda", "Ultima_Actualizacion"]
+    com_headers = ["Mes", "Codigo", "Dia", "Comentario", "Actualizado_por", "Timestamp"]
+
+    try:
+        cobranza_ensure_headers(ws_base, base_headers)
+        cobranza_ensure_headers(ws_venc, venc_headers)
+        cobranza_ensure_headers(ws_com, com_headers)
+    except gspread.exceptions.APIError as e:
+        st.error("❌ No se pudieron validar encabezados de hojas de Cobranza.")
+        st.caption(f"Detalle técnico: {e}")
+        return
+
+    st.markdown("### Cargar archivos del mes")
+    now_dt = datetime.now()
+    c1, c2 = st.columns(2)
+    with c1:
+        years = list(range(now_dt.year - 2, now_dt.year + 3))
+        year_sel = st.selectbox("Año", options=years, index=years.index(now_dt.year), key="ger_cob_year")
+    with c2:
+        month_sel = st.selectbox("Mes", options=list(range(1, 13)), index=now_dt.month - 1, key="ger_cob_month")
+    mes_sel = f"{year_sel}-{month_sel:02d}"
+
+    reporte = st.file_uploader("REPORTE.xlsx", type=["xlsx"], key="ger_cob_reporte")
+    antig = st.file_uploader("ANTIGÜEDAD_SALDOS.xlsx", type=["xlsx"], key="ger_cob_ant")
+
+    if st.button("Procesar", key="ger_cob_btn_proc"):
+        try:
+            if reporte is None or antig is None:
+                raise Exception("Carga ambos archivos para procesar.")
+            df_base = parse_reporte_cobranza_excel(reporte, mes_sel)
+            df_venc = parse_antiguedad_cobranza_excel(antig, mes_sel)
+
+            base_codes = set(df_base["Codigo"].astype(str))
+            venc_codes = set(df_venc["Codigo"].astype(str))
+            no_encontrados = base_codes - venc_codes
+
+            ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            df_base["Tipo_Pago"] = np.where(df_base["Codigo"].astype(str).isin(no_encontrados), "CONTADO", "CREDITO")
+            df_base["Ultima_Actualizacion"] = ts
+            df_venc["Ultima_Actualizacion"] = ts
+
+            cobranza_upsert_rows_by_key(ws_base, df_base[base_headers], ["Mes", "Codigo"], ["Razon_Social", "Saldo", "No_Vencido", "Vencido", "Tipo_Pago", "Ultima_Actualizacion"])
+            if not df_venc.empty:
+                cobranza_upsert_rows_by_key(ws_venc, df_venc[venc_headers], ["Codigo", "Folio", "Fecha_Vencimiento"], ["Mes", "Fecha_Factura", "Saldo_Vence", "Condicion", "Moneda", "Ultima_Actualizacion"])
+
+            st.session_state["ger_cob_stats"] = {
+                "clientes": int(len(df_base)),
+                "folios": int(len(df_venc)),
+                "contado": int(len(no_encontrados)),
+            }
+            st.session_state["ger_cob_missing"] = df_base[df_base["Codigo"].astype(str).isin(no_encontrados)][["Codigo", "Razon_Social"]].copy()
+            st.success("✅ Proceso de cobranza completado.")
+        except Exception as e:
+            st.error(f"❌ Error al procesar: {e}")
+
+    stats = st.session_state.get("ger_cob_stats")
+    if stats:
+        a, b, c = st.columns(3)
+        a.metric("Clientes base", stats["clientes"])
+        b.metric("Folios vencimientos", stats["folios"])
+        c.metric("Clientes CONTADO", stats["contado"])
+
+    missing = st.session_state.get("ger_cob_missing", pd.DataFrame(columns=["Codigo", "Razon_Social"]))
+    if isinstance(missing, pd.DataFrame) and not missing.empty:
+        st.warning("Clientes en REPORTE no encontrados en ANTIGÜEDAD (marcados como CONTADO).")
+        st.dataframe(missing, use_container_width=True, hide_index=True)
+
+    st.markdown("### Comentarios")
+    mes_com = st.text_input("Mes comentarios (YYYY-MM)", value=mes_sel, key="ger_cob_mes_com")
+    base_df = pd.DataFrame(cobranza_load_records_with_rows(ws_base))
+    clientes_mes = base_df[base_df.get("Mes", "").astype(str) == mes_com] if not base_df.empty else pd.DataFrame(columns=["Codigo", "Razon_Social"])
+    if clientes_mes.empty:
+        st.info("No hay clientes cargados para ese mes.")
+    else:
+        clientes_mes = clientes_mes[["Codigo", "Razon_Social"]].drop_duplicates().sort_values(["Razon_Social", "Codigo"])
+        opciones = [f"{r.Codigo} - {r.Razon_Social}" for r in clientes_mes.itertuples(index=False)]
+        cliente_sel = st.selectbox("Cliente", opciones, key="ger_cob_cliente")
+        dia_sel = st.selectbox("Día", list(range(1, 32)), key="ger_cob_dia")
+        comentario = st.text_area("Comentario", key="ger_cob_comentario")
+        usuario = st.text_input("Actualizado_por", value=_safe_str(usuario_actual), key="ger_cob_user")
+
+        if st.button("Guardar comentario", key="ger_cob_guardar"):
+            if not comentario.strip():
+                st.warning("Escribe un comentario.")
+                return
+            codigo = cliente_sel.split(" - ")[0].strip()
+            com_df = pd.DataFrame([{
+                "Mes": mes_com,
+                "Codigo": codigo,
+                "Dia": str(dia_sel),
+                "Comentario": comentario,
+                "Actualizado_por": usuario,
+                "Timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            }])
+            cobranza_upsert_rows_by_key(ws_com, com_df[com_headers], ["Mes", "Codigo", "Dia"], ["Comentario", "Actualizado_por", "Timestamp"])
+            st.success("✅ Comentario guardado.")
+
+    st.markdown("### Descargar")
+    mes_dl = st.text_input("Mes descarga (YYYY-MM)", value=mes_sel, key="ger_cob_mes_dl")
+    if st.button("Generar y descargar Excel", key="ger_cob_excel"):
+        base_df = pd.DataFrame(cobranza_load_records_with_rows(ws_base))
+        com_df = pd.DataFrame(cobranza_load_records_with_rows(ws_com))
+        base_df = base_df[base_df.get("Mes", "").astype(str) == mes_dl] if not base_df.empty else pd.DataFrame()
+        if base_df.empty:
+            st.error("No hay registros en cobranza_base para ese mes.")
+        else:
+            out = base_df[["Codigo", "Razon_Social"]].drop_duplicates().copy()
+            for d in range(1, 32):
+                out[str(d)] = ""
+            if not com_df.empty:
+                com_df = com_df[com_df.get("Mes", "").astype(str) == mes_dl]
+                for r in com_df.itertuples(index=False):
+                    dia = _cobranza_clean_text(getattr(r, "Dia", "1")) or "1"
+                    cod = _cobranza_clean_text(getattr(r, "Codigo", ""))
+                    txt = _cobranza_clean_text(getattr(r, "Comentario", ""))
+                    if dia in out.columns:
+                        out.loc[out["Codigo"].astype(str) == cod, dia] = txt
+
+            year_i = int(mes_dl.split("-")[0]) if "-" in mes_dl else now_dt.year
+            month_i = int(mes_dl.split("-")[1]) if "-" in mes_dl else now_dt.month
+            bio = BytesIO()
+            with pd.ExcelWriter(bio, engine="xlsxwriter") as writer:
+                out.to_excel(writer, sheet_name="Cobranza", index=False, startrow=1)
+                ws = writer.sheets["Cobranza"]
+                ws.write(0, 0, f"Fecha De Generación: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}   Año: {year_i}   Mes: {MESES_ES[month_i] if 1 <= month_i <= 12 else str(month_i)}")
+            bio.seek(0)
+            st.download_button(
+                "Descargar Excel de cobranza",
+                data=bio.getvalue(),
+                file_name=f"cobranza_{mes_dl}.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                key="ger_cob_download",
+            )
+
 # --- INTERFAZ ---
 USUARIOS_VALIDOS = ["AlejandroVTD", "CeciliaATD", "SChava"]
 
@@ -1535,6 +1935,7 @@ usuario_actual = ensure_user_logged_in()
 tab_specs = [
     ("buscar", "🔍 Buscar Pedido"),
     ("descargar", "⬇️ Descargar Datos"),
+    ("cobranza", "📒 Cobranza"),
 ]
 
 if usuario_puede(usuario_actual, "organizador"):
@@ -3903,3 +4304,7 @@ if "organizador" in tab_map:
                         st.error(f"❌ No se pudieron eliminar los ítems: {e}")
             else:
                 st.info("No hay ítems en plantilla para eliminar.")
+
+
+with tab_map["cobranza"]:
+    render_cobranza_tab_gerente()
