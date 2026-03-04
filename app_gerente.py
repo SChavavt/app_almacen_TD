@@ -1939,7 +1939,7 @@ def render_cobranza_tab_gerente():
             dias_txt = ", ".join(str(d) for d in dias_venc)
             total_folios = int(venc_cliente[["Folio", "Fecha_Vencimiento"]].drop_duplicates().shape[0])
             st.info(
-                f"🗓️ **Vencimientos del cliente en {mes_com}:** días **{dias_txt}** · "
+                f"🗓️ **Vencimientos del cliente en {mes_com}:** El Día **{dias_txt}** · "
                 f"folios activos: **{total_folios}**."
             )
             with st.expander("Ver detalle de folios y vencimientos", expanded=False):
