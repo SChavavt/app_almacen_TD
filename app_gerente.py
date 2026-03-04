@@ -1498,6 +1498,12 @@ def _cobranza_norm_code(v) -> str:
         return t
 
 
+def _cobranza_is_valid_cliente_code(v) -> bool:
+    """Valida que el código de cliente sea numérico (ej. 16982)."""
+    t = _cobranza_clean_text(v)
+    return bool(t) and t.isdigit()
+
+
 def _cobranza_to_float(v) -> float:
     t = _cobranza_clean_text(v).replace(",", "").replace("$", "")
     if not t:
@@ -1659,7 +1665,7 @@ def parse_reporte_cobranza_excel(file, mes: str) -> pd.DataFrame:
         df["Vencido"] = 0.0
     df = df[["Codigo", "Razon_Social", "Saldo", "No_Vencido", "Vencido"]].copy()
     df["Codigo"] = df["Codigo"].apply(_cobranza_norm_code)
-    df = df[df["Codigo"].astype(str).str.strip() != ""]
+    df = df[df["Codigo"].apply(_cobranza_is_valid_cliente_code)]
     for c in ["Saldo", "No_Vencido", "Vencido"]:
         df[c] = df[c].apply(_cobranza_to_float)
     df["Mes"] = mes
