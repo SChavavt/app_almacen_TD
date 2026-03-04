@@ -1395,6 +1395,12 @@ def get_filtered_sheet_dataframe(
     return df, headers
 
 
+@st.cache_data(ttl=5, hash_funcs={gspread.Worksheet: lambda _: None})
+def get_sheet_row_values_cached(worksheet: Any, row_index: int) -> list[Any]:
+    """Lee una fila puntual de Sheets con caché corta para guardias de concurrencia."""
+    return worksheet.row_values(int(row_index))
+
+
 def _record_local_sheet_update(worksheet_name: str, row_index: int, values: dict[str, Any]) -> None:
     local_updates = st.session_state.setdefault("local_sheet_updates", {})
     worksheet_updates = local_updates.setdefault(worksheet_name, {})
@@ -2676,10 +2682,14 @@ def mostrar_pedido_detalle(
 ):
     """Procesa el pedido: actualiza estado a 'En Proceso' sin alterar UI."""
 
+    estado_actual_ui = str(row.get("Estado", "")).strip()
+    puede_procesar_ui = estado_actual_ui in ["🟡 Pendiente", "🔴 Demorado"]
+
     if col_print_btn.button(
         "⚙️ Procesar",
         key=f"procesar_{row['ID_Pedido']}_{origen_tab}",
         on_click=_mark_skip_demorado_check_once,
+        disabled=not puede_procesar_ui,
     ):
         # Solo para marcar que ya se presionó (si se usa para estilos/toasts)
         st.session_state.setdefault("printed_items", {})
@@ -2698,6 +2708,33 @@ def mostrar_pedido_detalle(
                     "❌ No se encontraron las columnas 'Estado' y/o 'Hora_Proceso' en Google Sheets."
                 )
             else:
+                estado_remoto = ""
+                if "Estado" in headers:
+                    try:
+                        row_values = get_sheet_row_values_cached(worksheet, int(gsheet_row_index))
+                        estado_idx = headers.index("Estado")
+                        if estado_idx < len(row_values):
+                            estado_remoto = str(row_values[estado_idx] or "").strip()
+                    except Exception:
+                        estado_remoto = ""
+
+                if estado_remoto and estado_remoto not in ["🟡 Pendiente", "🔴 Demorado"]:
+                    df.at[idx, "Estado"] = estado_remoto
+                    row["Estado"] = estado_remoto
+                    worksheet_name = _get_worksheet_name_safe(worksheet)
+                    if worksheet_name:
+                        _record_local_sheet_update(
+                            worksheet_name,
+                            int(gsheet_row_index),
+                            {"Estado": estado_remoto},
+                        )
+                    st.toast(
+                        f"ℹ️ Este pedido ya estaba en '{estado_remoto}'. Se bloqueó el reproceso.",
+                        icon="ℹ️",
+                    )
+                    st.session_state["refresh_data_caches_pending"] = True
+                    st.rerun()
+
                 updates = [
                     {
                         "range": gspread.utils.rowcol_to_a1(
@@ -2731,6 +2768,7 @@ def mostrar_pedido_detalle(
                     marcar_contexto_pedido(row["ID_Pedido"], origen_tab, scroll=False)
 
                     preserve_tab_state()
+                    st.session_state["refresh_data_caches_pending"] = True
                     st.session_state["reload_after_action"] = True
                     st.rerun()
                 else:
@@ -4192,8 +4230,7 @@ if st.session_state.pop("reload_after_action", False):
     pass
 
 if st.session_state.pop("refresh_data_caches_pending", False):
-    get_raw_sheet_data.clear()
-    get_filtered_sheet_dataframe.clear()
+    st.cache_data.clear()
 
 if st.session_state.get("need_compare"):
     prev_pedidos = st.session_state.get("prev_pedidos_count", 0)
