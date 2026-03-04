@@ -1845,6 +1845,22 @@ def render_cobranza_tab_gerente():
     venc_headers = ["Mes", "Codigo", "Folio", "Fecha_Factura", "Fecha_Vencimiento", "Saldo_Vence", "Condicion", "Moneda", "Ultima_Actualizacion"]
     com_headers = ["Mes", "Codigo", "Dia", "Comentario", "Actualizado_por", "Timestamp"]
 
+    cache_key = "ger_cob_data_cache"
+
+    def _load_cobranza_data(force_refresh: bool = False):
+        if force_refresh or cache_key not in st.session_state:
+            st.session_state[cache_key] = {
+                "base_df": pd.DataFrame(cobranza_load_records_with_rows(ws_base)),
+                "venc_df": pd.DataFrame(cobranza_load_records_with_rows(ws_venc)),
+                "com_df": pd.DataFrame(cobranza_load_records_with_rows(ws_com)),
+            }
+        cache = st.session_state.get(cache_key, {})
+        return (
+            cache.get("base_df", pd.DataFrame()).copy(),
+            cache.get("venc_df", pd.DataFrame()).copy(),
+            cache.get("com_df", pd.DataFrame()).copy(),
+        )
+
     try:
         cobranza_ensure_headers(ws_base, base_headers)
         cobranza_ensure_headers(ws_venc, venc_headers)
@@ -1898,6 +1914,7 @@ def render_cobranza_tab_gerente():
                 "contado": int(len(no_encontrados)),
             }
             st.session_state["ger_cob_missing"] = df_base[df_base["Codigo"].astype(str).isin(no_encontrados)][["Codigo", "Razon_Social"]].copy()
+            st.session_state["ger_cob_force_refresh"] = True
             if sin_mes_auto > 0:
                 st.warning(f"{sin_mes_auto} cliente(s) sin fecha de vencimiento válida; se asignó mes de carga {mes_sel}.")
             st.success("✅ Proceso de cobranza completado.")
@@ -1916,8 +1933,8 @@ def render_cobranza_tab_gerente():
         st.warning("Clientes en REPORTE no encontrados en ANTIGÜEDAD (marcados como CONTADO).")
         st.dataframe(missing, use_container_width=True, hide_index=True)
 
-    base_df = pd.DataFrame(cobranza_load_records_with_rows(ws_base))
-    venc_df = pd.DataFrame(cobranza_load_records_with_rows(ws_venc))
+    force_refresh = bool(st.session_state.pop("ger_cob_force_refresh", False))
+    base_df, venc_df, _ = _load_cobranza_data(force_refresh=force_refresh)
     st.markdown("### Comentarios")
     meses_disponibles = _cobranza_meses_disponibles(base_df)
     mes_actual = datetime.now().strftime("%Y-%m")
@@ -1997,40 +2014,42 @@ def render_cobranza_tab_gerente():
             "PAGO_COMPLETO": "Pagó completo",
         }
 
-        dias_opciones = list(range(1, 32))
-        dia_actual = datetime.now().day
-        dia_sugerido = dias_venc[0] if dias_venc else dia_actual
-        if dia_sugerido not in dias_opciones:
-            dia_sugerido = dia_actual
-        dia_sel = st.selectbox("Día", dias_opciones, index=dias_opciones.index(dia_sugerido), key="ger_cob_dia")
+        with st.form("ger_cob_form", clear_on_submit=False):
+            dias_opciones = list(range(1, 32))
+            dia_actual = datetime.now().day
+            dia_sugerido = dias_venc[0] if dias_venc else dia_actual
+            if dia_sugerido not in dias_opciones:
+                dia_sugerido = dia_actual
+            dia_sel = st.selectbox("Día", dias_opciones, index=dias_opciones.index(dia_sugerido), key="ger_cob_dia")
 
-        accion_code = st.selectbox(
-            "Acción de cobranza",
-            options=list(acciones_cobranza.keys()),
-            format_func=lambda c: acciones_cobranza[c],
-            key="ger_cob_accion",
-        )
-        respuesta_code = st.selectbox(
-            "Respuesta / estado del cliente",
-            options=list(respuestas_cliente.keys()),
-            format_func=lambda c: respuestas_cliente[c],
-            key="ger_cob_respuesta",
-        )
+            accion_code = st.selectbox(
+                "Acción de cobranza",
+                options=list(acciones_cobranza.keys()),
+                format_func=lambda c: acciones_cobranza[c],
+                key="ger_cob_accion",
+            )
+            respuesta_code = st.selectbox(
+                "Respuesta / estado del cliente",
+                options=list(respuestas_cliente.keys()),
+                format_func=lambda c: respuestas_cliente[c],
+                key="ger_cob_respuesta",
+            )
 
-        ya_pago_default = accion_code in {"PAGO_PARCIAL", "LIQUIDADO"} or respuesta_code in {"PAGO_PARCIAL", "PAGO_COMPLETO"}
-        ya_pago = st.checkbox(
-            "Marcar como ya pagó (usa día actual)",
-            value=ya_pago_default,
-            key="ger_cob_ya_pago",
-        )
-        if ya_pago:
-            st.caption(f"Se guardará en el día actual: **{dia_actual}**")
+            ya_pago_default = accion_code in {"PAGO_PARCIAL", "LIQUIDADO"} or respuesta_code in {"PAGO_PARCIAL", "PAGO_COMPLETO"}
+            ya_pago = st.checkbox(
+                "Marcar como ya pagó (usa día actual)",
+                value=ya_pago_default,
+                key="ger_cob_ya_pago",
+            )
+            if ya_pago:
+                st.caption(f"Se guardará en el día actual: **{dia_actual}**")
 
-        detalle = st.text_input("Detalle corto (opcional)", key="ger_cob_detalle")
-        comentario = st.text_area("Comentario adicional (opcional)", key="ger_cob_comentario")
-        usuario = st.text_input("Actualizado_por", value=_safe_str(usuario_actual), key="ger_cob_user")
+            detalle = st.text_input("Detalle corto (opcional)", key="ger_cob_detalle")
+            comentario = st.text_area("Comentario adicional (opcional)", key="ger_cob_comentario")
+            usuario = st.text_input("Actualizado_por", value=_safe_str(usuario_actual), key="ger_cob_user")
+            guardar_comentario = st.form_submit_button("Guardar comentario")
 
-        if st.button("Guardar comentario", key="ger_cob_guardar"):
+        if guardar_comentario:
             fecha_txt = datetime.now().strftime("%d/%m/%Y")
             comentario_partes = [
                 fecha_txt,
@@ -2053,7 +2072,9 @@ def render_cobranza_tab_gerente():
                 "Timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             }])
             cobranza_upsert_rows_by_key(ws_com, com_df[com_headers], ["Mes", "Codigo", "Dia"], ["Comentario", "Actualizado_por", "Timestamp"])
+            st.session_state["ger_cob_force_refresh"] = True
             st.success("✅ Comentario guardado.")
+            st.rerun()
 
     st.markdown("### Descargar")
     mes_dl = st.selectbox(
@@ -2063,9 +2084,7 @@ def render_cobranza_tab_gerente():
         key="ger_cob_mes_dl",
     )
     if st.button("Generar y descargar Excel", key="ger_cob_excel"):
-        base_df = pd.DataFrame(cobranza_load_records_with_rows(ws_base))
-        venc_df = pd.DataFrame(cobranza_load_records_with_rows(ws_venc))
-        com_df = pd.DataFrame(cobranza_load_records_with_rows(ws_com))
+        base_df, venc_df, com_df = _load_cobranza_data(force_refresh=True)
         base_df = base_df[base_df.get("Mes", "").astype(str) == mes_dl] if not base_df.empty else pd.DataFrame()
         if not base_df.empty and "Tipo_Pago" in base_df.columns:
             tipo_pago = base_df["Tipo_Pago"].astype(str).str.strip().str.upper()
