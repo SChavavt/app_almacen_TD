@@ -2556,7 +2556,7 @@ if "modificar" in tab_map:
 
         df_pedidos = cargar_pedidos_modificables()
         df_casos = cargar_casos_especiales()
-        # Fuente exclusiva para la sección de garantías (sin mezclar otras hojas).
+        # Fuente exclusiva para la sección de casos especiales (sin mezclar otras hojas).
         df_casos_garantias = df_casos.copy()
 
         # En modificación solo se incluyen casos especiales pendientes de limpieza.
@@ -2578,28 +2578,19 @@ if "modificar" in tab_map:
         pedido_sel = None
         source_sel = None
 
-        def es_garantia(row):
-            """Determina si un caso corresponde a una garantía."""
-            for col in ("Tipo_Envio", "Tipo_Caso"):
-                valor = normalizar(str(row.get(col, "")))
-                if valor and "garant" in valor:
-                    return True
-            return False
-
-        df_garantias = df_casos_garantias[
-            df_casos_garantias.apply(es_garantia, axis=1)
-        ].copy()
+        # Mostrar todos los pedidos de la hoja casos_especiales en esta sección.
+        df_garantias = df_casos_garantias.copy()
 
         mostrar_garantias = st.checkbox(
-            "🔘 Mostrar sección de garantías",
-            help="Activa esta opción para consultar únicamente la información de garantías.",
+            "🔘 Mostrar sección de casos especiales",
+            help="Activa esta opción para consultar únicamente la información de la hoja casos_especiales.",
         )
 
         if mostrar_garantias:
-            st.markdown("### 🛡️ Garantías registradas")
+            st.markdown("### 🛡️ Casos especiales registrados")
             termino_busqueda_garantia = st.text_input(
                 "Buscar por cliente o folio",
-                key="busqueda_garantias",
+                key="busqueda_casos_especiales",
                 placeholder="Cliente o folio",
             )
 
@@ -2629,7 +2620,7 @@ if "modificar" in tab_map:
 
             if df_garantias_filtrado.empty:
                 st.info(
-                    "No se encontraron garantías con el criterio de búsqueda proporcionado."
+                    "No se encontraron casos especiales con el criterio de búsqueda proporcionado."
                 )
                 st.stop()
             else:
@@ -2676,7 +2667,7 @@ if "modificar" in tab_map:
 
                 def format_garantia(idx):
                     if idx is None:
-                        return "Selecciona una garantía"
+                        return "Selecciona un caso especial"
                     row = df_garantias_filtrado.loc[idx]
                     hora = formatear_fecha(row.get("Hora_Registro"), "%d/%m/%Y %H:%M")
                     estado = row.get("Estado_Caso") or row.get("Estado") or ""
@@ -2687,17 +2678,17 @@ if "modificar" in tab_map:
                     )
 
                 idx_garantia = st.selectbox(
-                    "Selecciona una garantía para ver detalles o modificarla:",
+                    "Selecciona un caso especial para ver detalles o modificarlo:",
                     opciones_select,
                     format_func=format_garantia,
-                    key="select_garantia",
+                    key="select_caso_especial",
                 )
 
                 if idx_garantia is not None and idx_garantia in df_garantias_filtrado.index:
                     row_garantia = df_garantias_filtrado.loc[idx_garantia]
                     pedido_sel = row_garantia.get("ID_Pedido")
                     source_sel = "casos"
-                    st.markdown("#### 📘 Detalles de la garantía seleccionada")
+                    st.markdown("#### 📘 Detalles del caso especial seleccionado")
 
                     def limpiar(valor):
                         if valor is None:
@@ -2803,7 +2794,7 @@ if "modificar" in tab_map:
                     agregar_adjuntos("📄 Documentos adicionales", row_garantia.get("Documento_Adicional_URL", ""))
 
                     if secciones_adjuntos:
-                        st.markdown("#### 🗂️ Archivos de la garantía")
+                        st.markdown("#### 🗂️ Archivos del caso especial")
                         for titulo, urls in secciones_adjuntos:
                             st.markdown(f"**{titulo}:**")
                             for idx, raw_url in enumerate(urls, start=1):
@@ -2817,7 +2808,7 @@ if "modificar" in tab_map:
                 else:
                     pedido_sel = None
                     source_sel = None
-                    st.info("Selecciona una garantía para ver detalles o modificarla.")
+                    st.info("Selecciona un caso especial para ver detalles o modificarlo.")
                     st.stop()
 
 
@@ -2874,7 +2865,7 @@ if "modificar" in tab_map:
             st.warning("⚠️ No se ha seleccionado ningún pedido válido.")
             st.stop()
 
-        row_df = df_pedidos if source_sel == "pedidos" else df_casos
+        row_df = df_pedidos if source_sel == "pedidos" else df_casos_garantias
         row_sel = row_df[row_df["ID_Pedido"].astype(str) == str(pedido_sel)]
         if row_sel.empty:
             st.session_state.pop("pedido_modificado", None)
