@@ -1559,6 +1559,28 @@ def cobranza_ensure_headers(ws, expected_headers: list[str]):
             cobranza_update_row_values(ws, 1, expected_headers)
 
 
+def cobranza_replace_matrix_values(ws, matrix: list[list]):
+    """Escribe una matriz completa con fallback para versiones viejas de gspread."""
+    if not matrix or not matrix[0]:
+        return
+
+    rows = len(matrix)
+    cols = len(matrix[0])
+
+    if hasattr(ws, "update"):
+        end_a1 = gspread.utils.rowcol_to_a1(rows, cols)
+        ws.update(f"A1:{end_a1}", matrix, value_input_option="USER_ENTERED")
+        return
+
+    cells = ws.range(1, 1, rows, cols)
+    i = 0
+    for r in range(rows):
+        for c in range(cols):
+            cells[i].value = matrix[r][c]
+            i += 1
+    ws.update_cells(cells, value_input_option="USER_ENTERED")
+
+
 def cobranza_load_records_with_rows(ws) -> list[dict]:
     values = ws.get_all_values()
     if not values:
@@ -1576,22 +1598,32 @@ def cobranza_load_records_with_rows(ws) -> list[dict]:
 def cobranza_upsert_rows_by_key(ws, df: pd.DataFrame, key_cols: list[str], update_cols: list[str]):
     if df.empty:
         return
-    headers = [str(h).strip() for h in ws.row_values(1)]
+    headers = [str(h).strip() for h in _retry_gspread_api_call(lambda: ws.row_values(1), retries=4, base_delay=0.9)]
     recs = cobranza_load_records_with_rows(ws)
-    idx = {tuple(_cobranza_clean_text(r.get(k, "")) for k in key_cols): r for r in recs}
+    # Guardamos índice por posición para poder escribir todo en un solo update
+    # y evitar exceder cuota por demasiados writes por minuto.
+    idx = {
+        tuple(_cobranza_clean_text(r.get(k, "")) for k in key_cols): i
+        for i, r in enumerate(recs)
+    }
     for _, r in df.iterrows():
         key = tuple(_cobranza_clean_text(r.get(k, "")) for k in key_cols)
         payload = {h: _cobranza_clean_text(r.get(h, "")) for h in headers}
         if key in idx:
-            old = idx[key]
-            row_num = old["__row_number__"]
-            row_vals = [old.get(h, "") for h in headers]
+            old = recs[idx[key]]
             for c in set(key_cols + update_cols):
                 if c in headers:
-                    row_vals[headers.index(c)] = payload.get(c, "")
-            cobranza_update_row_values(ws, row_num, row_vals)
+                    old[c] = payload.get(c, "")
         else:
-            ws.append_row([payload.get(h, "") for h in headers], value_input_option="USER_ENTERED")
+            recs.append({h: payload.get(h, "") for h in headers})
+            idx[key] = len(recs) - 1
+
+    matrix = [headers] + [[rec.get(h, "") for h in headers] for rec in recs]
+    _retry_gspread_api_call(
+        lambda: cobranza_replace_matrix_values(ws, matrix),
+        retries=4,
+        base_delay=1.0,
+    )
 
 
 def parse_reporte_cobranza_excel(file, mes: str) -> pd.DataFrame:
