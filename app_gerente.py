@@ -1672,7 +1672,7 @@ def parse_reporte_cobranza_excel(file, mes: str) -> pd.DataFrame:
     return df[["Mes", "Codigo", "Razon_Social", "Saldo", "No_Vencido", "Vencido"]]
 
 
-def parse_antiguedad_cobranza_excel(file, mes: str) -> pd.DataFrame:
+def parse_antiguedad_cobranza_excel(file, mes: str = "") -> pd.DataFrame:
     raw = pd.read_excel(file, header=None)
     rows = raw.fillna("").values.tolist()
     codigo = ""
@@ -1720,8 +1720,9 @@ def parse_antiguedad_cobranza_excel(file, mes: str) -> pd.DataFrame:
 
         if not folio or not fv or saldo <= 0:
             continue
+        mes_row = fv[:7] if fv else mes
         out.append({
-            "Mes": mes,
+            "Mes": mes_row,
             "Codigo": codigo,
             "Folio": folio,
             "Fecha_Factura": ff,
@@ -1790,13 +1791,8 @@ def render_cobranza_tab_gerente():
 
     st.markdown("### Cargar archivos del mes")
     now_dt = datetime.now()
-    c1, c2 = st.columns(2)
-    with c1:
-        years = list(range(now_dt.year - 2, now_dt.year + 3))
-        year_sel = st.selectbox("Año", options=years, index=years.index(now_dt.year), key="ger_cob_year")
-    with c2:
-        month_sel = st.selectbox("Mes", options=list(range(1, 13)), index=now_dt.month - 1, key="ger_cob_month")
-    mes_sel = f"{year_sel}-{month_sel:02d}"
+    mes_sel = now_dt.strftime("%Y-%m")
+    st.caption("El mes se asigna automáticamente con base en la Fecha_Vencimiento del archivo ANTIGÜEDAD_SALDOS.xlsx.")
 
     reporte = st.file_uploader("REPORTE.xlsx", type=["xlsx"], key="ger_cob_reporte")
     antig = st.file_uploader("ANTIGÜEDAD_SALDOS.xlsx", type=["xlsx"], key="ger_cob_ant")
@@ -1807,6 +1803,16 @@ def render_cobranza_tab_gerente():
                 raise Exception("Carga ambos archivos para procesar.")
             df_base = parse_reporte_cobranza_excel(reporte, mes_sel)
             df_venc = parse_antiguedad_cobranza_excel(antig, mes_sel)
+
+            mes_por_codigo = {}
+            if not df_venc.empty:
+                tmp = df_venc[["Codigo", "Mes", "Fecha_Vencimiento"]].copy()
+                tmp = tmp[tmp["Mes"].astype(str).str.match(r"^\d{4}-\d{2}$", na=False)]
+                tmp = tmp.sort_values("Fecha_Vencimiento")
+                mes_por_codigo = tmp.groupby("Codigo")["Mes"].agg(lambda x: x.iloc[-1]).to_dict()
+
+            df_base["Mes"] = df_base["Codigo"].astype(str).map(mes_por_codigo).fillna(mes_sel)
+            sin_mes_auto = int((~df_base["Codigo"].astype(str).isin(set(mes_por_codigo.keys()))).sum())
 
             base_codes = set(df_base["Codigo"].astype(str))
             venc_codes = set(df_venc["Codigo"].astype(str))
@@ -1827,6 +1833,8 @@ def render_cobranza_tab_gerente():
                 "contado": int(len(no_encontrados)),
             }
             st.session_state["ger_cob_missing"] = df_base[df_base["Codigo"].astype(str).isin(no_encontrados)][["Codigo", "Razon_Social"]].copy()
+            if sin_mes_auto > 0:
+                st.warning(f"{sin_mes_auto} cliente(s) sin fecha de vencimiento válida; se asignó mes de carga {mes_sel}.")
             st.success("✅ Proceso de cobranza completado.")
         except Exception as e:
             st.error(f"❌ Error al procesar: {e}")
