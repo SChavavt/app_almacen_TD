@@ -1974,24 +1974,81 @@ def render_cobranza_tab_gerente():
         else:
             st.caption("ℹ️ Este cliente no tiene vencimientos detectados en ese mes. Puedes capturar comentario manualmente.")
 
+        acciones_cobranza = {
+            "COBRO": "Se le cobró",
+            "RECOBRO": "Se le volvió a cobrar",
+            "COBRO_FAC_VENCIDA": "Se le cobró factura vencida",
+            "COBRO_VENCIDO": "Se le cobró lo vencido",
+            "PAGO_PARCIAL": "Cliente pagó parcialmente",
+            "LIQUIDADO": "Cliente liquidó factura",
+        }
+        respuestas_cliente = {
+            "PAGA_HOY": "Pagará hoy",
+            "PAGA_MANANA": "Pagará mañana",
+            "PAGA_SEMANA": "Pagará esta semana",
+            "PROMESA_PAGO": "Promete liquidar pronto",
+            "PIDIO_TIEMPO": "Pide unos días para pagar",
+            "ESPERA_FIN_MES": "Pide esperar fin de mes",
+            "REVISA_CONTAB": "Revisará con contabilidad",
+            "REVISA_FACTURA": "Revisará factura",
+            "ENVIA_COMPROB": "Enviará comprobante",
+            "SIN_RESPUESTA": "No respondió",
+            "PAGO_PARCIAL": "Pagó parcialmente",
+            "PAGO_COMPLETO": "Pagó completo",
+        }
+
         dias_opciones = list(range(1, 32))
         dia_actual = datetime.now().day
         dia_sugerido = dias_venc[0] if dias_venc else dia_actual
         if dia_sugerido not in dias_opciones:
             dia_sugerido = dia_actual
         dia_sel = st.selectbox("Día", dias_opciones, index=dias_opciones.index(dia_sugerido), key="ger_cob_dia")
-        comentario = st.text_area("Comentario", key="ger_cob_comentario")
+
+        accion_code = st.selectbox(
+            "Acción de cobranza",
+            options=list(acciones_cobranza.keys()),
+            format_func=lambda c: acciones_cobranza[c],
+            key="ger_cob_accion",
+        )
+        respuesta_code = st.selectbox(
+            "Respuesta / estado del cliente",
+            options=list(respuestas_cliente.keys()),
+            format_func=lambda c: respuestas_cliente[c],
+            key="ger_cob_respuesta",
+        )
+
+        ya_pago_default = accion_code in {"PAGO_PARCIAL", "LIQUIDADO"} or respuesta_code in {"PAGO_PARCIAL", "PAGO_COMPLETO"}
+        ya_pago = st.checkbox(
+            "Marcar como ya pagó (usa día actual)",
+            value=ya_pago_default,
+            key="ger_cob_ya_pago",
+        )
+        if ya_pago:
+            st.caption(f"Se guardará en el día actual: **{dia_actual}**")
+
+        detalle = st.text_input("Detalle corto (opcional)", key="ger_cob_detalle")
+        comentario = st.text_area("Comentario adicional (opcional)", key="ger_cob_comentario")
         usuario = st.text_input("Actualizado_por", value=_safe_str(usuario_actual), key="ger_cob_user")
 
         if st.button("Guardar comentario", key="ger_cob_guardar"):
-            if not comentario.strip():
-                st.warning("Escribe un comentario.")
-                return
+            fecha_txt = datetime.now().strftime("%d/%m/%Y")
+            comentario_partes = [
+                fecha_txt,
+                acciones_cobranza.get(accion_code, accion_code),
+                respuestas_cliente.get(respuesta_code, respuesta_code),
+            ]
+            if detalle.strip():
+                comentario_partes.append(detalle.strip())
+            comentario_compuesto = " – ".join(comentario_partes)
+            if comentario.strip():
+                comentario_compuesto = f"{comentario_compuesto} | {comentario.strip()}"
+
+            dia_guardado = dia_actual if ya_pago else int(dia_sel)
             com_df = pd.DataFrame([{
                 "Mes": mes_com,
                 "Codigo": codigo,
-                "Dia": str(dia_sel),
-                "Comentario": comentario,
+                "Dia": str(dia_guardado),
+                "Comentario": comentario_compuesto,
                 "Actualizado_por": usuario,
                 "Timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             }])
