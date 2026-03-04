@@ -182,10 +182,44 @@ ALE_COLUMNAS = {
 }
 
 
+def _empty_pedidos_df(nombre_hoja: str) -> pd.DataFrame:
+    """Construye un DataFrame vacío de pedidos con columnas mínimas + metadata."""
+    df = pd.DataFrame(columns=PEDIDOS_COLUMNAS_MINIMAS)
+    for c in PEDIDOS_COLUMNAS_MINIMAS:
+        if c not in df.columns:
+            df[c] = ""
+    df["__hoja_origen"] = nombre_hoja
+    df["__sheet_row"] = pd.Series(dtype="int")
+    return df
+
+
 def cargar_hoja_pedidos(nombre_hoja):
-    """Carga una hoja de pedidos por nombre y garantiza columnas mínimas."""
-    sheet = get_main_worksheet(nombre_hoja)
-    data = _get_all_records_with_retry(sheet)
+    """Carga una hoja de pedidos por nombre y garantiza columnas mínimas.
+
+    Si falla por error transitorio/redacted en una hoja secundaria, intenta fallback
+    y, en último caso, devuelve DataFrame vacío para no tumbar la app completa.
+    """
+    try:
+        sheet = get_main_worksheet(nombre_hoja)
+        data = _get_all_records_with_retry(sheet)
+    except gspread.exceptions.APIError as e:
+        # Fallback específico: si falla data_pedidos, intentar datos_pedidos.
+        if nombre_hoja == "data_pedidos":
+            try:
+                sheet = get_main_worksheet("datos_pedidos")
+                data = _get_all_records_with_retry(sheet)
+                nombre_hoja = "datos_pedidos"
+                st.warning("⚠️ No se pudo leer 'data_pedidos'. Se usó fallback a 'datos_pedidos'.")
+            except Exception:
+                st.warning(f"⚠️ No se pudo leer la hoja '{nombre_hoja}' (Google API). Se mostrará vacío temporalmente.")
+                return _empty_pedidos_df(nombre_hoja)
+        else:
+            st.warning(f"⚠️ No se pudo leer la hoja '{nombre_hoja}' (Google API). Se mostrará vacío temporalmente.")
+            return _empty_pedidos_df(nombre_hoja)
+    except Exception:
+        st.warning(f"⚠️ No se pudo leer la hoja '{nombre_hoja}'. Se mostrará vacío temporalmente.")
+        return _empty_pedidos_df(nombre_hoja)
+
     df = pd.DataFrame(data)
     for c in PEDIDOS_COLUMNAS_MINIMAS:
         if c not in df.columns:
@@ -3245,16 +3279,21 @@ if "organizador" in tab_map:
             citas = df_citas.copy()
             if "Fecha_Inicio" in citas.columns:
                 citas["_fi"] = _to_dt(citas["Fecha_Inicio"])
-                citas_hoy = citas[citas["_fi"].dt.date == hoy].copy()
+                estatus_ci = citas.get("Estatus", "").astype(str).str.lower().str.strip()
+                citas_pendientes = citas[estatus_ci != "realizada"].copy()
+
+                citas_hoy = citas_pendientes[citas_pendientes["_fi"].dt.date == hoy].copy()
                 citas_hoy = citas_hoy.sort_values("_fi", ascending=True)
+                citas_otras = citas_pendientes[citas_pendientes["_fi"].dt.date != hoy].copy()
+                citas_otras = citas_otras.sort_values("_fi", ascending=True)
 
                 tipo_seg = citas.get("Tipo", "").astype(str).str.lower().str.contains("seguimiento", na=False)
-                estatus_ci = citas.get("Estatus", "").astype(str).str.lower()
                 estatus_pend = ~estatus_ci.isin(["realizada", "cancelada"])
                 seguimientos_pend = citas[tipo_seg & estatus_pend].copy()
                 seguimientos_pend = seguimientos_pend.sort_values("_fi", ascending=True)
             else:
                 citas_hoy = citas.iloc[0:0]
+                citas_otras = citas.iloc[0:0]
                 seguimientos_pend = citas.iloc[0:0]
 
             # --- TAREAS (HOY / VENCIDAS) ---
@@ -3379,11 +3418,61 @@ if "organizador" in tab_map:
 
             # ===== DETALLES =====
             st.markdown("### 📅 Citas de hoy")
-            if citas_hoy.empty:
-                st.info("Sin citas para hoy.")
-            else:
-                cols = [c for c in ["Fecha_Inicio","Cliente_Persona","Empresa_Clinica","Tipo","Prioridad","Estatus","Notas"] if c in citas_hoy.columns]
-                st.dataframe(citas_hoy[cols], use_container_width=True)
+            def render_citas_lista(df_lista: pd.DataFrame, key_prefix: str, empty_text: str):
+                if df_lista.empty:
+                    st.info(empty_text)
+                    return
+
+                cols = [c for c in ["Fecha_Inicio", "Cliente_Persona", "Empresa_Clinica", "Tipo", "Prioridad", "Estatus", "Notas"] if c in df_lista.columns]
+                st.dataframe(df_lista[cols], use_container_width=True)
+
+                for i, row in df_lista.iterrows():
+                    cita_id = str(row.get("Cita_ID", "")).strip() or f"{key_prefix}_{i}"
+                    cliente = row.get("Cliente_Persona", "Sin cliente")
+                    fecha_ini = row.get("Fecha_Inicio", "")
+                    estatus_actual = str(row.get("Estatus", "Programada") or "Programada")
+                    notas_actuales = str(row.get("Notas", "") or "")
+                    exp_title = f"📝 {fecha_ini} · {cliente} · {estatus_actual}"
+
+                    with st.expander(exp_title, expanded=False):
+                        with st.form(f"form_cita_hoy_{key_prefix}_{cita_id}"):
+                            nuevo_estatus = st.selectbox(
+                                "Estatus",
+                                ["Programada", "Realizada", "Reprogramada", "Cancelada"],
+                                index=["Programada", "Realizada", "Reprogramada", "Cancelada"].index(estatus_actual) if estatus_actual in ["Programada", "Realizada", "Reprogramada", "Cancelada"] else 0,
+                                key=f"estatus_{key_prefix}_{cita_id}",
+                            )
+                            atendida = st.checkbox(
+                                "Marcar como atendida (cambia estatus a Realizada y se quita de estas listas)",
+                                value=False,
+                                key=f"atendida_{key_prefix}_{cita_id}",
+                            )
+                            comentario = st.text_area(
+                                "Comentarios / notas de la cita",
+                                value=notas_actuales,
+                                height=90,
+                                key=f"nota_{key_prefix}_{cita_id}",
+                            )
+                            guardar = st.form_submit_button("💾 Guardar cambios")
+
+                        if guardar:
+                            try:
+                                updates = {
+                                    "Estatus": "Realizada" if atendida else nuevo_estatus,
+                                    "Notas": comentario.strip(),
+                                    "Last_Updated_At": now_iso(),
+                                    "Last_Updated_By": "ALEJANDRO",
+                                }
+                                safe_update_by_id("CITAS", "Cita_ID", row.get("Cita_ID", ""), updates)
+                                st.success(f"✅ Cita actualizada: {row.get('Cita_ID', '')}")
+                                st.rerun()
+                            except Exception as e:
+                                st.error(f"❌ No se pudo actualizar la cita: {e}")
+
+            render_citas_lista(citas_hoy, "hoy", "Sin citas para hoy (pendientes por atender).")
+
+            st.markdown("### 📚 Citas pasadas y futuras (pendientes por atender)")
+            render_citas_lista(citas_otras, "otras", "No hay citas pasadas/futuras pendientes por atender.")
 
             if not seguimientos_pend.empty:
                 st.markdown("### 🔁 Seguimientos pendientes")
@@ -3498,6 +3587,102 @@ if "organizador" in tab_map:
                         st.rerun()
                     except Exception as e:
                         st.error(f"❌ Error creando cita: {e}")
+
+            with st.expander("✏️ Editar cita existente", expanded=False):
+                if df_citas.empty:
+                    st.info("No hay citas para editar.")
+                else:
+                    citas_edit = df_citas.copy()
+                    citas_edit["_fi"] = _to_dt(citas_edit.get("Fecha_Inicio", ""))
+                    citas_edit = citas_edit.sort_values("_fi", ascending=False, na_position="last")
+                    citas_edit["_label"] = (
+                        citas_edit.get("Fecha_Inicio", "").astype(str)
+                        + " · "
+                        + citas_edit.get("Cliente_Persona", "").astype(str)
+                        + " · "
+                        + citas_edit.get("Tipo", "").astype(str)
+                        + " · "
+                        + citas_edit.get("Estatus", "").astype(str)
+                    )
+                    options = citas_edit.index.tolist()
+                    selected_idx = st.selectbox(
+                        "Selecciona una cita",
+                        options=options,
+                        format_func=lambda idx: citas_edit.loc[idx, "_label"],
+                        key="organizador_cita_edit_selector",
+                    )
+                    cita_sel = citas_edit.loc[selected_idx]
+                    start_dt = pd.to_datetime(cita_sel.get("Fecha_Inicio", ""), errors="coerce")
+                    end_dt = pd.to_datetime(cita_sel.get("Fecha_Fin", ""), errors="coerce")
+                    if pd.isna(start_dt):
+                        start_dt = datetime.now().replace(second=0, microsecond=0)
+                    if pd.isna(end_dt) or end_dt <= start_dt:
+                        end_dt = start_dt + timedelta(minutes=60)
+                    duracion_default = int(max(15, min(480, (end_dt - start_dt).total_seconds() // 60)))
+
+                    with st.form("form_editar_cita"):
+                        col1, col2, col3, col4 = st.columns(4)
+                        with col1:
+                            fecha_edit = st.date_input("Fecha", value=start_dt.date(), format="DD/MM/YYYY")
+                        with col2:
+                            hora_edit = st.time_input("Hora", value=start_dt.time())
+                        with col3:
+                            duracion_edit = st.number_input("Duración (min)", min_value=15, max_value=480, value=duracion_default, step=15)
+                        with col4:
+                            prioridad_edit = st.selectbox("Prioridad", ["Alta", "Media", "Baja"], index=["Alta", "Media", "Baja"].index(str(cita_sel.get("Prioridad", "Media"))) if str(cita_sel.get("Prioridad", "Media")) in ["Alta", "Media", "Baja"] else 1)
+
+                        cliente_edit = st.text_input("Cliente / persona", value=str(cita_sel.get("Cliente_Persona", "")))
+                        empresa_edit = st.text_input("Empresa o clínica", value=str(cita_sel.get("Empresa_Clinica", "")))
+
+                        col5, col6 = st.columns(2)
+                        with col5:
+                            tipo_edit = st.selectbox("Tipo", ["Visita", "Llamada", "Junta", "Seguimiento"], index=["Visita", "Llamada", "Junta", "Seguimiento"].index(str(cita_sel.get("Tipo", "Seguimiento"))) if str(cita_sel.get("Tipo", "Seguimiento")) in ["Visita", "Llamada", "Junta", "Seguimiento"] else 3)
+                        with col6:
+                            estatus_edit = st.selectbox("Estatus", ["Programada", "Realizada", "Reprogramada", "Cancelada"], index=["Programada", "Realizada", "Reprogramada", "Cancelada"].index(str(cita_sel.get("Estatus", "Programada"))) if str(cita_sel.get("Estatus", "Programada")) in ["Programada", "Realizada", "Reprogramada", "Cancelada"] else 0)
+
+                        notas_edit = st.text_area("Notas", value=str(cita_sel.get("Notas", "")), height=90)
+                        col7, col8, col9 = st.columns(3)
+                        with col7:
+                            lugar_edit = st.text_input("Lugar", value=str(cita_sel.get("Lugar", "")))
+                        with col8:
+                            telefono_edit = st.text_input("Teléfono", value=str(cita_sel.get("Telefono", "")))
+                        with col9:
+                            correo_edit = st.text_input("Correo", value=str(cita_sel.get("Correo", "")))
+
+                        reminder_actual = pd.to_numeric(pd.Series([cita_sel.get("Reminder_Minutes_Before", 30)]), errors="coerce").fillna(30).iloc[0]
+                        reminder_edit = st.number_input("Recordatorio (min antes)", min_value=0, max_value=240, value=int(reminder_actual), step=5)
+
+                        guardar_edit = st.form_submit_button("💾 Guardar edición completa")
+
+                    if guardar_edit:
+                        if not cliente_edit.strip():
+                            st.error("❌ Cliente/persona es obligatorio.")
+                        else:
+                            try:
+                                start_edit = datetime.combine(fecha_edit, hora_edit)
+                                end_edit = start_edit + timedelta(minutes=int(duracion_edit))
+                                updates_edit = {
+                                    "Fecha_Inicio": start_edit.strftime("%Y-%m-%d %H:%M:%S"),
+                                    "Fecha_Fin": end_edit.strftime("%Y-%m-%d %H:%M:%S"),
+                                    "Cliente_Persona": cliente_edit.strip(),
+                                    "Empresa_Clinica": empresa_edit.strip(),
+                                    "Tipo": tipo_edit,
+                                    "Prioridad": prioridad_edit,
+                                    "Estatus": estatus_edit,
+                                    "Notas": notas_edit.strip(),
+                                    "Lugar": lugar_edit.strip(),
+                                    "Telefono": telefono_edit.strip(),
+                                    "Correo": correo_edit.strip(),
+                                    "Reminder_Minutes_Before": str(int(reminder_edit)),
+                                    "Reminder_Status": "Pendiente" if int(reminder_edit) > 0 else "N/A",
+                                    "Last_Updated_At": now_iso(),
+                                    "Last_Updated_By": "ALEJANDRO",
+                                }
+                                safe_update_by_id("CITAS", "Cita_ID", cita_sel.get("Cita_ID", ""), updates_edit)
+                                st.success(f"✅ Cita actualizada: {cita_sel.get('Cita_ID', '')}")
+                                st.rerun()
+                            except Exception as e:
+                                st.error(f"❌ No se pudo editar la cita: {e}")
 
             st.markdown("### 📋 Agenda")
             agenda_view = df_citas.copy()
