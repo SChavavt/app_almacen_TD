@@ -2389,7 +2389,9 @@ if selected_tab == 2:
     hoy_entries = [e for e in hoy_entries if _is_visible_auto_entry(e)]
     hoy_entries = sort_entries_by_flow_number_desc(hoy_entries)
 
-    anteriores = ant + sin_fecha
+    # Mantener una sola secuencia por número de flujo para que pedidos y
+    # devoluciones foráneas (incluyendo sin Fecha_Entrega) queden consecutivos.
+    anteriores = sort_entries_by_flow_number_desc(ant + sin_fecha)
 
     # Distribución inteligente: usar el espacio libre de "Anteriores"
     # para continuar la lista de "Hoy" y evitar columnas desbalanceadas.
