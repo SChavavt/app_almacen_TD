@@ -2000,6 +2000,7 @@ def render_cobranza_tab_gerente():
             "LIQUIDADO": "Cliente liquidó factura",
         }
         respuestas_cliente = {
+            "": "",
             "PAGA_HOY": "Pagará hoy",
             "PAGA_MANANA": "Pagará mañana",
             "PAGA_SEMANA": "Pagará esta semana",
@@ -2017,7 +2018,7 @@ def render_cobranza_tab_gerente():
         with st.form("ger_cob_form", clear_on_submit=False):
             dias_opciones = list(range(1, 32))
             dia_actual = datetime.now().day
-            dia_sugerido = dias_venc[0] if dias_venc else dia_actual
+            dia_sugerido = dia_actual
             if dia_sugerido not in dias_opciones:
                 dia_sugerido = dia_actual
             dia_sel = st.selectbox("Día", dias_opciones, index=dias_opciones.index(dia_sugerido), key="ger_cob_dia")
@@ -2034,17 +2035,6 @@ def render_cobranza_tab_gerente():
                 format_func=lambda c: respuestas_cliente[c],
                 key="ger_cob_respuesta",
             )
-
-            ya_pago_default = accion_code in {"PAGO_PARCIAL", "LIQUIDADO"} or respuesta_code in {"PAGO_PARCIAL", "PAGO_COMPLETO"}
-            ya_pago = st.checkbox(
-                "Marcar como ya pagó (usa día actual)",
-                value=ya_pago_default,
-                key="ger_cob_ya_pago",
-            )
-            if ya_pago:
-                st.caption(f"Se guardará en el día actual: **{dia_actual}**")
-
-            detalle = st.text_input("Detalle corto (opcional)", key="ger_cob_detalle")
             comentario = st.text_area("Comentario adicional (opcional)", key="ger_cob_comentario")
             usuario = st.text_input("Actualizado_por", value=_safe_str(usuario_actual), key="ger_cob_user")
             guardar_comentario = st.form_submit_button("Guardar comentario")
@@ -2054,15 +2044,14 @@ def render_cobranza_tab_gerente():
             comentario_partes = [
                 fecha_txt,
                 acciones_cobranza.get(accion_code, accion_code),
-                respuestas_cliente.get(respuesta_code, respuesta_code),
             ]
-            if detalle.strip():
-                comentario_partes.append(detalle.strip())
+            if respuesta_code:
+                comentario_partes.append(respuestas_cliente.get(respuesta_code, respuesta_code))
             comentario_compuesto = " – ".join(comentario_partes)
             if comentario.strip():
                 comentario_compuesto = f"{comentario_compuesto} | {comentario.strip()}"
 
-            dia_guardado = dia_actual if ya_pago else int(dia_sel)
+            dia_guardado = int(dia_sel)
             com_df = pd.DataFrame([{
                 "Mes": mes_com,
                 "Codigo": codigo,
