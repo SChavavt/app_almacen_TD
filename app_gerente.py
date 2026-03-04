@@ -1885,17 +1885,44 @@ def render_cobranza_tab_gerente():
         st.warning("Clientes en REPORTE no encontrados en ANTIGÜEDAD (marcados como CONTADO).")
         st.dataframe(missing, use_container_width=True, hide_index=True)
 
-    st.markdown("### Comentarios")
-    mes_com = st.text_input("Mes comentarios (YYYY-MM)", value=mes_sel, key="ger_cob_mes_com")
     base_df = pd.DataFrame(cobranza_load_records_with_rows(ws_base))
-    clientes_mes = base_df[base_df.get("Mes", "").astype(str) == mes_com] if not base_df.empty else pd.DataFrame(columns=["Codigo", "Razon_Social"])
+    st.markdown("### Comentarios")
+    anio_actual = datetime.now().year
+    mes_actual = datetime.now().strftime("%Y-%m")
+    meses_disponibles = []
+    if not base_df.empty and "Mes" in base_df.columns:
+        meses_disponibles = sorted({
+            m for m in base_df["Mes"].astype(str)
+            if re.match(r"^\d{4}-\d{2}$", m) and m.startswith(f"{anio_actual}-")
+        })
+    if mes_actual not in meses_disponibles:
+        meses_disponibles.append(mes_actual)
+    meses_disponibles = sorted(meses_disponibles)
+    mes_com = st.selectbox(
+        "Mes comentarios (YYYY-MM)",
+        options=meses_disponibles,
+        index=meses_disponibles.index(mes_actual),
+        key="ger_cob_mes_com",
+    )
+
+    if base_df.empty:
+        clientes_mes = pd.DataFrame(columns=["Codigo", "Razon_Social"])
+    else:
+        base_mes = base_df[base_df.get("Mes", "").astype(str) == mes_com].copy()
+        if "Tipo_Pago" in base_mes.columns:
+            tipo_pago = base_mes["Tipo_Pago"].astype(str).str.strip().str.upper()
+            base_mes = base_mes[tipo_pago != "CONTADO"]
+        clientes_mes = base_mes
+
     if clientes_mes.empty:
-        st.info("No hay clientes cargados para ese mes.")
+        st.info("No hay clientes cargados para ese mes (excluyendo CONTADO).")
     else:
         clientes_mes = clientes_mes[["Codigo", "Razon_Social"]].drop_duplicates().sort_values(["Razon_Social", "Codigo"])
         opciones = [f"{r.Codigo} - {r.Razon_Social}" for r in clientes_mes.itertuples(index=False)]
         cliente_sel = st.selectbox("Cliente", opciones, key="ger_cob_cliente")
-        dia_sel = st.selectbox("Día", list(range(1, 32)), key="ger_cob_dia")
+        dias_opciones = list(range(1, 32))
+        dia_actual = datetime.now().day
+        dia_sel = st.selectbox("Día", dias_opciones, index=dias_opciones.index(dia_actual), key="ger_cob_dia")
         comentario = st.text_area("Comentario", key="ger_cob_comentario")
         usuario = st.text_input("Actualizado_por", value=_safe_str(usuario_actual), key="ger_cob_user")
 
