@@ -2517,12 +2517,13 @@ def render_cobranza_tab_gerente():
             )
 
 # --- INTERFAZ ---
-USUARIOS_VALIDOS = ["AlejandroVTD", "CeciliaATD", "SChava"]
+USUARIOS_VALIDOS = ["AlejandroVTD", "CeciliaATD", "SChava", "FinanzasTD"]
 
 PERMISOS_USUARIO = {
-    "AlejandroVTD": {"organizador": True, "modificar": False},
-    "CeciliaATD": {"organizador": False, "modificar": True},
-    "SChava": {"organizador": True, "modificar": True},
+    "AlejandroVTD": {"organizador": True, "modificar": False, "cobranza": False},
+    "CeciliaATD": {"organizador": False, "modificar": True, "cobranza": False},
+    "SChava": {"organizador": True, "modificar": True, "cobranza": True},
+    "FinanzasTD": {"organizador": False, "modificar": False, "cobranza": True},
 }
 
 
@@ -2576,17 +2577,25 @@ def usuario_puede(usuario: str | None, permiso: str) -> bool:
 
 usuario_actual = ensure_user_logged_in()
 
-tab_specs = [
-    ("buscar", "🔍 Buscar Pedido"),
-    ("descargar", "⬇️ Descargar Datos"),
-    ("cobranza", "📒 Cobranza"),
-]
+if usuario_actual == "FinanzasTD":
+    tab_specs = [
+        ("cobranza", "📒 Cobranza"),
+        ("buscar", "🔍 Buscar Pedido"),
+    ]
+else:
+    tab_specs = [
+        ("buscar", "🔍 Buscar Pedido"),
+        ("descargar", "⬇️ Descargar Datos"),
+    ]
 
-if usuario_puede(usuario_actual, "organizador"):
-    tab_specs.insert(0, ("organizador", "🗂️ Organizador"))
+    if usuario_puede(usuario_actual, "cobranza"):
+        tab_specs.append(("cobranza", "📒 Cobranza"))
 
-if usuario_puede(usuario_actual, "modificar"):
-    tab_specs.append(("modificar", "✏️ Modificar Pedido"))
+    if usuario_puede(usuario_actual, "organizador"):
+        tab_specs.insert(0, ("organizador", "🗂️ Organizador"))
+
+    if usuario_puede(usuario_actual, "modificar"):
+        tab_specs.append(("modificar", "✏️ Modificar Pedido"))
 
 tabs = st.tabs([titulo for _, titulo in tab_specs])
 tab_map = {clave: tab for (clave, _), tab in zip(tab_specs, tabs)}
@@ -3055,90 +3064,91 @@ with tab_map["buscar"]:
                 mensaje += " Revisa el rango de fechas seleccionado."
             st.warning(mensaje)
 
-with tab_map["descargar"]:
-    st.header("⬇️ Descargar Datos")
+if "descargar" in tab_map:
+    with tab_map["descargar"]:
+        st.header("⬇️ Descargar Datos")
 
-    if st.button(
-        "🔄 Refrescar datos",
-        help="Recarga los datos desde Google Sheets para ver la información más reciente.",
-    ):
-        st.cache_data.clear()
-        st.rerun()
+        if st.button(
+            "🔄 Refrescar datos",
+            help="Recarga los datos desde Google Sheets para ver la información más reciente.",
+        ):
+            st.cache_data.clear()
+            st.rerun()
 
-    df_todos = cargar_todos_los_pedidos()
-    df_casos = cargar_casos_especiales()
+        df_todos = cargar_todos_los_pedidos()
+        df_casos = cargar_casos_especiales()
 
-    sub_tabs = st.tabs([
-        "⚙️ Pedidos en Flujo",
-        "📦 Pedidos Históricos",
-        "🧾 Casos especiales",
-        "🟢 Solo pedidos completados",
-    ])
+        sub_tabs = st.tabs([
+            "⚙️ Pedidos en Flujo",
+            "📦 Pedidos Históricos",
+            "🧾 Casos especiales",
+            "🟢 Solo pedidos completados",
+        ])
 
-    with sub_tabs[0]:
-        flujo_data = construir_descarga_flujo_por_categoria()
+        with sub_tabs[0]:
+            flujo_data = construir_descarga_flujo_por_categoria()
 
-        st.markdown("#### 🚚 Foráneos")
-        render_descarga_tabla(
-            df_base=flujo_data["foraneos"],
-            key_prefix="descarga_flujo_foraneos",
-            permitir_filtros=False,
-            ordenar_por_id=False,
-            mostrar_descarga=False,
-        )
+            st.markdown("#### 🚚 Foráneos")
+            render_descarga_tabla(
+                df_base=flujo_data["foraneos"],
+                key_prefix="descarga_flujo_foraneos",
+                permitir_filtros=False,
+                ordenar_por_id=False,
+                mostrar_descarga=False,
+            )
 
-        st.markdown("#### 📍 Locales")
-        render_descarga_tabla(
-            df_base=flujo_data["locales"],
-            key_prefix="descarga_flujo_locales",
-            permitir_filtros=False,
-            ordenar_por_id=False,
-            mostrar_descarga=False,
-        )
+            st.markdown("#### 📍 Locales")
+            render_descarga_tabla(
+                df_base=flujo_data["locales"],
+                key_prefix="descarga_flujo_locales",
+                permitir_filtros=False,
+                ordenar_por_id=False,
+                mostrar_descarga=False,
+            )
 
-        st.markdown("#### 🧾 Casos especiales")
-        render_descarga_tabla(
-            df_base=flujo_data["casos"],
-            key_prefix="descarga_flujo_casos",
-            permitir_filtros=False,
-            ordenar_por_id=False,
-            mostrar_descarga=False,
-        )
+            st.markdown("#### 🧾 Casos especiales")
+            render_descarga_tabla(
+                df_base=flujo_data["casos"],
+                key_prefix="descarga_flujo_casos",
+                permitir_filtros=False,
+                ordenar_por_id=False,
+                mostrar_descarga=False,
+            )
 
-        excel_flujo_buffer = construir_excel_flujo_unificado(flujo_data)
-        fecha_hoy = datetime.now().strftime("%d-%m-%Y")
-        st.download_button(
-            label="⬇️ Descargar Excel unificado",
-            data=excel_flujo_buffer.getvalue(),
-            file_name=f"pedidos_en_flujo_{fecha_hoy}.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            key="descarga_flujo_unificado",
-        )
+            excel_flujo_buffer = construir_excel_flujo_unificado(flujo_data)
+            fecha_hoy = datetime.now().strftime("%d-%m-%Y")
+            st.download_button(
+                label="⬇️ Descargar Excel unificado",
+                data=excel_flujo_buffer.getvalue(),
+                file_name=f"pedidos_en_flujo_{fecha_hoy}.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                key="descarga_flujo_unificado",
+            )
 
-    with sub_tabs[1]:
-        render_descarga_tabla(
-            df_base=df_todos,
-            key_prefix="descarga_historicos",
-            permitir_filtros=True,
-            ordenar_por_id=True,
-        )
+        with sub_tabs[1]:
+            render_descarga_tabla(
+                df_base=df_todos,
+                key_prefix="descarga_historicos",
+                permitir_filtros=True,
+                ordenar_por_id=True,
+            )
 
-    with sub_tabs[2]:
-        render_descarga_tabla(
-            df_base=df_casos,
-            key_prefix="descarga_casos",
-            permitir_filtros=True,
-            ordenar_por_id=True,
-        )
+        with sub_tabs[2]:
+            render_descarga_tabla(
+                df_base=df_casos,
+                key_prefix="descarga_casos",
+                permitir_filtros=True,
+                ordenar_por_id=True,
+            )
 
-    with sub_tabs[3]:
-        df_solo_completados = construir_descarga_solo_completados()
-        render_descarga_tabla(
-            df_base=df_solo_completados,
-            key_prefix="descarga_solo_completados",
-            permitir_filtros=False,
-            ordenar_por_id=True,
-        )
+        with sub_tabs[3]:
+            df_solo_completados = construir_descarga_solo_completados()
+            render_descarga_tabla(
+                df_base=df_solo_completados,
+                key_prefix="descarga_solo_completados",
+                permitir_filtros=False,
+                ordenar_por_id=True,
+            )
 
 if "modificar" in tab_map:
     with tab_map["modificar"]:
@@ -5092,5 +5102,6 @@ if "organizador" in tab_map:
                 st.info("No hay ítems en plantilla para eliminar.")
 
 
-with tab_map["cobranza"]:
-    render_cobranza_tab_gerente()
+if "cobranza" in tab_map:
+    with tab_map["cobranza"]:
+        render_cobranza_tab_gerente()
