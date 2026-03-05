@@ -30,6 +30,7 @@ _ALE_ID_CACHE = {}
 _ALE_BOOTSTRAP_CACHE = {}
 _MAIN_SPREADSHEET_CACHE = None
 _COBRANZA_SPREADSHEET_CACHE = None
+_COBRANZA_WS_CACHE = None
 
 # --- CREDENCIALES DESDE SECRETS ---
 try:
@@ -1618,20 +1619,39 @@ def cobranza_update_row_values(ws, row_number: int, values: list):
     ws.update_cells(cells, value_input_option="USER_ENTERED")
 
 def cobranza_ensure_headers(ws, expected_headers: list[str]):
-    current = [str(x).strip() for x in ws.row_values(1)]
+    current = [
+        str(x).strip()
+        for x in _retry_gspread_api_call(
+            lambda: ws.row_values(1),
+            retries=4,
+            base_delay=0.9,
+        )
+    ]
     if current != expected_headers:
         if not any(current):
-            ws.append_row(expected_headers, value_input_option="USER_ENTERED")
+            _retry_gspread_api_call(
+                lambda: ws.append_row(expected_headers, value_input_option="USER_ENTERED"),
+                retries=4,
+                base_delay=0.9,
+            )
         else:
-            cobranza_update_row_values(ws, 1, expected_headers)
+            _retry_gspread_api_call(
+                lambda: cobranza_update_row_values(ws, 1, expected_headers),
+                retries=4,
+                base_delay=0.9,
+            )
 
 
 
 
 def cobranza_migrar_comentarios_con_folio(ws):
-    """Migra `cobranza_comentarios` del esquema viejo (sin Folio) al nuevo."""
-    expected = ["Mes", "Codigo", "Folio", "Dia", "Comentario", "Actualizado_por", "Timestamp"]
+    """Migra `cobranza_comentarios` a esquema actual sin perder datos."""
+    expected = [
+        "Mes", "Codigo", "Folio", "Dia", "Comentario", "Actualizado_por", "Timestamp",
+        "Fecha_Proximo_Pago", "Recordatorio_Activo", "Estatus_Seguimiento", "Fecha_Cierre"
+    ]
     legacy = ["Mes", "Codigo", "Dia", "Comentario", "Actualizado_por", "Timestamp"]
+    with_folio = ["Mes", "Codigo", "Folio", "Dia", "Comentario", "Actualizado_por", "Timestamp"]
 
     values = _retry_gspread_api_call(lambda: ws.get_all_values(), retries=4, base_delay=0.9)
     if not values:
@@ -1646,7 +1666,16 @@ def cobranza_migrar_comentarios_con_folio(ws):
         for row in values[1:]:
             row = row + [""] * (len(legacy) - len(row))
             mes, codigo, dia, comentario, actualizado_por, timestamp = row[:len(legacy)]
-            matrix.append([mes, codigo, "", dia, comentario, actualizado_por, timestamp])
+            matrix.append([mes, codigo, "", dia, comentario, actualizado_por, timestamp, "", "", "", ""])
+        _retry_gspread_api_call(lambda: cobranza_replace_matrix_values(ws, matrix), retries=4, base_delay=1.0)
+        return True
+
+    if headers == with_folio:
+        matrix = [expected]
+        for row in values[1:]:
+            row = row + [""] * (len(with_folio) - len(row))
+            mes, codigo, folio, dia, comentario, actualizado_por, timestamp = row[:len(with_folio)]
+            matrix.append([mes, codigo, folio, dia, comentario, actualizado_por, timestamp, "", "", "", ""])
         _retry_gspread_api_call(lambda: cobranza_replace_matrix_values(ws, matrix), retries=4, base_delay=1.0)
         return True
 
@@ -1837,6 +1866,11 @@ def parse_antiguedad_cobranza_excel(file, mes: str = "") -> pd.DataFrame:
 
 def get_cobranza_worksheets_safe():
     """Abre hojas de cobranza con manejo robusto de APIError para no romper la app."""
+    global _COBRANZA_WS_CACHE
+
+    if _COBRANZA_WS_CACHE is not None:
+        return _COBRANZA_WS_CACHE
+
     spreadsheet_id = get_cobranza_spreadsheet_id()
     service_email = str(credentials_dict.get("client_email", "(sin client_email en secrets)"))
     try:
@@ -1844,7 +1878,8 @@ def get_cobranza_worksheets_safe():
         ws_base = _retry_gspread_api_call(lambda: ss.worksheet("cobranza_base"), retries=4, base_delay=0.9)
         ws_venc = _retry_gspread_api_call(lambda: ss.worksheet("cobranza_vencimientos"), retries=4, base_delay=0.9)
         ws_com = _retry_gspread_api_call(lambda: ss.worksheet("cobranza_comentarios"), retries=4, base_delay=0.9)
-        return ws_base, ws_venc, ws_com
+        _COBRANZA_WS_CACHE = (ws_base, ws_venc, ws_com)
+        return _COBRANZA_WS_CACHE
     except gspread.exceptions.WorksheetNotFound:
         st.error("❌ Faltan pestañas requeridas en el Google Sheet de Cobranza.")
         st.caption(
@@ -1853,9 +1888,11 @@ def get_cobranza_worksheets_safe():
         st.caption(f"Spreadsheet usado: {spreadsheet_id}")
         return None, None, None
     except gspread.exceptions.APIError as e:
-        st.error(
-            "❌ No fue posible abrir las hojas de Cobranza en Google Sheets (permiso o ID)."
-        )
+        if _is_transient_gspread_error(e):
+            st.warning("⚠️ Google Sheets en límite temporal (429). Reintenta en unos segundos.")
+            st.caption(f"Detalle técnico: {e}")
+            return None, None, None
+        st.error("❌ No fue posible abrir las hojas de Cobranza en Google Sheets (permiso o ID).")
         st.caption(f"Spreadsheet usado: {spreadsheet_id}")
         st.caption(f"Comparte el archivo con esta cuenta de servicio: {service_email}")
         st.caption(f"Detalle técnico: {e}")
@@ -2057,7 +2094,10 @@ def render_cobranza_tab_gerente():
 
     base_headers = ["Mes", "Codigo", "Razon_Social", "Saldo", "No_Vencido", "Vencido", "Tipo_Pago", "Ultima_Actualizacion"]
     venc_headers = ["Mes", "Codigo", "Folio", "Fecha_Factura", "Fecha_Vencimiento", "Saldo_Vence", "Condicion", "Moneda", "Ultima_Actualizacion"]
-    com_headers = ["Mes", "Codigo", "Folio", "Dia", "Comentario", "Actualizado_por", "Timestamp"]
+    com_headers = [
+        "Mes", "Codigo", "Folio", "Dia", "Comentario", "Actualizado_por", "Timestamp",
+        "Fecha_Proximo_Pago", "Recordatorio_Activo", "Estatus_Seguimiento", "Fecha_Cierre"
+    ]
 
     cache_key = "ger_cob_data_cache"
 
@@ -2083,9 +2123,16 @@ def render_cobranza_tab_gerente():
         if migracion_comentarios:
             st.info("ℹ️ Se migró la hoja de comentarios para incluir la columna Folio sin perder datos existentes.")
     except gspread.exceptions.APIError as e:
-        st.error("❌ No se pudieron validar encabezados de hojas de Cobranza.")
-        st.caption(f"Detalle técnico: {e}")
-        return
+        if _is_transient_gspread_error(e):
+            st.warning(
+                "⚠️ Google Sheets está con límite temporal de lecturas (quota/rate limit). "
+                "Se continuará con los encabezados actuales y puedes reintentar en unos segundos."
+            )
+            st.caption(f"Detalle técnico: {e}")
+        else:
+            st.error("❌ No se pudieron validar encabezados de hojas de Cobranza.")
+            st.caption(f"Detalle técnico: {e}")
+            return
 
     st.markdown("### Cargar archivos del mes")
     now_dt = datetime.now()
@@ -2238,6 +2285,7 @@ def render_cobranza_tab_gerente():
             "PAGO_PARCIAL": "Pagó parcialmente",
             "PAGO_COMPLETO": "Pagó completo",
         }
+        respuestas_con_promesa = {"PAGA_HOY", "PAGA_MANANA", "PAGA_SEMANA", "PROMESA_PAGO", "PIDIO_TIEMPO", "ESPERA_FIN_MES"}
 
         acciones_por_texto = {v: k for k, v in acciones_cobranza.items()}
         respuestas_por_texto = {v: k for k, v in respuestas_cliente.items() if v}
@@ -2315,34 +2363,89 @@ def render_cobranza_tab_gerente():
             key="ger_cob_dia",
         )
 
+        dia_sel_int = int(dia_sel)
+        comentario_existente = ""
+        fecha_pago_existente_txt = ""
+        recordatorio_existente = ""
+        estatus_existente = ""
+        if not com_df.empty:
+            com_mes = com_df.get("Mes", "").astype(str)
+            com_codigo = com_df.get("Codigo", "").astype(str)
+            com_folio = com_df.get("Folio", "").astype(str)
+            com_dia = pd.to_numeric(com_df.get("Dia", ""), errors="coerce")
+            existentes = com_df[
+                (com_mes == str(mes_com))
+                & (com_codigo == str(codigo))
+                & (com_folio == str(folio_sel))
+                & (com_dia == dia_sel_int)
+            ].copy()
+            if not existentes.empty:
+                existentes = existentes.sort_values(by=[c for c in ["Timestamp", "__row"] if c in existentes.columns])
+                ultimo = existentes.iloc[-1]
+                comentario_existente = str(ultimo.get("Comentario", "") or "").strip()
+                recordatorio_existente = str(ultimo.get("Recordatorio_Activo", "") or "").strip().upper()
+                estatus_existente = str(ultimo.get("Estatus_Seguimiento", "") or "").strip().upper()
+                fecha_raw = str(ultimo.get("Fecha_Proximo_Pago", "") or "").strip()
+                try:
+                    fecha_tmp = pd.to_datetime(fecha_raw, errors="coerce")
+                    fecha_pago_existente_txt = "" if pd.isna(fecha_tmp) else fecha_tmp.strftime("%Y-%m-%d")
+                except Exception:
+                    fecha_pago_existente_txt = ""
+
+        prefill_ctx = (str(mes_com), str(codigo), str(folio_sel), dia_sel_int)
+        if st.session_state.get("ger_cob_prefill_ctx") != prefill_ctx:
+            accion_pref, respuesta_pref, comentario_pref = _parse_cobranza_comentario_guardado(comentario_existente)
+            seguimiento_activo_pref = bool(fecha_pago_existente_txt or recordatorio_existente or estatus_existente)
+            for k in [
+                "ger_cob_accion", "ger_cob_respuesta", "ger_cob_comentario",
+                "ger_cob_fecha_picker", "ger_cob_seguimiento_activo",
+                "ger_cob_recordatorio", "ger_cob_estatus"
+            ]:
+                st.session_state.pop(k, None)
+            st.session_state["ger_cob_accion"] = accion_pref if accion_pref in acciones_cobranza else ""
+            st.session_state["ger_cob_respuesta"] = respuesta_pref if respuesta_pref in respuestas_cliente else ""
+            st.session_state["ger_cob_comentario"] = comentario_pref
+            st.session_state["ger_cob_fecha_picker"] = pd.to_datetime(fecha_pago_existente_txt).date() if fecha_pago_existente_txt else date.today()
+            st.session_state["ger_cob_seguimiento_activo"] = seguimiento_activo_pref
+            st.session_state["ger_cob_recordatorio"] = recordatorio_existente if recordatorio_existente in {"SI", "NO"} else ""
+            st.session_state["ger_cob_estatus"] = estatus_existente if estatus_existente in {"PENDIENTE", "LIQUIDADO"} else ""
+            st.session_state["ger_cob_prefill_ctx"] = prefill_ctx
+
+        with st.form("ger_cob_seguimiento_form", clear_on_submit=False):
+            seguimiento_activo = st.checkbox(
+                "Activar seguimiento de próximo pago",
+                key="ger_cob_seguimiento_activo",
+                help="Al activar, se muestran los campos de seguimiento (fecha, recordatorio y estatus).",
+            )
+            if seguimiento_activo:
+                st.markdown("#### 🔔 Sección de seguimiento")
+                st.date_input(
+                    "Fecha de próximo pago",
+                    key="ger_cob_fecha_picker",
+                    format="DD/MM/YYYY",
+                )
+                st.selectbox(
+                    "Recordatorio activo",
+                    options=["", "SI", "NO"],
+                    key="ger_cob_recordatorio",
+                )
+                st.selectbox(
+                    "Estatus de seguimiento",
+                    options=["", "PENDIENTE", "LIQUIDADO"],
+                    key="ger_cob_estatus",
+                    help="LIQUIDADO equivale a pagado completo y deja de mostrarse en seguimiento.",
+                )
+            aplicar_seg = st.form_submit_button("Aplicar cambios de seguimiento")
+
+        if aplicar_seg:
+            st.success("✅ Cambios de seguimiento aplicados. Ahora puedes guardar comentario.")
+
+        seguimiento_activo = bool(st.session_state.get("ger_cob_seguimiento_activo", False))
+        fecha_pago_dt = st.session_state.get("ger_cob_fecha_picker") if seguimiento_activo else None
+        recordatorio_activo = st.session_state.get("ger_cob_recordatorio", "") if seguimiento_activo else ""
+        estatus_seguimiento = st.session_state.get("ger_cob_estatus", "") if seguimiento_activo else ""
+
         with st.form("ger_cob_form", clear_on_submit=False):
-            dia_sel_int = int(dia_sel)
-            comentario_existente = ""
-            if not com_df.empty:
-                com_mes = com_df.get("Mes", "").astype(str)
-                com_codigo = com_df.get("Codigo", "").astype(str)
-                com_folio = com_df.get("Folio", "").astype(str)
-                com_dia = pd.to_numeric(com_df.get("Dia", ""), errors="coerce")
-                existentes = com_df[
-                    (com_mes == str(mes_com))
-                    & (com_codigo == str(codigo))
-                    & (com_folio == str(folio_sel))
-                    & (com_dia == dia_sel_int)
-                ].copy()
-                if not existentes.empty:
-                    existentes = existentes.sort_values(by=[c for c in ["Timestamp", "__row"] if c in existentes.columns])
-                    comentario_existente = str(existentes.iloc[-1].get("Comentario", "") or "").strip()
-
-            prefill_ctx = (str(mes_com), str(codigo), str(folio_sel), dia_sel_int)
-            if st.session_state.get("ger_cob_prefill_ctx") != prefill_ctx:
-                accion_pref, respuesta_pref, comentario_pref = _parse_cobranza_comentario_guardado(comentario_existente)
-                for k in ["ger_cob_accion", "ger_cob_respuesta", "ger_cob_comentario"]:
-                    st.session_state.pop(k, None)
-                st.session_state["ger_cob_accion"] = accion_pref if accion_pref in acciones_cobranza else ""
-                st.session_state["ger_cob_respuesta"] = respuesta_pref if respuesta_pref in respuestas_cliente else ""
-                st.session_state["ger_cob_comentario"] = comentario_pref
-                st.session_state["ger_cob_prefill_ctx"] = prefill_ctx
-
             accion_code = st.selectbox(
                 "Acción de cobranza",
                 options=list(acciones_cobranza.keys()),
@@ -2375,6 +2478,18 @@ def render_cobranza_tab_gerente():
                     comentario_compuesto = f"{comentario_compuesto} | {comentario.strip()}"
 
                 dia_guardado = int(dia_sel)
+                fecha_proximo_pago = ""
+                if seguimiento_activo and respuesta_code in respuestas_con_promesa and fecha_pago_dt:
+                    fecha_proximo_pago = pd.to_datetime(fecha_pago_dt).strftime("%Y-%m-%d")
+
+                recordatorio_guardado = recordatorio_activo if seguimiento_activo else ""
+                estatus_form = estatus_seguimiento if seguimiento_activo else ""
+
+                texto_pago = f"{comentario_compuesto} {respuestas_cliente.get(respuesta_code, '')}".strip()
+                es_pagado = estatus_form == "LIQUIDADO" or _cobranza_es_pago_completo(texto_pago)
+                estatus_guardado = "LIQUIDADO" if es_pagado else estatus_form
+                fecha_cierre = datetime.now().strftime("%Y-%m-%d") if es_pagado else ""
+
                 com_df = pd.DataFrame([{
                     "Mes": mes_com,
                     "Codigo": codigo,
@@ -2383,16 +2498,73 @@ def render_cobranza_tab_gerente():
                     "Comentario": comentario_compuesto,
                     "Actualizado_por": usuario,
                     "Timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                    "Fecha_Proximo_Pago": fecha_proximo_pago,
+                    "Recordatorio_Activo": recordatorio_guardado,
+                    "Estatus_Seguimiento": estatus_guardado,
+                    "Fecha_Cierre": fecha_cierre,
                 }])
                 cobranza_upsert_rows_by_key(
                     ws_com,
                     com_df[com_headers],
                     ["Mes", "Codigo", "Folio", "Dia"],
-                    ["Comentario", "Actualizado_por", "Timestamp"],
+                    [
+                        "Comentario", "Actualizado_por", "Timestamp", "Fecha_Proximo_Pago",
+                        "Recordatorio_Activo", "Estatus_Seguimiento", "Fecha_Cierre"
+                    ],
                 )
                 st.session_state["ger_cob_force_refresh"] = True
                 st.success("✅ Comentario guardado.")
                 st.rerun()
+
+    st.markdown("### 📅 Seguimiento de próximos pagos")
+    if com_df.empty:
+        st.info("Aún no hay seguimientos capturados.")
+    else:
+        seg = com_df.copy()
+        seg["Mes"] = seg.get("Mes", "").astype(str)
+        seg = seg[seg["Mes"] == str(mes_com)].copy()
+        seg["Fecha_Proximo_Pago"] = pd.to_datetime(seg.get("Fecha_Proximo_Pago", ""), errors="coerce")
+        seg["Recordatorio_Activo"] = seg.get("Recordatorio_Activo", "").astype(str).str.upper().str.strip()
+        seg["Estatus_Seguimiento"] = seg.get("Estatus_Seguimiento", "").astype(str).str.upper().str.strip()
+
+        seg = seg[seg["Recordatorio_Activo"] == "SI"]
+        seg = seg[seg["Estatus_Seguimiento"] == "PENDIENTE"]
+        seg = seg[~seg.get("Comentario", "").astype(str).apply(_cobranza_es_pago_completo)]
+        seg = seg[seg["Fecha_Proximo_Pago"].notna()].copy()
+
+        if seg.empty:
+            st.info("No hay recordatorios pendientes para ese mes.")
+        else:
+            hoy = pd.Timestamp(date.today())
+            seg["Dias_Restantes"] = (seg["Fecha_Proximo_Pago"].dt.normalize() - hoy).dt.days
+            seg["Estado_Fecha"] = np.where(
+                seg["Dias_Restantes"] < 0,
+                "VENCIDO",
+                np.where(seg["Dias_Restantes"] == 0, "HOY", "PROXIMO"),
+            )
+
+            filtro_seg = st.selectbox(
+                "Filtro de seguimiento",
+                options=["Todos", "Vencidos", "Vence hoy", "Próximos 7 días"],
+                key="ger_cob_filtro_seg",
+            )
+            if filtro_seg == "Vencidos":
+                seg = seg[seg["Dias_Restantes"] < 0]
+            elif filtro_seg == "Vence hoy":
+                seg = seg[seg["Dias_Restantes"] == 0]
+            elif filtro_seg == "Próximos 7 días":
+                seg = seg[(seg["Dias_Restantes"] >= 0) & (seg["Dias_Restantes"] <= 7)]
+
+            cliente_nom = clientes_mes[["Codigo", "Razon_Social"]].drop_duplicates() if not clientes_mes.empty else pd.DataFrame(columns=["Codigo", "Razon_Social"])
+            seg = seg.merge(cliente_nom, on="Codigo", how="left")
+            seg = seg.sort_values(["Fecha_Proximo_Pago", "Codigo", "Folio"]).copy()
+            seg["Fecha_Proximo_Pago"] = seg["Fecha_Proximo_Pago"].dt.strftime("%Y-%m-%d")
+            cols_seg = [
+                "Codigo", "Razon_Social", "Folio", "Fecha_Proximo_Pago", "Dias_Restantes",
+                "Estado_Fecha", "Comentario", "Actualizado_por", "Timestamp"
+            ]
+            seg = seg[[c for c in cols_seg if c in seg.columns]]
+            st.dataframe(seg, use_container_width=True, hide_index=True)
 
     st.markdown("### Descargar")
     mes_dl = st.selectbox(
