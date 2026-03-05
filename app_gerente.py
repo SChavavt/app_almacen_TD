@@ -29,7 +29,6 @@ SPREADSHEET_ID_ALEJANDRO = "1lWZEL228boUMH_tAdQ3_ZGkYHZZuEkfv"
 _ALE_ID_CACHE = {}
 _ALE_BOOTSTRAP_CACHE = {}
 _MAIN_SPREADSHEET_CACHE = None
-_COBRANZA_SPREADSHEET_CACHE = None
 
 # --- CREDENCIALES DESDE SECRETS ---
 try:
@@ -1570,37 +1569,11 @@ def get_cobranza_spreadsheet_id() -> str:
     return str(spreadsheet_id)
 
 
-def get_cobranza_spreadsheet(force_refresh: bool = False):
-    """Abre y cachea el spreadsheet de cobranza para reducir lecturas a la API."""
-    global _COBRANZA_SPREADSHEET_CACHE
-
-    if _COBRANZA_SPREADSHEET_CACHE is not None and not force_refresh:
-        return _COBRANZA_SPREADSHEET_CACHE
-
-    spreadsheet_id = get_cobranza_spreadsheet_id()
-    _COBRANZA_SPREADSHEET_CACHE = _retry_gspread_api_call(
-        lambda: gspread_client.open_by_key(spreadsheet_id),
-        retries=4,
-        base_delay=0.9,
-    )
-    return _COBRANZA_SPREADSHEET_CACHE
-
-
 def get_cobranza_worksheet(nombre_hoja: str):
-    try:
-        return _retry_gspread_api_call(
-            lambda: get_cobranza_spreadsheet().worksheet(nombre_hoja),
-            retries=4,
-            base_delay=0.9,
-        )
-    except gspread.exceptions.APIError as exc:
-        if not _is_transient_gspread_error(exc):
-            raise
-        return _retry_gspread_api_call(
-            lambda: get_cobranza_spreadsheet(force_refresh=True).worksheet(nombre_hoja),
-            retries=4,
-            base_delay=1.1,
-        )
+    spreadsheet_id = get_cobranza_spreadsheet_id()
+    return gspread_client.open_by_key(spreadsheet_id).worksheet(nombre_hoja)
+
+
 
 
 def cobranza_update_row_values(ws, row_number: int, values: list):
@@ -1804,10 +1777,9 @@ def get_cobranza_worksheets_safe():
     spreadsheet_id = get_cobranza_spreadsheet_id()
     service_email = str(credentials_dict.get("client_email", "(sin client_email en secrets)"))
     try:
-        ss = get_cobranza_spreadsheet()
-        ws_base = _retry_gspread_api_call(lambda: ss.worksheet("cobranza_base"), retries=4, base_delay=0.9)
-        ws_venc = _retry_gspread_api_call(lambda: ss.worksheet("cobranza_vencimientos"), retries=4, base_delay=0.9)
-        ws_com = _retry_gspread_api_call(lambda: ss.worksheet("cobranza_comentarios"), retries=4, base_delay=0.9)
+        ws_base = get_cobranza_worksheet("cobranza_base")
+        ws_venc = get_cobranza_worksheet("cobranza_vencimientos")
+        ws_com = get_cobranza_worksheet("cobranza_comentarios")
         return ws_base, ws_venc, ws_com
     except gspread.exceptions.WorksheetNotFound:
         st.error("❌ Faltan pestañas requeridas en el Google Sheet de Cobranza.")
@@ -1850,46 +1822,16 @@ def _cobranza_sheet_title_safe(title: str) -> str:
     return (t[:100] if t else f"Cobranza_{datetime.now().strftime('%Y%m%d_%H%M%S')}")
 
 
-def _cobranza_guardar_en_drive_por_mes(spreadsheet_id: str, mes: str, out_df: pd.DataFrame) -> tuple[str, bool]:
-    """Guarda reporte en una hoja mensual; actualiza la existente si ya fue creada."""
-    del spreadsheet_id  # Se conserva por compatibilidad de firma.
-
-    ss = get_cobranza_spreadsheet()
-    title = _cobranza_sheet_title_safe(f"Cobranza_{mes}")
-    creada = False
-
-    try:
-        ws_target = _retry_gspread_api_call(lambda: ss.worksheet(title), retries=4, base_delay=0.9)
-    except gspread.exceptions.WorksheetNotFound:
-        ws_target = _retry_gspread_api_call(
-            lambda: ss.add_worksheet(
-                title=title,
-                rows=max(len(out_df) + 5, 50),
-                cols=max(len(out_df.columns) + 2, 20),
-            ),
-            retries=4,
-            base_delay=1.0,
-        )
-        creada = True
+def _cobranza_guardar_en_drive_nueva_hoja(spreadsheet_id: str, sheet_name: str, out_df: pd.DataFrame) -> str:
+    """Crea una worksheet nueva en Drive y guarda el reporte generado."""
+    ss = gspread_client.open_by_key(spreadsheet_id)
+    title = _cobranza_sheet_title_safe(sheet_name)
+    ws_new = ss.add_worksheet(title=title, rows=max(len(out_df) + 5, 50), cols=max(len(out_df.columns) + 2, 20))
 
     encabezado = [f"Fecha De Generación: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"] + [""] * (len(out_df.columns) - 1)
     matrix = [encabezado, list(out_df.columns)] + out_df.fillna("").astype(str).values.tolist()
-    _retry_gspread_api_call(lambda: cobranza_replace_matrix_values(ws_target, matrix), retries=4, base_delay=1.0)
-    return title, creada
-
-
-def _cobranza_es_pago_completo(texto: str) -> bool:
-    txt = _cobranza_clean_text(texto).lower()
-    if not txt:
-        return False
-    variantes = [
-        "pago completo",
-        "pagó completo",
-        "cliente liquido factura",
-        "cliente liquidó factura",
-        "liquidado",
-    ]
-    return any(v in txt for v in variantes)
+    cobranza_replace_matrix_values(ws_new, matrix)
+    return title
 
 def render_cobranza_tab_gerente():
     st.subheader("📒 Cobranza")
@@ -2285,7 +2227,7 @@ def render_cobranza_tab_gerente():
                         out.loc[mask, dia_col] = np.where(
                             previo.str.strip() == "",
                             nota,
-                            previo + "\n" + nota,
+                            previo + " | " + nota,
                         )
 
             if not com_df.empty:
@@ -2300,7 +2242,7 @@ def render_cobranza_tab_gerente():
                         out.loc[mask, dia] = np.where(
                             previo.str.strip() == "",
                             txt,
-                            np.where(txt.strip() == "", previo, previo + "\n" + txt),
+                            np.where(txt.strip() == "", previo, previo + " | " + txt),
                         )
 
             cols_orden = ["Codigo", "Razon_Social", "Folio", "Saldo_Vence", "Fecha_Vencimiento", "Condicion", "Moneda", "Estatus_Cobranza"] + [str(d) for d in range(1, 32)]
@@ -2313,73 +2255,16 @@ def render_cobranza_tab_gerente():
                 out.to_excel(writer, sheet_name="Cobranza", index=False, startrow=1)
                 ws = writer.sheets["Cobranza"]
                 ws.write(0, 0, f"Fecha De Generación: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}   Año: {year_i}   Mes: {MESES_ES[month_i] if 1 <= month_i <= 12 else str(month_i)}")
-
-                wb = writer.book
-                fmt_header = wb.add_format({"bold": True, "align": "center", "valign": "vcenter", "bg_color": "#D9E1F2", "border": 1})
-                fmt_texto = wb.add_format({"text_wrap": True, "valign": "top", "border": 1})
-                fmt_pago_completo = wb.add_format({"bg_color": "#C6EFCE", "font_color": "#006100", "text_wrap": True, "valign": "top", "border": 1})
-
-                ws.set_row(1, 22)
-                for c_idx, col in enumerate(out.columns):
-                    ws.write(1, c_idx, col, fmt_header)
-
-                anchos = {
-                    "Codigo": 12,
-                    "Razon_Social": 34,
-                    "Folio": 22,
-                    "Saldo_Vence": 14,
-                    "Fecha_Vencimiento": 18,
-                    "Condicion": 18,
-                    "Moneda": 10,
-                    "Estatus_Cobranza": 15,
-                }
-                for c_idx, col in enumerate(out.columns):
-                    if col in anchos:
-                        ws.set_column(c_idx, c_idx, anchos[col])
-                    elif str(col).isdigit():
-                        ws.set_column(c_idx, c_idx, 26)
-                    else:
-                        ws.set_column(c_idx, c_idx, 14)
-
-                ws.freeze_panes(2, 8)
-                ws.autofilter(1, 0, len(out) + 1, len(out.columns) - 1)
-
-                for row_idx, row in out.iterrows():
-                    max_lineas = 1
-                    for dia in range(1, 32):
-                        col = str(dia)
-                        if col not in out.columns:
-                            continue
-                        val = str(row.get(col, "") or "")
-                        if val:
-                            lineas = val.count("\n") + 1
-                            estimado = max(1, int(len(val) / 34) + 1)
-                            max_lineas = max(max_lineas, max(lineas, estimado))
-                    ws.set_row(row_idx + 2, min(110, max(20, max_lineas * 14)))
-
-                    for dia in range(1, 32):
-                        col = str(dia)
-                        if col not in out.columns:
-                            continue
-                        c_idx = out.columns.get_loc(col)
-                        valor = str(row.get(col, "") or "")
-                        if _cobranza_es_pago_completo(valor):
-                            ws.write(row_idx + 2, c_idx, valor, fmt_pago_completo)
-                        else:
-                            ws.write(row_idx + 2, c_idx, valor, fmt_texto)
             bio.seek(0)
 
             try:
                 spreadsheet_id = get_cobranza_spreadsheet_id()
-                nombre_hoja, creada = _cobranza_guardar_en_drive_por_mes(
+                nombre_hoja = _cobranza_guardar_en_drive_nueva_hoja(
                     spreadsheet_id,
-                    mes_dl,
+                    f"Cobranza_{mes_dl}_{datetime.now().strftime('%Y%m%d_%H%M%S')}",
                     out,
                 )
-                if creada:
-                    st.success(f"✅ También se guardó en Drive en una nueva hoja: {nombre_hoja}")
-                else:
-                    st.success(f"✅ También se actualizó en Drive la hoja existente: {nombre_hoja}")
+                st.success(f"✅ También se guardó en Drive en la hoja: {nombre_hoja}")
             except Exception as e:
                 st.warning(f"⚠️ Se generó el Excel local, pero no se pudo guardar en Drive: {e}")
 
