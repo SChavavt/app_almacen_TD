@@ -1992,6 +1992,7 @@ def render_cobranza_tab_gerente():
             st.caption("ℹ️ Este cliente no tiene vencimientos detectados en ese mes. Puedes capturar comentario manualmente.")
 
         acciones_cobranza = {
+            "": "",
             "COBRO": "Se le cobró",
             "RECOBRO": "Se le volvió a cobrar",
             "COBRO_FAC_VENCIDA": "Se le cobró factura vencida",
@@ -2021,7 +2022,7 @@ def render_cobranza_tab_gerente():
         def _parse_cobranza_comentario_guardado(comentario_txt: str):
             txt = str(comentario_txt or "").strip()
             if not txt:
-                return "COBRO", "", ""
+                return "", "", ""
 
             bloque_principal, comentario_extra = txt, ""
             if "|" in txt:
@@ -2032,13 +2033,13 @@ def render_cobranza_tab_gerente():
             if partes and re.match(r"^\d{2}/\d{2}/\d{4}$", partes[0]):
                 partes = partes[1:]
 
-            accion = "COBRO"
+            accion = ""
             respuesta = ""
             restantes = []
             for parte in partes:
                 if not parte:
                     continue
-                if accion == "COBRO" and parte in acciones_por_texto:
+                if not accion and parte in acciones_por_texto:
                     accion = acciones_por_texto[parte]
                     continue
                 if not respuesta and parte in respuestas_por_texto:
@@ -2051,14 +2052,31 @@ def render_cobranza_tab_gerente():
 
             return accion, respuesta, comentario_extra
 
-        with st.form("ger_cob_form", clear_on_submit=False):
-            dias_opciones = list(range(1, 32))
-            dia_actual = datetime.now().day
-            dia_sugerido = dia_actual
-            if dia_sugerido not in dias_opciones:
-                dia_sugerido = dia_actual
-            dia_sel = st.selectbox("Día", dias_opciones, index=dias_opciones.index(dia_sugerido), key="ger_cob_dia")
+        dia_actual = datetime.now().day
+        dias_opciones = [dia_actual]
+        if not com_df.empty:
+            com_mes_cliente = com_df[
+                (com_df.get("Mes", "").astype(str) == str(mes_com))
+                & (com_df.get("Codigo", "").astype(str) == str(codigo))
+            ].copy()
+            if not com_mes_cliente.empty:
+                dias_historicos = pd.to_numeric(com_mes_cliente.get("Dia", ""), errors="coerce")
+                dias_historicos = [
+                    int(d)
+                    for d in dias_historicos.dropna().tolist()
+                    if 1 <= int(d) <= 31 and int(d) <= dia_actual
+                ]
+                dias_opciones.extend(dias_historicos)
 
+        dias_opciones = sorted(set(dias_opciones))
+        dia_sel = st.selectbox(
+            "Día",
+            options=dias_opciones,
+            index=dias_opciones.index(dia_actual),
+            key="ger_cob_dia",
+        )
+
+        with st.form("ger_cob_form", clear_on_submit=False):
             dia_sel_int = int(dia_sel)
             comentario_existente = ""
             if not com_df.empty:
@@ -2079,7 +2097,7 @@ def render_cobranza_tab_gerente():
                 accion_pref, respuesta_pref, comentario_pref = _parse_cobranza_comentario_guardado(comentario_existente)
                 for k in ["ger_cob_accion", "ger_cob_respuesta", "ger_cob_comentario"]:
                     st.session_state.pop(k, None)
-                st.session_state["ger_cob_accion"] = accion_pref if accion_pref in acciones_cobranza else "COBRO"
+                st.session_state["ger_cob_accion"] = accion_pref if accion_pref in acciones_cobranza else ""
                 st.session_state["ger_cob_respuesta"] = respuesta_pref if respuesta_pref in respuestas_cliente else ""
                 st.session_state["ger_cob_comentario"] = comentario_pref
                 st.session_state["ger_cob_prefill_ctx"] = prefill_ctx
@@ -2102,29 +2120,32 @@ def render_cobranza_tab_gerente():
 
         if guardar_comentario:
             fecha_txt = datetime.now().strftime("%d/%m/%Y")
-            comentario_partes = [
-                fecha_txt,
-                acciones_cobranza.get(accion_code, accion_code),
-            ]
-            if respuesta_code:
-                comentario_partes.append(respuestas_cliente.get(respuesta_code, respuesta_code))
-            comentario_compuesto = " – ".join(comentario_partes)
-            if comentario.strip():
-                comentario_compuesto = f"{comentario_compuesto} | {comentario.strip()}"
+            if not accion_code and not respuesta_code and not comentario.strip():
+                st.warning("⚠️ Captura al menos una acción, una respuesta o un comentario antes de guardar.")
+            else:
+                comentario_partes = [fecha_txt]
+                accion_label = acciones_cobranza.get(accion_code, accion_code)
+                if accion_label:
+                    comentario_partes.append(accion_label)
+                if respuesta_code:
+                    comentario_partes.append(respuestas_cliente.get(respuesta_code, respuesta_code))
+                comentario_compuesto = " – ".join(comentario_partes)
+                if comentario.strip():
+                    comentario_compuesto = f"{comentario_compuesto} | {comentario.strip()}"
 
-            dia_guardado = int(dia_sel)
-            com_df = pd.DataFrame([{
-                "Mes": mes_com,
-                "Codigo": codigo,
-                "Dia": str(dia_guardado),
-                "Comentario": comentario_compuesto,
-                "Actualizado_por": usuario,
-                "Timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-            }])
-            cobranza_upsert_rows_by_key(ws_com, com_df[com_headers], ["Mes", "Codigo", "Dia"], ["Comentario", "Actualizado_por", "Timestamp"])
-            st.session_state["ger_cob_force_refresh"] = True
-            st.success("✅ Comentario guardado.")
-            st.rerun()
+                dia_guardado = int(dia_sel)
+                com_df = pd.DataFrame([{
+                    "Mes": mes_com,
+                    "Codigo": codigo,
+                    "Dia": str(dia_guardado),
+                    "Comentario": comentario_compuesto,
+                    "Actualizado_por": usuario,
+                    "Timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                }])
+                cobranza_upsert_rows_by_key(ws_com, com_df[com_headers], ["Mes", "Codigo", "Dia"], ["Comentario", "Actualizado_por", "Timestamp"])
+                st.session_state["ger_cob_force_refresh"] = True
+                st.success("✅ Comentario guardado.")
+                st.rerun()
 
     st.markdown("### Descargar")
     mes_dl = st.selectbox(
