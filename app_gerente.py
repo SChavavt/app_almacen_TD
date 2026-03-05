@@ -1822,36 +1822,16 @@ def _cobranza_sheet_title_safe(title: str) -> str:
     return (t[:100] if t else f"Cobranza_{datetime.now().strftime('%Y%m%d_%H%M%S')}")
 
 
-def _cobranza_guardar_en_drive_por_mes(spreadsheet_id: str, mes: str, out_df: pd.DataFrame) -> tuple[str, bool]:
-    """Guarda reporte en una hoja mensual; actualiza la existente si ya fue creada."""
+def _cobranza_guardar_en_drive_nueva_hoja(spreadsheet_id: str, sheet_name: str, out_df: pd.DataFrame) -> str:
+    """Crea una worksheet nueva en Drive y guarda el reporte generado."""
     ss = gspread_client.open_by_key(spreadsheet_id)
-    title = _cobranza_sheet_title_safe(f"Cobranza_{mes}")
-    creada = False
-
-    try:
-        ws_target = ss.worksheet(title)
-    except gspread.exceptions.WorksheetNotFound:
-        ws_target = ss.add_worksheet(title=title, rows=max(len(out_df) + 5, 50), cols=max(len(out_df.columns) + 2, 20))
-        creada = True
+    title = _cobranza_sheet_title_safe(sheet_name)
+    ws_new = ss.add_worksheet(title=title, rows=max(len(out_df) + 5, 50), cols=max(len(out_df.columns) + 2, 20))
 
     encabezado = [f"Fecha De Generación: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"] + [""] * (len(out_df.columns) - 1)
     matrix = [encabezado, list(out_df.columns)] + out_df.fillna("").astype(str).values.tolist()
-    cobranza_replace_matrix_values(ws_target, matrix)
-    return title, creada
-
-
-def _cobranza_es_pago_completo(texto: str) -> bool:
-    txt = _cobranza_clean_text(texto).lower()
-    if not txt:
-        return False
-    variantes = [
-        "pago completo",
-        "pagó completo",
-        "cliente liquido factura",
-        "cliente liquidó factura",
-        "liquidado",
-    ]
-    return any(v in txt for v in variantes)
+    cobranza_replace_matrix_values(ws_new, matrix)
+    return title
 
 def render_cobranza_tab_gerente():
     st.subheader("📒 Cobranza")
@@ -2275,29 +2255,16 @@ def render_cobranza_tab_gerente():
                 out.to_excel(writer, sheet_name="Cobranza", index=False, startrow=1)
                 ws = writer.sheets["Cobranza"]
                 ws.write(0, 0, f"Fecha De Generación: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}   Año: {year_i}   Mes: {MESES_ES[month_i] if 1 <= month_i <= 12 else str(month_i)}")
-
-                fmt_pago_completo = writer.book.add_format({"bg_color": "#C6EFCE", "font_color": "#006100"})
-                for row_idx, row in out.iterrows():
-                    for dia in range(1, 32):
-                        col = str(dia)
-                        if col not in out.columns:
-                            continue
-                        valor = row.get(col, "")
-                        if _cobranza_es_pago_completo(valor):
-                            ws.write(row_idx + 2, out.columns.get_loc(col), valor, fmt_pago_completo)
             bio.seek(0)
 
             try:
                 spreadsheet_id = get_cobranza_spreadsheet_id()
-                nombre_hoja, creada = _cobranza_guardar_en_drive_por_mes(
+                nombre_hoja = _cobranza_guardar_en_drive_nueva_hoja(
                     spreadsheet_id,
-                    mes_dl,
+                    f"Cobranza_{mes_dl}_{datetime.now().strftime('%Y%m%d_%H%M%S')}",
                     out,
                 )
-                if creada:
-                    st.success(f"✅ También se guardó en Drive en una nueva hoja: {nombre_hoja}")
-                else:
-                    st.success(f"✅ También se actualizó en Drive la hoja existente: {nombre_hoja}")
+                st.success(f"✅ También se guardó en Drive en la hoja: {nombre_hoja}")
             except Exception as e:
                 st.warning(f"⚠️ Se generó el Excel local, pero no se pudo guardar en Drive: {e}")
 
