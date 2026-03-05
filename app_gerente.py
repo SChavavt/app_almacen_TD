@@ -2052,10 +2052,12 @@ def render_cobranza_tab_gerente():
     mes_sel = now_dt.strftime("%Y-%m")
     st.caption("El mes se asigna automáticamente con base en la Fecha_Vencimiento del archivo ANTIGÜEDAD_SALDOS.xlsx.")
 
-    reporte = st.file_uploader("REPORTE.xlsx", type=["xlsx"], key="ger_cob_reporte")
-    antig = st.file_uploader("ANTIGÜEDAD_SALDOS.xlsx", type=["xlsx"], key="ger_cob_ant")
+    with st.form("ger_cob_carga_form", clear_on_submit=False):
+        reporte = st.file_uploader("REPORTE.xlsx", type=["xlsx"], key="ger_cob_reporte")
+        antig = st.file_uploader("ANTIGÜEDAD_SALDOS.xlsx", type=["xlsx"], key="ger_cob_ant")
+        procesar_carga = st.form_submit_button("Procesar")
 
-    if st.button("Procesar", key="ger_cob_btn_proc"):
+    if procesar_carga:
         try:
             if reporte is None or antig is None:
                 raise Exception("Carga ambos archivos para procesar.")
