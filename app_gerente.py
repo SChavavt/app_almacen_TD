@@ -16,12 +16,19 @@ import urllib.parse
 import urllib.request
 import time
 import calendar
+from zoneinfo import ZoneInfo
 
 # --- CONFIGURACIÓN DE STREAMLIT ---
 st.set_page_config(page_title="🔍 Buscador de Guías y Descargas", layout="wide")
 st.title("🔍 Buscador de Pedidos por Guía o Cliente")
 
 MESES_ES = ["", "Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"]
+
+MEXICO_CITY_TZ = ZoneInfo("America/Mexico_City")
+
+def now_cdmx() -> datetime:
+    """Fecha/hora actual en zona horaria de Ciudad de México."""
+    return datetime.now(MEXICO_CITY_TZ)
 
 # ===== SPREADSHEETS =====
 SPREADSHEET_ID_MAIN = "1aWkSelodaz0nWfQx7FZAysGnIYGQFJxAN7RO3YgCiZY"
@@ -460,12 +467,12 @@ def cargar_alejandro_hoja(nombre_hoja: str) -> pd.DataFrame:
 
 
 def now_iso():
-    return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    return now_cdmx().strftime("%Y-%m-%d %H:%M:%S")
 
 
 def new_id(prefix: str) -> str:
     # Ej: CITA-20260224-AB12CD34
-    return f"{prefix}-{datetime.now().strftime('%Y%m%d')}-{uuid.uuid4().hex[:8].upper()}"
+    return f"{prefix}-{now_cdmx().strftime('%Y%m%d')}-{uuid.uuid4().hex[:8].upper()}"
 
 
 def ensure_headers(sheet, nombre_hoja: str):
@@ -1906,8 +1913,8 @@ def get_cobranza_worksheets_safe():
 
 def _cobranza_meses_disponibles(base_df: pd.DataFrame) -> list[str]:
     """Devuelve meses YYYY-MM desde el año actual en adelante (incluyendo mes actual)."""
-    mes_actual = datetime.now().strftime("%Y-%m")
-    anio_actual = datetime.now().year
+    mes_actual = now_cdmx().strftime("%Y-%m")
+    anio_actual = now_cdmx().year
     meses = []
     if not base_df.empty and "Mes" in base_df.columns:
         meses = sorted({
@@ -2166,7 +2173,7 @@ def render_cobranza_tab_gerente():
             no_encontrados = base_codes - venc_codes
             codigos_con_venc_sin_mes = (base_codes & venc_codes) - set(mes_por_codigo.keys())
 
-            ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            ts = now_cdmx().strftime("%Y-%m-%d %H:%M:%S")
             df_base["Tipo_Pago"] = np.where(df_base["Codigo"].astype(str).isin(no_encontrados), "CONTADO", "CREDITO")
             df_base["Ultima_Actualizacion"] = ts
             df_venc["Ultima_Actualizacion"] = ts
@@ -2207,7 +2214,7 @@ def render_cobranza_tab_gerente():
     base_df, venc_df, com_df = _load_cobranza_data(force_refresh=force_refresh)
     st.markdown("### Comentarios")
     meses_disponibles = _cobranza_meses_disponibles(base_df)
-    mes_actual = datetime.now().strftime("%Y-%m")
+    mes_actual = now_cdmx().strftime("%Y-%m")
     mes_com = st.selectbox(
         "Mes comentarios (YYYY-MM)",
         options=meses_disponibles,
@@ -2264,9 +2271,6 @@ def render_cobranza_tab_gerente():
         acciones_cobranza = {
             "": "",
             "COBRO": "Se le cobró",
-            "RECOBRO": "Se le volvió a cobrar",
-            "COBRO_FAC_VENCIDA": "Se le cobró factura vencida",
-            "COBRO_VENCIDO": "Se le cobró lo vencido",
             "PAGO_PARCIAL": "Cliente pagó parcialmente",
             "LIQUIDADO": "Cliente liquidó factura",
         }
@@ -2465,7 +2469,7 @@ def render_cobranza_tab_gerente():
             guardar_comentario = st.form_submit_button("Guardar comentario")
 
         if guardar_comentario:
-            fecha_txt = datetime.now().strftime("%d/%m/%Y")
+            fecha_txt = now_cdmx().strftime("%d/%m/%Y")
             if not accion_code and not respuesta_code and not comentario.strip():
                 st.warning("⚠️ Captura al menos una acción, una respuesta o un comentario antes de guardar.")
             else:
@@ -2490,7 +2494,7 @@ def render_cobranza_tab_gerente():
                 texto_pago = f"{comentario_compuesto} {respuestas_cliente.get(respuesta_code, '')}".strip()
                 es_pagado = estatus_form == "LIQUIDADO" or _cobranza_es_pago_completo(texto_pago)
                 estatus_guardado = "LIQUIDADO" if es_pagado else estatus_form
-                fecha_cierre = datetime.now().strftime("%Y-%m-%d") if es_pagado else ""
+                fecha_cierre = now_cdmx().strftime("%Y-%m-%d") if es_pagado else ""
 
                 com_df = pd.DataFrame([{
                     "Mes": mes_com,
@@ -2499,7 +2503,7 @@ def render_cobranza_tab_gerente():
                     "Dia": str(dia_guardado),
                     "Comentario": comentario_compuesto,
                     "Actualizado_por": usuario,
-                    "Timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                    "Timestamp": now_cdmx().strftime("%Y-%m-%d %H:%M:%S"),
                     "Fecha_Proximo_Pago": fecha_proximo_pago,
                     "Recordatorio_Activo": recordatorio_guardado,
                     "Estatus_Seguimiento": estatus_guardado,
