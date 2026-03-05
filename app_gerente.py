@@ -1626,6 +1626,42 @@ def cobranza_ensure_headers(ws, expected_headers: list[str]):
             cobranza_update_row_values(ws, 1, expected_headers)
 
 
+
+
+def cobranza_migrar_comentarios_con_folio(ws):
+    """Migra `cobranza_comentarios` del esquema viejo (sin Folio) al nuevo."""
+    expected = ["Mes", "Codigo", "Folio", "Dia", "Comentario", "Actualizado_por", "Timestamp"]
+    legacy = ["Mes", "Codigo", "Dia", "Comentario", "Actualizado_por", "Timestamp"]
+
+    values = _retry_gspread_api_call(lambda: ws.get_all_values(), retries=4, base_delay=0.9)
+    if not values:
+        return False
+
+    headers = [str(x).strip() for x in values[0]]
+    if headers == expected:
+        return False
+
+    if headers == legacy:
+        matrix = [expected]
+        for row in values[1:]:
+            row = row + [""] * (len(legacy) - len(row))
+            mes, codigo, dia, comentario, actualizado_por, timestamp = row[:len(legacy)]
+            matrix.append([mes, codigo, "", dia, comentario, actualizado_por, timestamp])
+        _retry_gspread_api_call(lambda: cobranza_replace_matrix_values(ws, matrix), retries=4, base_delay=1.0)
+        return True
+
+    # Fallback: reordena por nombre de columna para evitar corrimiento de datos.
+    if all(h in expected for h in headers):
+        matrix = [expected]
+        for row in values[1:]:
+            row = row + [""] * (len(headers) - len(row))
+            rec = {headers[i]: row[i] for i in range(len(headers))}
+            matrix.append([rec.get(h, "") for h in expected])
+        _retry_gspread_api_call(lambda: cobranza_replace_matrix_values(ws, matrix), retries=4, base_delay=1.0)
+        return True
+
+    return False
+
 def cobranza_replace_matrix_values(ws, matrix: list[list]):
     """Escribe una matriz completa con fallback para versiones viejas de gspread."""
     if not matrix or not matrix[0]:
@@ -2040,9 +2076,12 @@ def render_cobranza_tab_gerente():
         )
 
     try:
+        migracion_comentarios = cobranza_migrar_comentarios_con_folio(ws_com)
         cobranza_ensure_headers(ws_base, base_headers)
         cobranza_ensure_headers(ws_venc, venc_headers)
         cobranza_ensure_headers(ws_com, com_headers)
+        if migracion_comentarios:
+            st.info("ℹ️ Se migró la hoja de comentarios para incluir la columna Folio sin perder datos existentes.")
     except gspread.exceptions.APIError as e:
         st.error("❌ No se pudieron validar encabezados de hojas de Cobranza.")
         st.caption(f"Detalle técnico: {e}")
