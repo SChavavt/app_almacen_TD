@@ -341,8 +341,17 @@ def assign_flow_numbers(entries_local, entries_foraneo, df_all: pd.DataFrame) ->
             if key and key not in foraneo_map:
                 foraneo_map[key] = numero_fmt
 
-    def assign(entries, primary_map: dict[str, str], fallback_map: dict[str, str]) -> None:
+    def assign(
+        entries,
+        primary_map: dict[str, str],
+        fallback_map: dict[str, str],
+        suppress_cancelled_number: bool = False,
+    ) -> None:
         for entry in entries:
+            if suppress_cancelled_number and _is_cancelado_estado(entry.get("estado", "")):
+                entry["numero"] = ""
+                continue
+
             keys = [
                 _flow_match_key(entry.get("id_pedido", "")),
                 _flow_match_key(entry.get("folio", "")),
@@ -360,7 +369,7 @@ def assign_flow_numbers(entries_local, entries_foraneo, df_all: pd.DataFrame) ->
             entry["numero"] = number or "?"
 
     assign(entries_local, local_map, foraneo_map)
-    assign(entries_foraneo, foraneo_map, local_map)
+    assign(entries_foraneo, foraneo_map, local_map, suppress_cancelled_number=True)
 
 
 def assign_display_numbers(auto_local_entries, auto_foraneo_entries, today_date) -> None:
@@ -594,7 +603,9 @@ def render_auto_list(
 
     rows_html = []
     for fallback_number, e in visible:
-        display_number = e.get("display_num", fallback_number)
+        is_cancelado = _is_cancelado_estado(e.get("estado", ""))
+        display_number = None if is_cancelado else e.get("display_num", fallback_number)
+        number_label = f"#{display_number}" if display_number is not None else "—"
         chips = []
 
         # Chips principales (máx 3)
@@ -637,7 +648,7 @@ def render_auto_list(
         rows_html.append(
             f"""
             <tr class='board-row'>
-              <td class='board-n'>#{display_number}</td>
+              <td class='board-n'>{number_label}</td>
               <td class='board-main'>
                 <div class='board-client'>{e.get('cliente','—')}{surtidor_html}</div>
                 {chips_html}
