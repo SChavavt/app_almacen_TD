@@ -633,6 +633,11 @@ def _flow_key(value: Any) -> str:
     return normalize_sheet_text(value).lower()
 
 
+def _is_cancelado_estado(value: Any) -> bool:
+    estado = _normalize_text_for_matching(str(value))
+    return "cancelado" in estado
+
+
 def _parse_foraneo_number(raw: Any) -> Optional[int]:
     text = str(raw or "").strip()
     if not text:
@@ -764,6 +769,9 @@ def build_flow_number_maps(
     next_number = 1
     case_missing_number_by_row: dict[int, str] = {}
     for _, _, source_kind, row in combined_rows:
+        if _is_cancelado_estado(row.get("Estado", "")):
+            continue
+
         keys = [_flow_key(row.get("ID_Pedido", "")), _flow_key(row.get("Folio_Factura", ""))]
 
         existing = None
