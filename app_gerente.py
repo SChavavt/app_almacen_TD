@@ -2071,12 +2071,13 @@ def render_cobranza_tab_gerente():
                 tmp = tmp.sort_values("Fecha_Vencimiento")
                 mes_por_codigo = tmp.groupby("Codigo")["Mes"].agg(lambda x: x.iloc[-1]).to_dict()
 
-            df_base["Mes"] = df_base["Codigo"].astype(str).map(mes_por_codigo).fillna(mes_sel)
-            sin_mes_auto = int((~df_base["Codigo"].astype(str).isin(set(mes_por_codigo.keys()))).sum())
+            codigos_base = df_base["Codigo"].astype(str)
+            df_base["Mes"] = codigos_base.map(mes_por_codigo).fillna(mes_sel)
 
             base_codes = set(df_base["Codigo"].astype(str))
             venc_codes = set(df_venc["Codigo"].astype(str))
             no_encontrados = base_codes - venc_codes
+            codigos_con_venc_sin_mes = (base_codes & venc_codes) - set(mes_por_codigo.keys())
 
             ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             df_base["Tipo_Pago"] = np.where(df_base["Codigo"].astype(str).isin(no_encontrados), "CONTADO", "CREDITO")
@@ -2094,8 +2095,11 @@ def render_cobranza_tab_gerente():
             }
             st.session_state["ger_cob_missing"] = df_base[df_base["Codigo"].astype(str).isin(no_encontrados)][["Codigo", "Razon_Social"]].copy()
             st.session_state["ger_cob_force_refresh"] = True
-            if sin_mes_auto > 0:
-                st.warning(f"{sin_mes_auto} cliente(s) sin fecha de vencimiento válida; se asignó mes de carga {mes_sel}.")
+            if codigos_con_venc_sin_mes:
+                st.warning(
+                    f"{len(codigos_con_venc_sin_mes)} cliente(s) con vencimientos pero sin mes derivado de Fecha_Vencimiento; "
+                    f"se asignó mes de carga {mes_sel}."
+                )
             st.success("✅ Proceso de cobranza completado.")
         except Exception as e:
             st.error(f"❌ Error al procesar: {e}")
