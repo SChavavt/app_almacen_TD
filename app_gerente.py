@@ -1934,7 +1934,7 @@ def render_cobranza_tab_gerente():
         st.dataframe(missing, use_container_width=True, hide_index=True)
 
     force_refresh = bool(st.session_state.pop("ger_cob_force_refresh", False))
-    base_df, venc_df, _ = _load_cobranza_data(force_refresh=force_refresh)
+    base_df, venc_df, com_df = _load_cobranza_data(force_refresh=force_refresh)
     st.markdown("### Comentarios")
     meses_disponibles = _cobranza_meses_disponibles(base_df)
     mes_actual = datetime.now().strftime("%Y-%m")
@@ -2000,6 +2000,7 @@ def render_cobranza_tab_gerente():
             "LIQUIDADO": "Cliente liquidó factura",
         }
         respuestas_cliente = {
+            "": "",
             "PAGA_HOY": "Pagará hoy",
             "PAGA_MANANA": "Pagará mañana",
             "PAGA_SEMANA": "Pagará esta semana",
@@ -2014,13 +2015,74 @@ def render_cobranza_tab_gerente():
             "PAGO_COMPLETO": "Pagó completo",
         }
 
+        acciones_por_texto = {v: k for k, v in acciones_cobranza.items()}
+        respuestas_por_texto = {v: k for k, v in respuestas_cliente.items() if v}
+
+        def _parse_cobranza_comentario_guardado(comentario_txt: str):
+            txt = str(comentario_txt or "").strip()
+            if not txt:
+                return "COBRO", "", ""
+
+            bloque_principal, comentario_extra = txt, ""
+            if "|" in txt:
+                bloque_principal, comentario_extra = txt.split("|", 1)
+                comentario_extra = comentario_extra.strip()
+
+            partes = [p.strip() for p in re.split(r"\s+[–-]\s+", bloque_principal) if p.strip()]
+            if partes and re.match(r"^\d{2}/\d{2}/\d{4}$", partes[0]):
+                partes = partes[1:]
+
+            accion = "COBRO"
+            respuesta = ""
+            restantes = []
+            for parte in partes:
+                if not parte:
+                    continue
+                if accion == "COBRO" and parte in acciones_por_texto:
+                    accion = acciones_por_texto[parte]
+                    continue
+                if not respuesta and parte in respuestas_por_texto:
+                    respuesta = respuestas_por_texto[parte]
+                    continue
+                restantes.append(parte)
+
+            if restantes:
+                comentario_extra = " – ".join([t for t in [" – ".join(restantes), comentario_extra] if t]).strip()
+
+            return accion, respuesta, comentario_extra
+
         with st.form("ger_cob_form", clear_on_submit=False):
             dias_opciones = list(range(1, 32))
             dia_actual = datetime.now().day
-            dia_sugerido = dias_venc[0] if dias_venc else dia_actual
+            dia_sugerido = dia_actual
             if dia_sugerido not in dias_opciones:
                 dia_sugerido = dia_actual
             dia_sel = st.selectbox("Día", dias_opciones, index=dias_opciones.index(dia_sugerido), key="ger_cob_dia")
+
+            dia_sel_int = int(dia_sel)
+            comentario_existente = ""
+            if not com_df.empty:
+                com_mes = com_df.get("Mes", "").astype(str)
+                com_codigo = com_df.get("Codigo", "").astype(str)
+                com_dia = pd.to_numeric(com_df.get("Dia", ""), errors="coerce")
+                existentes = com_df[
+                    (com_mes == str(mes_com))
+                    & (com_codigo == str(codigo))
+                    & (com_dia == dia_sel_int)
+                ].copy()
+                if not existentes.empty:
+                    existentes = existentes.sort_values(by=[c for c in ["Timestamp", "__row"] if c in existentes.columns])
+                    comentario_existente = str(existentes.iloc[-1].get("Comentario", "") or "").strip()
+
+            prefill_ctx = (str(mes_com), str(codigo), dia_sel_int)
+            if st.session_state.get("ger_cob_prefill_ctx") != prefill_ctx:
+                accion_pref, respuesta_pref, comentario_pref = _parse_cobranza_comentario_guardado(comentario_existente)
+                for k in ["ger_cob_accion", "ger_cob_respuesta", "ger_cob_comentario"]:
+                    st.session_state.pop(k, None)
+                st.session_state["ger_cob_accion"] = accion_pref if accion_pref in acciones_cobranza else "COBRO"
+                st.session_state["ger_cob_respuesta"] = respuesta_pref if respuesta_pref in respuestas_cliente else ""
+                st.session_state["ger_cob_comentario"] = comentario_pref
+                st.session_state["ger_cob_prefill_ctx"] = prefill_ctx
 
             accion_code = st.selectbox(
                 "Acción de cobranza",
@@ -2034,17 +2096,6 @@ def render_cobranza_tab_gerente():
                 format_func=lambda c: respuestas_cliente[c],
                 key="ger_cob_respuesta",
             )
-
-            ya_pago_default = accion_code in {"PAGO_PARCIAL", "LIQUIDADO"} or respuesta_code in {"PAGO_PARCIAL", "PAGO_COMPLETO"}
-            ya_pago = st.checkbox(
-                "Marcar como ya pagó (usa día actual)",
-                value=ya_pago_default,
-                key="ger_cob_ya_pago",
-            )
-            if ya_pago:
-                st.caption(f"Se guardará en el día actual: **{dia_actual}**")
-
-            detalle = st.text_input("Detalle corto (opcional)", key="ger_cob_detalle")
             comentario = st.text_area("Comentario adicional (opcional)", key="ger_cob_comentario")
             usuario = st.text_input("Actualizado_por", value=_safe_str(usuario_actual), key="ger_cob_user")
             guardar_comentario = st.form_submit_button("Guardar comentario")
@@ -2054,15 +2105,14 @@ def render_cobranza_tab_gerente():
             comentario_partes = [
                 fecha_txt,
                 acciones_cobranza.get(accion_code, accion_code),
-                respuestas_cliente.get(respuesta_code, respuesta_code),
             ]
-            if detalle.strip():
-                comentario_partes.append(detalle.strip())
+            if respuesta_code:
+                comentario_partes.append(respuestas_cliente.get(respuesta_code, respuesta_code))
             comentario_compuesto = " – ".join(comentario_partes)
             if comentario.strip():
                 comentario_compuesto = f"{comentario_compuesto} | {comentario.strip()}"
 
-            dia_guardado = dia_actual if ya_pago else int(dia_sel)
+            dia_guardado = int(dia_sel)
             com_df = pd.DataFrame([{
                 "Mes": mes_com,
                 "Codigo": codigo,
