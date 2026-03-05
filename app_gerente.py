@@ -2021,7 +2021,7 @@ def render_cobranza_tab_gerente():
 
     base_headers = ["Mes", "Codigo", "Razon_Social", "Saldo", "No_Vencido", "Vencido", "Tipo_Pago", "Ultima_Actualizacion"]
     venc_headers = ["Mes", "Codigo", "Folio", "Fecha_Factura", "Fecha_Vencimiento", "Saldo_Vence", "Condicion", "Moneda", "Ultima_Actualizacion"]
-    com_headers = ["Mes", "Codigo", "Dia", "Comentario", "Actualizado_por", "Timestamp"]
+    com_headers = ["Mes", "Codigo", "Folio", "Dia", "Comentario", "Actualizado_por", "Timestamp"]
 
     cache_key = "ger_cob_data_cache"
 
@@ -2236,12 +2236,28 @@ def render_cobranza_tab_gerente():
 
             return accion, respuesta, comentario_extra
 
+        folios_cliente = []
+        if not venc_cliente.empty and "Folio" in venc_cliente.columns:
+            folios_cliente = sorted({
+                _cobranza_clean_text(f)
+                for f in venc_cliente["Folio"].tolist()
+                if _cobranza_clean_text(f)
+            })
+
+        folio_sel = st.selectbox(
+            "Folio",
+            options=folios_cliente if folios_cliente else ["SIN_FOLIO"],
+            key="ger_cob_folio",
+            help="Folios activos del cliente en el mes seleccionado.",
+        )
+
         dia_actual = datetime.now().day
         dias_opciones = [dia_actual]
         if not com_df.empty:
             com_mes_cliente = com_df[
                 (com_df.get("Mes", "").astype(str) == str(mes_com))
                 & (com_df.get("Codigo", "").astype(str) == str(codigo))
+                & (com_df.get("Folio", "").astype(str) == str(folio_sel))
             ].copy()
             if not com_mes_cliente.empty:
                 dias_historicos = pd.to_numeric(com_mes_cliente.get("Dia", ""), errors="coerce")
@@ -2266,17 +2282,19 @@ def render_cobranza_tab_gerente():
             if not com_df.empty:
                 com_mes = com_df.get("Mes", "").astype(str)
                 com_codigo = com_df.get("Codigo", "").astype(str)
+                com_folio = com_df.get("Folio", "").astype(str)
                 com_dia = pd.to_numeric(com_df.get("Dia", ""), errors="coerce")
                 existentes = com_df[
                     (com_mes == str(mes_com))
                     & (com_codigo == str(codigo))
+                    & (com_folio == str(folio_sel))
                     & (com_dia == dia_sel_int)
                 ].copy()
                 if not existentes.empty:
                     existentes = existentes.sort_values(by=[c for c in ["Timestamp", "__row"] if c in existentes.columns])
                     comentario_existente = str(existentes.iloc[-1].get("Comentario", "") or "").strip()
 
-            prefill_ctx = (str(mes_com), str(codigo), dia_sel_int)
+            prefill_ctx = (str(mes_com), str(codigo), str(folio_sel), dia_sel_int)
             if st.session_state.get("ger_cob_prefill_ctx") != prefill_ctx:
                 accion_pref, respuesta_pref, comentario_pref = _parse_cobranza_comentario_guardado(comentario_existente)
                 for k in ["ger_cob_accion", "ger_cob_respuesta", "ger_cob_comentario"]:
@@ -2321,12 +2339,18 @@ def render_cobranza_tab_gerente():
                 com_df = pd.DataFrame([{
                     "Mes": mes_com,
                     "Codigo": codigo,
+                    "Folio": folio_sel,
                     "Dia": str(dia_guardado),
                     "Comentario": comentario_compuesto,
                     "Actualizado_por": usuario,
                     "Timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                 }])
-                cobranza_upsert_rows_by_key(ws_com, com_df[com_headers], ["Mes", "Codigo", "Dia"], ["Comentario", "Actualizado_por", "Timestamp"])
+                cobranza_upsert_rows_by_key(
+                    ws_com,
+                    com_df[com_headers],
+                    ["Mes", "Codigo", "Folio", "Dia"],
+                    ["Comentario", "Actualizado_por", "Timestamp"],
+                )
                 st.session_state["ger_cob_force_refresh"] = True
                 st.success("✅ Comentario guardado.")
                 st.rerun()
@@ -2419,7 +2443,10 @@ def render_cobranza_tab_gerente():
                 for r in com_df.itertuples(index=False):
                     dia = _cobranza_clean_text(getattr(r, "Dia", "1")) or "1"
                     cod = _cobranza_clean_text(getattr(r, "Codigo", ""))
+                    folio = _cobranza_clean_text(getattr(r, "Folio", ""))
                     txt = _cobranza_clean_text(getattr(r, "Comentario", ""))
+                    if folio:
+                        txt = f"Folio {folio}: {txt}"
                     if dia in out.columns:
                         mask = out["Codigo"].astype(str) == cod
                         previo = out.loc[mask, dia].astype(str).fillna("")
