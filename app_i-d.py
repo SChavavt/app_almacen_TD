@@ -237,6 +237,11 @@ def _flow_match_key(value) -> str:
     return sanitize_text(value).lower()
 
 
+def _is_cancelado_estado(value: object) -> bool:
+    estado = sanitize_text(value).lower()
+    return "cancelado" in estado
+
+
 def _build_flow_number_maps(df_all: pd.DataFrame) -> tuple[dict[str, str], dict[str, str]]:
     if df_all.empty:
         return {}, {}
@@ -315,6 +320,9 @@ def assign_flow_numbers(entries_local, entries_foraneo, df_all: pd.DataFrame) ->
     foraneo_map: dict[str, str] = {}
     next_foraneo = 1
     for entry in sorted(entries_foraneo, key=lambda e: e.get("sort_key", pd.Timestamp.max)):
+        if _is_cancelado_estado(entry.get("estado", "")):
+            continue
+
         keys = [
             _flow_match_key(entry.get("id_pedido", "")),
             _flow_match_key(entry.get("folio", "")),
