@@ -1832,13 +1832,14 @@ def get_cobranza_worksheets_safe():
 
 
 def _cobranza_meses_disponibles(base_df: pd.DataFrame) -> list[str]:
-    """Devuelve meses YYYY-MM ordenados (incluyendo mes actual)."""
+    """Devuelve meses YYYY-MM desde el año actual en adelante (incluyendo mes actual)."""
     mes_actual = datetime.now().strftime("%Y-%m")
+    anio_actual = datetime.now().year
     meses = []
     if not base_df.empty and "Mes" in base_df.columns:
         meses = sorted({
             m for m in base_df["Mes"].astype(str)
-            if re.match(r"^\d{4}-\d{2}$", m)
+            if re.match(r"^\d{4}-\d{2}$", m) and int(m[:4]) >= anio_actual
         })
     if mes_actual not in meses:
         meses.append(mes_actual)
