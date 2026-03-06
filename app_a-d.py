@@ -4655,79 +4655,6 @@ if df_main is not None:
         "✅ Historial Completados",
     ]
 
-    pedidos_locales_tab = df_pendientes_proceso_demorado[
-        df_pendientes_proceso_demorado["Tipo_Envio"] == "📍 Pedido Local"
-    ].copy()
-    pedidos_foraneos_tab = df_pendientes_proceso_demorado[
-        df_pendientes_proceso_demorado["Tipo_Envio"] == "🚚 Pedido Foráneo"
-    ].copy()
-    pedidos_cdmx_tab = df_pendientes_proceso_demorado[
-        df_pendientes_proceso_demorado["Tipo_Envio"] == "🏙️ Pedido CDMX"
-    ].copy()
-    solicitudes_guia_tab = df_pendientes_proceso_demorado[
-        df_pendientes_proceso_demorado["Tipo_Envio"] == "📋 Solicitudes de Guía"
-    ].copy()
-    cursos_eventos_tab = df_pendientes_proceso_demorado[
-        df_pendientes_proceso_demorado["Tipo_Envio"] == "🎓 Cursos y Eventos"
-    ].copy()
-
-    tipo_col_casos_tabs = (
-        "Tipo_Caso"
-        if "Tipo_Caso" in df_casos.columns
-        else ("Tipo_Envio" if "Tipo_Envio" in df_casos.columns else None)
-    )
-
-    devoluciones_tab = pd.DataFrame(columns=df_casos.columns)
-    garantias_tab = pd.DataFrame(columns=df_casos.columns)
-    if tipo_col_casos_tabs:
-        devoluciones_tab = df_casos[
-            df_casos[tipo_col_casos_tabs]
-            .astype(str)
-            .str.contains("Devoluci", case=False, na=False)
-        ].copy()
-        garantias_tab = df_casos[
-            df_casos[tipo_col_casos_tabs]
-            .astype(str)
-            .str.contains("Garant", case=False, na=False)
-        ].copy()
-        if "Estado" in devoluciones_tab.columns:
-            devoluciones_tab = devoluciones_tab[
-                ~devoluciones_tab["Estado"]
-                .astype(str)
-                .str.strip()
-                .isin(["🟢 Completado", "✅ Viajó"])
-            ]
-        if "Estado" in garantias_tab.columns:
-            garantias_tab = garantias_tab[
-                ~garantias_tab["Estado"]
-                .astype(str)
-                .str.strip()
-                .isin(["🟢 Completado", "✅ Viajó"])
-            ]
-
-    completados_historial_tab = df_main[
-        (df_main["Estado"].isin(["🟢 Completado", "🟣 Cancelado"]))
-        & (~df_main["Completados_Limpiado"].astype(str).str.strip().str.lower().isin(["sí", "si", "yes", "true", "1"]))
-    ].copy()
-
-    hidden_main_tabs = []
-    if pedidos_locales_tab.empty:
-        hidden_main_tabs.append("📍 Pedidos Locales")
-    if pedidos_foraneos_tab.empty:
-        hidden_main_tabs.append("🚚 Pedidos Foráneos")
-    if pedidos_cdmx_tab.empty:
-        hidden_main_tabs.append("🏙️ Pedidos CDMX")
-    if solicitudes_guia_tab.empty:
-        hidden_main_tabs.append("📋 Solicitudes de Guía")
-    if cursos_eventos_tab.empty:
-        hidden_main_tabs.append("🎓 Cursos y Eventos")
-    if devoluciones_tab.empty:
-        hidden_main_tabs.append("🔁 Devoluciones")
-    if garantias_tab.empty:
-        hidden_main_tabs.append("🛠 Garantías")
-    if completados_historial_tab.empty:
-        hidden_main_tabs.append("✅ Historial Completados")
-
     if st.session_state.get("bulk_complete_mode", False):
         st.caption(
             f"Modo de selección múltiple activo. Pedidos seleccionados: {len(_get_bulk_selected_ids())}."
@@ -4736,66 +4663,27 @@ if df_main is not None:
     main_tabs = st.tabs(tab_options)
     components.html(f"""
     <script>
-    (function() {{
-        const expectedLabels = {json.dumps(tab_options)};
-        const hiddenLabels = {json.dumps(hidden_main_tabs)};
-        const tabGroups = window.parent.document.querySelectorAll('.stTabs');
-        let targetGroup = null;
-
-        tabGroups.forEach(group => {{
-            if (targetGroup) return;
-            const tabs = Array.from(group.querySelectorAll('[data-baseweb="tab"]'));
-            if (tabs.length !== expectedLabels.length) return;
-            const labels = tabs.map(tab => tab.textContent.trim());
-            const isMatch = expectedLabels.every((label, idx) => labels[idx] === label);
-            if (isMatch) targetGroup = group;
+    const tabs = window.parent.document.querySelectorAll('.stTabs [data-baseweb="tab"]');
+    const activeIndex = {st.session_state.get("active_main_tab_index", 0)};
+    if (tabs[activeIndex]) {{
+        tabs[activeIndex].click();
+    }}
+    tabs.forEach((tab, idx) => {{
+        tab.addEventListener('click', () => {{
+            const params = new URLSearchParams(window.parent.location.search);
+            params.set('tab', idx);
+            const query = params.toString();
+            const base = window.parent.location.origin + window.parent.location.pathname;
+            const newUrl = query ? `${{base}}?${{query}}` : base;
+            window.parent.history.replaceState(null, '', newUrl);
         }});
-
-        if (!targetGroup) return;
-
-        const tabs = Array.from(targetGroup.querySelectorAll('[data-baseweb="tab"]'));
-        const firstVisibleIndex = tabs.findIndex(tab => !hiddenLabels.includes(tab.textContent.trim()));
-
-        tabs.forEach((tab, idx) => {{
-            const label = tab.textContent.trim();
-            if (hiddenLabels.includes(label)) {{
-                tab.style.display = 'none';
-                return;
-            }}
-            tab.style.display = '';
-            tab.addEventListener('click', () => {{
-                const params = new URLSearchParams(window.parent.location.search);
-                params.set('tab', idx);
-                const query = params.toString();
-                const base = window.parent.location.origin + window.parent.location.pathname;
-                const newUrl = query ? `${{base}}?${{query}}` : base;
-                window.parent.history.replaceState(null, '', newUrl);
-            }});
-        }});
-
-        const activeIndex = {st.session_state.get("active_main_tab_index", 0)};
-        const activeTab = tabs[activeIndex];
-        const activeHidden = activeTab ? hiddenLabels.includes(activeTab.textContent.trim()) : true;
-        const indexToOpen = activeHidden ? firstVisibleIndex : activeIndex;
-        if (indexToOpen >= 0 && tabs[indexToOpen]) {{
-            tabs[indexToOpen].click();
-        }}
-    }})();
+    }});
     </script>
     """, height=0)
 
     with main_tabs[0]: # 📍 Pedidos Locales
         st.markdown("### 📋 Pedidos Locales")
         subtab_options_local = _LOCAL_SUBTAB_OPTIONS
-        hidden_local_subtabs = []
-        if pedidos_locales_tab[pedidos_locales_tab["Turno"] == "☀️ Local Mañana"].empty:
-            hidden_local_subtabs.append("🌅 Mañana")
-        if pedidos_locales_tab[pedidos_locales_tab["Turno"] == "🌙 Local Tarde"].empty:
-            hidden_local_subtabs.append("🌇 Tarde")
-        if pedidos_locales_tab[pedidos_locales_tab["Turno"] == "🌵 Saltillo"].empty:
-            hidden_local_subtabs.append("⛰️ Saltillo")
-        if pedidos_locales_tab[pedidos_locales_tab["Turno"] == "📦 Pasa a Bodega"].empty:
-            hidden_local_subtabs.append("📦 En Bodega")
 
         subtabs_local = st.tabs(subtab_options_local)
 
@@ -4827,17 +4715,7 @@ if df_main is not None:
             if (localTabs[activeIndex]) {{
                 localTabs[activeIndex].click();
             }}
-            const hiddenLabels = {json.dumps(hidden_local_subtabs)};
-            const firstVisibleIndex = Array.from(localTabs).findIndex(
-                tab => !hiddenLabels.includes(tab.textContent.trim())
-            );
             localTabs.forEach((tab, idx) => {{
-                const label = tab.textContent.trim();
-                if (hiddenLabels.includes(label)) {{
-                    tab.style.display = 'none';
-                    return;
-                }}
-                tab.style.display = '';
                 tab.addEventListener('click', () => {{
                     const params = new URLSearchParams(window.parent.location.search);
                     params.set('local_tab', idx);
@@ -4847,12 +4725,6 @@ if df_main is not None:
                     window.parent.history.replaceState(null, '', newUrl);
                 }});
             }});
-            const activeTab = localTabs[activeIndex];
-            const activeHidden = activeTab ? hiddenLabels.includes(activeTab.textContent.trim()) : true;
-            const indexToOpen = activeHidden ? firstVisibleIndex : activeIndex;
-            if (indexToOpen >= 0 && localTabs[indexToOpen]) {{
-                localTabs[indexToOpen].click();
-            }}
         }})();
         </script>
         """
