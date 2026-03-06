@@ -2326,12 +2326,6 @@ def render_cobranza_tab_gerente():
         }
         respuestas_cliente = {
             "": "",
-            "PAGA_HOY": "Pagará hoy",
-            "PAGA_MANANA": "Pagará mañana",
-            "PAGA_SEMANA": "Pagará esta semana",
-            "PROMESA_PAGO": "Promete liquidar pronto",
-            "PIDIO_TIEMPO": "Pide unos días para pagar",
-            "ESPERA_FIN_MES": "Pide esperar fin de mes",
             "REVISA_CONTAB": "Revisará con contabilidad",
             "REVISA_FACTURA": "Revisará factura",
             "ENVIA_COMPROB": "Enviará comprobante",
@@ -2339,7 +2333,6 @@ def render_cobranza_tab_gerente():
             "PAGO_PARCIAL": "Pagó parcialmente",
             "PAGO_COMPLETO": "Pagó completo",
         }
-        respuestas_con_promesa = {"PAGA_HOY", "PAGA_MANANA", "PAGA_SEMANA", "PROMESA_PAGO", "PIDIO_TIEMPO", "ESPERA_FIN_MES"}
 
         acciones_por_texto = {v: k for k, v in acciones_cobranza.items()}
         respuestas_por_texto = {v: k for k, v in respuestas_cliente.items() if v}
@@ -2462,7 +2455,7 @@ def render_cobranza_tab_gerente():
             st.session_state["ger_cob_fecha_picker"] = pd.to_datetime(fecha_pago_existente_txt).date() if fecha_pago_existente_txt else date.today()
             st.session_state["ger_cob_seguimiento_activo"] = seguimiento_activo_pref
             st.session_state["ger_cob_recordatorio"] = recordatorio_existente if recordatorio_existente in {"SI", "NO"} else ""
-            st.session_state["ger_cob_estatus"] = estatus_existente if estatus_existente in {"PENDIENTE", "LIQUIDADO"} else ""
+            st.session_state["ger_cob_estatus"] = estatus_existente if estatus_existente in {"PENDIENTE", "PROMESA_PAGO", "LIQUIDADO"} else ""
             st.session_state["ger_cob_prefill_ctx"] = prefill_ctx
 
         seguimiento_activo = st.checkbox(
@@ -2487,9 +2480,9 @@ def render_cobranza_tab_gerente():
                 )
                 st.selectbox(
                     "Estatus de seguimiento",
-                    options=["", "PENDIENTE", "LIQUIDADO"],
+                    options=["", "PENDIENTE", "PROMESA_PAGO", "LIQUIDADO"],
                     key="ger_cob_estatus",
-                    help="LIQUIDADO equivale a pagado completo y deja de mostrarse en seguimiento.",
+                    help="PROMESA_PAGO agrupa promesas de pago; LIQUIDADO equivale a pagado completo y deja de mostrarse en seguimiento.",
                 )
                 aplicar_seg = st.form_submit_button("Aplicar cambios de seguimiento")
 
@@ -2535,7 +2528,7 @@ def render_cobranza_tab_gerente():
 
                 dia_guardado = int(dia_sel)
                 fecha_proximo_pago = ""
-                if seguimiento_activo and respuesta_code in respuestas_con_promesa and fecha_pago_dt:
+                if seguimiento_activo and estatus_seguimiento == "PROMESA_PAGO" and fecha_pago_dt:
                     fecha_proximo_pago = pd.to_datetime(fecha_pago_dt).strftime("%Y-%m-%d")
 
                 recordatorio_guardado = recordatorio_activo if seguimiento_activo else ""
@@ -2572,7 +2565,7 @@ def render_cobranza_tab_gerente():
                 st.success("✅ Comentario guardado.")
                 st.rerun()
 
-    st.markdown("### 📅 Seguimiento de próximos pagos")
+    st.markdown("### Seguimiento de pagos")
     if com_df.empty:
         st.info("Aún no hay seguimientos capturados.")
     else:
@@ -2591,14 +2584,14 @@ def render_cobranza_tab_gerente():
 
         mask_seg = (
             (rec_series == "SI")
-            & (est_series == "PENDIENTE")
+            & (est_series.isin(["PENDIENTE", "PROMESA_PAGO"]))
             & (~com_series.apply(_cobranza_es_pago_completo))
             & (fecha_series.notna())
         )
         seg = seg[mask_seg].copy()
 
         if seg.empty:
-            st.info("No hay recordatorios pendientes.")
+            st.caption("Sin recordatorios pendientes.")
         else:
             hoy = pd.Timestamp(date.today())
             seg["Dias_Restantes"] = (seg["Fecha_Proximo_Pago"].dt.normalize() - hoy).dt.days
