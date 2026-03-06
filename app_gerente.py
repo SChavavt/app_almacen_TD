@@ -1950,6 +1950,18 @@ def _cobranza_aplicar_formato_drive(ss, ws, total_rows: int, total_cols: int):
 
     requests = [
         {
+            "updateSheetProperties": {
+                "properties": {
+                    "sheetId": ws.id,
+                    "gridProperties": {
+                        "frozenRowCount": 2,
+                        "frozenColumnCount": 2,
+                    },
+                },
+                "fields": "gridProperties.frozenRowCount,gridProperties.frozenColumnCount",
+            }
+        },
+        {
             "repeatCell": {
                 "range": {
                     "sheetId": ws.id,
@@ -2884,6 +2896,7 @@ def render_cobranza_tab_gerente():
                 out.to_excel(writer, sheet_name="Cobranza", index=False, startrow=1)
                 ws = writer.sheets["Cobranza"]
                 ws.write(0, 0, f"Fecha De Generación: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}   Periodo: {mes_dl}")
+                ws.freeze_panes(2, 2)
 
                 wb = writer.book
                 fmt_header = wb.add_format({"bold": True, "align": "center", "valign": "vcenter", "bg_color": "#D9E1F2", "border": 1})
