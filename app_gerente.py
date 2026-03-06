@@ -2573,7 +2573,6 @@ def render_cobranza_tab_gerente():
                 key="ger_cob_respuesta",
             )
             comentario = st.text_area("Comentario adicional (opcional)", key="ger_cob_comentario")
-            usuario = st.text_input("Actualizado_por", value=_safe_str(usuario_actual), key="ger_cob_user")
             guardar_comentario = st.form_submit_button("Guardar comentario")
 
         if guardar_comentario:
@@ -2613,7 +2612,7 @@ def render_cobranza_tab_gerente():
                         "Folio": folio,
                         "Dia": str(dia_guardado),
                         "Comentario": comentario_compuesto,
-                        "Actualizado_por": usuario,
+                        "Actualizado_por": _safe_str(usuario_actual),
                         "Timestamp": now_cdmx().strftime("%Y-%m-%d %H:%M:%S"),
                         "Fecha_Proximo_Pago": fecha_proximo_pago,
                         "Recordatorio_Activo": recordatorio_guardado,
