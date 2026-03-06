@@ -1912,14 +1912,13 @@ def get_cobranza_worksheets_safe():
 
 
 def _cobranza_meses_disponibles(base_df: pd.DataFrame) -> list[str]:
-    """Devuelve meses YYYY-MM desde el año actual en adelante (incluyendo mes actual)."""
+    """Devuelve todos los meses YYYY-MM disponibles (incluyendo mes actual)."""
     mes_actual = now_cdmx().strftime("%Y-%m")
-    anio_actual = now_cdmx().year
     meses = []
     if not base_df.empty and "Mes" in base_df.columns:
         meses = sorted({
             m for m in base_df["Mes"].astype(str)
-            if re.match(r"^\d{4}-\d{2}$", m) and int(m[:4]) >= anio_actual
+            if re.match(r"^\d{4}-\d{2}$", m)
         })
     if mes_actual not in meses:
         meses.append(mes_actual)
@@ -2215,24 +2214,83 @@ def render_cobranza_tab_gerente():
     st.markdown("### Comentarios")
     meses_disponibles = _cobranza_meses_disponibles(base_df)
     mes_actual = now_cdmx().strftime("%Y-%m")
-    mes_com = st.selectbox(
-        "Mes comentarios (YYYY-MM)",
-        options=meses_disponibles,
-        index=meses_disponibles.index(mes_actual),
-        key="ger_cob_mes_com",
+
+    filtro_mes_activo = st.checkbox(
+        "Filtrar por año y mes",
+        value=st.session_state.get("ger_cob_filtro_mes_activo", False),
+        key="ger_cob_filtro_mes_activo",
     )
+
+    anios_disponibles = sorted({m.split("-")[0] for m in meses_disponibles if re.match(r"^\d{4}-\d{2}$", m)})
+    mes_com = ""
+    if filtro_mes_activo:
+        if not anios_disponibles:
+            st.info("No hay años disponibles para filtrar.")
+        else:
+            anio_aplicado = st.session_state.get("ger_cob_filtro_anio_aplicado", mes_actual.split("-")[0])
+            if anio_aplicado not in anios_disponibles:
+                anio_aplicado = anios_disponibles[-1]
+
+            meses_anio_aplicado = sorted([m for m in meses_disponibles if m.startswith(f"{anio_aplicado}-")])
+            meses_num_aplicados = [m.split("-")[1] for m in meses_anio_aplicado]
+            if not meses_num_aplicados:
+                meses_num_aplicados = [mes_actual.split("-")[1]]
+
+            mes_num_aplicado = st.session_state.get("ger_cob_filtro_mes_num_aplicado", mes_actual.split("-")[1])
+            if mes_num_aplicado not in meses_num_aplicados:
+                mes_num_aplicado = meses_num_aplicados[-1]
+
+            with st.form("ger_cob_filtro_mes_form", clear_on_submit=False):
+                st.caption("Selecciona un año y un mes, luego presiona **Aplicar filtro**.")
+                col_anio, col_mes, col_btn = st.columns([1.2, 1.2, 0.8])
+                with col_anio:
+                    anio_sel = st.selectbox(
+                        "Año",
+                        options=anios_disponibles,
+                        index=anios_disponibles.index(anio_aplicado),
+                        key="ger_cob_filtro_anio",
+                    )
+                meses_anio = sorted([m for m in meses_disponibles if m.startswith(f"{anio_sel}-")])
+                meses_anio_num = [m.split("-")[1] for m in meses_anio]
+                if not meses_anio_num:
+                    meses_anio_num = [mes_actual.split("-")[1]]
+                mes_default_num = mes_num_aplicado if mes_num_aplicado in meses_anio_num else meses_anio_num[-1]
+                with col_mes:
+                    mes_num_sel = st.selectbox(
+                        "Mes",
+                        options=meses_anio_num,
+                        format_func=lambda m: f"{m} - {MESES_ES[int(m)] if m.isdigit() and 1 <= int(m) <= 12 else m}",
+                        index=meses_anio_num.index(mes_default_num),
+                        key="ger_cob_filtro_mes_num",
+                    )
+                with col_btn:
+                    st.write("")
+                    st.write("")
+                    aplicar_filtro = st.form_submit_button("Aplicar filtro")
+
+            if aplicar_filtro or ("ger_cob_mes_com_aplicado" not in st.session_state):
+                st.session_state["ger_cob_filtro_anio_aplicado"] = anio_sel
+                st.session_state["ger_cob_filtro_mes_num_aplicado"] = mes_num_sel
+                st.session_state["ger_cob_mes_com_aplicado"] = f"{anio_sel}-{mes_num_sel}"
+
+            mes_com = st.session_state.get("ger_cob_mes_com_aplicado", f"{anio_aplicado}-{mes_num_aplicado}")
+            st.caption(f"Filtro activo: **{mes_com}**")
+
+    if not mes_com:
+        mes_com = "TODOS"
 
     if base_df.empty:
         clientes_mes = pd.DataFrame(columns=["Codigo", "Razon_Social"])
     else:
-        base_mes = base_df[base_df.get("Mes", "").astype(str) == mes_com].copy()
-        if "Tipo_Pago" in base_mes.columns:
-            tipo_pago = base_mes["Tipo_Pago"].astype(str).str.strip().str.upper()
-            base_mes = base_mes[tipo_pago != "CONTADO"]
-        clientes_mes = base_mes
+        clientes_mes = base_df.copy()
+        if mes_com != "TODOS":
+            clientes_mes = clientes_mes[clientes_mes.get("Mes", "").astype(str) == mes_com]
+        if "Tipo_Pago" in clientes_mes.columns:
+            tipo_pago = clientes_mes["Tipo_Pago"].astype(str).str.strip().str.upper()
+            clientes_mes = clientes_mes[tipo_pago != "CONTADO"]
 
     if clientes_mes.empty:
-        st.info("No hay clientes cargados para ese mes (excluyendo CONTADO).")
+        st.info("No hay clientes cargados para el filtro seleccionado (excluyendo CONTADO).")
     else:
         clientes_mes = clientes_mes[["Codigo", "Razon_Social"]].drop_duplicates().sort_values(["Razon_Social", "Codigo"])
         opciones = [f"{r.Codigo} - {r.Razon_Social}" for r in clientes_mes.itertuples(index=False)]
@@ -2242,9 +2300,10 @@ def render_cobranza_tab_gerente():
         venc_cliente = pd.DataFrame()
         if not venc_df.empty:
             venc_cliente = venc_df[
-                (venc_df.get("Mes", "").astype(str) == mes_com)
-                & (venc_df.get("Codigo", "").astype(str) == codigo)
+                (venc_df.get("Codigo", "").astype(str) == codigo)
             ].copy()
+            if mes_com != "TODOS":
+                venc_cliente = venc_cliente[venc_cliente.get("Mes", "").astype(str) == mes_com].copy()
 
         dias_venc = []
         if not venc_cliente.empty and "Fecha_Vencimiento" in venc_cliente.columns:
@@ -2255,7 +2314,7 @@ def render_cobranza_tab_gerente():
             dias_txt = ", ".join(str(d) for d in dias_venc)
             total_folios = int(venc_cliente[["Folio", "Fecha_Vencimiento"]].drop_duplicates().shape[0])
             st.info(
-                f"🗓️ **Vencimientos del cliente en {mes_com}:** el día **{dias_txt}** · "
+                f"🗓️ **Vencimientos del cliente ({mes_com if mes_com != 'TODOS' else 'todos los meses'}):** el día **{dias_txt}** · "
                 f"folios activos: **{total_folios}**."
             )
             with st.expander("Ver detalle de folios y vencimientos", expanded=False):
@@ -2266,7 +2325,7 @@ def render_cobranza_tab_gerente():
                     )
                     st.dataframe(detalle, use_container_width=True, hide_index=True)
         else:
-            st.caption("ℹ️ Este cliente no tiene vencimientos detectados en ese mes. Puedes capturar comentario manualmente.")
+            st.caption("ℹ️ Este cliente no tiene vencimientos detectados para el filtro actual. Puedes capturar comentario manualmente.")
 
         acciones_cobranza = {
             "": "",
@@ -2339,16 +2398,16 @@ def render_cobranza_tab_gerente():
             "Folio",
             options=folios_cliente if folios_cliente else ["SIN_FOLIO"],
             key="ger_cob_folio",
-            help="Folios activos del cliente en el mes seleccionado.",
+            help="Folios activos del cliente según el filtro actual.",
         )
 
         dia_actual = datetime.now().day
         dias_opciones = [dia_actual]
         if not com_df.empty:
             com_mes_cliente = com_df[
-                (com_df.get("Mes", "").astype(str) == str(mes_com))
-                & (com_df.get("Codigo", "").astype(str) == str(codigo))
+                (com_df.get("Codigo", "").astype(str) == str(codigo))
                 & (com_df.get("Folio", "").astype(str) == str(folio_sel))
+                & ((com_df.get("Mes", "").astype(str) == str(mes_com)) if mes_com != "TODOS" else True)
             ].copy()
             if not com_mes_cliente.empty:
                 dias_historicos = pd.to_numeric(com_mes_cliente.get("Dia", ""), errors="coerce")
@@ -2378,9 +2437,9 @@ def render_cobranza_tab_gerente():
             com_folio = com_df.get("Folio", "").astype(str)
             com_dia = pd.to_numeric(com_df.get("Dia", ""), errors="coerce")
             existentes = com_df[
-                (com_mes == str(mes_com))
-                & (com_codigo == str(codigo))
+                (com_codigo == str(codigo))
                 & (com_folio == str(folio_sel))
+                & ((com_mes == str(mes_com)) if mes_com != "TODOS" else True)
                 & (com_dia == dia_sel_int)
             ].copy()
             if not existentes.empty:
@@ -2497,7 +2556,7 @@ def render_cobranza_tab_gerente():
                 fecha_cierre = now_cdmx().strftime("%Y-%m-%d") if es_pagado else ""
 
                 com_df = pd.DataFrame([{
-                    "Mes": mes_com,
+                    "Mes": mes_com if mes_com != "TODOS" else mes_actual,
                     "Codigo": codigo,
                     "Folio": folio_sel,
                     "Dia": str(dia_guardado),
@@ -2527,9 +2586,6 @@ def render_cobranza_tab_gerente():
         st.info("Aún no hay seguimientos capturados.")
     else:
         seg = com_df.copy()
-        mes_series = seg["Mes"].astype(str) if "Mes" in seg.columns else pd.Series("", index=seg.index, dtype="string")
-        seg = seg[mes_series == str(mes_com)].copy()
-
         fecha_series_raw = seg["Fecha_Proximo_Pago"] if "Fecha_Proximo_Pago" in seg.columns else pd.Series("", index=seg.index, dtype="string")
         fecha_series = pd.to_datetime(fecha_series_raw, errors="coerce")
         seg["Fecha_Proximo_Pago"] = fecha_series
@@ -2551,7 +2607,7 @@ def render_cobranza_tab_gerente():
         seg = seg[mask_seg].copy()
 
         if seg.empty:
-            st.info("No hay recordatorios pendientes para ese mes.")
+            st.info("No hay recordatorios pendientes.")
         else:
             hoy = pd.Timestamp(date.today())
             seg["Dias_Restantes"] = (seg["Fecha_Proximo_Pago"].dt.normalize() - hoy).dt.days
@@ -2688,13 +2744,11 @@ def render_cobranza_tab_gerente():
             cols_orden = ["Codigo", "Razon_Social", "Folio", "Saldo_Vence", "Fecha_Vencimiento", "Condicion", "Moneda", "Estatus_Cobranza"] + [str(d) for d in range(1, 32)]
             out = out[cols_orden]
 
-            year_i = int(mes_dl.split("-")[0]) if "-" in mes_dl else now_dt.year
-            month_i = int(mes_dl.split("-")[1]) if "-" in mes_dl else now_dt.month
             bio = BytesIO()
             with pd.ExcelWriter(bio, engine="xlsxwriter") as writer:
                 out.to_excel(writer, sheet_name="Cobranza", index=False, startrow=1)
                 ws = writer.sheets["Cobranza"]
-                ws.write(0, 0, f"Fecha De Generación: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}   Año: {year_i}   Mes: {MESES_ES[month_i] if 1 <= month_i <= 12 else str(month_i)}")
+                ws.write(0, 0, f"Fecha De Generación: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}   Periodo: {mes_dl}")
 
                 wb = writer.book
                 fmt_header = wb.add_format({"bold": True, "align": "center", "valign": "vcenter", "bg_color": "#D9E1F2", "border": 1})
