@@ -2651,16 +2651,27 @@ def render_cobranza_tab_gerente():
         est_series = est_series_raw.astype(str).str.upper().str.strip()
         com_series = com_series_raw.astype(str)
 
+        # Solo alertar promesas de pago con fecha comprometida en seguimiento.
+        # Esto evita mezclar recordatorios "pendientes" sin promesa explícita.
         mask_seg = (
             (rec_series == "SI")
-            & (est_series.isin(["PENDIENTE", "PROMESA_PAGO"]))
+            & (est_series == "PROMESA_PAGO")
             & (~com_series.apply(_cobranza_es_pago_completo))
             & (fecha_series.notna())
         )
         seg = seg[mask_seg].copy()
 
+        # Mantener únicamente el último seguimiento por cliente+folio.
+        # Así se alertan promesas vigentes y no históricos duplicados.
+        if not seg.empty:
+            seg["_ts"] = pd.to_datetime(seg.get("Timestamp", ""), errors="coerce")
+            seg["_dia_num"] = pd.to_numeric(seg.get("Dia", ""), errors="coerce")
+            seg = seg.sort_values(["Codigo", "Folio", "_ts", "_dia_num"], ascending=[True, True, True, True])
+            seg = seg.drop_duplicates(subset=["Codigo", "Folio"], keep="last").copy()
+            seg = seg.drop(columns=[c for c in ["_ts", "_dia_num"] if c in seg.columns], errors="ignore")
+
         if seg.empty:
-            st.caption("Sin recordatorios pendientes.")
+            st.caption("Sin promesas de pago con fecha pendiente.")
         else:
             hoy = pd.Timestamp(date.today())
             seg["Dias_Restantes"] = (seg["Fecha_Proximo_Pago"].dt.normalize() - hoy).dt.days
@@ -2669,6 +2680,22 @@ def render_cobranza_tab_gerente():
                 "VENCIDO",
                 np.where(seg["Dias_Restantes"] == 0, "HOY", "PROXIMO"),
             )
+
+            vencidos = int((seg["Dias_Restantes"] < 0).sum())
+            hoy_count = int((seg["Dias_Restantes"] == 0).sum())
+            manana_count = int((seg["Dias_Restantes"] == 1).sum())
+
+            m1, m2, m3 = st.columns(3)
+            m1.metric("🔴 Vencidos", vencidos)
+            m2.metric("🟠 Vencen hoy", hoy_count)
+            m3.metric("🟡 Vencen mañana", manana_count)
+
+            if vencidos > 0:
+                st.error(f"⚠️ Tienes {vencidos} seguimiento(s) de pago vencido(s).")
+            if (hoy_count + manana_count) > 0:
+                st.warning(
+                    f"🔔 Atención: {hoy_count} pago(s) vence(n) hoy y {manana_count} vence(n) mañana."
+                )
 
             filtro_seg = st.selectbox(
                 "Filtro de seguimiento",
@@ -2691,7 +2718,30 @@ def render_cobranza_tab_gerente():
                 "Estado_Fecha", "Comentario", "Actualizado_por", "Timestamp"
             ]
             seg = seg[[c for c in cols_seg if c in seg.columns]]
-            st.dataframe(seg, use_container_width=True, hide_index=True)
+
+            def _seg_estado_color(v):
+                txt = str(v).upper().strip()
+                if txt == "VENCIDO":
+                    return "background-color: #ffe6e6; color: #b00020; font-weight: 700"
+                if txt == "HOY":
+                    return "background-color: #fff4e5; color: #9c5700; font-weight: 700"
+                return "background-color: #fffbe6; color: #8a6d00; font-weight: 600"
+
+            def _seg_dias_color(v):
+                n = pd.to_numeric(v, errors="coerce")
+                if pd.isna(n):
+                    return ""
+                if n < 0:
+                    return "background-color: #ffe6e6; color: #b00020; font-weight: 700"
+                if n == 0:
+                    return "background-color: #fff4e5; color: #9c5700; font-weight: 700"
+                if n == 1:
+                    return "background-color: #fffbe6; color: #8a6d00; font-weight: 700"
+                return "background-color: #ecfff0; color: #1e7e34"
+
+            seg_styled = seg.style.applymap(_seg_estado_color, subset=["Estado_Fecha"])
+            seg_styled = seg_styled.applymap(_seg_dias_color, subset=["Dias_Restantes"])
+            st.dataframe(seg_styled, use_container_width=True, hide_index=True)
 
     st.markdown("### Descargar")
     mes_dl = st.selectbox(
