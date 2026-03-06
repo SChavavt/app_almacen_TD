@@ -1912,14 +1912,13 @@ def get_cobranza_worksheets_safe():
 
 
 def _cobranza_meses_disponibles(base_df: pd.DataFrame) -> list[str]:
-    """Devuelve meses YYYY-MM desde el año actual en adelante (incluyendo mes actual)."""
+    """Devuelve todos los meses YYYY-MM disponibles (incluyendo mes actual)."""
     mes_actual = now_cdmx().strftime("%Y-%m")
-    anio_actual = now_cdmx().year
     meses = []
     if not base_df.empty and "Mes" in base_df.columns:
         meses = sorted({
             m for m in base_df["Mes"].astype(str)
-            if re.match(r"^\d{4}-\d{2}$", m) and int(m[:4]) >= anio_actual
+            if re.match(r"^\d{4}-\d{2}$", m)
         })
     if mes_actual not in meses:
         meses.append(mes_actual)
@@ -2215,24 +2214,18 @@ def render_cobranza_tab_gerente():
     st.markdown("### Comentarios")
     meses_disponibles = _cobranza_meses_disponibles(base_df)
     mes_actual = now_cdmx().strftime("%Y-%m")
-    mes_com = st.selectbox(
-        "Mes comentarios (YYYY-MM)",
-        options=meses_disponibles,
-        index=meses_disponibles.index(mes_actual),
-        key="ger_cob_mes_com",
-    )
+    mes_com = mes_actual
 
     if base_df.empty:
         clientes_mes = pd.DataFrame(columns=["Codigo", "Razon_Social"])
     else:
-        base_mes = base_df[base_df.get("Mes", "").astype(str) == mes_com].copy()
-        if "Tipo_Pago" in base_mes.columns:
-            tipo_pago = base_mes["Tipo_Pago"].astype(str).str.strip().str.upper()
-            base_mes = base_mes[tipo_pago != "CONTADO"]
-        clientes_mes = base_mes
+        clientes_mes = base_df.copy()
+        if "Tipo_Pago" in clientes_mes.columns:
+            tipo_pago = clientes_mes["Tipo_Pago"].astype(str).str.strip().str.upper()
+            clientes_mes = clientes_mes[tipo_pago != "CONTADO"]
 
     if clientes_mes.empty:
-        st.info("No hay clientes cargados para ese mes (excluyendo CONTADO).")
+        st.info("No hay clientes cargados (excluyendo CONTADO).")
     else:
         clientes_mes = clientes_mes[["Codigo", "Razon_Social"]].drop_duplicates().sort_values(["Razon_Social", "Codigo"])
         opciones = [f"{r.Codigo} - {r.Razon_Social}" for r in clientes_mes.itertuples(index=False)]
@@ -2242,8 +2235,7 @@ def render_cobranza_tab_gerente():
         venc_cliente = pd.DataFrame()
         if not venc_df.empty:
             venc_cliente = venc_df[
-                (venc_df.get("Mes", "").astype(str) == mes_com)
-                & (venc_df.get("Codigo", "").astype(str) == codigo)
+                (venc_df.get("Codigo", "").astype(str) == codigo)
             ].copy()
 
         dias_venc = []
@@ -2255,7 +2247,7 @@ def render_cobranza_tab_gerente():
             dias_txt = ", ".join(str(d) for d in dias_venc)
             total_folios = int(venc_cliente[["Folio", "Fecha_Vencimiento"]].drop_duplicates().shape[0])
             st.info(
-                f"🗓️ **Vencimientos del cliente en {mes_com}:** el día **{dias_txt}** · "
+                f"🗓️ **Vencimientos del cliente (todos los meses):** el día **{dias_txt}** · "
                 f"folios activos: **{total_folios}**."
             )
             with st.expander("Ver detalle de folios y vencimientos", expanded=False):
@@ -2266,7 +2258,7 @@ def render_cobranza_tab_gerente():
                     )
                     st.dataframe(detalle, use_container_width=True, hide_index=True)
         else:
-            st.caption("ℹ️ Este cliente no tiene vencimientos detectados en ese mes. Puedes capturar comentario manualmente.")
+            st.caption("ℹ️ Este cliente no tiene vencimientos detectados. Puedes capturar comentario manualmente.")
 
         acciones_cobranza = {
             "": "",
@@ -2339,15 +2331,14 @@ def render_cobranza_tab_gerente():
             "Folio",
             options=folios_cliente if folios_cliente else ["SIN_FOLIO"],
             key="ger_cob_folio",
-            help="Folios activos del cliente en el mes seleccionado.",
+            help="Folios activos del cliente en todos los meses cargados.",
         )
 
         dia_actual = datetime.now().day
         dias_opciones = [dia_actual]
         if not com_df.empty:
             com_mes_cliente = com_df[
-                (com_df.get("Mes", "").astype(str) == str(mes_com))
-                & (com_df.get("Codigo", "").astype(str) == str(codigo))
+                (com_df.get("Codigo", "").astype(str) == str(codigo))
                 & (com_df.get("Folio", "").astype(str) == str(folio_sel))
             ].copy()
             if not com_mes_cliente.empty:
@@ -2378,8 +2369,7 @@ def render_cobranza_tab_gerente():
             com_folio = com_df.get("Folio", "").astype(str)
             com_dia = pd.to_numeric(com_df.get("Dia", ""), errors="coerce")
             existentes = com_df[
-                (com_mes == str(mes_com))
-                & (com_codigo == str(codigo))
+                (com_codigo == str(codigo))
                 & (com_folio == str(folio_sel))
                 & (com_dia == dia_sel_int)
             ].copy()
@@ -2396,7 +2386,7 @@ def render_cobranza_tab_gerente():
                 except Exception:
                     fecha_pago_existente_txt = ""
 
-        prefill_ctx = (str(mes_com), str(codigo), str(folio_sel), dia_sel_int)
+        prefill_ctx = (str(codigo), str(folio_sel), dia_sel_int)
         if st.session_state.get("ger_cob_prefill_ctx") != prefill_ctx:
             accion_pref, respuesta_pref, comentario_pref = _parse_cobranza_comentario_guardado(comentario_existente)
             seguimiento_activo_pref = bool(fecha_pago_existente_txt or recordatorio_existente or estatus_existente)
@@ -2527,9 +2517,6 @@ def render_cobranza_tab_gerente():
         st.info("Aún no hay seguimientos capturados.")
     else:
         seg = com_df.copy()
-        mes_series = seg["Mes"].astype(str) if "Mes" in seg.columns else pd.Series("", index=seg.index, dtype="string")
-        seg = seg[mes_series == str(mes_com)].copy()
-
         fecha_series_raw = seg["Fecha_Proximo_Pago"] if "Fecha_Proximo_Pago" in seg.columns else pd.Series("", index=seg.index, dtype="string")
         fecha_series = pd.to_datetime(fecha_series_raw, errors="coerce")
         seg["Fecha_Proximo_Pago"] = fecha_series
@@ -2551,7 +2538,7 @@ def render_cobranza_tab_gerente():
         seg = seg[mask_seg].copy()
 
         if seg.empty:
-            st.info("No hay recordatorios pendientes para ese mes.")
+            st.info("No hay recordatorios pendientes.")
         else:
             hoy = pd.Timestamp(date.today())
             seg["Dias_Restantes"] = (seg["Fecha_Proximo_Pago"].dt.normalize() - hoy).dt.days
@@ -2688,13 +2675,11 @@ def render_cobranza_tab_gerente():
             cols_orden = ["Codigo", "Razon_Social", "Folio", "Saldo_Vence", "Fecha_Vencimiento", "Condicion", "Moneda", "Estatus_Cobranza"] + [str(d) for d in range(1, 32)]
             out = out[cols_orden]
 
-            year_i = int(mes_dl.split("-")[0]) if "-" in mes_dl else now_dt.year
-            month_i = int(mes_dl.split("-")[1]) if "-" in mes_dl else now_dt.month
             bio = BytesIO()
             with pd.ExcelWriter(bio, engine="xlsxwriter") as writer:
                 out.to_excel(writer, sheet_name="Cobranza", index=False, startrow=1)
                 ws = writer.sheets["Cobranza"]
-                ws.write(0, 0, f"Fecha De Generación: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}   Año: {year_i}   Mes: {MESES_ES[month_i] if 1 <= month_i <= 12 else str(month_i)}")
+                ws.write(0, 0, f"Fecha De Generación: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}   Periodo: {mes_dl}")
 
                 wb = writer.book
                 fmt_header = wb.add_format({"bold": True, "align": "center", "valign": "vcenter", "bg_color": "#D9E1F2", "border": 1})
