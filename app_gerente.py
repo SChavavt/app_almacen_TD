@@ -2880,14 +2880,17 @@ def render_cobranza_tab_gerente():
             )
 
 # --- INTERFAZ ---
-USUARIOS_VALIDOS = ["AlejandroVTD", "CeciliaATD", "SChava", "FinanzasTD"]
+USUARIOS_VALIDOS = ["AlejandroVTD", "CeciliaATD", "SChava", "BreydaFTD", "SaraiFTD"]
 
 PERMISOS_USUARIO = {
     "AlejandroVTD": {"organizador": True, "modificar": False, "cobranza": False},
     "CeciliaATD": {"organizador": False, "modificar": True, "cobranza": False},
     "SChava": {"organizador": True, "modificar": True, "cobranza": True},
-    "FinanzasTD": {"organizador": False, "modificar": False, "cobranza": True},
+    "BreydaFTD": {"organizador": False, "modificar": False, "cobranza": True},
+    "SaraiFTD": {"organizador": False, "modificar": False, "cobranza": True},
 }
+
+COBRANZA_ONLY_USERS = {"BreydaFTD", "SaraiFTD"}
 
 
 def _query_param_value(nombre_param: str) -> str:
@@ -2940,7 +2943,7 @@ def usuario_puede(usuario: str | None, permiso: str) -> bool:
 
 usuario_actual = ensure_user_logged_in()
 
-if usuario_actual == "FinanzasTD":
+if usuario_actual in COBRANZA_ONLY_USERS:
     tab_specs = [
         ("cobranza", "📒 Cobranza"),
         ("buscar", "🔍 Buscar Pedido"),
