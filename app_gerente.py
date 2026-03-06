@@ -2664,198 +2664,7 @@ def render_cobranza_tab_gerente():
                 st.success(f"✅ Comentario guardado en {len(folios_sel)} folio(s).")
                 st.rerun()
 
-    st.markdown("### Seguimiento de pagos")
-    if com_df.empty:
-        st.info("Aún no hay seguimientos capturados.")
-    else:
-        cliente_nom = clientes_mes[["Codigo", "Razon_Social"]].drop_duplicates() if not clientes_mes.empty else pd.DataFrame(columns=["Codigo", "Razon_Social"])
-        seg = com_df.copy()
-        fecha_series_raw = seg["Fecha_Proximo_Pago"] if "Fecha_Proximo_Pago" in seg.columns else pd.Series("", index=seg.index, dtype="string")
-        fecha_series = pd.to_datetime(fecha_series_raw, errors="coerce")
-        seg["Fecha_Proximo_Pago"] = fecha_series
-
-        rec_series_raw = seg["Recordatorio_Activo"] if "Recordatorio_Activo" in seg.columns else pd.Series("", index=seg.index, dtype="string")
-        est_series_raw = seg["Estatus_Seguimiento"] if "Estatus_Seguimiento" in seg.columns else pd.Series("", index=seg.index, dtype="string")
-        com_series_raw = seg["Comentario"] if "Comentario" in seg.columns else pd.Series("", index=seg.index, dtype="string")
-
-        rec_series = rec_series_raw.astype(str).str.upper().str.strip()
-        est_series = est_series_raw.astype(str).str.upper().str.strip()
-        com_series = com_series_raw.astype(str)
-
-        mask_seg = (
-            (rec_series == "SI")
-            & (est_series == "PROMESA_PAGO")
-            & (~com_series.apply(_cobranza_es_pago_completo))
-            & (fecha_series.notna())
-        )
-        seg = seg[mask_seg].copy()
-
-        if not seg.empty:
-            seg["_ts"] = pd.to_datetime(seg.get("Timestamp", ""), errors="coerce")
-            seg["_dia_num"] = pd.to_numeric(seg.get("Dia", ""), errors="coerce")
-            seg = seg.sort_values(["Codigo", "Folio", "_ts", "_dia_num"], ascending=[True, True, True, True])
-            seg = seg.drop_duplicates(subset=["Codigo", "Folio"], keep="last").copy()
-            seg = seg.drop(columns=[c for c in ["_ts", "_dia_num"] if c in seg.columns], errors="ignore")
-
-        tab_seg_resumen, tab_seg_gestion = st.tabs(["📊 Seguimiento", "🧭 Gestión de seguimiento"])
-
-        with tab_seg_resumen:
-            if seg.empty:
-                st.caption("Sin promesas de pago con fecha pendiente.")
-            else:
-                hoy = pd.Timestamp(date.today())
-                seg["Dias_Restantes"] = (seg["Fecha_Proximo_Pago"].dt.normalize() - hoy).dt.days
-                seg["Estado_Fecha"] = np.where(
-                    seg["Dias_Restantes"] < 0,
-                    "VENCIDO",
-                    np.where(seg["Dias_Restantes"] == 0, "HOY", "PROXIMO"),
-                )
-
-                vencidos = int((seg["Dias_Restantes"] < 0).sum())
-                hoy_count = int((seg["Dias_Restantes"] == 0).sum())
-                manana_count = int((seg["Dias_Restantes"] == 1).sum())
-
-                m1, m2, m3 = st.columns(3)
-                m1.metric("🔴 Vencidos", vencidos)
-                m2.metric("🟠 Vencen hoy", hoy_count)
-                m3.metric("🟡 Vencen mañana", manana_count)
-
-                if vencidos > 0:
-                    st.error(f"⚠️ Tienes {vencidos} seguimiento(s) de pago vencido(s).")
-                if (hoy_count + manana_count) > 0:
-                    st.warning(
-                        f"🔔 Atención: {hoy_count} pago(s) vence(n) hoy y {manana_count} vence(n) mañana."
-                    )
-
-                filtro_seg = st.selectbox(
-                    "Filtro de seguimiento",
-                    options=["Todos", "Vencidos", "Vence hoy", "Próximos 7 días"],
-                    key="ger_cob_filtro_seg",
-                )
-                seg_view = seg.copy()
-                if filtro_seg == "Vencidos":
-                    seg_view = seg_view[seg_view["Dias_Restantes"] < 0]
-                elif filtro_seg == "Vence hoy":
-                    seg_view = seg_view[seg_view["Dias_Restantes"] == 0]
-                elif filtro_seg == "Próximos 7 días":
-                    seg_view = seg_view[(seg_view["Dias_Restantes"] >= 0) & (seg_view["Dias_Restantes"] <= 7)]
-
-                seg_view = seg_view.merge(cliente_nom, on="Codigo", how="left")
-                seg_view = seg_view.sort_values(["Fecha_Proximo_Pago", "Codigo", "Folio"]).copy()
-                seg_view["Fecha_Proximo_Pago"] = seg_view["Fecha_Proximo_Pago"].dt.strftime("%Y-%m-%d")
-                cols_seg = [
-                    "Codigo", "Razon_Social", "Folio", "Fecha_Proximo_Pago", "Dias_Restantes",
-                    "Estado_Fecha", "Comentario", "Actualizado_por", "Timestamp"
-                ]
-                seg_view = seg_view[[c for c in cols_seg if c in seg_view.columns]]
-
-                def _seg_estado_color(v):
-                    txt = str(v).upper().strip()
-                    if txt == "VENCIDO":
-                        return "color: #ff4d6d; font-weight: 700"
-                    if txt == "HOY":
-                        return "color: #ffb86b; font-weight: 700"
-                    return "color: #f4d35e; font-weight: 600"
-
-                def _seg_dias_color(v):
-                    n = pd.to_numeric(v, errors="coerce")
-                    if pd.isna(n):
-                        return ""
-                    if n < 0:
-                        return "color: #ff4d6d; font-weight: 700"
-                    if n == 0:
-                        return "color: #ffb86b; font-weight: 700"
-                    if n == 1:
-                        return "color: #f4d35e; font-weight: 700"
-                    return "color: #86efac; font-weight: 600"
-
-                seg_styled = seg_view.style.applymap(_seg_estado_color, subset=["Estado_Fecha"])
-                seg_styled = seg_styled.applymap(_seg_dias_color, subset=["Dias_Restantes"])
-                st.dataframe(seg_styled, use_container_width=True, hide_index=True)
-
-        with tab_seg_gestion:
-            st.caption("Nueva pestaña para seguimiento operativo: cambia estatus, reprograma fecha y marca liquidación en un clic.")
-            if seg.empty:
-                st.info("No hay promesas activas para gestionar.")
-            else:
-                seg_gestion = seg.merge(cliente_nom, on="Codigo", how="left")
-                seg_gestion = seg_gestion.sort_values(["Fecha_Proximo_Pago", "Codigo", "Folio"]).copy()
-                opciones = []
-                etiquetas = {}
-                for row in seg_gestion.itertuples(index=False):
-                    row_id = int(getattr(row, "__row", 0) or 0)
-                    if row_id <= 0:
-                        continue
-                    fecha_txt = pd.to_datetime(getattr(row, "Fecha_Proximo_Pago", ""), errors="coerce")
-                    fecha_txt = "" if pd.isna(fecha_txt) else fecha_txt.strftime("%Y-%m-%d")
-                    codigo_txt = _cobranza_clean_text(getattr(row, "Codigo", ""))
-                    folio_txt = _cobranza_clean_text(getattr(row, "Folio", ""))
-                    razon_txt = _cobranza_clean_text(getattr(row, "Razon_Social", ""))
-                    etiquetas[str(row_id)] = f"{codigo_txt} · {razon_txt} · Folio {folio_txt} · Próximo pago {fecha_txt}"
-                    opciones.append(str(row_id))
-
-                if not opciones:
-                    st.info("No se encontraron filas editables en Google Sheets para esta vista.")
-                else:
-                    row_sel = st.selectbox(
-                        "Selecciona un seguimiento",
-                        options=opciones,
-                        format_func=lambda rid: etiquetas.get(rid, rid),
-                        key="ger_cob_seg_row_sel",
-                    )
-                    fila = seg_gestion[seg_gestion["__row"].astype(str) == str(row_sel)].iloc[0]
-                    estatus_actual = _cobranza_clean_text(fila.get("Estatus_Seguimiento", "")).upper() or "PROMESA_PAGO"
-                    fecha_actual_dt = pd.to_datetime(fila.get("Fecha_Proximo_Pago", ""), errors="coerce")
-
-                    with st.form("ger_cob_gestion_seguimiento_form", clear_on_submit=False):
-                        nuevo_estatus = st.selectbox(
-                            "Nuevo estatus",
-                            options=["PENDIENTE", "PROMESA_PAGO", "LIQUIDADO"],
-                            index=["PENDIENTE", "PROMESA_PAGO", "LIQUIDADO"].index(estatus_actual) if estatus_actual in {"PENDIENTE", "PROMESA_PAGO", "LIQUIDADO"} else 1,
-                        )
-                        nueva_fecha_pago = st.date_input(
-                            "Nueva fecha de pago",
-                            value=(fecha_actual_dt.date() if not pd.isna(fecha_actual_dt) else date.today()),
-                            format="DD/MM/YYYY",
-                            disabled=nuevo_estatus != "PROMESA_PAGO",
-                        )
-                        comentario_gestion = st.text_area("Nota de seguimiento (opcional)")
-                        col_a, col_b = st.columns(2)
-                        with col_a:
-                            aplicar_gestion = st.form_submit_button("Guardar cambios")
-                        with col_b:
-                            liquidar_directo = st.form_submit_button("✅ Liquidar folio")
-
-                    if aplicar_gestion or liquidar_directo:
-                        estatus_final = "LIQUIDADO" if liquidar_directo else nuevo_estatus
-                        fecha_final = ""
-                        if estatus_final == "PROMESA_PAGO":
-                            fecha_final = pd.to_datetime(nueva_fecha_pago).strftime("%Y-%m-%d")
-
-                        row_number = int(row_sel)
-                        row_values = _retry_gspread_api_call(lambda: ws_com.row_values(row_number), retries=4, base_delay=1.0)
-                        if len(row_values) < len(com_headers):
-                            row_values.extend([""] * (len(com_headers) - len(row_values)))
-                        idx = {h: i for i, h in enumerate(com_headers)}
-
-                        comentario_actual = _cobranza_clean_text(row_values[idx["Comentario"]])
-                        nota = comentario_gestion.strip()
-                        if estatus_final == "LIQUIDADO":
-                            nota = "Cliente liquidado." if not nota else f"{nota} | Cliente liquidado."
-                        if nota:
-                            row_values[idx["Comentario"]] = f"{comentario_actual} | {nota}".strip(" |")
-
-                        row_values[idx["Estatus_Seguimiento"]] = estatus_final
-                        row_values[idx["Recordatorio_Activo"]] = "SI" if estatus_final == "PROMESA_PAGO" else "NO"
-                        row_values[idx["Fecha_Proximo_Pago"]] = fecha_final
-                        row_values[idx["Fecha_Cierre"]] = now_cdmx().strftime("%Y-%m-%d") if estatus_final == "LIQUIDADO" else ""
-                        row_values[idx["Actualizado_por"]] = _safe_str(usuario_actual)
-                        row_values[idx["Timestamp"]] = now_cdmx().strftime("%Y-%m-%d %H:%M:%S")
-
-                        cobranza_update_row_values(ws_com, row_number, row_values)
-                        st.session_state["ger_cob_force_refresh"] = True
-                        st.success("✅ Seguimiento actualizado.")
-                        st.rerun()
+    st.info("📌 El seguimiento de pagos ahora se gestiona en la pestaña **📊 Seguimiento Cobranza**.")
 
     st.markdown("### Descargar")
     mes_dl = st.selectbox(
@@ -3058,6 +2867,230 @@ def render_cobranza_tab_gerente():
                 key="ger_cob_download",
             )
 
+
+
+def render_seguimiento_cobranza_tab_gerente(usuario_actual: str | None):
+    st.subheader("📊 Seguimiento Cobranza")
+
+    ws_base, _, ws_com = get_cobranza_worksheets_safe()
+    if not ws_base or not ws_com:
+        st.info("La pestaña permanece visible, pero sin conexión activa a Google Sheets.")
+        return
+
+    base_headers = ["Mes", "Codigo", "Razon_Social", "Saldo", "No_Vencido", "Vencido", "Tipo_Pago", "Ultima_Actualizacion"]
+    com_headers = [
+        "Mes", "Codigo", "Folio", "Dia", "Comentario", "Actualizado_por", "Timestamp",
+        "Fecha_Proximo_Pago", "Recordatorio_Activo", "Estatus_Seguimiento", "Fecha_Cierre"
+    ]
+
+    try:
+        cobranza_ensure_headers(ws_base, base_headers)
+        cobranza_ensure_headers(ws_com, com_headers)
+    except gspread.exceptions.APIError as e:
+        if _is_transient_gspread_error(e):
+            st.warning("⚠️ Google Sheets está con límite temporal de lecturas. Reintenta en unos segundos.")
+            st.caption(f"Detalle técnico: {e}")
+        else:
+            st.error("❌ No se pudieron validar encabezados de seguimiento de cobranza.")
+            st.caption(f"Detalle técnico: {e}")
+        return
+
+    base_df = pd.DataFrame(cobranza_load_records_with_rows(ws_base))
+    com_df = pd.DataFrame(cobranza_load_records_with_rows(ws_com))
+    if com_df.empty:
+        st.info("Aún no hay seguimientos capturados.")
+        return
+
+    cliente_nom = base_df[["Codigo", "Razon_Social"]].drop_duplicates() if not base_df.empty else pd.DataFrame(columns=["Codigo", "Razon_Social"])
+
+    meses_com = sorted({str(m).strip() for m in com_df.get("Mes", pd.Series(dtype="string")).tolist() if str(m).strip()}, reverse=True)
+    opciones_mes = ["Todos"] + meses_com
+    mes_sel = st.selectbox("Mes de seguimiento", options=opciones_mes, key="ger_seg_mes_sel")
+
+    seg = com_df.copy()
+    if mes_sel != "Todos":
+        seg = seg[seg.get("Mes", "").astype(str) == mes_sel].copy()
+
+    fecha_series_raw = seg["Fecha_Proximo_Pago"] if "Fecha_Proximo_Pago" in seg.columns else pd.Series("", index=seg.index, dtype="string")
+    fecha_series = pd.to_datetime(fecha_series_raw, errors="coerce")
+    seg["Fecha_Proximo_Pago"] = fecha_series
+
+    rec_series_raw = seg["Recordatorio_Activo"] if "Recordatorio_Activo" in seg.columns else pd.Series("", index=seg.index, dtype="string")
+    est_series_raw = seg["Estatus_Seguimiento"] if "Estatus_Seguimiento" in seg.columns else pd.Series("", index=seg.index, dtype="string")
+    com_series_raw = seg["Comentario"] if "Comentario" in seg.columns else pd.Series("", index=seg.index, dtype="string")
+
+    rec_series = rec_series_raw.astype(str).str.upper().str.strip()
+    est_series = est_series_raw.astype(str).str.upper().str.strip()
+    com_series = com_series_raw.astype(str)
+
+    mask_seg = (
+        (rec_series == "SI")
+        & (est_series == "PROMESA_PAGO")
+        & (~com_series.apply(_cobranza_es_pago_completo))
+        & (fecha_series.notna())
+    )
+    seg = seg[mask_seg].copy()
+
+    if not seg.empty:
+        seg["_ts"] = pd.to_datetime(seg.get("Timestamp", ""), errors="coerce")
+        seg["_dia_num"] = pd.to_numeric(seg.get("Dia", ""), errors="coerce")
+        seg = seg.sort_values(["Codigo", "Folio", "_ts", "_dia_num"], ascending=[True, True, True, True])
+        seg = seg.drop_duplicates(subset=["Codigo", "Folio"], keep="last").copy()
+        seg = seg.drop(columns=[c for c in ["_ts", "_dia_num"] if c in seg.columns], errors="ignore")
+
+    if seg.empty:
+        st.caption("Sin promesas de pago con fecha pendiente.")
+        return
+
+    hoy = pd.Timestamp(date.today())
+    seg["Dias_Restantes"] = (seg["Fecha_Proximo_Pago"].dt.normalize() - hoy).dt.days
+    seg["Estado_Fecha"] = np.where(
+        seg["Dias_Restantes"] < 0,
+        "VENCIDO",
+        np.where(seg["Dias_Restantes"] == 0, "HOY", "PROXIMO"),
+    )
+
+    vencidos = int((seg["Dias_Restantes"] < 0).sum())
+    hoy_count = int((seg["Dias_Restantes"] == 0).sum())
+    manana_count = int((seg["Dias_Restantes"] == 1).sum())
+
+    m1, m2, m3 = st.columns(3)
+    m1.metric("🔴 Vencidos", vencidos)
+    m2.metric("🟠 Vencen hoy", hoy_count)
+    m3.metric("🟡 Vencen mañana", manana_count)
+
+    filtro_seg = st.selectbox(
+        "Filtro de seguimiento",
+        options=["Todos", "Vencidos", "Vence hoy", "Próximos 7 días"],
+        key="ger_seg_filtro_seg",
+    )
+    seg_filtrado = seg.copy()
+    if filtro_seg == "Vencidos":
+        seg_filtrado = seg_filtrado[seg_filtrado["Dias_Restantes"] < 0]
+    elif filtro_seg == "Vence hoy":
+        seg_filtrado = seg_filtrado[seg_filtrado["Dias_Restantes"] == 0]
+    elif filtro_seg == "Próximos 7 días":
+        seg_filtrado = seg_filtrado[(seg_filtrado["Dias_Restantes"] >= 0) & (seg_filtrado["Dias_Restantes"] <= 7)]
+
+    seg_view = seg_filtrado.merge(cliente_nom, on="Codigo", how="left")
+    seg_view = seg_view.sort_values(["Fecha_Proximo_Pago", "Codigo", "Folio"]).copy()
+    seg_view["Fecha_Proximo_Pago"] = seg_view["Fecha_Proximo_Pago"].dt.strftime("%Y-%m-%d")
+    cols_seg = [
+        "Codigo", "Razon_Social", "Folio", "Fecha_Proximo_Pago", "Dias_Restantes",
+        "Estado_Fecha", "Comentario", "Actualizado_por", "Timestamp"
+    ]
+    seg_view = seg_view[[c for c in cols_seg if c in seg_view.columns]]
+
+    def _seg_estado_color(v):
+        txt = str(v).upper().strip()
+        if txt == "VENCIDO":
+            return "color: #ff4d6d; font-weight: 700"
+        if txt == "HOY":
+            return "color: #ffb86b; font-weight: 700"
+        return "color: #f4d35e; font-weight: 600"
+
+    def _seg_dias_color(v):
+        n = pd.to_numeric(v, errors="coerce")
+        if pd.isna(n):
+            return ""
+        if n < 0:
+            return "color: #ff4d6d; font-weight: 700"
+        if n == 0:
+            return "color: #ffb86b; font-weight: 700"
+        if n == 1:
+            return "color: #f4d35e; font-weight: 700"
+        return "color: #86efac; font-weight: 600"
+
+    seg_styled = seg_view.style.applymap(_seg_estado_color, subset=["Estado_Fecha"])
+    seg_styled = seg_styled.applymap(_seg_dias_color, subset=["Dias_Restantes"])
+    st.dataframe(seg_styled, use_container_width=True, hide_index=True)
+
+    st.markdown("#### 🧭 Gestión de seguimiento")
+    if seg_filtrado.empty:
+        st.info("No hay promesas activas para gestionar con el filtro seleccionado.")
+        return
+
+    seg_gestion = seg_filtrado.merge(cliente_nom, on="Codigo", how="left")
+    seg_gestion = seg_gestion.sort_values(["Fecha_Proximo_Pago", "Codigo", "Folio"]).copy()
+    opciones = []
+    etiquetas = {}
+    for row in seg_gestion.itertuples(index=False):
+        row_id = int(getattr(row, "__row", 0) or 0)
+        if row_id <= 0:
+            continue
+        fecha_txt = pd.to_datetime(getattr(row, "Fecha_Proximo_Pago", ""), errors="coerce")
+        fecha_txt = "" if pd.isna(fecha_txt) else fecha_txt.strftime("%Y-%m-%d")
+        codigo_txt = _cobranza_clean_text(getattr(row, "Codigo", ""))
+        folio_txt = _cobranza_clean_text(getattr(row, "Folio", ""))
+        razon_txt = _cobranza_clean_text(getattr(row, "Razon_Social", ""))
+        etiquetas[str(row_id)] = f"{codigo_txt} · {razon_txt} · Folio {folio_txt} · Próximo pago {fecha_txt}"
+        opciones.append(str(row_id))
+
+    if not opciones:
+        st.info("No se encontraron filas editables en Google Sheets para esta vista.")
+        return
+
+    row_sel = st.selectbox(
+        "Selecciona un seguimiento",
+        options=opciones,
+        format_func=lambda rid: etiquetas.get(rid, rid),
+        key="ger_seg_row_sel",
+    )
+    fila = seg_gestion[seg_gestion["__row"].astype(str) == str(row_sel)].iloc[0]
+    estatus_actual = _cobranza_clean_text(fila.get("Estatus_Seguimiento", "")).upper() or "PROMESA_PAGO"
+    fecha_actual_dt = pd.to_datetime(fila.get("Fecha_Proximo_Pago", ""), errors="coerce")
+
+    with st.form("ger_seg_gestion_form", clear_on_submit=False):
+        nuevo_estatus = st.selectbox(
+            "Nuevo estatus",
+            options=["PENDIENTE", "PROMESA_PAGO", "LIQUIDADO"],
+            index=["PENDIENTE", "PROMESA_PAGO", "LIQUIDADO"].index(estatus_actual) if estatus_actual in {"PENDIENTE", "PROMESA_PAGO", "LIQUIDADO"} else 1,
+        )
+        nueva_fecha_pago = st.date_input(
+            "Nueva fecha de pago",
+            value=(fecha_actual_dt.date() if not pd.isna(fecha_actual_dt) else date.today()),
+            format="DD/MM/YYYY",
+            disabled=nuevo_estatus != "PROMESA_PAGO",
+        )
+        comentario_gestion = st.text_area("Nota de seguimiento (opcional)")
+        col_a, col_b = st.columns(2)
+        with col_a:
+            aplicar_gestion = st.form_submit_button("Guardar cambios")
+        with col_b:
+            liquidar_directo = st.form_submit_button("✅ Liquidar folio")
+
+    if not (aplicar_gestion or liquidar_directo):
+        return
+
+    estatus_final = "LIQUIDADO" if liquidar_directo else nuevo_estatus
+    fecha_final = ""
+    if estatus_final == "PROMESA_PAGO":
+        fecha_final = pd.to_datetime(nueva_fecha_pago).strftime("%Y-%m-%d")
+
+    row_number = int(row_sel)
+    row_values = _retry_gspread_api_call(lambda: ws_com.row_values(row_number), retries=4, base_delay=1.0)
+    if len(row_values) < len(com_headers):
+        row_values.extend([""] * (len(com_headers) - len(row_values)))
+    idx = {h: i for i, h in enumerate(com_headers)}
+
+    comentario_actual = _cobranza_clean_text(row_values[idx["Comentario"]])
+    nota = comentario_gestion.strip()
+    if estatus_final == "LIQUIDADO":
+        nota = "Cliente liquidado." if not nota else f"{nota} | Cliente liquidado."
+    if nota:
+        row_values[idx["Comentario"]] = f"{comentario_actual} | {nota}".strip(" |")
+
+    row_values[idx["Estatus_Seguimiento"]] = estatus_final
+    row_values[idx["Recordatorio_Activo"]] = "SI" if estatus_final == "PROMESA_PAGO" else "NO"
+    row_values[idx["Fecha_Proximo_Pago"]] = fecha_final
+    row_values[idx["Fecha_Cierre"]] = now_cdmx().strftime("%Y-%m-%d") if estatus_final == "LIQUIDADO" else ""
+    row_values[idx["Actualizado_por"]] = _safe_str(usuario_actual)
+    row_values[idx["Timestamp"]] = now_cdmx().strftime("%Y-%m-%d %H:%M:%S")
+
+    cobranza_update_row_values(ws_com, row_number, row_values)
+    st.success("✅ Seguimiento actualizado.")
+    st.rerun()
+
 # --- INTERFAZ ---
 USUARIOS_VALIDOS = ["AlejandroVTD", "CeciliaATD", "SChava", "BreydaFTD", "SaraiFTD"]
 
@@ -3125,6 +3158,7 @@ usuario_actual = ensure_user_logged_in()
 if usuario_actual in COBRANZA_ONLY_USERS:
     tab_specs = [
         ("cobranza", "📒 Cobranza"),
+        ("seguimiento_cobranza", "📊 Seguimiento Cobranza"),
         ("buscar", "🔍 Buscar Pedido"),
     ]
 else:
@@ -3135,6 +3169,7 @@ else:
 
     if usuario_puede(usuario_actual, "cobranza"):
         tab_specs.append(("cobranza", "📒 Cobranza"))
+        tab_specs.append(("seguimiento_cobranza", "📊 Seguimiento Cobranza"))
 
     if usuario_puede(usuario_actual, "organizador"):
         tab_specs.insert(0, ("organizador", "🗂️ Organizador"))
@@ -5650,3 +5685,7 @@ if "organizador" in tab_map:
 if "cobranza" in tab_map:
     with tab_map["cobranza"]:
         render_cobranza_tab_gerente()
+
+if "seguimiento_cobranza" in tab_map:
+    with tab_map["seguimiento_cobranza"]:
+        render_seguimiento_cobranza_tab_gerente(usuario_actual)
