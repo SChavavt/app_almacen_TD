@@ -2090,6 +2090,24 @@ def _cobranza_es_pago_completo(texto: str) -> bool:
     ]
     return any(v in txt for v in variantes)
 
+
+def _cobranza_texto_seguimiento_para_calendario(row) -> str:
+    """Genera una nota de seguimiento para mostrarse en la columna del día comprometido."""
+    estatus = _cobranza_clean_text(getattr(row, "Estatus_Seguimiento", "")).upper()
+    fecha_txt = _cobranza_clean_text(getattr(row, "Fecha_Proximo_Pago", ""))
+    folio = _cobranza_clean_text(getattr(row, "Folio", ""))
+
+    if estatus not in {"PROMESA_PAGO", "PENDIENTE"} or not fecha_txt:
+        return ""
+
+    fecha_dt = pd.to_datetime(fecha_txt, errors="coerce")
+    if pd.isna(fecha_dt):
+        return ""
+
+    estatus_legible = "Promesa de pago" if estatus == "PROMESA_PAGO" else "Pendiente de pago"
+    prefijo_folio = f"Folio {folio}: " if folio else ""
+    return f"{prefijo_folio}Seguimiento ({estatus_legible}) para {fecha_dt.strftime('%d/%m/%Y')}"
+
 def render_cobranza_tab_gerente():
     st.subheader("📒 Cobranza")
 
@@ -2843,6 +2861,20 @@ def render_cobranza_tab_gerente():
                             txt,
                             np.where(txt.strip() == "", previo, previo + "\n" + txt),
                         )
+
+                    txt_seguimiento = _cobranza_texto_seguimiento_para_calendario(r)
+                    if txt_seguimiento:
+                        fecha_seg = pd.to_datetime(getattr(r, "Fecha_Proximo_Pago", ""), errors="coerce")
+                        if not pd.isna(fecha_seg):
+                            dia_seg = str(int(fecha_seg.day))
+                            if dia_seg in out.columns:
+                                mask = out["Codigo"].astype(str) == cod
+                                previo = out.loc[mask, dia_seg].astype(str).fillna("")
+                                out.loc[mask, dia_seg] = np.where(
+                                    previo.str.strip() == "",
+                                    txt_seguimiento,
+                                    np.where(txt_seguimiento.strip() == "", previo, previo + "\n" + txt_seguimiento),
+                                )
 
             cols_orden = ["Codigo", "Razon_Social", "Folio", "Saldo_Vence", "Fecha_Vencimiento", "Condicion", "Moneda", "Estatus_Cobranza"] + [str(d) for d in range(1, 32)]
             out = out[cols_orden]
