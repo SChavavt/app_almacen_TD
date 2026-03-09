@@ -1729,9 +1729,6 @@ def cobranza_load_records_with_rows(ws) -> list[dict]:
     for i, row in enumerate(values[1:], start=2):
         row = row + [""] * (len(headers) - len(row))
         rec = {headers[j]: row[j] for j in range(len(headers))}
-        # Compatibilidad interna: varias vistas usan "__row" para editar en Sheets.
-        # Conservamos también "__row_number__" para no romper flujos existentes.
-        rec["__row"] = i
         rec["__row_number__"] = i
         out.append(rec)
     return out
