@@ -1729,6 +1729,9 @@ def cobranza_load_records_with_rows(ws) -> list[dict]:
     for i, row in enumerate(values[1:], start=2):
         row = row + [""] * (len(headers) - len(row))
         rec = {headers[j]: row[j] for j in range(len(headers))}
+        # Compatibilidad interna: varias vistas usan "__row" para editar en Sheets.
+        # Conservamos también "__row_number__" para no romper flujos existentes.
+        rec["__row"] = i
         rec["__row_number__"] = i
         out.append(rec)
     return out
@@ -3012,17 +3015,24 @@ def render_seguimiento_cobranza_tab_gerente(usuario_actual: str | None):
 
     seg_gestion = seg_filtrado.merge(cliente_nom, on="Codigo", how="left")
     seg_gestion = seg_gestion.sort_values(["Fecha_Proximo_Pago", "Codigo", "Folio"]).copy()
+
+    # Nota: columnas con prefijo "__" pueden no exponerse como atributo en itertuples.
+    # Por eso normalizamos a una columna interna de selección segura.
+    row_src = seg_gestion.get("__row", seg_gestion.get("__row_number__", ""))
+    seg_gestion["_row_id"] = pd.to_numeric(row_src, errors="coerce").fillna(0).astype(int)
+    seg_gestion = seg_gestion[seg_gestion["_row_id"] > 0].copy()
+
     opciones = []
     etiquetas = {}
-    for row in seg_gestion.itertuples(index=False):
-        row_id = int(getattr(row, "__row", 0) or 0)
+    for _, row in seg_gestion.iterrows():
+        row_id = int(row.get("_row_id", 0) or 0)
         if row_id <= 0:
             continue
-        fecha_txt = pd.to_datetime(getattr(row, "Fecha_Proximo_Pago", ""), errors="coerce")
+        fecha_txt = pd.to_datetime(row.get("Fecha_Proximo_Pago", ""), errors="coerce")
         fecha_txt = "" if pd.isna(fecha_txt) else fecha_txt.strftime("%Y-%m-%d")
-        codigo_txt = _cobranza_clean_text(getattr(row, "Codigo", ""))
-        folio_txt = _cobranza_clean_text(getattr(row, "Folio", ""))
-        razon_txt = _cobranza_clean_text(getattr(row, "Razon_Social", ""))
+        codigo_txt = _cobranza_clean_text(row.get("Codigo", ""))
+        folio_txt = _cobranza_clean_text(row.get("Folio", ""))
+        razon_txt = _cobranza_clean_text(row.get("Razon_Social", ""))
         etiquetas[str(row_id)] = f"{codigo_txt} · {razon_txt} · Folio {folio_txt} · Próximo pago {fecha_txt}"
         opciones.append(str(row_id))
 
@@ -3036,7 +3046,7 @@ def render_seguimiento_cobranza_tab_gerente(usuario_actual: str | None):
         format_func=lambda rid: etiquetas.get(rid, rid),
         key="ger_seg_row_sel",
     )
-    fila = seg_gestion[seg_gestion["__row"].astype(str) == str(row_sel)].iloc[0]
+    fila = seg_gestion[seg_gestion["_row_id"].astype(str) == str(row_sel)].iloc[0]
     estatus_actual = _cobranza_clean_text(fila.get("Estatus_Seguimiento", "")).upper() or "PROMESA_PAGO"
     fecha_actual_dt = pd.to_datetime(fila.get("Fecha_Proximo_Pago", ""), errors="coerce")
 
