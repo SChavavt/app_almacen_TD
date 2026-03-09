@@ -673,10 +673,13 @@ def render_auto_list(
         else ""
     )
 
-    row_height_px = 52
-    title_height_px = 68 if show_header else 8
-    min_content = 200 if show_header else 120
-    content_height = max(min_content, (len(visible) * row_height_px) + title_height_px)
+    row_height_px = 44
+    title_height_px = 58 if show_header else 10
+    min_content = 140 if show_header else 100
+    safety_padding_px = 24
+    content_height = max(
+        min_content, (len(visible) * row_height_px) + title_height_px + safety_padding_px
+    )
     component_height = content_height
 
     html = f"""
@@ -2436,12 +2439,11 @@ if selected_tab == 2:
         if hoy_continuacion:
             render_auto_list(
                 hoy_continuacion,
-                title="",
-                subtitle="",
+                title=f"🚚 FORÁNEOS • HOY ({hoy.strftime('%d/%m')})",
+                subtitle="Todos los de hoy y fechas futuras",
                 max_rows=140,
                 start_number=next_number,
-                panel_height=120,
-                show_header=False,
+                panel_height=160,
             )
 
     # --- DERECHA: HOY + FUTUROS + SIN Fecha_Entrega ---
