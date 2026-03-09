@@ -2184,51 +2184,52 @@ def render_cobranza_tab_gerente():
         procesar_carga = st.form_submit_button("Procesar")
 
     if procesar_carga:
-        try:
-            if reporte is None or antig is None:
-                raise Exception("Carga ambos archivos para procesar.")
-            df_base = parse_reporte_cobranza_excel(reporte, mes_sel)
-            df_venc = parse_antiguedad_cobranza_excel(antig, mes_sel)
+        with st.spinner("Procesando archivos, por favor espera..."):
+            try:
+                if reporte is None or antig is None:
+                    raise Exception("Carga ambos archivos para procesar.")
+                df_base = parse_reporte_cobranza_excel(reporte, mes_sel)
+                df_venc = parse_antiguedad_cobranza_excel(antig, mes_sel)
 
-            mes_por_codigo = {}
-            if not df_venc.empty:
-                tmp = df_venc[["Codigo", "Mes", "Fecha_Vencimiento"]].copy()
-                tmp = tmp[tmp["Mes"].astype(str).str.match(r"^\d{4}-\d{2}$", na=False)]
-                tmp = tmp.sort_values("Fecha_Vencimiento")
-                mes_por_codigo = tmp.groupby("Codigo")["Mes"].agg(lambda x: x.iloc[-1]).to_dict()
+                mes_por_codigo = {}
+                if not df_venc.empty:
+                    tmp = df_venc[["Codigo", "Mes", "Fecha_Vencimiento"]].copy()
+                    tmp = tmp[tmp["Mes"].astype(str).str.match(r"^\d{4}-\d{2}$", na=False)]
+                    tmp = tmp.sort_values("Fecha_Vencimiento")
+                    mes_por_codigo = tmp.groupby("Codigo")["Mes"].agg(lambda x: x.iloc[-1]).to_dict()
 
-            codigos_base = df_base["Codigo"].astype(str)
-            df_base["Mes"] = codigos_base.map(mes_por_codigo).fillna(mes_sel)
+                codigos_base = df_base["Codigo"].astype(str)
+                df_base["Mes"] = codigos_base.map(mes_por_codigo).fillna(mes_sel)
 
-            base_codes = set(df_base["Codigo"].astype(str))
-            venc_codes = set(df_venc["Codigo"].astype(str))
-            no_encontrados = base_codes - venc_codes
-            codigos_con_venc_sin_mes = (base_codes & venc_codes) - set(mes_por_codigo.keys())
+                base_codes = set(df_base["Codigo"].astype(str))
+                venc_codes = set(df_venc["Codigo"].astype(str))
+                no_encontrados = base_codes - venc_codes
+                codigos_con_venc_sin_mes = (base_codes & venc_codes) - set(mes_por_codigo.keys())
 
-            ts = now_cdmx().strftime("%Y-%m-%d %H:%M:%S")
-            df_base["Tipo_Pago"] = np.where(df_base["Codigo"].astype(str).isin(no_encontrados), "CONTADO", "CREDITO")
-            df_base["Ultima_Actualizacion"] = ts
-            df_venc["Ultima_Actualizacion"] = ts
+                ts = now_cdmx().strftime("%Y-%m-%d %H:%M:%S")
+                df_base["Tipo_Pago"] = np.where(df_base["Codigo"].astype(str).isin(no_encontrados), "CONTADO", "CREDITO")
+                df_base["Ultima_Actualizacion"] = ts
+                df_venc["Ultima_Actualizacion"] = ts
 
-            cobranza_upsert_rows_by_key(ws_base, df_base[base_headers], ["Mes", "Codigo"], ["Razon_Social", "Saldo", "No_Vencido", "Vencido", "Tipo_Pago", "Ultima_Actualizacion"])
-            if not df_venc.empty:
-                cobranza_upsert_rows_by_key(ws_venc, df_venc[venc_headers], ["Codigo", "Folio", "Fecha_Vencimiento"], ["Mes", "Fecha_Factura", "Saldo_Vence", "Condicion", "Moneda", "Ultima_Actualizacion"])
+                cobranza_upsert_rows_by_key(ws_base, df_base[base_headers], ["Mes", "Codigo"], ["Razon_Social", "Saldo", "No_Vencido", "Vencido", "Tipo_Pago", "Ultima_Actualizacion"])
+                if not df_venc.empty:
+                    cobranza_upsert_rows_by_key(ws_venc, df_venc[venc_headers], ["Codigo", "Folio", "Fecha_Vencimiento"], ["Mes", "Fecha_Factura", "Saldo_Vence", "Condicion", "Moneda", "Ultima_Actualizacion"])
 
-            st.session_state["ger_cob_stats"] = {
-                "clientes": int(len(df_base)),
-                "folios": int(len(df_venc)),
-                "contado": int(len(no_encontrados)),
-            }
-            st.session_state["ger_cob_missing"] = df_base[df_base["Codigo"].astype(str).isin(no_encontrados)][["Codigo", "Razon_Social"]].copy()
-            st.session_state["ger_cob_force_refresh"] = True
-            if codigos_con_venc_sin_mes:
-                st.warning(
-                    f"{len(codigos_con_venc_sin_mes)} cliente(s) con vencimientos pero sin mes derivado de Fecha_Vencimiento; "
-                    f"se asignó mes de carga {mes_sel}."
-                )
-            st.success("✅ Proceso de cobranza completado.")
-        except Exception as e:
-            st.error(f"❌ Error al procesar: {e}")
+                st.session_state["ger_cob_stats"] = {
+                    "clientes": int(len(df_base)),
+                    "folios": int(len(df_venc)),
+                    "contado": int(len(no_encontrados)),
+                }
+                st.session_state["ger_cob_missing"] = df_base[df_base["Codigo"].astype(str).isin(no_encontrados)][["Codigo", "Razon_Social"]].copy()
+                st.session_state["ger_cob_force_refresh"] = True
+                if codigos_con_venc_sin_mes:
+                    st.warning(
+                        f"{len(codigos_con_venc_sin_mes)} cliente(s) con vencimientos pero sin mes derivado de Fecha_Vencimiento; "
+                        f"se asignó mes de carga {mes_sel}."
+                    )
+                st.success("✅ Proceso de cobranza completado.")
+            except Exception as e:
+                st.error(f"❌ Error al procesar: {e}")
 
     stats = st.session_state.get("ger_cob_stats")
     if stats:
