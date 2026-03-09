@@ -3022,63 +3022,43 @@ def render_seguimiento_cobranza_tab_gerente(usuario_actual: str | None):
     seg_gestion["_row_id"] = pd.to_numeric(row_src, errors="coerce").fillna(0).astype(int)
     seg_gestion = seg_gestion[seg_gestion["_row_id"] > 0].copy()
 
-    if seg_gestion.empty:
+    opciones = []
+    etiquetas = {}
+    for _, row in seg_gestion.iterrows():
+        row_id = int(row.get("_row_id", 0) or 0)
+        if row_id <= 0:
+            continue
+        fecha_txt = pd.to_datetime(row.get("Fecha_Proximo_Pago", ""), errors="coerce")
+        fecha_txt = "" if pd.isna(fecha_txt) else fecha_txt.strftime("%Y-%m-%d")
+        codigo_txt = _cobranza_clean_text(row.get("Codigo", ""))
+        folio_txt = _cobranza_clean_text(row.get("Folio", ""))
+        razon_txt = _cobranza_clean_text(row.get("Razon_Social", ""))
+        etiquetas[str(row_id)] = f"{codigo_txt} · {razon_txt} · Folio {folio_txt} · Próximo pago {fecha_txt}"
+        opciones.append(str(row_id))
+
+    if not opciones:
         st.info("No se encontraron filas editables en Google Sheets para esta vista.")
         return
 
-    seg_gestion["Codigo"] = seg_gestion.get("Codigo", "").astype(str)
-    seg_gestion["Razon_Social"] = seg_gestion.get("Razon_Social", "").astype(str)
-
-    st.caption("Selecciona uno o varios folios por cliente para aplicar cambios masivos.")
-    row_sel_multi: list[int] = []
-    for (codigo_cli, razon_cli), grp in seg_gestion.groupby(["Codigo", "Razon_Social"], sort=True):
-        grp_sorted = grp.sort_values(["Fecha_Proximo_Pago", "Folio"]).copy()
-        opciones_cli = []
-        etiquetas_cli = {}
-        for _, row in grp_sorted.iterrows():
-            row_id = int(row.get("_row_id", 0) or 0)
-            if row_id <= 0:
-                continue
-            fecha_txt = pd.to_datetime(row.get("Fecha_Proximo_Pago", ""), errors="coerce")
-            fecha_txt = "" if pd.isna(fecha_txt) else fecha_txt.strftime("%Y-%m-%d")
-            folio_txt = _cobranza_clean_text(row.get("Folio", ""))
-            estatus_txt = _cobranza_clean_text(row.get("Estatus_Seguimiento", "")).upper() or "PROMESA_PAGO"
-            opciones_cli.append(row_id)
-            etiquetas_cli[row_id] = f"Folio {folio_txt} · Estatus {estatus_txt} · Próximo pago {fecha_txt}"
-
-        if not opciones_cli:
-            continue
-
-        exp_title = f"{_cobranza_clean_text(codigo_cli)} · {_cobranza_clean_text(razon_cli)} ({len(opciones_cli)} folios)"
-        with st.expander(exp_title, expanded=False):
-            sel_cli = st.multiselect(
-                "Folios en seguimiento",
-                options=opciones_cli,
-                format_func=lambda rid, map_et=etiquetas_cli: map_et.get(rid, str(rid)),
-                key=f"ger_seg_rows_cli_{_cobranza_clean_text(codigo_cli)}",
-            )
-            row_sel_multi.extend(int(rid) for rid in sel_cli)
-
-    row_sel_multi = sorted(set(row_sel_multi))
-    seleccion_df = seg_gestion[seg_gestion["_row_id"].isin(row_sel_multi)].copy()
-    estatus_default = "PROMESA_PAGO"
-    if len(row_sel_multi) == 1:
-        estatus_default = _cobranza_clean_text(seleccion_df.iloc[0].get("Estatus_Seguimiento", "")).upper() or "PROMESA_PAGO"
-    if estatus_default not in {"PENDIENTE", "PROMESA_PAGO"}:
-        estatus_default = "PROMESA_PAGO"
-
-    fecha_actual_dt = pd.to_datetime(seleccion_df.get("Fecha_Proximo_Pago", pd.Series(dtype="string")), errors="coerce").dropna()
-    fecha_default = fecha_actual_dt.min().date() if not fecha_actual_dt.empty else date.today()
+    row_sel = st.selectbox(
+        "Selecciona un seguimiento",
+        options=opciones,
+        format_func=lambda rid: etiquetas.get(rid, rid),
+        key="ger_seg_row_sel",
+    )
+    fila = seg_gestion[seg_gestion["_row_id"].astype(str) == str(row_sel)].iloc[0]
+    estatus_actual = _cobranza_clean_text(fila.get("Estatus_Seguimiento", "")).upper() or "PROMESA_PAGO"
+    fecha_actual_dt = pd.to_datetime(fila.get("Fecha_Proximo_Pago", ""), errors="coerce")
 
     with st.form("ger_seg_gestion_form", clear_on_submit=False):
         nuevo_estatus = st.selectbox(
             "Nuevo estatus",
-            options=["PENDIENTE", "PROMESA_PAGO"],
-            index=["PENDIENTE", "PROMESA_PAGO"].index(estatus_default) if estatus_default in {"PENDIENTE", "PROMESA_PAGO"} else 1,
+            options=["PENDIENTE", "PROMESA_PAGO", "LIQUIDADO"],
+            index=["PENDIENTE", "PROMESA_PAGO", "LIQUIDADO"].index(estatus_actual) if estatus_actual in {"PENDIENTE", "PROMESA_PAGO", "LIQUIDADO"} else 1,
         )
         nueva_fecha_pago = st.date_input(
             "Nueva fecha de pago",
-            value=fecha_default,
+            value=(fecha_actual_dt.date() if not pd.isna(fecha_actual_dt) else date.today()),
             format="DD/MM/YYYY",
             disabled=nuevo_estatus != "PROMESA_PAGO",
         )
@@ -3087,13 +3067,9 @@ def render_seguimiento_cobranza_tab_gerente(usuario_actual: str | None):
         with col_a:
             aplicar_gestion = st.form_submit_button("Guardar cambios")
         with col_b:
-            liquidar_directo = st.form_submit_button("✅ Liquidar folio(s) seleccionados")
+            liquidar_directo = st.form_submit_button("✅ Liquidar folio")
 
     if not (aplicar_gestion or liquidar_directo):
-        return
-
-    if not row_sel_multi:
-        st.warning("Selecciona al menos un folio para aplicar la gestión.")
         return
 
     estatus_final = "LIQUIDADO" if liquidar_directo else nuevo_estatus
@@ -3101,30 +3077,28 @@ def render_seguimiento_cobranza_tab_gerente(usuario_actual: str | None):
     if estatus_final == "PROMESA_PAGO":
         fecha_final = pd.to_datetime(nueva_fecha_pago).strftime("%Y-%m-%d")
 
+    row_number = int(row_sel)
+    row_values = _retry_gspread_api_call(lambda: ws_com.row_values(row_number), retries=4, base_delay=1.0)
+    if len(row_values) < len(com_headers):
+        row_values.extend([""] * (len(com_headers) - len(row_values)))
     idx = {h: i for i, h in enumerate(com_headers)}
 
-    for row_number in row_sel_multi:
-        row_values = _retry_gspread_api_call(lambda rn=row_number: ws_com.row_values(rn), retries=4, base_delay=1.0)
-        if len(row_values) < len(com_headers):
-            row_values.extend([""] * (len(com_headers) - len(row_values)))
+    comentario_actual = _cobranza_clean_text(row_values[idx["Comentario"]])
+    nota = comentario_gestion.strip()
+    if estatus_final == "LIQUIDADO":
+        nota = "Cliente liquidado." if not nota else f"{nota} | Cliente liquidado."
+    if nota:
+        row_values[idx["Comentario"]] = f"{comentario_actual} | {nota}".strip(" |")
 
-        comentario_actual = _cobranza_clean_text(row_values[idx["Comentario"]])
-        nota = comentario_gestion.strip()
-        if estatus_final == "LIQUIDADO":
-            nota = "Cliente liquidado." if not nota else f"{nota} | Cliente liquidado."
-        if nota:
-            row_values[idx["Comentario"]] = f"{comentario_actual} | {nota}".strip(" |")
+    row_values[idx["Estatus_Seguimiento"]] = estatus_final
+    row_values[idx["Recordatorio_Activo"]] = "SI" if estatus_final == "PROMESA_PAGO" else "NO"
+    row_values[idx["Fecha_Proximo_Pago"]] = fecha_final
+    row_values[idx["Fecha_Cierre"]] = now_cdmx().strftime("%Y-%m-%d") if estatus_final == "LIQUIDADO" else ""
+    row_values[idx["Actualizado_por"]] = _safe_str(usuario_actual)
+    row_values[idx["Timestamp"]] = now_cdmx().strftime("%Y-%m-%d %H:%M:%S")
 
-        row_values[idx["Estatus_Seguimiento"]] = estatus_final
-        row_values[idx["Recordatorio_Activo"]] = "SI" if estatus_final == "PROMESA_PAGO" else "NO"
-        row_values[idx["Fecha_Proximo_Pago"]] = fecha_final
-        row_values[idx["Fecha_Cierre"]] = now_cdmx().strftime("%Y-%m-%d") if estatus_final == "LIQUIDADO" else ""
-        row_values[idx["Actualizado_por"]] = _safe_str(usuario_actual)
-        row_values[idx["Timestamp"]] = now_cdmx().strftime("%Y-%m-%d %H:%M:%S")
-
-        cobranza_update_row_values(ws_com, row_number, row_values)
-
-    st.success(f"✅ Seguimiento actualizado en {len(row_sel_multi)} folio(s).")
+    cobranza_update_row_values(ws_com, row_number, row_values)
+    st.success("✅ Seguimiento actualizado.")
     st.rerun()
 
 # --- INTERFAZ ---
