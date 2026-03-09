@@ -2119,9 +2119,9 @@ def _cobranza_texto_seguimiento_para_calendario(row) -> str:
     if pd.isna(fecha_dt):
         return ""
 
-    estatus_legible = "Promesa de pago" if estatus == "PROMESA_PAGO" else "Pendiente de pago"
-    prefijo_folio = f"Folio {folio}: " if folio else ""
-    return f"{prefijo_folio}Seguimiento ({estatus_legible}) para {fecha_dt.strftime('%d/%m/%Y')}"
+    estatus_legible = "Seg. promesa" if estatus == "PROMESA_PAGO" else "Seg. pendiente"
+    prefijo_folio = f"{folio}: " if folio else ""
+    return f"{prefijo_folio}{estatus_legible} {fecha_dt.strftime('%d/%m')}"
 
 def render_cobranza_tab_gerente():
     st.subheader("📒 Cobranza")
@@ -2609,7 +2609,7 @@ def render_cobranza_tab_gerente():
             guardar_comentario = st.form_submit_button("Guardar comentario")
 
         if guardar_comentario:
-            fecha_txt = now_cdmx().strftime("%d/%m/%Y")
+            fecha_txt = now_cdmx().strftime("%d/%m")
             if not folios_sel:
                 st.warning("⚠️ Selecciona al menos un folio para guardar comentario.")
             elif not accion_code and not respuesta_code and not comentario.strip():
@@ -2739,9 +2739,9 @@ def render_cobranza_tab_gerente():
                         continue
                     dia_col = str(int(fecha.day))
                     nota = (
-                        f"{fecha.strftime('%d/%m/%Y')} factura pagada."
+                        f"{fecha.strftime('%d/%m')}: Pagada"
                         if float(saldo_vence) <= 0.0
-                        else f"{fecha.strftime('%d/%m/%Y')} hoy vence su factura."
+                        else f"{fecha.strftime('%d/%m')}: Vence"
                     )
                     if dia_col in out.columns:
                         mask = out["Codigo"].astype(str) == codigo
@@ -2760,7 +2760,7 @@ def render_cobranza_tab_gerente():
                     folio = _cobranza_clean_text(getattr(r, "Folio", ""))
                     txt = _cobranza_clean_text(getattr(r, "Comentario", ""))
                     if folio:
-                        txt = f"Folio {folio}: {txt}"
+                        txt = f"{folio}: {txt}"
                     if dia in out.columns:
                         mask = out["Codigo"].astype(str) == cod
                         previo = out.loc[mask, dia].astype(str).fillna("")
