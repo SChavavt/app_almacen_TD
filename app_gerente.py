@@ -2119,9 +2119,9 @@ def _cobranza_texto_seguimiento_para_calendario(row) -> str:
     if pd.isna(fecha_dt):
         return ""
 
-    estatus_legible = "Seg. promesa" if estatus == "PROMESA_PAGO" else "Seg. pendiente"
-    prefijo_folio = f"{folio}: " if folio else ""
-    return f"{prefijo_folio}{estatus_legible} {fecha_dt.strftime('%d/%m')}"
+    estatus_legible = "Promesa de pago" if estatus == "PROMESA_PAGO" else "Pendiente de pago"
+    prefijo_folio = f"Folio {folio}: " if folio else ""
+    return f"{prefijo_folio}Seguimiento ({estatus_legible}) para {fecha_dt.strftime('%d/%m/%Y')}"
 
 def render_cobranza_tab_gerente():
     st.subheader("📒 Cobranza")
@@ -2739,9 +2739,9 @@ def render_cobranza_tab_gerente():
                         continue
                     dia_col = str(int(fecha.day))
                     nota = (
-                        f"{fecha.strftime('%d/%m')}: Pagada"
+                        f"{fecha.strftime('%d/%m/%Y')} factura pagada."
                         if float(saldo_vence) <= 0.0
-                        else f"{fecha.strftime('%d/%m')}: Vence"
+                        else f"{fecha.strftime('%d/%m/%Y')} hoy vence su factura."
                     )
                     if dia_col in out.columns:
                         mask = out["Codigo"].astype(str) == codigo
