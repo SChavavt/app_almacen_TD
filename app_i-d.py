@@ -2436,12 +2436,11 @@ if selected_tab == 2:
         if hoy_continuacion:
             render_auto_list(
                 hoy_continuacion,
-                title="",
-                subtitle="",
+                title=f"🚚 FORÁNEOS • HOY ({hoy.strftime('%d/%m')})",
+                subtitle="Todos los de hoy y fechas futuras",
                 max_rows=140,
                 start_number=next_number,
-                panel_height=120,
-                show_header=False,
+                panel_height=160,
             )
 
     # --- DERECHA: HOY + FUTUROS + SIN Fecha_Entrega ---
