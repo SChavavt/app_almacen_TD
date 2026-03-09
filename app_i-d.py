@@ -2428,7 +2428,7 @@ if selected_tab == 2:
         next_number = render_auto_list(
             anteriores,
             title="🚚 FORÁNEOS • ANTERIORES",
-            subtitle=f"Fechas previas + pedidos sin Fecha_Entrega + continuación de HOY ({hoy.strftime('%d/%m')})",
+            subtitle=f"Fechas previas + pedidos sin Fecha_Entrega",
             max_rows=140,
             panel_height=220,
         )
