@@ -368,6 +368,11 @@ def assign_flow_numbers(entries_local, entries_foraneo, df_all: pd.DataFrame) ->
                 entry["numero"] = ""
                 continue
 
+            if suppress_cancelled_number and sanitize_text(entry.get("tipo", "")):
+                if _parse_foraneo_number(entry.get("numero_foraneo", "")) is None:
+                    entry["numero"] = ""
+                    continue
+
             keys = [
                 _flow_match_key(entry.get("id_pedido", "")),
                 _flow_match_key(entry.get("folio", "")),
