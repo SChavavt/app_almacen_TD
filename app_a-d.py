@@ -2971,6 +2971,7 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
                 if aplicar_cambios:
                     st.session_state["expanded_pedidos"][row['ID_Pedido']] = True
                     cambios = []
+                    estado_antes_cambio = str(row.get("Estado", "")).strip()
                     nueva_fecha_str = st.session_state[fecha_key].strftime('%Y-%m-%d')
 
                     if nueva_fecha_str != fecha_actual_str:
@@ -2997,6 +2998,19 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
                                 }
                             )
 
+                    # Blindaje adicional: en este flujo el Estado no debe cambiar.
+                    # Forzamos conservar el Estado en el mismo batch para evitar drift.
+                    if cambios and "Estado" in headers and estado_antes_cambio:
+                        col_idx_estado = headers.index("Estado") + 1
+                        cambios.append(
+                            {
+                                "range": gspread.utils.rowcol_to_a1(
+                                    gsheet_row_index, col_idx_estado
+                                ),
+                                "values": [[estado_antes_cambio]],
+                            }
+                        )
+
                     if cambios:
                         if batch_update_gsheet_cells(worksheet, cambios, headers=headers):
                             if "Fecha_Entrega" in headers:
@@ -3006,6 +3020,45 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
                                 and tipo_envio_actual == "📍 Pedido Local"
                             ):
                                 df.at[idx, "Turno"] = st.session_state[turno_key]
+
+                            # Guardrail: este flujo solo debe cambiar Fecha_Entrega/Turno.
+                            # Si por automatización externa el Estado cambia, lo restauramos.
+                            if "Estado" in headers and estado_antes_cambio:
+                                try:
+                                    row_values = get_sheet_row_values_cached(
+                                        worksheet, int(gsheet_row_index)
+                                    )
+                                    estado_idx = headers.index("Estado")
+                                    estado_despues_cambio = (
+                                        str(row_values[estado_idx]).strip()
+                                        if estado_idx < len(row_values)
+                                        else ""
+                                    )
+                                except Exception:
+                                    estado_despues_cambio = ""
+
+                                if (
+                                    estado_despues_cambio
+                                    and estado_despues_cambio != estado_antes_cambio
+                                ):
+                                    restaurado = update_gsheet_cell(
+                                        worksheet,
+                                        headers,
+                                        gsheet_row_index,
+                                        "Estado",
+                                        estado_antes_cambio,
+                                    )
+                                    if restaurado:
+                                        df.at[idx, "Estado"] = estado_antes_cambio
+                                        row["Estado"] = estado_antes_cambio
+                                        st.warning(
+                                            "⚠️ Detectamos un cambio inesperado de Estado al aplicar Fecha/Turno. "
+                                            "Se restauró el Estado original automáticamente."
+                                        )
+                                    else:
+                                        st.error(
+                                            "❌ Se detectó un cambio inesperado de Estado y no se pudo restaurar automáticamente."
+                                        )
 
                             st.toast(
                                 f"📅 Pedido {row['ID_Pedido']} actualizado.",
