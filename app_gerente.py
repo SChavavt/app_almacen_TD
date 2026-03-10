@@ -2045,7 +2045,10 @@ def _cobranza_aplicar_formato_drive(ss, ws, total_rows: int, total_cols: int):
                             },
                             "format": {
                                 "backgroundColor": {"red": 0.776, "green": 0.937, "blue": 0.808},
-                                "textFormat": {"foregroundColor": {"red": 0.0, "green": 0.38, "blue": 0.0}},
+                                "textFormat": {
+                                    "bold": True,
+                                    "foregroundColor": {"red": 0.0, "green": 0.0, "blue": 0.0},
+                                },
                             },
                         },
                     },
@@ -2112,6 +2115,38 @@ def _cobranza_es_pago_completo(texto: str) -> bool:
         "liquidado",
     ]
     return any(v in txt for v in variantes)
+
+
+def _cobranza_codigos_liquidados_mes(com_df: pd.DataFrame, mes_objetivo: str) -> set[str]:
+    """Obtiene códigos cuyo último registro del mes quedó como pagado completo/liquidado."""
+    if com_df.empty:
+        return set()
+
+    com_mes = com_df[com_df.get("Mes", "").astype(str) == str(mes_objetivo)].copy()
+    if com_mes.empty:
+        return set()
+
+    if "__row" not in com_mes.columns:
+        com_mes["__row"] = np.arange(len(com_mes))
+
+    com_mes["Codigo"] = com_mes.get("Codigo", "").astype(str).str.strip()
+    com_mes = com_mes[com_mes["Codigo"] != ""]
+    if com_mes.empty:
+        return set()
+
+    com_mes["_timestamp_sort"] = pd.to_datetime(com_mes.get("Timestamp", ""), errors="coerce")
+    com_mes = com_mes.sort_values(by=["Codigo", "_timestamp_sort", "__row"]).drop_duplicates(
+        subset=["Codigo"],
+        keep="last",
+    )
+
+    def _es_liquidado_row(row) -> bool:
+        estatus = _cobranza_clean_text(row.get("Estatus_Seguimiento", "")).upper()
+        comentario = _cobranza_clean_text(row.get("Comentario", ""))
+        return estatus == "LIQUIDADO" or _cobranza_es_pago_completo(comentario)
+
+    liquidados = com_mes[com_mes.apply(_es_liquidado_row, axis=1)]
+    return set(liquidados["Codigo"].astype(str).tolist())
 
 
 def _cobranza_texto_seguimiento_para_calendario(row) -> str:
@@ -2731,6 +2766,11 @@ def render_cobranza_tab_gerente():
             "CON SALDO",
         )
 
+        codigos_liquidados = _cobranza_codigos_liquidados_mes(com_df, mes_objetivo)
+        if codigos_liquidados:
+            mask_liquidados = out["Codigo"].astype(str).isin(codigos_liquidados)
+            out.loc[mask_liquidados, "Estatus_Cobranza"] = "PAGADO"
+
         for d in range(1, 32):
             out[str(d)] = ""
 
@@ -2805,7 +2845,7 @@ def render_cobranza_tab_gerente():
             wb = writer.book
             fmt_header = wb.add_format({"bold": True, "align": "center", "valign": "vcenter", "bg_color": "#D9E1F2", "border": 1})
             fmt_texto = wb.add_format({"text_wrap": True, "valign": "top", "border": 1})
-            fmt_pago_completo = wb.add_format({"bg_color": "#C6EFCE", "font_color": "#006100", "text_wrap": True, "valign": "top", "border": 1})
+            fmt_pago_completo = wb.add_format({"bg_color": "#C6EFCE", "bold": True, "font_color": "#000000", "text_wrap": True, "valign": "top", "border": 1})
 
             ws.set_row(1, 22)
             for c_idx, col in enumerate(out.columns):
@@ -2843,6 +2883,17 @@ def render_cobranza_tab_gerente():
                         estimado = max(1, int(len(val) / 34) + 1)
                         max_lineas = max(max_lineas, max(lineas, estimado))
                 ws.set_row(row_idx + 2, min(110, max(20, max_lineas * 14)))
+
+                for c_idx, col in enumerate(out.columns):
+                    if str(col).isdigit():
+                        continue
+                    valor_col = row.get(col, "")
+                    if col in {"Saldo_Vence"}:
+                        try:
+                            valor_col = float(valor_col)
+                        except Exception:
+                            pass
+                    ws.write(row_idx + 2, c_idx, valor_col, fmt_texto)
 
                 for dia in range(1, 32):
                     col = str(dia)
