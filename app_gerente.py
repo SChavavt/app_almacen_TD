@@ -38,6 +38,14 @@ _ALE_BOOTSTRAP_CACHE = {}
 _MAIN_SPREADSHEET_CACHE = None
 _COBRANZA_SPREADSHEET_CACHE = None
 _COBRANZA_WS_CACHE = None
+_COBRANZA_VALUES_CACHE = {}
+
+
+def _cobranza_cache_key(ws):
+    """Clave estable por spreadsheet+worksheet para evitar colisiones de cache."""
+    ws_id = getattr(ws, "id", None)
+    ss_id = getattr(getattr(ws, "spreadsheet", None), "id", None)
+    return (ss_id, ws_id) if ws_id is not None else None
 
 # --- CREDENCIALES DESDE SECRETS ---
 try:
@@ -1806,6 +1814,7 @@ def cobranza_replace_matrix_values(ws, matrix: list[list]):
     if hasattr(ws, "update"):
         end_a1 = gspread.utils.rowcol_to_a1(rows, cols)
         ws.update(f"A1:{end_a1}", matrix, value_input_option="USER_ENTERED")
+        _COBRANZA_VALUES_CACHE.pop(_cobranza_cache_key(ws), None)
         return
 
     cells = ws.range(1, 1, rows, cols)
@@ -1815,10 +1824,28 @@ def cobranza_replace_matrix_values(ws, matrix: list[list]):
             cells[i].value = matrix[r][c]
             i += 1
     ws.update_cells(cells, value_input_option="USER_ENTERED")
+    _COBRANZA_VALUES_CACHE.pop(_cobranza_cache_key(ws), None)
 
 
-def cobranza_load_records_with_rows(ws) -> list[dict]:
-    values = ws.get_all_values()
+def _cobranza_get_all_values_cached(ws, max_age_seconds: float = 20.0, use_cache: bool = True):
+    """Lee valores de una worksheet con cache corto para bajar lecturas por minuto."""
+    cache_key = _cobranza_cache_key(ws)
+    now_ts = time.time()
+    if use_cache and cache_key is not None:
+        cache_entry = _COBRANZA_VALUES_CACHE.get(cache_key)
+        if cache_entry:
+            age = now_ts - cache_entry["ts"]
+            if age <= max_age_seconds:
+                return cache_entry["values"]
+
+    values = _retry_gspread_api_call(lambda: ws.get_all_values(), retries=4, base_delay=1.0)
+    if cache_key is not None:
+        _COBRANZA_VALUES_CACHE[cache_key] = {"ts": now_ts, "values": values}
+    return values
+
+
+def cobranza_load_records_with_rows(ws, use_cache: bool = True) -> list[dict]:
+    values = _cobranza_get_all_values_cached(ws, use_cache=use_cache)
     if not values:
         return []
     headers = values[0]
@@ -1863,6 +1890,7 @@ def cobranza_upsert_rows_by_key(ws, df: pd.DataFrame, key_cols: list[str], updat
         retries=4,
         base_delay=1.0,
     )
+    _COBRANZA_VALUES_CACHE.pop(_cobranza_cache_key(ws), None)
 
 
 def parse_reporte_cobranza_excel(file, mes: str) -> pd.DataFrame:
@@ -2163,11 +2191,15 @@ def _cobranza_aplicar_formato_drive(ss, ws, total_rows: int, total_cols: int):
     _retry_gspread_api_call(lambda: ss.batch_update({"requests": requests}), retries=4, base_delay=1.0)
 def _cobranza_guardar_en_drive_por_mes(spreadsheet_id: str, mes: str, out_df: pd.DataFrame) -> tuple[str, bool]:
     """Guarda reporte en una hoja mensual; actualiza la existente si ya fue creada."""
-    ss = get_cobranza_spreadsheet() if not spreadsheet_id else _retry_gspread_api_call(
-        lambda: gspread_client.open_by_key(str(spreadsheet_id)),
-        retries=4,
-        base_delay=0.9,
-    )
+    configured_id = get_cobranza_spreadsheet_id()
+    if not spreadsheet_id or str(spreadsheet_id).strip() == str(configured_id).strip():
+        ss = get_cobranza_spreadsheet()
+    else:
+        ss = _retry_gspread_api_call(
+            lambda: gspread_client.open_by_key(str(spreadsheet_id)),
+            retries=4,
+            base_delay=0.9,
+        )
     title = _cobranza_sheet_title_safe(f"Cobranza_{mes}")
     creada = False
 
@@ -2279,9 +2311,9 @@ def render_cobranza_tab_gerente():
     def _load_cobranza_data(force_refresh: bool = False):
         if force_refresh or cache_key not in st.session_state:
             st.session_state[cache_key] = {
-                "base_df": pd.DataFrame(cobranza_load_records_with_rows(ws_base)),
-                "venc_df": pd.DataFrame(cobranza_load_records_with_rows(ws_venc)),
-                "com_df": pd.DataFrame(cobranza_load_records_with_rows(ws_com)),
+                "base_df": pd.DataFrame(cobranza_load_records_with_rows(ws_base, use_cache=not force_refresh)),
+                "venc_df": pd.DataFrame(cobranza_load_records_with_rows(ws_venc, use_cache=not force_refresh)),
+                "com_df": pd.DataFrame(cobranza_load_records_with_rows(ws_com, use_cache=not force_refresh)),
             }
         cache = st.session_state.get(cache_key, {})
         return (
