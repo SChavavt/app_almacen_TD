@@ -2053,6 +2053,33 @@ def _cobranza_meses_disponibles(base_df: pd.DataFrame) -> list[str]:
     return sorted(meses)
 
 
+def _cobranza_meses_con_comentarios(com_df: pd.DataFrame) -> list[str]:
+    """Devuelve meses operativos válidos (YYYY-MM) presentes en comentarios."""
+    if com_df.empty:
+        return []
+
+    meses = sorted({
+        _cobranza_clean_text(m)
+        for m in com_df.get("Mes_Operativo", "").astype(str).tolist()
+        if re.match(r"^\d{4}-\d{2}$", _cobranza_clean_text(m))
+    })
+    return meses
+
+
+def _cobranza_meses_hojas_creadas(ss) -> list[str]:
+    """Lista meses con hoja mensual ya creada en Drive (Cobranza_YYYY-MM)."""
+    meses = []
+    worksheets = _retry_gspread_api_call(lambda: ss.worksheets(), retries=4, base_delay=0.9)
+    for ws in worksheets:
+        title = _cobranza_clean_text(getattr(ws, "title", ""))
+        if not title.startswith("Cobranza_"):
+            continue
+        mes = title.replace("Cobranza_", "", 1)
+        if re.match(r"^\d{4}-\d{2}$", mes):
+            meses.append(mes)
+    return sorted(set(meses))
+
+
 def _cobranza_sheet_title_safe(title: str) -> str:
     t = re.sub(r"[\[\]\*\?/\\:]", "-", str(title or "").strip())
     return (t[:100] if t else f"Cobranza_{datetime.now().strftime('%Y%m%d_%H%M%S')}")
@@ -2846,7 +2873,7 @@ def render_cobranza_tab_gerente():
 
     st.info("📌 El seguimiento de pagos ahora se gestiona en la pestaña **📊 Seguimiento Cobranza**.")
 
-    def _generar_excel_cobranza_mes(mes_objetivo: str, actualizar_drive: bool = False):
+    def _generar_excel_cobranza_mes(mes_objetivo: str, actualizar_drive: bool = False, mostrar_toast_drive: bool = True):
         base_df, venc_df, com_df = _load_cobranza_data(force_refresh=actualizar_drive)
         base_all = base_df.copy() if not base_df.empty else pd.DataFrame()
         base_df = base_df[base_df.get("Mes", "").astype(str) == mes_objetivo] if not base_df.empty else pd.DataFrame()
@@ -3080,6 +3107,7 @@ def render_cobranza_tab_gerente():
         bio.seek(0)
         excel_bytes = bio.getvalue()
 
+        drive_result = None
         if actualizar_drive:
             try:
                 spreadsheet_id = get_cobranza_spreadsheet_id()
@@ -3088,40 +3116,72 @@ def render_cobranza_tab_gerente():
                     mes_objetivo,
                     out,
                 )
-                if creada:
-                    st.success(f"✅ Excel actualizado. Se generó una hoja nueva en Drive: {nombre_hoja}")
-                else:
-                    st.success(f"✅ Excel actualizado. Solo se actualizó la hoja existente en Drive: {nombre_hoja}")
+                drive_result = {"ok": True, "hoja": nombre_hoja, "creada": bool(creada)}
+                if mostrar_toast_drive:
+                    if creada:
+                        st.success(f"✅ Excel actualizado. Se generó una hoja nueva en Drive: {nombre_hoja}")
+                    else:
+                        st.success(f"✅ Excel actualizado. Solo se actualizó la hoja existente en Drive: {nombre_hoja}")
             except Exception as e:
-                st.warning(f"⚠️ Se generó el Excel local, pero no se pudo guardar en Drive: {e}")
+                drive_result = {"ok": False, "error": str(e)}
+                if mostrar_toast_drive:
+                    st.warning(f"⚠️ Se generó el Excel local, pero no se pudo guardar en Drive: {e}")
 
-        return excel_bytes
+        return excel_bytes, drive_result
 
     st.markdown("### Actualizar Excel")
-    st.caption("Esta acción actualiza el Excel del mes seleccionado en Drive. Si no existe la hoja del mes, se crea una nueva automáticamente.")
-    mes_actualizar = st.selectbox(
-        "Mes a actualizar (YYYY-MM)",
-        options=meses_disponibles,
-        index=meses_disponibles.index(mes_actual) if mes_actual in meses_disponibles else 0,
-        key="ger_cob_mes_actualizar",
-    )
-    if st.button("Actualizar Excel del mes seleccionado", key="ger_cob_excel_actualizar"):
-        excel_bytes = _generar_excel_cobranza_mes(mes_actualizar, actualizar_drive=True)
-        if excel_bytes:
+    st.caption("Actualiza en Drive el Excel de todos los meses que ya tengan comentarios. Si la hoja mensual no existe, se crea automáticamente.")
+    if st.button("Actualizar Excel de todos los comentarios", key="ger_cob_excel_actualizar"):
+        meses_comentarios = _cobranza_meses_con_comentarios(com_df)
+        if not meses_comentarios:
+            st.info("No hay comentarios con Mes_Operativo válido para actualizar en Drive.")
+        else:
             st.session_state["ger_cob_excel_descargas"] = st.session_state.get("ger_cob_excel_descargas", {})
-            st.session_state["ger_cob_excel_descargas"][mes_actualizar] = excel_bytes
+            hojas_creadas = []
+            hojas_actualizadas = []
+            hojas_error = []
+
+            for mes_actualizar in meses_comentarios:
+                excel_bytes, drive_result = _generar_excel_cobranza_mes(
+                    mes_actualizar,
+                    actualizar_drive=True,
+                    mostrar_toast_drive=False,
+                )
+                if excel_bytes:
+                    st.session_state["ger_cob_excel_descargas"][mes_actualizar] = excel_bytes
+                if not drive_result:
+                    hojas_error.append(f"{mes_actualizar} (sin respuesta de Drive)")
+                    continue
+                if drive_result.get("ok"):
+                    if drive_result.get("creada"):
+                        hojas_creadas.append(drive_result.get("hoja", f"Cobranza_{mes_actualizar}"))
+                    else:
+                        hojas_actualizadas.append(drive_result.get("hoja", f"Cobranza_{mes_actualizar}"))
+                else:
+                    hojas_error.append(f"{mes_actualizar}: {drive_result.get('error', 'Error desconocido')}")
+
+            if hojas_creadas:
+                st.success(f"✅ Se crearon hojas nuevas: {', '.join(hojas_creadas)}")
+            if hojas_actualizadas:
+                st.success(f"✅ Se actualizaron hojas existentes: {', '.join(hojas_actualizadas)}")
+            if hojas_error:
+                st.warning("⚠️ Hubo meses que no se pudieron actualizar: " + " | ".join(hojas_error))
 
     st.markdown("### Descargar")
     with st.expander("📥 Descargar hojas de meses disponibles", expanded=False):
-        st.caption("Aquí solo se preparan y descargan los Excel de los meses disponibles, sin actualizar Drive.")
+        st.caption("Solo se muestran meses que ya tienen hoja creada en Drive.")
+        meses_creados_drive = _cobranza_meses_hojas_creadas(get_cobranza_spreadsheet())
+        if not meses_creados_drive:
+            st.info("Aún no hay hojas mensuales creadas en Drive para descargar.")
+            return
         mes_descarga = st.selectbox(
             "Mes disponible para descargar (YYYY-MM)",
-            options=meses_disponibles,
-            index=meses_disponibles.index(mes_actual) if mes_actual in meses_disponibles else 0,
+            options=meses_creados_drive,
+            index=meses_creados_drive.index(mes_actual) if mes_actual in meses_creados_drive else len(meses_creados_drive) - 1,
             key="ger_cob_mes_descarga",
         )
         if st.button("Preparar Excel para descarga", key="ger_cob_preparar_descarga"):
-            excel_bytes = _generar_excel_cobranza_mes(mes_descarga, actualizar_drive=False)
+            excel_bytes, _ = _generar_excel_cobranza_mes(mes_descarga, actualizar_drive=False)
             if excel_bytes:
                 st.session_state["ger_cob_excel_descargas"] = st.session_state.get("ger_cob_excel_descargas", {})
                 st.session_state["ger_cob_excel_descargas"][mes_descarga] = excel_bytes
