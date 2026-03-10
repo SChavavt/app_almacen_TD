@@ -368,6 +368,11 @@ def assign_flow_numbers(entries_local, entries_foraneo, df_all: pd.DataFrame) ->
                 entry["numero"] = ""
                 continue
 
+            if suppress_cancelled_number and sanitize_text(entry.get("tipo", "")):
+                if _parse_foraneo_number(entry.get("numero_foraneo", "")) is None:
+                    entry["numero"] = ""
+                    continue
+
             keys = [
                 _flow_match_key(entry.get("id_pedido", "")),
                 _flow_match_key(entry.get("folio", "")),
@@ -626,7 +631,10 @@ def render_auto_list(
     rows_html = []
     for fallback_number, e in visible:
         is_cancelado = _is_cancelado_estado(e.get("estado", ""))
-        display_number = None if is_cancelado else e.get("display_num", fallback_number)
+        has_explicit_number = bool(sanitize_text(e.get("numero", "")))
+        display_number = None
+        if not is_cancelado and has_explicit_number:
+            display_number = e.get("display_num", fallback_number)
         number_label = f"#{display_number}" if display_number is not None else "—"
         chips = []
 
