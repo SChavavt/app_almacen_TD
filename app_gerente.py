@@ -1572,19 +1572,6 @@ def _cobranza_to_date(v) -> str:
     return dt.strftime("%Y-%m-%d")
 
 
-def _cobranza_mes_operativo(mes: str, estatus: str, fecha_proximo_pago: str) -> str:
-    """Calcula mes operativo: usa mes de promesa activa; si no, conserva mes original."""
-    mes_base = _cobranza_clean_text(mes)
-    estatus_txt = _cobranza_clean_text(estatus).upper()
-    fecha_txt = _cobranza_clean_text(fecha_proximo_pago)
-
-    if estatus_txt == "PROMESA_PAGO" and fecha_txt:
-        fecha_dt = pd.to_datetime(fecha_txt, errors="coerce")
-        if not pd.isna(fecha_dt):
-            return fecha_dt.strftime("%Y-%m")
-    return mes_base
-
-
 def get_cobranza_spreadsheet_id() -> str:
     gs = st.secrets.get("gsheets", {})
     spreadsheet_id = (
@@ -1676,14 +1663,10 @@ def cobranza_migrar_comentarios_con_folio(ws):
     """Migra `cobranza_comentarios` a esquema actual sin perder datos."""
     expected = [
         "Mes", "Codigo", "Folio", "Dia", "Comentario", "Actualizado_por", "Timestamp",
-        "Fecha_Proximo_Pago", "Recordatorio_Activo", "Estatus_Seguimiento", "Fecha_Cierre", "Mes_Operativo"
+        "Fecha_Proximo_Pago", "Recordatorio_Activo", "Estatus_Seguimiento", "Fecha_Cierre"
     ]
     legacy = ["Mes", "Codigo", "Dia", "Comentario", "Actualizado_por", "Timestamp"]
     with_folio = ["Mes", "Codigo", "Folio", "Dia", "Comentario", "Actualizado_por", "Timestamp"]
-    prev_expected = [
-        "Mes", "Codigo", "Folio", "Dia", "Comentario", "Actualizado_por", "Timestamp",
-        "Fecha_Proximo_Pago", "Recordatorio_Activo", "Estatus_Seguimiento", "Fecha_Cierre"
-    ]
 
     values = _retry_gspread_api_call(lambda: ws.get_all_values(), retries=4, base_delay=0.9)
     if not values:
@@ -1698,8 +1681,7 @@ def cobranza_migrar_comentarios_con_folio(ws):
         for row in values[1:]:
             row = row + [""] * (len(legacy) - len(row))
             mes, codigo, dia, comentario, actualizado_por, timestamp = row[:len(legacy)]
-            mes_operativo = _cobranza_mes_operativo(mes, "", "")
-            matrix.append([mes, codigo, "", dia, comentario, actualizado_por, timestamp, "", "", "", "", mes_operativo])
+            matrix.append([mes, codigo, "", dia, comentario, actualizado_por, timestamp, "", "", "", ""])
         _retry_gspread_api_call(lambda: cobranza_replace_matrix_values(ws, matrix), retries=4, base_delay=1.0)
         return True
 
@@ -1708,18 +1690,7 @@ def cobranza_migrar_comentarios_con_folio(ws):
         for row in values[1:]:
             row = row + [""] * (len(with_folio) - len(row))
             mes, codigo, folio, dia, comentario, actualizado_por, timestamp = row[:len(with_folio)]
-            mes_operativo = _cobranza_mes_operativo(mes, "", "")
-            matrix.append([mes, codigo, folio, dia, comentario, actualizado_por, timestamp, "", "", "", "", mes_operativo])
-        _retry_gspread_api_call(lambda: cobranza_replace_matrix_values(ws, matrix), retries=4, base_delay=1.0)
-        return True
-
-    if headers == prev_expected:
-        matrix = [expected]
-        for row in values[1:]:
-            row = row + [""] * (len(prev_expected) - len(row))
-            mes, codigo, folio, dia, comentario, actualizado_por, timestamp, fecha, recordatorio, estatus, fecha_cierre = row[:len(prev_expected)]
-            mes_operativo = _cobranza_mes_operativo(mes, estatus, fecha)
-            matrix.append([mes, codigo, folio, dia, comentario, actualizado_por, timestamp, fecha, recordatorio, estatus, fecha_cierre, mes_operativo])
+            matrix.append([mes, codigo, folio, dia, comentario, actualizado_por, timestamp, "", "", "", ""])
         _retry_gspread_api_call(lambda: cobranza_replace_matrix_values(ws, matrix), retries=4, base_delay=1.0)
         return True
 
@@ -1729,71 +1700,11 @@ def cobranza_migrar_comentarios_con_folio(ws):
         for row in values[1:]:
             row = row + [""] * (len(headers) - len(row))
             rec = {headers[i]: row[i] for i in range(len(headers))}
-            rec["Mes_Operativo"] = _cobranza_mes_operativo(
-                rec.get("Mes", ""),
-                rec.get("Estatus_Seguimiento", ""),
-                rec.get("Fecha_Proximo_Pago", ""),
-            )
             matrix.append([rec.get(h, "") for h in expected])
         _retry_gspread_api_call(lambda: cobranza_replace_matrix_values(ws, matrix), retries=4, base_delay=1.0)
         return True
 
     return False
-
-
-def cobranza_backfill_mes_operativo(ws) -> int:
-    """Rellena Mes_Operativo en filas históricas que lo tengan vacío."""
-    recs = cobranza_load_records_with_rows(ws)
-    if not recs:
-        return 0
-
-    updates = []
-    for rec in recs:
-        row_number = int(rec.get("__row", 0) or 0)
-        if row_number <= 1:
-            continue
-
-        mes_operativo = _cobranza_clean_text(rec.get("Mes_Operativo", ""))
-        if mes_operativo:
-            continue
-
-        nuevo_mes_operativo = _cobranza_mes_operativo(
-            rec.get("Mes", ""),
-            rec.get("Estatus_Seguimiento", ""),
-            rec.get("Fecha_Proximo_Pago", ""),
-        )
-        if not nuevo_mes_operativo:
-            continue
-
-        updates.append((
-            row_number,
-            nuevo_mes_operativo,
-            now_cdmx().strftime("%Y-%m-%d %H:%M:%S"),
-        ))
-
-    if not updates:
-        return 0
-
-    headers = [str(x).strip() for x in _retry_gspread_api_call(lambda: ws.row_values(1), retries=4, base_delay=0.9)]
-    idx = {h: i for i, h in enumerate(headers)}
-    if "Mes_Operativo" not in idx:
-        return 0
-
-    actualizado_por_idx = idx.get("Actualizado_por")
-    timestamp_idx = idx.get("Timestamp")
-
-    for row_number, mes_op, ts in updates:
-        row_values = _retry_gspread_api_call(lambda rn=row_number: ws.row_values(rn), retries=4, base_delay=1.0)
-        if len(row_values) < len(headers):
-            row_values.extend([""] * (len(headers) - len(row_values)))
-        row_values[idx["Mes_Operativo"]] = mes_op
-        if actualizado_por_idx is not None and not _cobranza_clean_text(row_values[actualizado_por_idx]):
-            row_values[actualizado_por_idx] = "sistema_backfill"
-        if timestamp_idx is not None:
-            row_values[timestamp_idx] = ts
-        cobranza_update_row_values(ws, row_number, row_values)
-
-    return len(updates)
 
 def cobranza_replace_matrix_values(ws, matrix: list[list]):
     """Escribe una matriz completa con fallback para versiones viejas de gspread."""
@@ -2271,7 +2182,7 @@ def render_cobranza_tab_gerente():
     venc_headers = ["Mes", "Codigo", "Folio", "Fecha_Factura", "Fecha_Vencimiento", "Saldo_Vence", "Condicion", "Moneda", "Ultima_Actualizacion"]
     com_headers = [
         "Mes", "Codigo", "Folio", "Dia", "Comentario", "Actualizado_por", "Timestamp",
-        "Fecha_Proximo_Pago", "Recordatorio_Activo", "Estatus_Seguimiento", "Fecha_Cierre", "Mes_Operativo"
+        "Fecha_Proximo_Pago", "Recordatorio_Activo", "Estatus_Seguimiento", "Fecha_Cierre"
     ]
 
     cache_key = "ger_cob_data_cache"
@@ -2295,11 +2206,8 @@ def render_cobranza_tab_gerente():
         cobranza_ensure_headers(ws_base, base_headers)
         cobranza_ensure_headers(ws_venc, venc_headers)
         cobranza_ensure_headers(ws_com, com_headers)
-        backfill_count = cobranza_backfill_mes_operativo(ws_com)
         if migracion_comentarios:
             st.info("ℹ️ Se migró la hoja de comentarios para incluir la columna Folio sin perder datos existentes.")
-        if backfill_count:
-            st.info(f"ℹ️ Se actualizaron {backfill_count} comentario(s) históricos con Mes_Operativo.")
     except gspread.exceptions.APIError as e:
         if _is_transient_gspread_error(e):
             st.warning(
@@ -2791,11 +2699,6 @@ def render_cobranza_tab_gerente():
                         "Recordatorio_Activo": recordatorio_guardado,
                         "Estatus_Seguimiento": estatus_guardado,
                         "Fecha_Cierre": fecha_cierre,
-                        "Mes_Operativo": _cobranza_mes_operativo(
-                            mes_com if mes_com != "TODOS" else mes_actual,
-                            estatus_guardado,
-                            fecha_proximo_pago,
-                        ),
                     }
                     for folio in folios_sel
                 ])
@@ -2805,7 +2708,7 @@ def render_cobranza_tab_gerente():
                     ["Mes", "Codigo", "Folio", "Dia"],
                     [
                         "Comentario", "Actualizado_por", "Timestamp", "Fecha_Proximo_Pago",
-                        "Recordatorio_Activo", "Estatus_Seguimiento", "Fecha_Cierre", "Mes_Operativo"
+                        "Recordatorio_Activo", "Estatus_Seguimiento", "Fecha_Cierre"
                     ],
                 )
                 st.session_state["ger_cob_force_refresh"] = True
@@ -2897,19 +2800,7 @@ def render_cobranza_tab_gerente():
                     )
 
         if not com_df.empty:
-            com_mes = com_df.copy()
-            com_mes["Mes_Operativo"] = com_mes.get("Mes_Operativo", "").astype(str)
-            mask_mes_op_vacio = com_mes["Mes_Operativo"].str.strip() == ""
-            if mask_mes_op_vacio.any():
-                com_mes.loc[mask_mes_op_vacio, "Mes_Operativo"] = com_mes.loc[mask_mes_op_vacio].apply(
-                    lambda row: _cobranza_mes_operativo(
-                        row.get("Mes", ""),
-                        row.get("Estatus_Seguimiento", ""),
-                        row.get("Fecha_Proximo_Pago", ""),
-                    ),
-                    axis=1,
-                )
-            com_mes = com_mes[com_mes.get("Mes_Operativo", "").astype(str) == mes_objetivo].copy()
+            com_mes = com_df[com_df.get("Mes", "").astype(str) == mes_objetivo].copy()
             for r in com_mes.itertuples(index=False):
                 dia = _cobranza_clean_text(getattr(r, "Dia", "1")) or "1"
                 cod = _cobranza_clean_text(getattr(r, "Codigo", ""))
@@ -3093,13 +2984,12 @@ def render_seguimiento_cobranza_tab_gerente(usuario_actual: str | None):
     base_headers = ["Mes", "Codigo", "Razon_Social", "Saldo", "No_Vencido", "Vencido", "Tipo_Pago", "Ultima_Actualizacion"]
     com_headers = [
         "Mes", "Codigo", "Folio", "Dia", "Comentario", "Actualizado_por", "Timestamp",
-        "Fecha_Proximo_Pago", "Recordatorio_Activo", "Estatus_Seguimiento", "Fecha_Cierre", "Mes_Operativo"
+        "Fecha_Proximo_Pago", "Recordatorio_Activo", "Estatus_Seguimiento", "Fecha_Cierre"
     ]
 
     try:
         cobranza_ensure_headers(ws_base, base_headers)
         cobranza_ensure_headers(ws_com, com_headers)
-        cobranza_backfill_mes_operativo(ws_com)
     except gspread.exceptions.APIError as e:
         if _is_transient_gspread_error(e):
             st.warning("⚠️ Google Sheets está con límite temporal de lecturas. Reintenta en unos segundos.")
@@ -3117,26 +3007,13 @@ def render_seguimiento_cobranza_tab_gerente(usuario_actual: str | None):
 
     cliente_nom = base_df[["Codigo", "Razon_Social"]].drop_duplicates() if not base_df.empty else pd.DataFrame(columns=["Codigo", "Razon_Social"])
 
-    seg_tmp = com_df.copy()
-    seg_tmp["Mes_Operativo"] = seg_tmp.get("Mes_Operativo", "").astype(str)
-    mask_mes_op_vacio = seg_tmp["Mes_Operativo"].str.strip() == ""
-    if mask_mes_op_vacio.any():
-        seg_tmp.loc[mask_mes_op_vacio, "Mes_Operativo"] = seg_tmp.loc[mask_mes_op_vacio].apply(
-            lambda row: _cobranza_mes_operativo(
-                row.get("Mes", ""),
-                row.get("Estatus_Seguimiento", ""),
-                row.get("Fecha_Proximo_Pago", ""),
-            ),
-            axis=1,
-        )
-
-    meses_com = sorted({str(m).strip() for m in seg_tmp.get("Mes_Operativo", pd.Series(dtype="string")).tolist() if str(m).strip()}, reverse=True)
+    meses_com = sorted({str(m).strip() for m in com_df.get("Mes", pd.Series(dtype="string")).tolist() if str(m).strip()}, reverse=True)
     opciones_mes = ["Todos"] + meses_com
     mes_sel = st.selectbox("Mes de seguimiento", options=opciones_mes, key="ger_seg_mes_sel")
 
-    seg = seg_tmp.copy()
+    seg = com_df.copy()
     if mes_sel != "Todos":
-        seg = seg[seg.get("Mes_Operativo", "").astype(str) == mes_sel].copy()
+        seg = seg[seg.get("Mes", "").astype(str) == mes_sel].copy()
 
     fecha_series_raw = seg["Fecha_Proximo_Pago"] if "Fecha_Proximo_Pago" in seg.columns else pd.Series("", index=seg.index, dtype="string")
     fecha_series = pd.to_datetime(fecha_series_raw, errors="coerce")
@@ -3352,11 +3229,6 @@ def render_seguimiento_cobranza_tab_gerente(usuario_actual: str | None):
         row_values[idx["Recordatorio_Activo"]] = "SI" if estatus_final == "PROMESA_PAGO" else "NO"
         row_values[idx["Fecha_Proximo_Pago"]] = fecha_final
         row_values[idx["Fecha_Cierre"]] = now_cdmx().strftime("%Y-%m-%d") if estatus_final == "LIQUIDADO" else ""
-        row_values[idx["Mes_Operativo"]] = _cobranza_mes_operativo(
-            row_values[idx["Mes"]],
-            row_values[idx["Estatus_Seguimiento"]],
-            row_values[idx["Fecha_Proximo_Pago"]],
-        )
         row_values[idx["Actualizado_por"]] = _safe_str(usuario_actual)
         row_values[idx["Timestamp"]] = now_cdmx().strftime("%Y-%m-%d %H:%M:%S")
 
