@@ -279,7 +279,8 @@ def _build_flow_number_maps(df_all: pd.DataFrame) -> tuple[dict[str, str], dict[
 
 
 def assign_flow_numbers(entries_local, entries_foraneo, df_all: pd.DataFrame) -> None:
-    local_map, foraneo_map = _build_flow_number_maps(df_all)
+    local_map, _ = _build_flow_number_maps(df_all)
+    foraneo_map: dict[str, str] = {}
 
     # Integrar Numero_Foraneo manual de devoluciones/casos foráneos,
     # sin alterar la numeración base de pedidos foráneos.
@@ -294,24 +295,43 @@ def assign_flow_numbers(entries_local, entries_foraneo, df_all: pd.DataFrame) ->
         if not _is_cancelado_estado(e.get("estado", "")) and not _is_limpiado_entry(e)
     ]
 
-    used_numbers: set[int] = {
-        int(v)
-        for v in foraneo_map.values()
-        if str(v).isdigit() and int(v) > 0
-    }
-
+    manual_numbers: set[int] = set()
     for entry in active_foraneo_entries:
         if not sanitize_text(entry.get("tipo", "")):
             continue
         parsed = _parse_foraneo_number(entry.get("numero_foraneo", ""))
         if parsed is not None:
-            used_numbers.add(parsed)
+            manual_numbers.add(parsed)
 
-    next_foraneo = 1
-    while next_foraneo in used_numbers:
-        next_foraneo += 1
+    used_numbers: set[int] = set(manual_numbers)
+    next_foraneo = (max(manual_numbers) + 1) if manual_numbers else 1
 
+    # 1) Casos/devoluciones foráneos con Numero_Foraneo manual.
     for entry in active_foraneo_entries:
+        if not sanitize_text(entry.get("tipo", "")):
+            continue
+
+        keys = [
+            _flow_match_key(entry.get("id_pedido", "")),
+            _flow_match_key(entry.get("folio", "")),
+        ]
+        if not any(keys):
+            continue
+
+        parsed = _parse_foraneo_number(entry.get("numero_foraneo", ""))
+        if parsed is None:
+            continue
+
+        numero_fmt = f"{parsed:02d}"
+        for key in keys:
+            if key and key not in foraneo_map:
+                foraneo_map[key] = numero_fmt
+
+    # 2) Pedidos foráneos normales: secuencia continua sin repetir manuales.
+    for entry in active_foraneo_entries:
+        if sanitize_text(entry.get("tipo", "")):
+            continue
+
         keys = [
             _flow_match_key(entry.get("id_pedido", "")),
             _flow_match_key(entry.get("folio", "")),
@@ -322,20 +342,10 @@ def assign_flow_numbers(entries_local, entries_foraneo, df_all: pd.DataFrame) ->
         if existing is not None:
             continue
 
-        is_case = bool(sanitize_text(entry.get("tipo", "")))
-        parsed = _parse_foraneo_number(entry.get("numero_foraneo", ""))
-
-        if is_case:
-            if parsed is None:
-                continue
-            numero = parsed
-            if numero >= next_foraneo:
-                next_foraneo = numero + 1
-        else:
-            while next_foraneo in used_numbers:
-                next_foraneo += 1
-            numero = next_foraneo
+        while next_foraneo in used_numbers:
             next_foraneo += 1
+        numero = next_foraneo
+        next_foraneo += 1
 
         used_numbers.add(numero)
         numero_fmt = f"{numero:02d}"
@@ -357,6 +367,11 @@ def assign_flow_numbers(entries_local, entries_foraneo, df_all: pd.DataFrame) ->
             if suppress_cancelled_number and _is_limpiado_entry(entry):
                 entry["numero"] = ""
                 continue
+
+            if suppress_cancelled_number and sanitize_text(entry.get("tipo", "")):
+                if _parse_foraneo_number(entry.get("numero_foraneo", "")) is None:
+                    entry["numero"] = ""
+                    continue
 
             keys = [
                 _flow_match_key(entry.get("id_pedido", "")),
