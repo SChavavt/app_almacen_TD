@@ -738,6 +738,8 @@ def build_flow_number_maps(
     map_foraneo: dict[str, str] = {}
     map_local = _build_map(df_local, lambda idx: str(idx + 101))
 
+    pending_case_updates: list[tuple[int, str]] = []
+
     casos_foraneo = pd.DataFrame()
     if df_casos is not None and not df_casos.empty:
         casos_work = _exclude_cleaned_completed(df_casos)
@@ -752,8 +754,7 @@ def build_flow_number_maps(
         )
         casos_foraneo = casos_work[envio_norm.str.contains("foraneo", na=False)].copy()
 
-    # Flujo foráneo combinado: respeta Numero_Foraneo cuando existe
-    # y continúa consecutivo para los siguientes registros.
+    # Igualar app_i: numeración foránea por flujo combinado y orden sort_key.
     combined_rows: list[tuple[pd.Timestamp, int, str, pd.Series]] = []
     if not df_foraneo.empty:
         for _, row in df_foraneo.iterrows():
@@ -766,7 +767,7 @@ def build_flow_number_maps(
     combined_rows.sort(key=lambda item: (item[0], item[1]))
 
     next_number = 1
-    used_numbers: set[int] = set()
+    case_missing_number_by_row: dict[int, str] = {}
     for _, _, source_kind, row in combined_rows:
         if _is_cancelado_estado(row.get("Estado", "")):
             continue
@@ -781,25 +782,23 @@ def build_flow_number_maps(
         if existing is not None:
             continue
 
-        parsed = _parse_foraneo_number(row.get("Numero_Foraneo", ""))
-        if parsed is not None:
-            numero = parsed
-            if numero >= next_number:
-                next_number = numero + 1
-        else:
-            while next_number in used_numbers:
-                next_number += 1
-            numero = next_number
-            next_number += 1
-
-        used_numbers.add(numero)
-        numero_fmt = f"{numero:02d}"
+        numero_fmt = f"{next_number:02d}"
+        next_number += 1
 
         for key in keys:
             if key and key not in map_foraneo:
                 map_foraneo[key] = numero_fmt
 
-    return map_local, map_foraneo, []
+        if source_kind == "caso" and _parse_foraneo_number(row.get("Numero_Foraneo", "")) is None:
+            row_idx = row.get("_gsheet_row_index", row.get("gsheet_row_index"))
+            try:
+                if row_idx is not None and not pd.isna(row_idx):
+                    case_missing_number_by_row[int(row_idx)] = numero_fmt
+            except Exception:
+                pass
+
+    pending_case_updates = sorted(case_missing_number_by_row.items(), key=lambda item: item[0])
+    return map_local, map_foraneo, pending_case_updates
 
 
 def resolve_flow_display_number(row: pd.Series, fallback_order: Any) -> str:
@@ -5588,51 +5587,6 @@ if df_main is not None:
     
             with st.expander(expander_title, expanded=st.session_state["expanded_devoluciones"].get(row_key, False)):
                 st.markdown(f"**🔢 Número foráneo asignado:** `{numero_foraneo_visible}`")
-
-                tipo_case = _normalize_text_for_matching(
-                    f"{row.get('Tipo_Envio', '')} {row.get('Tipo_Envio_Original', '')}"
-                )
-                row_idx_case = row.get("_gsheet_row_index", row.get("gsheet_row_index"))
-                numero_case_actual = _parse_foraneo_number(row.get("Numero_Foraneo", ""))
-                if "foraneo" in tipo_case:
-                    assign_col, info_col = st.columns([1, 2])
-                    with assign_col:
-                        if st.button("Asignar número foráneo", key=f"assign_num_foraneo_{row_key}"):
-                            max_actual = 0
-                            for val in st.session_state.get("flow_number_map_foraneo", {}).values():
-                                parsed = _parse_foraneo_number(val)
-                                if parsed and parsed > max_actual:
-                                    max_actual = parsed
-                            siguiente = f"{max_actual + 1:02d}"
-
-                            try:
-                                row_idx_int = int(float(row_idx_case)) if row_idx_case is not None and not pd.isna(row_idx_case) else None
-                            except Exception:
-                                row_idx_int = None
-
-                            if row_idx_int is None or "Numero_Foraneo" not in headers_casos:
-                                st.error("❌ No se pudo identificar la fila para guardar Numero_Foraneo.")
-                            else:
-                                col_num_foraneo = headers_casos.index("Numero_Foraneo") + 1
-                                ok_update = update_gsheet_cell(
-                                    worksheet_casos,
-                                    row_idx_int,
-                                    col_num_foraneo,
-                                    siguiente,
-                                    headers=headers_casos,
-                                )
-                                if ok_update:
-                                    st.success(f"✅ Número foráneo asignado: {siguiente}")
-                                    st.session_state["reload_after_action"] = True
-                                    st.rerun()
-                                else:
-                                    st.error("❌ No se pudo guardar Numero_Foraneo en la hoja.")
-                    with info_col:
-                        if numero_case_actual is not None:
-                            st.caption(f"Número actual en hoja: {numero_case_actual:02d}")
-                        else:
-                            st.caption("Este caso aún no tiene Número_Foraneo guardado.")
-
                 render_caso_especial_devolucion(row)
     
                 # === 🆕 NUEVO: Clasificar Tipo_Envio_Original, Turno y Fecha_Entrega (sin opción vacía y sin recargar) ===
