@@ -5591,141 +5591,140 @@ if df_main is not None:
     
                 # === 🆕 NUEVO: Clasificar Tipo_Envio_Original, Turno y Fecha_Entrega (sin opción vacía y sin recargar) ===
                 st.markdown("---")
-                st.markdown("#### 🚦 Clasificar envío y fecha")
-    
-                # Valores actuales
-                tipo_envio_actual = str(row.get("Tipo_Envio_Original", "")).strip()
-                turno_actual      = str(row.get("Turno", "")).strip()
-                fecha_actual_str  = str(row.get("Fecha_Entrega", "")).strip()
-                fecha_actual_dt   = pd.to_datetime(fecha_actual_str, errors='coerce') if fecha_actual_str else None
-                today_date        = (datetime.now(_TZ).date() if _TZ else datetime.now().date())
-    
-                # Claves únicas por caso (para que los widgets no “salten”)
-                tipo_key   = f"tipo_envio_orig_{row_key}"
-                turno_key  = f"turno_dev_{row_key}"
-                fecha_key  = f"fecha_dev_{row_key}"
-    
-                # Opciones SIN vacío
-                TIPO_OPTS  = ["📍 Pedido Local", "🚚 Pedido Foráneo"]
-                TURNO_OPTS = ["☀️ Local Mañana", "🌙 Local Tarde", "🌵 Saltillo", "📦 Pasa a Bodega"]
-    
-                # Inicializar valores en session_state (solo una vez)
-                if tipo_key not in st.session_state:
-                    # Elegir por lo que ya trae la hoja; si no cuadra, por defecto Foráneo
-                    if tipo_envio_actual in TIPO_OPTS:
-                        st.session_state[tipo_key] = tipo_envio_actual
-                    else:
-                        low = tipo_envio_actual.lower()
-                        st.session_state[tipo_key] = "📍 Pedido Local" if "local" in low else "🚚 Pedido Foráneo"
-    
-                if turno_key not in st.session_state:
-                    st.session_state[turno_key] = turno_actual if turno_actual in TURNO_OPTS else TURNO_OPTS[0]
-    
-                if fecha_key not in st.session_state:
-                    st.session_state[fecha_key] = (
-                        fecha_actual_dt.date() if pd.notna(fecha_actual_dt) and fecha_actual_dt.date() >= today_date else today_date
-                    )
-    
-                # Selects y fecha (sin opción vacía). Cambiar aquí NO guarda en Sheets.
-                c1, c2, c3 = st.columns([1.2, 1.2, 1])
-    
-                with c1:
-                    st.selectbox(
-                        "Tipo de envío original",
-                        options=TIPO_OPTS,
-                        index=TIPO_OPTS.index(st.session_state[tipo_key]) if st.session_state[tipo_key] in TIPO_OPTS else 1,
-                        key=tipo_key,
-                        on_change=preserve_tab_state,
-                    )
-    
-                with c2:
-                    st.selectbox(
-                        "Turno (si Local)",
-                        options=TURNO_OPTS,
-                        index=TURNO_OPTS.index(st.session_state[turno_key]) if st.session_state[turno_key] in TURNO_OPTS else 0,
-                        key=turno_key,
-                        disabled=(st.session_state[tipo_key] != "📍 Pedido Local"),
-                        help="Solo aplica para Pedido Local",
-                        on_change=preserve_tab_state,
-                    )
-    
-                with c3:
-                    st.date_input(
-                        "Fecha de envío",
-                        value=st.session_state[fecha_key],
-                        min_value= today_date,
-                        max_value= today_date + timedelta(days=365),
-                        format="DD/MM/YYYY",
-                        key=fecha_key,
-                        on_change=preserve_tab_state,
-                    )
-    
-                # Botón aplicar (AQUÍ SÍ se guardan cambios). No cambiamos de pestaña.
-                if st.button("✅ Aplicar cambios de envío/fecha", key=f"btn_aplicar_envio_fecha_{row_key}", on_click=preserve_tab_state):
-                    try:
-                        # Por si acaso, preservar la pestaña actual (Devoluciones es índice 4)
-                        st.session_state["preserve_main_tab"] = 4
-    
-                        # Resolver fila en gsheet
-                        gsheet_row_idx = None
-                        if "ID_Pedido" in df_casos.columns and idp:
-                            matches = df_casos.index[df_casos["ID_Pedido"].astype(str).str.strip() == idp]
-                            if len(matches) > 0:
-                                gsheet_row_idx = int(matches[0]) + 2
-                        if gsheet_row_idx is None:
-                            filt = (
-                                df_casos.get("Folio_Factura", pd.Series(dtype=str)).astype(str).str.strip().eq(folio) &
-                                df_casos.get("Cliente", pd.Series(dtype=str)).astype(str).str.strip().eq(cliente)
-                            )
-                            matches = df_casos.index[filt] if hasattr(filt, "any") else []
-                            if len(matches) > 0:
-                                gsheet_row_idx = int(matches[0]) + 2
-    
-                        if gsheet_row_idx is None:
-                            st.error("❌ No se encontró el caso en 'casos_especiales'.")
+                with st.expander("🚦 Clasificar envío y fecha", expanded=False):
+                    # Valores actuales
+                    tipo_envio_actual = str(row.get("Tipo_Envio_Original", "")).strip()
+                    turno_actual      = str(row.get("Turno", "")).strip()
+                    fecha_actual_str  = str(row.get("Fecha_Entrega", "")).strip()
+                    fecha_actual_dt   = pd.to_datetime(fecha_actual_str, errors='coerce') if fecha_actual_str else None
+                    today_date        = (datetime.now(_TZ).date() if _TZ else datetime.now().date())
+
+                    # Claves únicas por caso (para que los widgets no “salten”)
+                    tipo_key   = f"tipo_envio_orig_{row_key}"
+                    turno_key  = f"turno_dev_{row_key}"
+                    fecha_key  = f"fecha_dev_{row_key}"
+
+                    # Opciones SIN vacío
+                    TIPO_OPTS  = ["📍 Pedido Local", "🚚 Pedido Foráneo"]
+                    TURNO_OPTS = ["☀️ Local Mañana", "🌙 Local Tarde", "🌵 Saltillo", "📦 Pasa a Bodega"]
+
+                    # Inicializar valores en session_state (solo una vez)
+                    if tipo_key not in st.session_state:
+                        # Elegir por lo que ya trae la hoja; si no cuadra, por defecto Foráneo
+                        if tipo_envio_actual in TIPO_OPTS:
+                            st.session_state[tipo_key] = tipo_envio_actual
                         else:
-                            updates = []
-                            changed = False
-    
-                            # 1) Tipo_Envio_Original (sin opción vacía)
-                            tipo_sel = st.session_state[tipo_key]
-                            if "Tipo_Envio_Original" in headers_casos and tipo_sel != tipo_envio_actual:
-                                col_idx = headers_casos.index("Tipo_Envio_Original") + 1
-                                updates.append({'range': gspread.utils.rowcol_to_a1(gsheet_row_idx, col_idx), 'values': [[tipo_sel]]})
-                                changed = True
-    
-                            # 2) Turno (solo si Local)
-                            if tipo_sel == "📍 Pedido Local":
-                                turno_sel = st.session_state[turno_key]
-                                if "Turno" in headers_casos and turno_sel != turno_actual:
-                                    col_idx = headers_casos.index("Turno") + 1
-                                    updates.append({'range': gspread.utils.rowcol_to_a1(gsheet_row_idx, col_idx), 'values': [[turno_sel]]})
-                                    changed = True
-    
-                            # 3) Fecha_Entrega
-                            fecha_sel = st.session_state[fecha_key]
-                            fecha_sel_str = fecha_sel.strftime("%Y-%m-%d")
-                            if "Fecha_Entrega" in headers_casos and fecha_sel_str != fecha_actual_str:
-                                col_idx = headers_casos.index("Fecha_Entrega") + 1
-                                updates.append({'range': gspread.utils.rowcol_to_a1(gsheet_row_idx, col_idx), 'values': [[fecha_sel_str]]})
-                                changed = True
-    
-                            if updates and changed:
-                                if batch_update_gsheet_cells(worksheet_casos, updates, headers=headers_casos):
-                                    # Reflejar en la UI sin recargar toda la app
-                                    row["Tipo_Envio_Original"] = tipo_sel
-                                    if tipo_sel == "📍 Pedido Local":
-                                        row["Turno"] = st.session_state[turno_key]
-                                    row["Fecha_Entrega"] = fecha_sel_str
-    
-                                    st.toast("✅ Cambios aplicados.", icon="✅")
-                                    # 🚫 Nada de st.rerun() ni cambio de pestaña
-                                else:
-                                    st.error("❌ No se pudieron aplicar los cambios.")
+                            low = tipo_envio_actual.lower()
+                            st.session_state[tipo_key] = "📍 Pedido Local" if "local" in low else "🚚 Pedido Foráneo"
+
+                    if turno_key not in st.session_state:
+                        st.session_state[turno_key] = turno_actual if turno_actual in TURNO_OPTS else TURNO_OPTS[0]
+
+                    if fecha_key not in st.session_state:
+                        st.session_state[fecha_key] = (
+                            fecha_actual_dt.date() if pd.notna(fecha_actual_dt) and fecha_actual_dt.date() >= today_date else today_date
+                        )
+
+                    # Selects y fecha (sin opción vacía). Cambiar aquí NO guarda en Sheets.
+                    c1, c2, c3 = st.columns([1.2, 1.2, 1])
+
+                    with c1:
+                        st.selectbox(
+                            "Tipo de envío original",
+                            options=TIPO_OPTS,
+                            index=TIPO_OPTS.index(st.session_state[tipo_key]) if st.session_state[tipo_key] in TIPO_OPTS else 1,
+                            key=tipo_key,
+                            on_change=preserve_tab_state,
+                        )
+
+                    with c2:
+                        st.selectbox(
+                            "Turno (si Local)",
+                            options=TURNO_OPTS,
+                            index=TURNO_OPTS.index(st.session_state[turno_key]) if st.session_state[turno_key] in TURNO_OPTS else 0,
+                            key=turno_key,
+                            disabled=(st.session_state[tipo_key] != "📍 Pedido Local"),
+                            help="Solo aplica para Pedido Local",
+                            on_change=preserve_tab_state,
+                        )
+
+                    with c3:
+                        st.date_input(
+                            "Fecha de envío",
+                            value=st.session_state[fecha_key],
+                            min_value= today_date,
+                            max_value= today_date + timedelta(days=365),
+                            format="DD/MM/YYYY",
+                            key=fecha_key,
+                            on_change=preserve_tab_state,
+                        )
+
+                    # Botón aplicar (AQUÍ SÍ se guardan cambios). No cambiamos de pestaña.
+                    if st.button("✅ Aplicar cambios de envío/fecha", key=f"btn_aplicar_envio_fecha_{row_key}", on_click=preserve_tab_state):
+                        try:
+                            # Por si acaso, preservar la pestaña actual (Devoluciones es índice 4)
+                            st.session_state["preserve_main_tab"] = 4
+
+                            # Resolver fila en gsheet
+                            gsheet_row_idx = None
+                            if "ID_Pedido" in df_casos.columns and idp:
+                                matches = df_casos.index[df_casos["ID_Pedido"].astype(str).str.strip() == idp]
+                                if len(matches) > 0:
+                                    gsheet_row_idx = int(matches[0]) + 2
+                            if gsheet_row_idx is None:
+                                filt = (
+                                    df_casos.get("Folio_Factura", pd.Series(dtype=str)).astype(str).str.strip().eq(folio) &
+                                    df_casos.get("Cliente", pd.Series(dtype=str)).astype(str).str.strip().eq(cliente)
+                                )
+                                matches = df_casos.index[filt] if hasattr(filt, "any") else []
+                                if len(matches) > 0:
+                                    gsheet_row_idx = int(matches[0]) + 2
+
+                            if gsheet_row_idx is None:
+                                st.error("❌ No se encontró el caso en 'casos_especiales'.")
                             else:
-                                st.info("ℹ️ No hubo cambios que guardar.")
-                    except Exception as e:
-                        st.error(f"❌ Error al aplicar cambios: {e}")
+                                updates = []
+                                changed = False
+
+                                # 1) Tipo_Envio_Original (sin opción vacía)
+                                tipo_sel = st.session_state[tipo_key]
+                                if "Tipo_Envio_Original" in headers_casos and tipo_sel != tipo_envio_actual:
+                                    col_idx = headers_casos.index("Tipo_Envio_Original") + 1
+                                    updates.append({'range': gspread.utils.rowcol_to_a1(gsheet_row_idx, col_idx), 'values': [[tipo_sel]]})
+                                    changed = True
+
+                                # 2) Turno (solo si Local)
+                                if tipo_sel == "📍 Pedido Local":
+                                    turno_sel = st.session_state[turno_key]
+                                    if "Turno" in headers_casos and turno_sel != turno_actual:
+                                        col_idx = headers_casos.index("Turno") + 1
+                                        updates.append({'range': gspread.utils.rowcol_to_a1(gsheet_row_idx, col_idx), 'values': [[turno_sel]]})
+                                        changed = True
+
+                                # 3) Fecha_Entrega
+                                fecha_sel = st.session_state[fecha_key]
+                                fecha_sel_str = fecha_sel.strftime("%Y-%m-%d")
+                                if "Fecha_Entrega" in headers_casos and fecha_sel_str != fecha_actual_str:
+                                    col_idx = headers_casos.index("Fecha_Entrega") + 1
+                                    updates.append({'range': gspread.utils.rowcol_to_a1(gsheet_row_idx, col_idx), 'values': [[fecha_sel_str]]})
+                                    changed = True
+
+                                if updates and changed:
+                                    if batch_update_gsheet_cells(worksheet_casos, updates, headers=headers_casos):
+                                        # Reflejar en la UI sin recargar toda la app
+                                        row["Tipo_Envio_Original"] = tipo_sel
+                                        if tipo_sel == "📍 Pedido Local":
+                                            row["Turno"] = st.session_state[turno_key]
+                                        row["Fecha_Entrega"] = fecha_sel_str
+
+                                        st.toast("✅ Cambios aplicados.", icon="✅")
+                                        # 🚫 Nada de st.rerun() ni cambio de pestaña
+                                    else:
+                                        st.error("❌ No se pudieron aplicar los cambios.")
+                                else:
+                                    st.info("ℹ️ No hubo cambios que guardar.")
+                        except Exception as e:
+                            st.error(f"❌ Error al aplicar cambios: {e}")
     
     
                 # --- 🔧 Acciones rápidas (sin imprimir, sin cambiar pestaña) ---
@@ -5915,111 +5914,111 @@ if df_main is not None:
     
                 st.markdown("---")
     
-                st.markdown("#### 📋 Documentación")
-                st.caption("La guía es opcional; puedes completar la devolución sin subirla.")
-                success_placeholder = st.empty()
-                render_guia_upload_feedback(
-                    success_placeholder,
-                    row_key,
-                    "🔁 Devoluciones",
-                    s3_client,
-                )
-                form_key = f"form_guia_{row_key}"
-                with st.form(key=form_key):
-                    guia_files = st.file_uploader(
-                        "📋 Subir Guía de Retorno (opcional)",
-                        key=f"guia_{row_key}",
-                        help="Opcional: sube la guía de mensajería para el retorno del producto (PDF/JPG/PNG)",
-                        accept_multiple_files=True,
+                with st.expander("📋 Documentación", expanded=False):
+                    st.caption("La guía es opcional; puedes completar la devolución sin subirla.")
+                    success_placeholder = st.empty()
+                    render_guia_upload_feedback(
+                        success_placeholder,
+                        row_key,
+                        "🔁 Devoluciones",
+                        s3_client,
                     )
-    
-                    submitted_upload = st.form_submit_button(
-                        "📤 Subir Guía",
-                        on_click=preserve_tab_state,
-                    )
-    
-    
-                if submitted_upload:
-                    handle_generic_upload_change(row_key, ("expanded_devoluciones",))
-                    try:
-                        if not guia_files:
-                            st.warning("⚠️ Primero selecciona al menos un archivo de guía.")
-                        else:
-                            folder = idp or f"caso_{(folio or 'sfolio')}_{(cliente or 'scliente')}".replace(" ", "_")
-                            guia_keys = []
-                            for guia_file in guia_files:
-                                key_guia = f"{folder}/guia_retorno_{datetime.now().isoformat()[:19].replace(':','')}_{guia_file.name}"
-                                success, tmp_key = upload_file_to_s3(s3_client, S3_BUCKET_NAME, guia_file, key_guia)
-                                if success and tmp_key:
-                                    guia_keys.append(tmp_key)
-                            if guia_keys:
-                                gsheet_row_idx = None
-                                if "ID_Pedido" in df_casos.columns and idp:
-                                    matches = df_casos.index[df_casos["ID_Pedido"].astype(str).str.strip() == idp]
-                                    if len(matches) > 0:
-                                        gsheet_row_idx = int(matches[0]) + 2
-                                if gsheet_row_idx is None:
-                                    filt = (
-                                        df_casos.get("Folio_Factura", pd.Series(dtype=str)).astype(str).str.strip().eq(folio) &
-                                        df_casos.get("Cliente", pd.Series(dtype=str)).astype(str).str.strip().eq(cliente)
-                                    )
-                                    matches = df_casos.index[filt] if hasattr(filt, "any") else []
-                                    if len(matches) > 0:
-                                        gsheet_row_idx = int(matches[0]) + 2
-                                if gsheet_row_idx is None:
-                                    st.error("❌ No se encontró el caso en 'casos_especiales'.")
-                                else:
-                                    existing = str(row.get("Hoja_Ruta_Mensajero", "")).strip()
-                                    if existing.lower() in ("nan", "none", "n/a"):
-                                        existing = ""
-                                    new_keys = ", ".join(guia_keys)
-                                    guia_final = f"{existing}, {new_keys}" if existing else new_keys
-                                    ok = update_gsheet_cell(
-                                        worksheet_casos,
-                                        headers_casos,
-                                        gsheet_row_idx,
-                                        "Hoja_Ruta_Mensajero",
-                                        guia_final,
-                                    )
-                                    if ok:
-                                        uploaded_entries = [
-                                            {"key": key, "name": os.path.basename(key)}
-                                            for key in guia_keys
-                                        ]
-                                        devoluciones_display.at[
-                                            row.name, "Hoja_Ruta_Mensajero"
-                                        ] = guia_final
-                                        row["Hoja_Ruta_Mensajero"] = guia_final
-                                        st.toast(f"📤 {len(guia_keys)} guía(s) subida(s) con éxito.", icon="📦")
-                                        ensure_expanders_open(
-                                            row_key,
-                                            "expanded_devoluciones",
-                                        )
-                                        set_active_main_tab(5)
-                                        guia_success_map = st.session_state.setdefault(
-                                            "guia_upload_success", {}
-                                        )
-                                        guia_success_map[row_key] = {
-                                            "count": len(guia_keys),
-                                            "column": "Hoja_Ruta_Mensajero",
-                                            "files": uploaded_entries,
-                                            "timestamp": mx_now_str(),
-                                        }
-                                        st.cache_data.clear()
-                                        st.cache_resource.clear()
-                                        marcar_contexto_pedido(row_key, "🔁 Devoluciones")
-                                        render_guia_upload_feedback(
-                                            success_placeholder,
-                                            row_key,
-                                            "🔁 Devoluciones",
-                                            s3_client,
-                                        )
-                                    else:
-                                        st.error("❌ No se pudo actualizar la guía en Google Sheets.")
+                    form_key = f"form_guia_{row_key}"
+                    with st.form(key=form_key):
+                        guia_files = st.file_uploader(
+                            "📋 Subir Guía de Retorno (opcional)",
+                            key=f"guia_{row_key}",
+                            help="Opcional: sube la guía de mensajería para el retorno del producto (PDF/JPG/PNG)",
+                            accept_multiple_files=True,
+                        )
+
+                        submitted_upload = st.form_submit_button(
+                            "📤 Subir Guía",
+                            on_click=preserve_tab_state,
+                        )
+
+
+                    if submitted_upload:
+                        handle_generic_upload_change(row_key, ("expanded_devoluciones",))
+                        try:
+                            if not guia_files:
+                                st.warning("⚠️ Primero selecciona al menos un archivo de guía.")
                             else:
-                                st.warning("⚠️ No se subió ningún archivo válido.")
-                    except Exception as e:
-                        st.error(f"❌ Error al subir la guía: {e}")
+                                folder = idp or f"caso_{(folio or 'sfolio')}_{(cliente or 'scliente')}".replace(" ", "_")
+                                guia_keys = []
+                                for guia_file in guia_files:
+                                    key_guia = f"{folder}/guia_retorno_{datetime.now().isoformat()[:19].replace(':','')}_{guia_file.name}"
+                                    success, tmp_key = upload_file_to_s3(s3_client, S3_BUCKET_NAME, guia_file, key_guia)
+                                    if success and tmp_key:
+                                        guia_keys.append(tmp_key)
+                                if guia_keys:
+                                    gsheet_row_idx = None
+                                    if "ID_Pedido" in df_casos.columns and idp:
+                                        matches = df_casos.index[df_casos["ID_Pedido"].astype(str).str.strip() == idp]
+                                        if len(matches) > 0:
+                                            gsheet_row_idx = int(matches[0]) + 2
+                                    if gsheet_row_idx is None:
+                                        filt = (
+                                            df_casos.get("Folio_Factura", pd.Series(dtype=str)).astype(str).str.strip().eq(folio) &
+                                            df_casos.get("Cliente", pd.Series(dtype=str)).astype(str).str.strip().eq(cliente)
+                                        )
+                                        matches = df_casos.index[filt] if hasattr(filt, "any") else []
+                                        if len(matches) > 0:
+                                            gsheet_row_idx = int(matches[0]) + 2
+                                    if gsheet_row_idx is None:
+                                        st.error("❌ No se encontró el caso en 'casos_especiales'.")
+                                    else:
+                                        existing = str(row.get("Hoja_Ruta_Mensajero", "")).strip()
+                                        if existing.lower() in ("nan", "none", "n/a"):
+                                            existing = ""
+                                        new_keys = ", ".join(guia_keys)
+                                        guia_final = f"{existing}, {new_keys}" if existing else new_keys
+                                        ok = update_gsheet_cell(
+                                            worksheet_casos,
+                                            headers_casos,
+                                            gsheet_row_idx,
+                                            "Hoja_Ruta_Mensajero",
+                                            guia_final,
+                                        )
+                                        if ok:
+                                            uploaded_entries = [
+                                                {"key": key, "name": os.path.basename(key)}
+                                                for key in guia_keys
+                                            ]
+                                            devoluciones_display.at[
+                                                row.name, "Hoja_Ruta_Mensajero"
+                                            ] = guia_final
+                                            row["Hoja_Ruta_Mensajero"] = guia_final
+                                            st.toast(f"📤 {len(guia_keys)} guía(s) subida(s) con éxito.", icon="📦")
+                                            ensure_expanders_open(
+                                                row_key,
+                                                "expanded_devoluciones",
+                                            )
+                                            set_active_main_tab(5)
+                                            guia_success_map = st.session_state.setdefault(
+                                                "guia_upload_success", {}
+                                            )
+                                            guia_success_map[row_key] = {
+                                                "count": len(guia_keys),
+                                                "column": "Hoja_Ruta_Mensajero",
+                                                "files": uploaded_entries,
+                                                "timestamp": mx_now_str(),
+                                            }
+                                            st.cache_data.clear()
+                                            st.cache_resource.clear()
+                                            marcar_contexto_pedido(row_key, "🔁 Devoluciones")
+                                            render_guia_upload_feedback(
+                                                success_placeholder,
+                                                row_key,
+                                                "🔁 Devoluciones",
+                                                s3_client,
+                                            )
+                                        else:
+                                            st.error("❌ No se pudo actualizar la guía en Google Sheets.")
+                                else:
+                                    st.warning("⚠️ No se subió ningún archivo válido.")
+                        except Exception as e:
+                            st.error(f"❌ Error al subir la guía: {e}")
     
                 flag_key = f"confirm_complete_id_{row['ID_Pedido']}"
                 if st.button(
