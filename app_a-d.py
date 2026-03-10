@@ -2839,7 +2839,9 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
             else:
                 mostrar_cambio = st.checkbox(
                     "📅 Cambiar Fecha y Turno",
-                    key=f"chk_fecha_{row['ID_Pedido']}_{idx}_{origen_tab}",
+                    key=f"chk_fecha_{row['ID_Pedido']}_{origen_tab}",
+                    on_change=ensure_expanders_open,
+                    args=(row['ID_Pedido'], "expanded_pedidos"),
                 )
 
             if mostrar_cambio:
@@ -2887,7 +2889,7 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
                     else today
                 )
 
-                widget_suffix = f"{row['ID_Pedido']}_{idx}_{origen_tab}"
+                widget_suffix = f"{row['ID_Pedido']}_{origen_tab}"
 
                 fecha_key = f"new_fecha_{widget_suffix}"
                 turno_key = f"new_turno_{widget_suffix}"
@@ -2897,30 +2899,37 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
                 if turno_key not in st.session_state:
                     st.session_state[turno_key] = current_turno
 
-                st.date_input(
-                    "Nueva fecha:",
-                    value=st.session_state[fecha_key],
-                    min_value=today,
-                    max_value=today + timedelta(days=365),
-                    format="DD/MM/YYYY",
-                    key=fecha_key,
-                )
-
-                if tipo_envio_actual == "📍 Pedido Local" and origen_tab in ["Mañana", "Tarde"]:
-                    turno_options = ["", "☀️ Local Mañana", "🌙 Local Tarde"]
-                    if st.session_state[turno_key] not in turno_options:
-                        st.session_state[turno_key] = turno_options[0]
-
-                    st.selectbox(
-                        "Clasificar turno como:",
-                        options=turno_options,
-                        key=turno_key,
+                with st.container(border=True):
+                    st.caption(
+                        "Los cambios de fecha/turno se guardan juntos al presionar Aplicar."
                     )
+                    with st.form(key=f"form_fecha_turno_{widget_suffix}"):
+                        st.date_input(
+                            "Nueva fecha:",
+                            value=st.session_state[fecha_key],
+                            min_value=today,
+                            max_value=today + timedelta(days=365),
+                            format="DD/MM/YYYY",
+                            key=fecha_key,
+                        )
 
-                if st.button(
-                    "✅ Aplicar Cambios de Fecha/Turno",
-                    key=f"btn_apply_{widget_suffix}",
-                ):
+                        if tipo_envio_actual == "📍 Pedido Local" and origen_tab in ["Mañana", "Tarde"]:
+                            turno_options = ["", "☀️ Local Mañana", "🌙 Local Tarde"]
+                            if st.session_state[turno_key] not in turno_options:
+                                st.session_state[turno_key] = turno_options[0]
+
+                            st.selectbox(
+                                "Clasificar turno como:",
+                                options=turno_options,
+                                key=turno_key,
+                            )
+
+                        aplicar_cambios = st.form_submit_button(
+                            "✅ Aplicar Cambios de Fecha/Turno",
+                            use_container_width=True,
+                        )
+
+                if aplicar_cambios:
                     st.session_state["expanded_pedidos"][row['ID_Pedido']] = True
                     cambios = []
                     nueva_fecha_str = st.session_state[fecha_key].strftime('%Y-%m-%d')
@@ -2963,6 +2972,10 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
                                 f"📅 Pedido {row['ID_Pedido']} actualizado.",
                                 icon="✅",
                             )
+                            preserve_tab_state()
+                            st.session_state["refresh_data_caches_pending"] = True
+                            st.session_state["reload_after_action"] = True
+                            st.rerun()
                         else:
                             st.error("❌ Falló la actualización en Google Sheets.")
                     else:
