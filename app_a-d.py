@@ -2998,6 +2998,19 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
                                 }
                             )
 
+                    # Blindaje adicional: en este flujo el Estado no debe cambiar.
+                    # Forzamos conservar el Estado en el mismo batch para evitar drift.
+                    if cambios and "Estado" in headers and estado_antes_cambio:
+                        col_idx_estado = headers.index("Estado") + 1
+                        cambios.append(
+                            {
+                                "range": gspread.utils.rowcol_to_a1(
+                                    gsheet_row_index, col_idx_estado
+                                ),
+                                "values": [[estado_antes_cambio]],
+                            }
+                        )
+
                     if cambios:
                         if batch_update_gsheet_cells(worksheet, cambios, headers=headers):
                             if "Fecha_Entrega" in headers:
@@ -3041,6 +3054,10 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
                                         st.warning(
                                             "⚠️ Detectamos un cambio inesperado de Estado al aplicar Fecha/Turno. "
                                             "Se restauró el Estado original automáticamente."
+                                        )
+                                    else:
+                                        st.error(
+                                            "❌ Se detectó un cambio inesperado de Estado y no se pudo restaurar automáticamente."
                                         )
 
                             st.toast(
