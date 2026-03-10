@@ -257,12 +257,14 @@ def _build_flow_number_maps(df_all: pd.DataFrame) -> tuple[dict[str, str], dict[
         work["Folio_Factura"] = ""
     if "Numero_Foraneo" not in work.columns:
         work["Numero_Foraneo"] = ""
+    if "Estado" not in work.columns:
+        work["Estado"] = ""
 
     tipo_norm = work["Tipo_Envio"].astype(str).apply(_normalize_envio_original)
     tipo_original_norm = work["Tipo_Envio_Original"].astype(str).apply(_normalize_envio_original)
     mask_foraneo = tipo_norm.str.contains("foraneo", na=False) | tipo_original_norm.str.contains("foraneo", na=False)
 
-    df_foraneo = work[mask_foraneo].reset_index(drop=True)
+    df_foraneo = work[mask_foraneo].copy()
     df_local = work[~mask_foraneo].reset_index(drop=True)
 
     def build_map(df_src: pd.DataFrame, formatter) -> dict[str, str]:
@@ -275,36 +277,35 @@ def _build_flow_number_maps(df_all: pd.DataFrame) -> tuple[dict[str, str], dict[
                     out[key] = numero
         return out
 
-    foraneo_map = build_map(df_foraneo, lambda idx: f"{idx + 1:02d}")
     local_map = build_map(df_local, lambda idx: str(idx + 101))
 
-    used_numbers = {
-        int(v)
-        for v in foraneo_map.values()
-        if str(v).isdigit() and int(v) > 0
-    }
-    next_number = (max(used_numbers) + 1) if used_numbers else 1
+    foraneo_map: dict[str, str] = {}
+    used_numbers: set[int] = set()
+    next_number = 1
 
-    for _, row in df_foraneo.iterrows():
+    ordered_rows = sorted(df_foraneo.to_dict("records"), key=compute_sort_key)
+    for row in ordered_rows:
+        if _is_cancelado_estado(row.get("Estado", "")):
+            continue
+
         keys = [_flow_match_key(row.get("ID_Pedido", "")), _flow_match_key(row.get("Folio_Factura", ""))]
-        existing = None
-        for key in keys:
-            if key and key in foraneo_map:
-                existing = foraneo_map[key]
-                break
+        existing = next((foraneo_map[k] for k in keys if k and k in foraneo_map), None)
         if existing is not None:
             continue
 
         parsed = _parse_foraneo_number(row.get("Numero_Foraneo", ""))
-        if parsed is None:
-            parsed = next_number
+        if parsed is not None:
+            numero = parsed
+            if numero >= next_number:
+                next_number = numero + 1
+        else:
+            while next_number in used_numbers:
+                next_number += 1
+            numero = next_number
             next_number += 1
 
-        used_numbers.add(parsed)
-        while next_number in used_numbers:
-            next_number += 1
-
-        numero_fmt = f"{parsed:02d}"
+        used_numbers.add(numero)
+        numero_fmt = f"{numero:02d}"
         for key in keys:
             if key and key not in foraneo_map:
                 foraneo_map[key] = numero_fmt
@@ -313,33 +314,8 @@ def _build_flow_number_maps(df_all: pd.DataFrame) -> tuple[dict[str, str], dict[
 
 
 def assign_flow_numbers(entries_local, entries_foraneo, df_all: pd.DataFrame) -> None:
-    local_map, _ = _build_flow_number_maps(df_all)
-
-    # Foráneo: consecutivo real por orden de registro visible en app_i
-    # (incluye pedidos y devoluciones/casos ya cargados en entries_foraneo).
-    foraneo_map: dict[str, str] = {}
-    next_foraneo = 1
-    for entry in sorted(entries_foraneo, key=lambda e: e.get("sort_key", pd.Timestamp.max)):
-        if _is_cancelado_estado(entry.get("estado", "")):
-            continue
-
-        keys = [
-            _flow_match_key(entry.get("id_pedido", "")),
-            _flow_match_key(entry.get("folio", "")),
-        ]
-        existing = None
-        for key in keys:
-            if key and key in foraneo_map:
-                existing = foraneo_map[key]
-                break
-        if existing is not None:
-            continue
-
-        numero_fmt = f"{next_foraneo:02d}"
-        next_foraneo += 1
-        for key in keys:
-            if key and key not in foraneo_map:
-                foraneo_map[key] = numero_fmt
+    # Usa el mismo mapa persistido por Numero_Foraneo para que app_i refleje app_a.
+    local_map, foraneo_map = _build_flow_number_maps(df_all)
 
     def assign(
         entries,
