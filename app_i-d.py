@@ -255,8 +255,6 @@ def _build_flow_number_maps(df_all: pd.DataFrame) -> tuple[dict[str, str], dict[
         work["ID_Pedido"] = ""
     if "Folio_Factura" not in work.columns:
         work["Folio_Factura"] = ""
-    if "Numero_Foraneo" not in work.columns:
-        work["Numero_Foraneo"] = ""
 
     tipo_norm = work["Tipo_Envio"].astype(str).apply(_normalize_envio_original)
     tipo_original_norm = work["Tipo_Envio_Original"].astype(str).apply(_normalize_envio_original)
@@ -275,68 +273,72 @@ def _build_flow_number_maps(df_all: pd.DataFrame) -> tuple[dict[str, str], dict[
                     out[key] = numero
         return out
 
-    foraneo_map = build_map(df_foraneo, lambda idx: f"{idx + 1:02d}")
     local_map = build_map(df_local, lambda idx: str(idx + 101))
-
-    used_numbers = {
-        int(v)
-        for v in foraneo_map.values()
-        if str(v).isdigit() and int(v) > 0
-    }
-    next_number = (max(used_numbers) + 1) if used_numbers else 1
-
-    for _, row in df_foraneo.iterrows():
-        keys = [_flow_match_key(row.get("ID_Pedido", "")), _flow_match_key(row.get("Folio_Factura", ""))]
-        existing = None
-        for key in keys:
-            if key and key in foraneo_map:
-                existing = foraneo_map[key]
-                break
-        if existing is not None:
-            continue
-
-        parsed = _parse_foraneo_number(row.get("Numero_Foraneo", ""))
-        if parsed is None:
-            parsed = next_number
-            next_number += 1
-
-        used_numbers.add(parsed)
-        while next_number in used_numbers:
-            next_number += 1
-
-        numero_fmt = f"{parsed:02d}"
-        for key in keys:
-            if key and key not in foraneo_map:
-                foraneo_map[key] = numero_fmt
-
+    foraneo_map = build_map(df_foraneo, lambda idx: f"{idx + 1:02d}")
     return local_map, foraneo_map
 
 
 def assign_flow_numbers(entries_local, entries_foraneo, df_all: pd.DataFrame) -> None:
-    local_map, _ = _build_flow_number_maps(df_all)
+    local_map, foraneo_map = _build_flow_number_maps(df_all)
 
-    # Foráneo: consecutivo real por orden de registro visible en app_i
-    # (incluye pedidos y devoluciones/casos ya cargados en entries_foraneo).
-    foraneo_map: dict[str, str] = {}
-    next_foraneo = 1
-    for entry in sorted(entries_foraneo, key=lambda e: e.get("sort_key", pd.Timestamp.max)):
-        if _is_cancelado_estado(entry.get("estado", "")):
+    # Integrar Numero_Foraneo manual de devoluciones/casos foráneos,
+    # sin alterar la numeración base de pedidos foráneos.
+    def _is_limpiado_entry(entry: dict) -> bool:
+        raw = sanitize_text(entry.get("completados_limpiado", "")).lower().strip()
+        normalized = unicodedata.normalize("NFKD", raw)
+        normalized = "".join(ch for ch in normalized if not unicodedata.combining(ch))
+        return normalized == "si"
+
+    active_foraneo_entries = [
+        e for e in sorted(entries_foraneo, key=lambda e: e.get("sort_key", pd.Timestamp.max))
+        if not _is_cancelado_estado(e.get("estado", "")) and not _is_limpiado_entry(e)
+    ]
+
+    used_numbers: set[int] = {
+        int(v)
+        for v in foraneo_map.values()
+        if str(v).isdigit() and int(v) > 0
+    }
+
+    for entry in active_foraneo_entries:
+        if not sanitize_text(entry.get("tipo", "")):
             continue
+        parsed = _parse_foraneo_number(entry.get("numero_foraneo", ""))
+        if parsed is not None:
+            used_numbers.add(parsed)
 
+    next_foraneo = 1
+    while next_foraneo in used_numbers:
+        next_foraneo += 1
+
+    for entry in active_foraneo_entries:
         keys = [
             _flow_match_key(entry.get("id_pedido", "")),
             _flow_match_key(entry.get("folio", "")),
         ]
-        existing = None
-        for key in keys:
-            if key and key in foraneo_map:
-                existing = foraneo_map[key]
-                break
+        if not any(keys):
+            continue
+        existing = next((foraneo_map[k] for k in keys if k and k in foraneo_map), None)
         if existing is not None:
             continue
 
-        numero_fmt = f"{next_foraneo:02d}"
-        next_foraneo += 1
+        is_case = bool(sanitize_text(entry.get("tipo", "")))
+        parsed = _parse_foraneo_number(entry.get("numero_foraneo", ""))
+
+        if is_case:
+            if parsed is None:
+                continue
+            numero = parsed
+            if numero >= next_foraneo:
+                next_foraneo = numero + 1
+        else:
+            while next_foraneo in used_numbers:
+                next_foraneo += 1
+            numero = next_foraneo
+            next_foraneo += 1
+
+        used_numbers.add(numero)
+        numero_fmt = f"{numero:02d}"
         for key in keys:
             if key and key not in foraneo_map:
                 foraneo_map[key] = numero_fmt
@@ -352,6 +354,10 @@ def assign_flow_numbers(entries_local, entries_foraneo, df_all: pd.DataFrame) ->
                 entry["numero"] = ""
                 continue
 
+            if suppress_cancelled_number and _is_limpiado_entry(entry):
+                entry["numero"] = ""
+                continue
+
             keys = [
                 _flow_match_key(entry.get("id_pedido", "")),
                 _flow_match_key(entry.get("folio", "")),
@@ -361,12 +367,17 @@ def assign_flow_numbers(entries_local, entries_foraneo, df_all: pd.DataFrame) ->
                 if key and key in primary_map:
                     number = primary_map[key]
                     break
-            if number is None:
+
+            if number is None and not suppress_cancelled_number:
                 for key in keys:
                     if key and key in fallback_map:
                         number = fallback_map[key]
                         break
-            entry["numero"] = number or "?"
+
+            if suppress_cancelled_number and sanitize_text(entry.get("tipo", "")) and not number:
+                entry["numero"] = ""
+            else:
+                entry["numero"] = number or "?"
 
     assign(entries_local, local_map, foraneo_map)
     assign(entries_foraneo, foraneo_map, local_map, suppress_cancelled_number=True)
@@ -448,6 +459,7 @@ def build_base_entry(row, categoria: str):
         "tipo_envio": sanitize_text(row.get("Tipo_Envio", "")),
         "tipo_envio_original": sanitize_text(row.get("Tipo_Envio_Original", "")),
         "tipo": sanitize_text(row.get("Tipo", "")),
+        "numero_foraneo": sanitize_text(row.get("Numero_Foraneo", "")),
         "badges": [],
         "details": [],
         "sort_key": compute_sort_key(row),
