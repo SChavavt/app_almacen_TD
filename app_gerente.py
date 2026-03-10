@@ -2670,206 +2670,239 @@ def render_cobranza_tab_gerente():
 
     st.info("📌 El seguimiento de pagos ahora se gestiona en la pestaña **📊 Seguimiento Cobranza**.")
 
-    st.markdown("### Descargar")
-    mes_dl = st.selectbox(
-        "Mes descarga (YYYY-MM)",
-        options=meses_disponibles,
-        index=meses_disponibles.index(mes_actual) if mes_actual in meses_disponibles else 0,
-        key="ger_cob_mes_dl",
-    )
-    if st.button("Generar y descargar Excel", key="ger_cob_excel"):
-        base_df, venc_df, com_df = _load_cobranza_data(force_refresh=True)
-        base_df = base_df[base_df.get("Mes", "").astype(str) == mes_dl] if not base_df.empty else pd.DataFrame()
+    def _generar_excel_cobranza_mes(mes_objetivo: str, actualizar_drive: bool = False):
+        base_df, venc_df, com_df = _load_cobranza_data(force_refresh=actualizar_drive)
+        base_df = base_df[base_df.get("Mes", "").astype(str) == mes_objetivo] if not base_df.empty else pd.DataFrame()
         if not base_df.empty and "Tipo_Pago" in base_df.columns:
             tipo_pago = base_df["Tipo_Pago"].astype(str).str.strip().str.upper()
             base_df = base_df[tipo_pago != "CONTADO"]
         if base_df.empty:
             st.error("No hay registros en cobranza_base para ese mes (excluyendo CONTADO).")
+            return None
+
+        out = base_df[["Codigo", "Razon_Social"]].drop_duplicates().copy()
+        base_saldos = base_df[["Codigo", "Saldo"]].copy() if "Saldo" in base_df.columns else pd.DataFrame(columns=["Codigo", "Saldo"])
+        if not base_saldos.empty:
+            base_saldos["Saldo"] = pd.to_numeric(base_saldos["Saldo"], errors="coerce").fillna(0.0)
+            base_saldos = base_saldos.groupby("Codigo", as_index=False)["Saldo"].sum()
+            out = out.merge(base_saldos, on="Codigo", how="left")
         else:
-            out = base_df[["Codigo", "Razon_Social"]].drop_duplicates().copy()
-            base_saldos = base_df[["Codigo", "Saldo"]].copy() if "Saldo" in base_df.columns else pd.DataFrame(columns=["Codigo", "Saldo"])
-            if not base_saldos.empty:
-                base_saldos["Saldo"] = pd.to_numeric(base_saldos["Saldo"], errors="coerce").fillna(0.0)
-                base_saldos = base_saldos.groupby("Codigo", as_index=False)["Saldo"].sum()
-                out = out.merge(base_saldos, on="Codigo", how="left")
-            else:
-                out["Saldo"] = 0.0
-            if not venc_df.empty:
-                venc_mes = venc_df[venc_df.get("Mes", "").astype(str) == mes_dl].copy()
-                venc_mes = venc_mes[venc_mes.get("Codigo", "").astype(str).isin(out["Codigo"].astype(str))]
-            else:
-                venc_mes = pd.DataFrame()
+            out["Saldo"] = 0.0
+        if not venc_df.empty:
+            venc_mes = venc_df[venc_df.get("Mes", "").astype(str) == mes_objetivo].copy()
+            venc_mes = venc_mes[venc_mes.get("Codigo", "").astype(str).isin(out["Codigo"].astype(str))]
+        else:
+            venc_mes = pd.DataFrame()
 
-            extra_cols = ["Folio", "Saldo_Vence", "Fecha_Vencimiento", "Condicion", "Moneda", "Estatus_Cobranza"]
-            for c in extra_cols:
-                out[c] = ""
+        extra_cols = ["Folio", "Saldo_Vence", "Fecha_Vencimiento", "Condicion", "Moneda", "Estatus_Cobranza"]
+        for c in extra_cols:
+            out[c] = ""
 
-            if not venc_mes.empty:
-                venc_mes["Saldo_Vence"] = pd.to_numeric(venc_mes.get("Saldo_Vence", ""), errors="coerce")
-                venc_ag = venc_mes.groupby("Codigo", as_index=False).agg({
-                    "Folio": lambda s: " | ".join(sorted({str(x).strip() for x in s if str(x).strip()})),
-                    "Saldo_Vence": "sum",
-                    "Fecha_Vencimiento": lambda s: " | ".join(sorted({str(x).strip() for x in s if str(x).strip()})),
-                    "Condicion": lambda s: " | ".join(sorted({str(x).strip() for x in s if str(x).strip()})),
-                    "Moneda": lambda s: " | ".join(sorted({str(x).strip() for x in s if str(x).strip()})),
-                })
-                out = out.merge(venc_ag, on="Codigo", how="left", suffixes=("", "_agg"))
-                out["Folio"] = out["Folio_agg"].fillna("")
-                out["Saldo_Vence"] = out["Saldo_Vence_agg"].fillna(0.0)
-                out["Fecha_Vencimiento"] = out["Fecha_Vencimiento_agg"].fillna("")
-                out["Condicion"] = out["Condicion_agg"].fillna("")
-                out["Moneda"] = out["Moneda_agg"].fillna("")
-                out = out.drop(columns=[c for c in ["Folio_agg", "Saldo_Vence_agg", "Fecha_Vencimiento_agg", "Condicion_agg", "Moneda_agg"] if c in out.columns])
+        if not venc_mes.empty:
+            venc_mes["Saldo_Vence"] = pd.to_numeric(venc_mes.get("Saldo_Vence", ""), errors="coerce")
+            venc_ag = venc_mes.groupby("Codigo", as_index=False).agg({
+                "Folio": lambda s: " | ".join(sorted({str(x).strip() for x in s if str(x).strip()})),
+                "Saldo_Vence": "sum",
+                "Fecha_Vencimiento": lambda s: " | ".join(sorted({str(x).strip() for x in s if str(x).strip()})),
+                "Condicion": lambda s: " | ".join(sorted({str(x).strip() for x in s if str(x).strip()})),
+                "Moneda": lambda s: " | ".join(sorted({str(x).strip() for x in s if str(x).strip()})),
+            })
+            out = out.merge(venc_ag, on="Codigo", how="left", suffixes=("", "_agg"))
+            out["Folio"] = out["Folio_agg"].fillna("")
+            out["Saldo_Vence"] = out["Saldo_Vence_agg"].fillna(0.0)
+            out["Fecha_Vencimiento"] = out["Fecha_Vencimiento_agg"].fillna("")
+            out["Condicion"] = out["Condicion_agg"].fillna("")
+            out["Moneda"] = out["Moneda_agg"].fillna("")
+            out = out.drop(columns=[c for c in ["Folio_agg", "Saldo_Vence_agg", "Fecha_Vencimiento_agg", "Condicion_agg", "Moneda_agg"] if c in out.columns])
 
-            out["Saldo"] = pd.to_numeric(out.get("Saldo", 0.0), errors="coerce").fillna(0.0)
-            out["Saldo_Vence"] = pd.to_numeric(out.get("Saldo_Vence", 0.0), errors="coerce").fillna(0.0)
-            out["Estatus_Cobranza"] = np.where(
-                (out["Saldo"] <= 0.0) & (out["Saldo_Vence"] <= 0.0),
-                "PAGADO",
-                "CON SALDO",
-            )
+        out["Saldo"] = pd.to_numeric(out.get("Saldo", 0.0), errors="coerce").fillna(0.0)
+        out["Saldo_Vence"] = pd.to_numeric(out.get("Saldo_Vence", 0.0), errors="coerce").fillna(0.0)
+        out["Estatus_Cobranza"] = np.where(
+            (out["Saldo"] <= 0.0) & (out["Saldo_Vence"] <= 0.0),
+            "PAGADO",
+            "CON SALDO",
+        )
 
-            for d in range(1, 32):
-                out[str(d)] = ""
+        for d in range(1, 32):
+            out[str(d)] = ""
 
-            if not venc_mes.empty and "Fecha_Vencimiento" in venc_mes.columns:
-                fechas = pd.to_datetime(venc_mes["Fecha_Vencimiento"], errors="coerce", dayfirst=False)
-                saldos_vence = pd.to_numeric(venc_mes.get("Saldo_Vence", 0), errors="coerce").fillna(0.0)
-                for codigo, fecha, saldo_vence in zip(venc_mes.get("Codigo", "").astype(str), fechas, saldos_vence):
-                    if pd.isna(fecha):
-                        continue
-                    dia_col = str(int(fecha.day))
-                    nota = (
-                        f"{fecha.strftime('%d/%m')}: Pagada"
-                        if float(saldo_vence) <= 0.0
-                        else f"{fecha.strftime('%d/%m')}: Vence"
+        if not venc_mes.empty and "Fecha_Vencimiento" in venc_mes.columns:
+            fechas = pd.to_datetime(venc_mes["Fecha_Vencimiento"], errors="coerce", dayfirst=False)
+            saldos_vence = pd.to_numeric(venc_mes.get("Saldo_Vence", 0), errors="coerce").fillna(0.0)
+            for codigo, fecha, saldo_vence in zip(venc_mes.get("Codigo", "").astype(str), fechas, saldos_vence):
+                if pd.isna(fecha):
+                    continue
+                dia_col = str(int(fecha.day))
+                nota = (
+                    f"{fecha.strftime('%d/%m')}: Pagada"
+                    if saldo_vence <= 0
+                    else f"{fecha.strftime('%d/%m')}: Debe ${saldo_vence:,.2f}"
+                )
+                if dia_col in out.columns:
+                    mask = out["Codigo"].astype(str) == str(codigo)
+                    previo = out.loc[mask, dia_col].astype(str).fillna("")
+                    out.loc[mask, dia_col] = np.where(
+                        previo.str.strip() == "",
+                        nota,
+                        np.where(nota.strip() == "", previo, previo + "\n" + nota),
                     )
-                    if dia_col in out.columns:
-                        mask = out["Codigo"].astype(str) == codigo
-                        previo = out.loc[mask, dia_col].astype(str).fillna("")
-                        out.loc[mask, dia_col] = np.where(
-                            previo.str.strip() == "",
-                            nota,
-                            previo + "\n" + nota,
-                        )
 
-            if not com_df.empty:
-                com_df = com_df[com_df.get("Mes", "").astype(str) == mes_dl]
-                for r in com_df.itertuples(index=False):
-                    dia = _cobranza_clean_text(getattr(r, "Dia", "1")) or "1"
-                    cod = _cobranza_clean_text(getattr(r, "Codigo", ""))
-                    folio = _cobranza_clean_text(getattr(r, "Folio", ""))
-                    txt = _cobranza_clean_text(getattr(r, "Comentario", ""))
-                    if folio:
-                        txt = f"{folio}: {txt}"
-                    if dia in out.columns:
-                        mask = out["Codigo"].astype(str) == cod
-                        previo = out.loc[mask, dia].astype(str).fillna("")
-                        out.loc[mask, dia] = np.where(
-                            previo.str.strip() == "",
-                            txt,
-                            np.where(txt.strip() == "", previo, previo + "\n" + txt),
-                        )
+        if not com_df.empty:
+            com_mes = com_df[com_df.get("Mes", "").astype(str) == mes_objetivo].copy()
+            for r in com_mes.itertuples(index=False):
+                dia = _cobranza_clean_text(getattr(r, "Dia", "1")) or "1"
+                cod = _cobranza_clean_text(getattr(r, "Codigo", ""))
+                folio = _cobranza_clean_text(getattr(r, "Folio", ""))
+                txt = _cobranza_clean_text(getattr(r, "Comentario", ""))
+                if not cod or dia not in out.columns:
+                    continue
+                if folio:
+                    txt = f"[{folio}] {txt}" if txt else f"[{folio}]"
+                mask = out["Codigo"].astype(str) == cod
+                previo = out.loc[mask, dia].astype(str).fillna("")
+                out.loc[mask, dia] = np.where(
+                    previo.str.strip() == "",
+                    txt,
+                    np.where(txt.strip() == "", previo, previo + "\n" + txt),
+                )
 
-                    txt_seguimiento = _cobranza_texto_seguimiento_para_calendario(r)
-                    if txt_seguimiento:
-                        fecha_seg = pd.to_datetime(getattr(r, "Fecha_Proximo_Pago", ""), errors="coerce")
-                        if not pd.isna(fecha_seg):
-                            dia_seg = str(int(fecha_seg.day))
-                            if dia_seg in out.columns:
-                                mask = out["Codigo"].astype(str) == cod
-                                previo = out.loc[mask, dia_seg].astype(str).fillna("")
-                                out.loc[mask, dia_seg] = np.where(
-                                    previo.str.strip() == "",
-                                    txt_seguimiento,
-                                    np.where(txt_seguimiento.strip() == "", previo, previo + "\n" + txt_seguimiento),
-                                )
+                txt_seguimiento = _cobranza_texto_seguimiento_para_calendario(r)
+                if txt_seguimiento:
+                    fecha_seg = pd.to_datetime(getattr(r, "Fecha_Proximo_Pago", ""), errors="coerce")
+                    if not pd.isna(fecha_seg):
+                        dia_seg = str(int(fecha_seg.day))
+                        if dia_seg in out.columns:
+                            mask = out["Codigo"].astype(str) == cod
+                            previo = out.loc[mask, dia_seg].astype(str).fillna("")
+                            out.loc[mask, dia_seg] = np.where(
+                                previo.str.strip() == "",
+                                txt_seguimiento,
+                                np.where(txt_seguimiento.strip() == "", previo, previo + "\n" + txt_seguimiento),
+                            )
 
-            cols_orden = ["Codigo", "Razon_Social", "Folio", "Saldo_Vence", "Fecha_Vencimiento", "Condicion", "Moneda", "Estatus_Cobranza"] + [str(d) for d in range(1, 32)]
-            out = out[cols_orden]
+        cols_orden = ["Codigo", "Razon_Social", "Folio", "Saldo_Vence", "Fecha_Vencimiento", "Condicion", "Moneda", "Estatus_Cobranza"] + [str(d) for d in range(1, 32)]
+        out = out[cols_orden]
 
-            bio = BytesIO()
-            with pd.ExcelWriter(bio, engine="xlsxwriter") as writer:
-                out.to_excel(writer, sheet_name="Cobranza", index=False, startrow=1)
-                ws = writer.sheets["Cobranza"]
-                ws.write(0, 0, f"Fecha De Generación: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}   Periodo: {mes_dl}")
-                ws.freeze_panes(2, 2)
+        bio = BytesIO()
+        with pd.ExcelWriter(bio, engine="xlsxwriter") as writer:
+            out.to_excel(writer, sheet_name="Cobranza", index=False, startrow=1)
+            ws = writer.sheets["Cobranza"]
+            ws.write(0, 0, f"Fecha De Generación: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}   Periodo: {mes_objetivo}")
+            ws.freeze_panes(2, 2)
 
-                wb = writer.book
-                fmt_header = wb.add_format({"bold": True, "align": "center", "valign": "vcenter", "bg_color": "#D9E1F2", "border": 1})
-                fmt_texto = wb.add_format({"text_wrap": True, "valign": "top", "border": 1})
-                fmt_pago_completo = wb.add_format({"bg_color": "#C6EFCE", "font_color": "#006100", "text_wrap": True, "valign": "top", "border": 1})
+            wb = writer.book
+            fmt_header = wb.add_format({"bold": True, "align": "center", "valign": "vcenter", "bg_color": "#D9E1F2", "border": 1})
+            fmt_texto = wb.add_format({"text_wrap": True, "valign": "top", "border": 1})
+            fmt_pago_completo = wb.add_format({"bg_color": "#C6EFCE", "font_color": "#006100", "text_wrap": True, "valign": "top", "border": 1})
 
-                ws.set_row(1, 22)
-                for c_idx, col in enumerate(out.columns):
-                    ws.write(1, c_idx, col, fmt_header)
+            ws.set_row(1, 22)
+            for c_idx, col in enumerate(out.columns):
+                ws.write(1, c_idx, col, fmt_header)
 
-                anchos = {
-                    "Codigo": 12,
-                    "Razon_Social": 34,
-                    "Folio": 22,
-                    "Saldo_Vence": 14,
-                    "Fecha_Vencimiento": 18,
-                    "Condicion": 18,
-                    "Moneda": 10,
-                    "Estatus_Cobranza": 15,
-                }
-                for c_idx, col in enumerate(out.columns):
-                    if col in anchos:
-                        ws.set_column(c_idx, c_idx, anchos[col])
-                    elif str(col).isdigit():
-                        ws.set_column(c_idx, c_idx, 26)
+            anchos = {
+                "Codigo": 12,
+                "Razon_Social": 34,
+                "Folio": 22,
+                "Saldo_Vence": 14,
+                "Fecha_Vencimiento": 18,
+                "Condicion": 18,
+                "Moneda": 10,
+                "Estatus_Cobranza": 15,
+            }
+            for c_idx, col in enumerate(out.columns):
+                if col in anchos:
+                    ws.set_column(c_idx, c_idx, anchos[col])
+                elif str(col).isdigit():
+                    ws.set_column(c_idx, c_idx, 26)
+                else:
+                    ws.set_column(c_idx, c_idx, 14)
+
+            ws.autofilter(1, 0, len(out) + 1, len(out.columns) - 1)
+
+            for row_idx, row in out.iterrows():
+                max_lineas = 1
+                for dia in range(1, 32):
+                    col = str(dia)
+                    if col not in out.columns:
+                        continue
+                    val = str(row.get(col, "") or "")
+                    if val:
+                        lineas = val.count("\n") + 1
+                        estimado = max(1, int(len(val) / 34) + 1)
+                        max_lineas = max(max_lineas, max(lineas, estimado))
+                ws.set_row(row_idx + 2, min(110, max(20, max_lineas * 14)))
+
+                for dia in range(1, 32):
+                    col = str(dia)
+                    if col not in out.columns:
+                        continue
+                    c_idx = out.columns.get_loc(col)
+                    valor = str(row.get(col, "") or "")
+                    if _cobranza_es_pago_completo(valor):
+                        ws.write(row_idx + 2, c_idx, valor, fmt_pago_completo)
                     else:
-                        ws.set_column(c_idx, c_idx, 14)
+                        ws.write(row_idx + 2, c_idx, valor, fmt_texto)
+        bio.seek(0)
+        excel_bytes = bio.getvalue()
 
-                ws.autofilter(1, 0, len(out) + 1, len(out.columns) - 1)
-
-                for row_idx, row in out.iterrows():
-                    max_lineas = 1
-                    for dia in range(1, 32):
-                        col = str(dia)
-                        if col not in out.columns:
-                            continue
-                        val = str(row.get(col, "") or "")
-                        if val:
-                            lineas = val.count("\n") + 1
-                            estimado = max(1, int(len(val) / 34) + 1)
-                            max_lineas = max(max_lineas, max(lineas, estimado))
-                    ws.set_row(row_idx + 2, min(110, max(20, max_lineas * 14)))
-
-                    for dia in range(1, 32):
-                        col = str(dia)
-                        if col not in out.columns:
-                            continue
-                        c_idx = out.columns.get_loc(col)
-                        valor = str(row.get(col, "") or "")
-                        if _cobranza_es_pago_completo(valor):
-                            ws.write(row_idx + 2, c_idx, valor, fmt_pago_completo)
-                        else:
-                            ws.write(row_idx + 2, c_idx, valor, fmt_texto)
-            bio.seek(0)
-
+        if actualizar_drive:
             try:
                 spreadsheet_id = get_cobranza_spreadsheet_id()
                 nombre_hoja, creada = _cobranza_guardar_en_drive_por_mes(
                     spreadsheet_id,
-                    mes_dl,
+                    mes_objetivo,
                     out,
                 )
                 if creada:
-                    st.success(f"✅ También se guardó en Drive en una nueva hoja: {nombre_hoja}")
+                    st.success(f"✅ Excel actualizado. Se generó una hoja nueva en Drive: {nombre_hoja}")
                 else:
-                    st.success(f"✅ También se actualizó en Drive la hoja existente: {nombre_hoja}")
+                    st.success(f"✅ Excel actualizado. Solo se actualizó la hoja existente en Drive: {nombre_hoja}")
             except Exception as e:
                 st.warning(f"⚠️ Se generó el Excel local, pero no se pudo guardar en Drive: {e}")
 
+        return excel_bytes
+
+    st.markdown("### Actualizar Excel")
+    st.caption("Esta acción actualiza el Excel del mes seleccionado en Drive. Si no existe la hoja del mes, se crea una nueva automáticamente.")
+    mes_actualizar = st.selectbox(
+        "Mes a actualizar (YYYY-MM)",
+        options=meses_disponibles,
+        index=meses_disponibles.index(mes_actual) if mes_actual in meses_disponibles else 0,
+        key="ger_cob_mes_actualizar",
+    )
+    if st.button("Actualizar Excel del mes seleccionado", key="ger_cob_excel_actualizar"):
+        excel_bytes = _generar_excel_cobranza_mes(mes_actualizar, actualizar_drive=True)
+        if excel_bytes:
+            st.session_state["ger_cob_excel_descargas"] = st.session_state.get("ger_cob_excel_descargas", {})
+            st.session_state["ger_cob_excel_descargas"][mes_actualizar] = excel_bytes
+
+    st.markdown("### Descargar")
+    with st.expander("📥 Descargar hojas de meses disponibles", expanded=False):
+        st.caption("Aquí solo se preparan y descargan los Excel de los meses disponibles, sin actualizar Drive.")
+        mes_descarga = st.selectbox(
+            "Mes disponible para descargar (YYYY-MM)",
+            options=meses_disponibles,
+            index=meses_disponibles.index(mes_actual) if mes_actual in meses_disponibles else 0,
+            key="ger_cob_mes_descarga",
+        )
+        if st.button("Preparar Excel para descarga", key="ger_cob_preparar_descarga"):
+            excel_bytes = _generar_excel_cobranza_mes(mes_descarga, actualizar_drive=False)
+            if excel_bytes:
+                st.session_state["ger_cob_excel_descargas"] = st.session_state.get("ger_cob_excel_descargas", {})
+                st.session_state["ger_cob_excel_descargas"][mes_descarga] = excel_bytes
+
+        excel_descargas = st.session_state.get("ger_cob_excel_descargas", {})
+        excel_mes = excel_descargas.get(mes_descarga)
+        if excel_mes:
             st.download_button(
                 "Descargar Excel de cobranza",
-                data=bio.getvalue(),
-                file_name=f"cobranza_{mes_dl}.xlsx",
+                data=excel_mes,
+                file_name=f"cobranza_{mes_descarga}.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                key="ger_cob_download",
+                key=f"ger_cob_download_{mes_descarga}",
             )
+        else:
+            st.info("Prepara primero el archivo del mes seleccionado para habilitar su descarga.")
 
 
 
