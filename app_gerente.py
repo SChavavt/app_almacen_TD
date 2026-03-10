@@ -901,7 +901,11 @@ def render_descarga_tabla(df_base, key_prefix, permitir_filtros=True, ordenar_po
 
     if mostrar_descarga:
         buffer = BytesIO()
-        with pd.ExcelWriter(buffer, engine="xlsxwriter") as writer:
+        with pd.ExcelWriter(
+            buffer,
+            engine="xlsxwriter",
+            engine_kwargs={"options": {"strings_to_urls": False}},
+        ) as writer:
             filtrado.to_excel(writer, index=False, sheet_name="Pedidos")
         buffer.seek(0)
 
@@ -917,7 +921,11 @@ def render_descarga_tabla(df_base, key_prefix, permitir_filtros=True, ordenar_po
 def construir_excel_flujo_unificado(flujo_data):
     """Genera un Excel con 3 hojas (Foráneos, Locales y Casos especiales)."""
     buffer = BytesIO()
-    with pd.ExcelWriter(buffer, engine="xlsxwriter") as writer:
+    with pd.ExcelWriter(
+        buffer,
+        engine="xlsxwriter",
+        engine_kwargs={"options": {"strings_to_urls": False}},
+    ) as writer:
         for hoja, key in (("Foraneos", "foraneos"), ("Locales", "locales"), ("Casos_especiales", "casos")):
             df_hoja = flujo_data.get(key, pd.DataFrame()).copy()
             df_hoja = df_hoja.drop(columns=["ID_Pedido"], errors="ignore")
@@ -2784,7 +2792,11 @@ def render_cobranza_tab_gerente():
         out = out[cols_orden]
 
         bio = BytesIO()
-        with pd.ExcelWriter(bio, engine="xlsxwriter") as writer:
+        with pd.ExcelWriter(
+            bio,
+            engine="xlsxwriter",
+            engine_kwargs={"options": {"strings_to_urls": False}},
+        ) as writer:
             out.to_excel(writer, sheet_name="Cobranza", index=False, startrow=1)
             ws = writer.sheets["Cobranza"]
             ws.write(0, 0, f"Fecha De Generación: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}   Periodo: {mes_objetivo}")
