@@ -770,7 +770,7 @@ def build_flow_number_maps(
     def _is_limpiado(row_data: pd.Series) -> bool:
         return _normalize_text_for_matching(str(row_data.get("Completados_Limpiado", ""))) == "si"
 
-    used_numbers: set[int] = set()
+    manual_numbers: set[int] = set()
     for _, _, source_kind, row in combined_rows:
         if _is_cancelado_estado(row.get("Estado", "")) or _is_limpiado(row):
             continue
@@ -778,14 +778,36 @@ def build_flow_number_maps(
             continue
         parsed = _parse_foraneo_number(row.get("Numero_Foraneo", ""))
         if parsed is not None:
-            used_numbers.add(parsed)
+            manual_numbers.add(parsed)
 
-    next_number = 1
-    while next_number in used_numbers:
-        next_number += 1
+    used_numbers: set[int] = set(manual_numbers)
+    next_number = (max(manual_numbers) + 1) if manual_numbers else 1
 
+    # 1) Casos/devoluciones foráneos con Numero_Foraneo manual (se respeta tal cual).
     for _, _, source_kind, row in combined_rows:
         if _is_cancelado_estado(row.get("Estado", "")) or _is_limpiado(row):
+            continue
+        if source_kind != "caso":
+            continue
+
+        keys = [_flow_key(row.get("ID_Pedido", "")), _flow_key(row.get("Folio_Factura", ""))]
+        if not any(keys):
+            continue
+
+        parsed = _parse_foraneo_number(row.get("Numero_Foraneo", ""))
+        if parsed is None:
+            continue
+
+        numero_fmt = f"{parsed:02d}"
+        for key in keys:
+            if key and key not in map_foraneo:
+                map_foraneo[key] = numero_fmt
+
+    # 2) Pedidos foráneos normales en secuencia, sin repetir manuales.
+    for _, _, source_kind, row in combined_rows:
+        if _is_cancelado_estado(row.get("Estado", "")) or _is_limpiado(row):
+            continue
+        if source_kind == "caso":
             continue
 
         keys = [_flow_key(row.get("ID_Pedido", "")), _flow_key(row.get("Folio_Factura", ""))]
@@ -800,19 +822,10 @@ def build_flow_number_maps(
         if existing is not None:
             continue
 
-        parsed = _parse_foraneo_number(row.get("Numero_Foraneo", ""))
-        if source_kind == "caso" and parsed is None:
-            continue
-
-        if parsed is not None:
-            numero = parsed
-            if numero >= next_number:
-                next_number = numero + 1
-        else:
-            while next_number in used_numbers:
-                next_number += 1
-            numero = next_number
+        while next_number in used_numbers:
             next_number += 1
+        numero = next_number
+        next_number += 1
 
         used_numbers.add(numero)
         numero_fmt = f"{numero:02d}"
