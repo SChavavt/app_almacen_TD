@@ -3511,9 +3511,11 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
                                         st.session_state["active_main_tab_index"] = int(tab_val)
                                     except (ValueError, TypeError):
                                         st.session_state["active_main_tab_index"] = 0
-                                # 🚀 OPTIMIZACIÓN 8: Marcar contexto con scroll
-                                marcar_contexto_pedido(row["ID_Pedido"], origen_tab, scroll=True)
+                                # Mantener contexto del pedido sin forzar scroll
+                                marcar_contexto_pedido(row["ID_Pedido"], origen_tab, scroll=False)
                                 preserve_tab_state()
+                                st.session_state["refresh_data_caches_pending"] = True
+                                st.session_state["reload_after_action"] = True
                                 render_guia_upload_feedback(
                                     success_placeholder,
                                     row["ID_Pedido"],
@@ -3529,6 +3531,7 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
                                     gsheet_row_index,
                                     origen_tab,
                                 )
+                                st.rerun()
                             else:
                                 st.error(
                                     "❌ No se pudo actualizar el Google Sheet con los archivos de guía."
@@ -3898,8 +3901,10 @@ def mostrar_pedido_solo_guia(df, idx, row, orden, origen_tab, current_main_tab_l
                             "timestamp": mx_now_str(),
                         }
                         st.cache_data.clear()
-                        marcar_contexto_pedido(row["ID_Pedido"], origen_tab)
+                        marcar_contexto_pedido(row["ID_Pedido"], origen_tab, scroll=False)
                         preserve_tab_state()
+                        st.session_state["refresh_data_caches_pending"] = True
+                        st.session_state["reload_after_action"] = True
                         render_guia_upload_feedback(
                             success_placeholder,
                             row["ID_Pedido"],
@@ -3916,6 +3921,7 @@ def mostrar_pedido_solo_guia(df, idx, row, orden, origen_tab, current_main_tab_l
                             gsheet_row_index,
                             origen_tab,
                         )
+                        st.rerun()
                     else:
                         st.error(
                             "❌ No se pudo actualizar el Google Sheet con los archivos de guía."
