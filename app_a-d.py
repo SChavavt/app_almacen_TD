@@ -5664,7 +5664,15 @@ if df_main is not None:
             row_key_base = (idp or f"{folio}_{cliente}").replace(" ", "_") or "sin_id"
             row_key     = f"{row_key_base}_{idx}"
     
-            numero_foraneo_visible = resolve_case_foraneo_display_number(row, orden_devolucion)
+            tipo_case = _normalize_text_for_matching(
+                f"{row.get('Tipo_Envio', '')} {row.get('Tipo_Envio_Original', '')}"
+            )
+            is_foraneo_case = "foraneo" in tipo_case
+            numero_foraneo_visible = (
+                resolve_case_foraneo_display_number(row, orden_devolucion)
+                if is_foraneo_case
+                else None
+            )
 
             if area_resp.lower() == "cliente":
                 if estado.lower() == "aprobado" and estado_rec.lower() == "todo correcto":
@@ -5678,14 +5686,12 @@ if df_main is not None:
                 expander_title = f"🔁 {folio or 's/folio'} – {cliente or 's/cliente'} | Estado: {estado} | Estado_Recepcion: {estado_rec}"
     
             with st.expander(expander_title, expanded=st.session_state["expanded_devoluciones"].get(row_key, False)):
-                st.markdown(f"**🔢 Número foráneo asignado:** `{numero_foraneo_visible}`")
+                if is_foraneo_case and numero_foraneo_visible:
+                    st.markdown(f"**🔢 Número foráneo asignado:** `{numero_foraneo_visible}`")
 
-                tipo_case = _normalize_text_for_matching(
-                    f"{row.get('Tipo_Envio', '')} {row.get('Tipo_Envio_Original', '')}"
-                )
                 row_idx_case = row.get("_gsheet_row_index", row.get("gsheet_row_index"))
                 numero_case_actual = _parse_foraneo_number(row.get("Numero_Foraneo", ""))
-                if "foraneo" in tipo_case:
+                if is_foraneo_case:
                     assign_col, info_col = st.columns([1, 2])
                     with assign_col:
                         if st.button("Asignar número foráneo", key=f"assign_num_foraneo_{row_key}"):
@@ -7221,11 +7227,20 @@ if df_main is not None:
                             st.rerun()
                     comp_dev = comp_dev.sort_values(by="Fecha_Completado", ascending=False)
                     for orden_dev_comp, (_, row) in enumerate(comp_dev.iterrows(), start=1):
-                        numero_foraneo_visible = resolve_case_foraneo_display_number(row, orden_dev_comp)
+                        tipo_case = _normalize_text_for_matching(
+                            f"{row.get('Tipo_Envio', '')} {row.get('Tipo_Envio_Original', '')}"
+                        )
+                        is_foraneo_case = "foraneo" in tipo_case
+                        numero_foraneo_visible = (
+                            resolve_case_foraneo_display_number(row, orden_dev_comp)
+                            if is_foraneo_case
+                            else None
+                        )
                         with st.expander(
                             f"🔁 {row.get('Folio_Factura', 'N/A')} – {row.get('Cliente', 'N/A')}"
                         ):
-                            st.markdown(f"**🔢 Número foráneo asignado:** `{numero_foraneo_visible}`")
+                            if is_foraneo_case and numero_foraneo_visible:
+                                st.markdown(f"**🔢 Número foráneo asignado:** `{numero_foraneo_visible}`")
                             render_caso_especial_devolucion(row)
     
                 # Garantías completadas/canceladas
