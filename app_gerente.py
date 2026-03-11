@@ -2930,7 +2930,22 @@ def render_cobranza_tab_gerente():
             base_saldos = base_saldos.groupby("Codigo", as_index=False)["Saldo"].sum()
             out = out.merge(base_saldos, on="Codigo", how="left")
         else:
-            out["Saldo"] = 0.0
+            out["Saldo"] = np.nan
+
+        # Si el cliente sólo aparece por seguimiento del mes operativo (sin base del mes),
+        # heredamos el saldo más reciente disponible para no marcarlo como PAGADO por default.
+        base_saldos_hist = pd.DataFrame(columns=["Codigo", "Saldo"])
+        if not base_all.empty and "Saldo" in base_all.columns:
+            base_saldos_hist = base_all[["Codigo", "Saldo"]].copy()
+            base_saldos_hist["Codigo"] = base_saldos_hist.get("Codigo", "").astype(str)
+            base_saldos_hist["Saldo"] = pd.to_numeric(base_saldos_hist["Saldo"], errors="coerce")
+            base_saldos_hist = base_saldos_hist.sort_values(by=[c for c in ["Ultima_Actualizacion", "Mes"] if c in base_saldos_hist.columns])
+            base_saldos_hist = base_saldos_hist.drop_duplicates(subset=["Codigo"], keep="last")
+            base_saldos_hist = base_saldos_hist.rename(columns={"Saldo": "Saldo_hist"})
+            out = out.merge(base_saldos_hist[["Codigo", "Saldo_hist"]], on="Codigo", how="left")
+            out["Saldo"] = out["Saldo"].fillna(out["Saldo_hist"])
+            out = out.drop(columns=["Saldo_hist"], errors="ignore")
+        out["Saldo"] = pd.to_numeric(out.get("Saldo", 0.0), errors="coerce").fillna(0.0)
         if not venc_df.empty:
             venc_mes = venc_df[venc_df.get("Mes", "").astype(str) == mes_objetivo].copy()
             venc_mes = venc_mes[venc_mes.get("Codigo", "").astype(str).isin(out["Codigo"].astype(str))]
@@ -2958,13 +2973,57 @@ def render_cobranza_tab_gerente():
             out["Moneda"] = out["Moneda_agg"].fillna("")
             out = out.drop(columns=[c for c in ["Folio_agg", "Saldo_Vence_agg", "Fecha_Vencimiento_agg", "Condicion_agg", "Moneda_agg"] if c in out.columns])
 
-        out["Saldo"] = pd.to_numeric(out.get("Saldo", 0.0), errors="coerce").fillna(0.0)
+        # Fallback histórico para seguimientos que pasan a un nuevo mes operativo y no traen
+        # vencimientos en ese mes: mantiene folio/saldo/fecha desde el último registro conocido.
+        if not venc_df.empty:
+            venc_hist = venc_df.copy()
+            venc_hist["Codigo"] = venc_hist.get("Codigo", "").astype(str)
+            venc_hist["Fecha_Vencimiento"] = pd.to_datetime(venc_hist.get("Fecha_Vencimiento", ""), errors="coerce")
+            venc_hist["Saldo_Vence"] = pd.to_numeric(venc_hist.get("Saldo_Vence", ""), errors="coerce").fillna(0.0)
+            venc_hist = venc_hist[venc_hist["Codigo"].isin(out["Codigo"].astype(str))]
+            venc_hist = venc_hist.sort_values(["Codigo", "Fecha_Vencimiento"])
+            venc_hist = venc_hist.drop_duplicates(subset=["Codigo"], keep="last")
+            venc_hist["Fecha_Vencimiento"] = venc_hist["Fecha_Vencimiento"].dt.strftime("%Y-%m-%d")
+            venc_hist = venc_hist.rename(columns={
+                "Folio": "Folio_hist",
+                "Saldo_Vence": "Saldo_Vence_hist",
+                "Fecha_Vencimiento": "Fecha_Vencimiento_hist",
+                "Condicion": "Condicion_hist",
+                "Moneda": "Moneda_hist",
+            })
+            cols_hist = ["Codigo", "Folio_hist", "Saldo_Vence_hist", "Fecha_Vencimiento_hist", "Condicion_hist", "Moneda_hist"]
+            out = out.merge(venc_hist[cols_hist], on="Codigo", how="left")
+
+            mask_folio_vacio = out["Folio"].astype(str).str.strip() == ""
+            out.loc[mask_folio_vacio, "Folio"] = out.loc[mask_folio_vacio, "Folio_hist"].fillna("")
+            out.loc[mask_folio_vacio, "Fecha_Vencimiento"] = out.loc[mask_folio_vacio, "Fecha_Vencimiento_hist"].fillna("")
+            out.loc[mask_folio_vacio, "Condicion"] = out.loc[mask_folio_vacio, "Condicion_hist"].fillna("")
+            out.loc[mask_folio_vacio, "Moneda"] = out.loc[mask_folio_vacio, "Moneda_hist"].fillna("")
+
+            saldo_actual = pd.to_numeric(out["Saldo_Vence"], errors="coerce").fillna(0.0)
+            saldo_hist = pd.to_numeric(out.get("Saldo_Vence_hist", 0.0), errors="coerce").fillna(0.0)
+            out["Saldo_Vence"] = np.where(mask_folio_vacio, saldo_hist, saldo_actual)
+            out = out.drop(columns=[c for c in ["Folio_hist", "Saldo_Vence_hist", "Fecha_Vencimiento_hist", "Condicion_hist", "Moneda_hist"] if c in out.columns], errors="ignore")
+
         out["Saldo_Vence"] = pd.to_numeric(out.get("Saldo_Vence", 0.0), errors="coerce").fillna(0.0)
         out["Estatus_Cobranza"] = np.where(
             (out["Saldo"] <= 0.0) & (out["Saldo_Vence"] <= 0.0),
             "PAGADO",
             "CON SALDO",
         )
+
+        if not com_mes.empty:
+            codigos_con_seguimiento_activo = {
+                _cobranza_clean_text(cod)
+                for cod, est in zip(
+                    com_mes.get("Codigo", "").astype(str),
+                    com_mes.get("Estatus_Seguimiento", "").astype(str),
+                )
+                if _cobranza_clean_text(cod) and _cobranza_clean_text(est).upper() in {"PROMESA_PAGO", "PENDIENTE"}
+            }
+            if codigos_con_seguimiento_activo:
+                mask_seg_activo = out["Codigo"].astype(str).isin(codigos_con_seguimiento_activo)
+                out.loc[mask_seg_activo, "Estatus_Cobranza"] = "CON SALDO"
 
         codigos_liquidados = _cobranza_codigos_liquidados_mes(com_df, mes_objetivo)
         if codigos_liquidados:
