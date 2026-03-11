@@ -15,6 +15,7 @@ from typing import Optional, Tuple
 from zoneinfo import ZoneInfo
 from streamlit_autorefresh import st_autorefresh
 from textwrap import dedent
+from urllib.parse import urlsplit, urlunsplit, quote
 
 TZ = ZoneInfo("America/Mexico_City")
 
@@ -1874,6 +1875,8 @@ def compute_dashboard_base(df_conf: pd.DataFrame):
 @st.cache_data(ttl=120)
 def build_ultimos_pedidos_data(df_pedidos: pd.DataFrame, vendedor: str) -> pd.DataFrame:
     work = df_pedidos.copy() if not df_pedidos.empty else pd.DataFrame()
+    if not work.empty:
+        work["_origen_pedido"] = "pedidos"
     casos = load_casos_from_gsheets()
 
     if not casos.empty:
@@ -1884,6 +1887,7 @@ def build_ultimos_pedidos_data(df_pedidos: pd.DataFrame, vendedor: str) -> pd.Da
         ].copy()
 
         if not casos.empty:
+            casos["_origen_pedido"] = "casos_especiales"
             for base_col in [
                 "Hora_Registro",
                 "Cliente",
@@ -1973,16 +1977,25 @@ def display_attachments(adjuntos_str):
     """Renderiza enlaces; acepta lista separada por comas con keys o URLs completas."""
     if pd.isna(adjuntos_str) or not str(adjuntos_str).strip():
         return "N/A"
+
+    def _encode_url(url: str) -> str:
+        parsed = urlsplit(url)
+        encoded_path = quote(parsed.path, safe="/%._-~")
+        encoded_query = quote(parsed.query, safe="=&%._-~")
+        encoded_fragment = quote(parsed.fragment, safe="%._-~")
+        return urlunsplit((parsed.scheme, parsed.netloc, encoded_path, encoded_query, encoded_fragment))
+
     parts = [p.strip() for p in str(adjuntos_str).split(",") if p.strip()]
     links = []
     for p in parts:
         if p.startswith("http://") or p.startswith("https://"):
+            safe_url = _encode_url(p)
             name = p.split("/")[-1] or "archivo"
-            links.append(f"[{name}]({p})")
+            links.append(f"[{name}]({safe_url})")
         else:
             url = get_s3_file_url(p)
             name = p.split("/")[-1] or "archivo"
-            links.append(f"[{name}]({url})" if url else f"❌ {p}")
+            links.append(f"[{name}]({_encode_url(url)})" if url else f"❌ {p}")
     return " | ".join(links) if links else "N/A"
 
 
@@ -2738,7 +2751,21 @@ if selected_tab == 0:
         ).dt.strftime("%d/%m/%Y %H:%M").fillna("sin fecha")
         selector_df["_label_folio"] = selector_df["Folio_Factura"].map(sanitize_text)
         selector_df.loc[selector_df["_label_folio"] == "", "_label_folio"] = "Sin folio"
-        selector_df["_label_guia"] = selector_df.get("Adjuntos_Guia", "").map(sanitize_text).map(
+        guia_adjuntos = selector_df.get(
+            "Adjuntos_Guia", pd.Series("", index=selector_df.index)
+        ).map(sanitize_text)
+        guia_hoja_ruta = selector_df.get(
+            "Hoja_Ruta_Mensajero", pd.Series("", index=selector_df.index)
+        ).map(sanitize_text)
+        origen_pedido = selector_df.get(
+            "_origen_pedido", pd.Series("", index=selector_df.index)
+        ).map(sanitize_text)
+        selector_df["_guia_contenido"] = guia_adjuntos
+        selector_df.loc[
+            origen_pedido == "casos_especiales", "_guia_contenido"
+        ] = guia_hoja_ruta
+
+        selector_df["_label_guia"] = selector_df["_guia_contenido"].map(
             lambda x: "📋 " if x else ""
         )
         selector_df["_label_cliente"] = selector_df["Cliente"].map(sanitize_text)
@@ -2788,7 +2815,7 @@ if selected_tab == 0:
             with g2:
                 _render_detail_row(
                     "🧷 Adjuntos_Guia",
-                    display_attachments(pedido_sel.get("Adjuntos_Guia", "")),
+                    display_attachments(pedido_sel.get("_guia_contenido", "")),
                 )
 
             mod_cols = ["id_vendedor_Mod", "Modificacion_Surtido", "Adjuntos_Surtido"]
