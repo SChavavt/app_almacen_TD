@@ -1874,8 +1874,6 @@ def compute_dashboard_base(df_conf: pd.DataFrame):
 @st.cache_data(ttl=120)
 def build_ultimos_pedidos_data(df_pedidos: pd.DataFrame, vendedor: str) -> pd.DataFrame:
     work = df_pedidos.copy() if not df_pedidos.empty else pd.DataFrame()
-    if not work.empty:
-        work["_origen_pedido"] = "pedidos"
     casos = load_casos_from_gsheets()
 
     if not casos.empty:
@@ -1886,7 +1884,6 @@ def build_ultimos_pedidos_data(df_pedidos: pd.DataFrame, vendedor: str) -> pd.Da
         ].copy()
 
         if not casos.empty:
-            casos["_origen_pedido"] = "casos_especiales"
             for base_col in [
                 "Hora_Registro",
                 "Cliente",
@@ -2741,21 +2738,7 @@ if selected_tab == 0:
         ).dt.strftime("%d/%m/%Y %H:%M").fillna("sin fecha")
         selector_df["_label_folio"] = selector_df["Folio_Factura"].map(sanitize_text)
         selector_df.loc[selector_df["_label_folio"] == "", "_label_folio"] = "Sin folio"
-        guia_adjuntos = selector_df.get(
-            "Adjuntos_Guia", pd.Series("", index=selector_df.index)
-        ).map(sanitize_text)
-        guia_hoja_ruta = selector_df.get(
-            "Hoja_Ruta_Mensajero", pd.Series("", index=selector_df.index)
-        ).map(sanitize_text)
-        origen_pedido = selector_df.get(
-            "_origen_pedido", pd.Series("", index=selector_df.index)
-        ).map(sanitize_text)
-        selector_df["_guia_contenido"] = guia_adjuntos
-        selector_df.loc[
-            origen_pedido == "casos_especiales", "_guia_contenido"
-        ] = guia_hoja_ruta
-
-        selector_df["_label_guia"] = selector_df["_guia_contenido"].map(
+        selector_df["_label_guia"] = selector_df.get("Adjuntos_Guia", "").map(sanitize_text).map(
             lambda x: "📋 " if x else ""
         )
         selector_df["_label_cliente"] = selector_df["Cliente"].map(sanitize_text)
@@ -2805,7 +2788,7 @@ if selected_tab == 0:
             with g2:
                 _render_detail_row(
                     "🧷 Adjuntos_Guia",
-                    display_attachments(pedido_sel.get("_guia_contenido", "")),
+                    display_attachments(pedido_sel.get("Adjuntos_Guia", "")),
                 )
 
             mod_cols = ["id_vendedor_Mod", "Modificacion_Surtido", "Adjuntos_Surtido"]
