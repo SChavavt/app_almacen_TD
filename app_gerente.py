@@ -2371,15 +2371,16 @@ def render_cobranza_tab_gerente():
             st.caption(f"Detalle técnico: {e}")
             return
 
-    st.markdown("### Cargar archivos del mes")
     now_dt = datetime.now()
     mes_sel = now_dt.strftime("%Y-%m")
-    st.caption("El mes se asigna automáticamente con base en la Fecha_Vencimiento del archivo ANTIGÜEDAD_SALDOS.xlsx.")
 
-    with st.form("ger_cob_carga_form", clear_on_submit=False):
-        reporte = st.file_uploader("REPORTE.xlsx", type=["xlsx"], key="ger_cob_reporte")
-        antig = st.file_uploader("ANTIGÜEDAD_SALDOS.xlsx", type=["xlsx"], key="ger_cob_ant")
-        procesar_carga = st.form_submit_button("Procesar")
+    with st.expander("Cargar archivos del mes", expanded=False):
+        st.caption("El mes se asigna automáticamente con base en la Fecha_Vencimiento del archivo ANTIGÜEDAD_SALDOS.xlsx.")
+
+        with st.form("ger_cob_carga_form", clear_on_submit=False):
+            reporte = st.file_uploader("REPORTE.xlsx", type=["xlsx"], key="ger_cob_reporte")
+            antig = st.file_uploader("ANTIGÜEDAD_SALDOS.xlsx", type=["xlsx"], key="ger_cob_ant")
+            procesar_carga = st.form_submit_button("Procesar")
 
     if procesar_carga:
         with st.spinner("Procesando archivos, por favor espera..."):
