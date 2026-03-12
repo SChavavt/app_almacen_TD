@@ -2092,6 +2092,25 @@ def _cobranza_aplicar_formato_drive(ss, ws, total_rows: int, total_cols: int):
     if total_rows < 2 or total_cols <= 0:
         return
 
+    # Limpia reglas condicionales heredadas (versiones anteriores pintaban celdas completas en verde).
+    # Si no se eliminan explícitamente, Google Sheets conserva esas reglas al actualizar valores.
+    requests = []
+    try:
+        metadata = _retry_gspread_api_call(lambda: ss.fetch_sheet_metadata(), retries=3, base_delay=0.7)
+        sheets_meta = metadata.get("sheets", []) if isinstance(metadata, dict) else []
+        ws_meta = next((sh for sh in sheets_meta if sh.get("properties", {}).get("sheetId") == ws.id), None)
+        cond_rules = ws_meta.get("conditionalFormats", []) if isinstance(ws_meta, dict) else []
+        for idx in range(len(cond_rules) - 1, -1, -1):
+            requests.append({
+                "deleteConditionalFormatRule": {
+                    "sheetId": ws.id,
+                    "index": idx,
+                }
+            })
+    except Exception:
+        # Si falla la lectura de metadata continuamos con el formato base.
+        pass
+
     anchos_px = {
         0: 90,
         1: 260,
@@ -2103,7 +2122,7 @@ def _cobranza_aplicar_formato_drive(ss, ws, total_rows: int, total_cols: int):
         7: 120,
     }
 
-    requests = [
+    requests.extend([
         {
             "updateSheetProperties": {
                 "properties": {
@@ -2167,38 +2186,7 @@ def _cobranza_aplicar_formato_drive(ss, ws, total_rows: int, total_cols: int):
                 }
             }
         },
-    ]
-
-    if total_cols > 8 and total_rows > 2:
-        rango_dias = {
-            "sheetId": ws.id,
-            "startRowIndex": 2,
-            "endRowIndex": total_rows,
-            "startColumnIndex": 8,
-            "endColumnIndex": total_cols,
-        }
-        for txt_match in ["pago completo", "pagó completo", "liquidado", "liquidó", "liquido", "liquido factura"]:
-            requests.append({
-                "addConditionalFormatRule": {
-                    "rule": {
-                        "ranges": [rango_dias],
-                        "booleanRule": {
-                            "condition": {
-                                "type": "TEXT_CONTAINS",
-                                "values": [{"userEnteredValue": txt_match}],
-                            },
-                            "format": {
-                                "backgroundColor": {"red": 0.776, "green": 0.937, "blue": 0.808},
-                                "textFormat": {
-                                    "bold": True,
-                                    "foregroundColor": {"red": 0.0, "green": 0.0, "blue": 0.0},
-                                },
-                            },
-                        },
-                    },
-                    "index": 0,
-                }
-            })
+    ])
 
     for col_idx in range(total_cols):
         pixel_size = anchos_px.get(col_idx, 185 if col_idx >= 8 else 100)
@@ -2267,6 +2255,18 @@ def _cobranza_es_pago_completo(texto: str) -> bool:
         "liquidado",
     ]
     return any(v in txt for v in variantes)
+
+
+def _cobranza_etiqueta_pago_completo(texto: str) -> str:
+    """Agrega una marca visual en verde al comentario cuando ya fue liquidado/pagado completo."""
+    txt = _cobranza_clean_text(texto)
+    if not txt:
+        return ""
+    if not _cobranza_es_pago_completo(txt):
+        return txt
+    if "🟩" in txt:
+        return txt
+    return f"🟩 {txt}"
 
 
 def _cobranza_codigos_liquidados_mes(com_df: pd.DataFrame, mes_objetivo: str) -> set[str]:
@@ -3061,6 +3061,7 @@ def render_cobranza_tab_gerente():
                 cod = _cobranza_clean_text(getattr(r, "Codigo", ""))
                 folio = _cobranza_clean_text(getattr(r, "Folio", ""))
                 txt = _cobranza_clean_text(getattr(r, "Comentario", ""))
+                txt = _cobranza_etiqueta_pago_completo(txt)
                 if not cod or dia not in out.columns:
                     continue
                 if folio:
@@ -3104,7 +3105,6 @@ def render_cobranza_tab_gerente():
             wb = writer.book
             fmt_header = wb.add_format({"bold": True, "align": "center", "valign": "vcenter", "bg_color": "#D9E1F2", "border": 1})
             fmt_texto = wb.add_format({"text_wrap": True, "valign": "top", "border": 1})
-            fmt_pago_completo = wb.add_format({"bg_color": "#C6EFCE", "bold": True, "font_color": "#000000", "text_wrap": True, "valign": "top", "border": 1})
 
             ws.set_row(1, 22)
             for c_idx, col in enumerate(out.columns):
@@ -3160,10 +3160,7 @@ def render_cobranza_tab_gerente():
                         continue
                     c_idx = out.columns.get_loc(col)
                     valor = str(row.get(col, "") or "")
-                    if _cobranza_es_pago_completo(valor):
-                        ws.write(row_idx + 2, c_idx, valor, fmt_pago_completo)
-                    else:
-                        ws.write(row_idx + 2, c_idx, valor, fmt_texto)
+                    ws.write(row_idx + 2, c_idx, valor, fmt_texto)
         bio.seek(0)
         excel_bytes = bio.getvalue()
 
