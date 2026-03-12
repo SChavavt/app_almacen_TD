@@ -412,11 +412,18 @@ def _render_confirmar_modificacion_flow(
     awaiting_confirmation = st.session_state.get(flag_key, False)
 
     if not awaiting_confirmation:
-        if st.button(button_label, key=f"{flag_key}_trigger"):
+        trigger_placeholder = st.empty()
+        with trigger_placeholder:
+            trigger_clicked = st.button(button_label, key=f"{flag_key}_trigger")
+
+        if trigger_clicked:
+            trigger_placeholder.empty()
+            preserve_tab_state()
             st.session_state[flag_key] = True
+            awaiting_confirmation = True
             st.info("⚠️ Vuelve a confirmar para aplicar los cambios de surtido.")
-            st.rerun()
-        return None
+        else:
+            return None
 
     st.warning("¿Confirmas que deseas marcar esta modificación de surtido como confirmada?")
     if include_write_option:
@@ -451,8 +458,6 @@ def _render_confirmar_modificacion_flow(
             st.rerun()
 
     return None
-
-
 def _get_first_query_value(params: Any, key: str) -> Optional[str]:
     """Return the first value for ``key`` from Streamlit query params."""
 
@@ -3673,7 +3678,7 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
                     mod_confirmation_action = _render_confirmar_modificacion_flow(
                         context_key=f"{row['ID_Pedido']}_{idx}_{origen_tab}",
                         button_label="✅ Confirmar Cambios de Surtido",
-                        include_write_option=origen_tab == "Foráneo",
+                        include_write_option=origen_tab == "Foráneo"
                     )
                     if mod_confirmation_action:
                         st.session_state["expanded_pedidos"][row['ID_Pedido']] = True
@@ -3719,7 +3724,7 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
                         mod_confirmation_action = _render_confirmar_modificacion_flow(
                             context_key=f"df_{row['ID_Pedido']}_{idx}_{origen_tab}",
                             button_label="✅ Confirmar Cambios de Surtido",
-                            include_write_option=origen_tab == "Foráneo",
+                            include_write_option=origen_tab == "Foráneo"
                         )
                         if mod_confirmation_action:
                             st.session_state["expanded_pedidos"][row["ID_Pedido"]] = True
@@ -6079,7 +6084,7 @@ if df_main is not None:
                             mod_confirmation_action = _render_confirmar_modificacion_flow(
                                 context_key=f"caso_{idp or folio or cliente}",
                                 button_label="✅ Confirmar Cambios de Surtido",
-                                include_write_option=origen_tab == "Foráneo",
+                                include_write_option=origen_tab == "Foráneo"
                             )
                             if mod_confirmation_action:
                                 try:
@@ -6747,7 +6752,7 @@ if df_main is not None:
                             mod_confirmation_action = _render_confirmar_modificacion_flow(
                                 context_key=f"garantia_{unique_suffix}",
                                 button_label="✅ Confirmar Cambios de Surtido (Garantía)",
-                                include_write_option=origen_tab == "Foráneo",
+                                include_write_option=origen_tab == "Foráneo"
                             )
                             if mod_confirmation_action:
                                 try:
