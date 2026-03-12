@@ -2845,7 +2845,7 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
             f"❌ No se puede operar el pedido '{row['ID_Pedido']}' porque su índice de fila es inválido: {gsheet_row_index}."
         )
         return
-    folio = row.get("Folio_Factura", "").strip() or row['ID_Pedido']
+    folio = row.get("Folio_Factura", "").strip() or "S/F"
     guia_marker = "📋 " if pedido_sin_guia(row) else ""
     st.markdown(f'<a name="pedido_{row["ID_Pedido"]}"></a>', unsafe_allow_html=True)
     _render_bulk_selector(row)
@@ -3109,7 +3109,7 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
 
         numero_visible = resolve_flow_display_number(row, orden)
         col_order_num.write(f"**{numero_visible}**")
-        folio_factura = row.get("Folio_Factura", "").strip()
+        folio_factura = row.get("Folio_Factura", "").strip() or "S/F"
         cliente = row.get("Cliente", "").strip()
         col_client.markdown(f"📄 **{folio_factura}**  \n🤝 **{cliente}**")
 
@@ -3772,7 +3772,7 @@ def mostrar_pedido_solo_guia(df, idx, row, orden, origen_tab, current_main_tab_l
         st.error(f"❌ Error interno: No se obtuvo _gsheet_row_index para '{row.get('ID_Pedido','?')}'.")
         return
 
-    folio = (row.get("Folio_Factura", "") or "").strip() or row['ID_Pedido']
+    folio = (row.get("Folio_Factura", "") or "").strip() or "S/F"
     st.markdown(f'<a name="pedido_{row["ID_Pedido"]}"></a>', unsafe_allow_html=True)
     _render_bulk_selector(row)
 
