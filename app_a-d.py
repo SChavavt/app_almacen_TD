@@ -1772,6 +1772,83 @@ def batch_update_gsheet_cells(worksheet, updates_list, *, headers: Optional[list
     return False
 
 
+def confirmar_modificacion_surtido(
+    worksheet,
+    headers,
+    gsheet_row_index,
+    mod_texto,
+):
+    """Confirma modificación de surtido priorizando batch y con fallback seguro."""
+
+    if "Modificacion_Surtido" not in headers:
+        st.error("❌ No existe la columna 'Modificacion_Surtido' para confirmar el cambio.")
+        return False
+
+    texto_confirmado = f"{str(mod_texto or '').strip()} [✔CONFIRMADO]".strip()
+
+    updates = [
+        {
+            "range": gspread.utils.rowcol_to_a1(
+                gsheet_row_index,
+                headers.index("Modificacion_Surtido") + 1,
+            ),
+            "values": [[texto_confirmado]],
+        }
+    ]
+
+    if "Estado" in headers:
+        updates.append(
+            {
+                "range": gspread.utils.rowcol_to_a1(
+                    gsheet_row_index,
+                    headers.index("Estado") + 1,
+                ),
+                "values": [["🔵 En Proceso"]],
+            }
+        )
+
+    if "Hora_Proceso" in headers:
+        updates.append(
+            {
+                "range": gspread.utils.rowcol_to_a1(
+                    gsheet_row_index,
+                    headers.index("Hora_Proceso") + 1,
+                ),
+                "values": [[mx_now_str()]],
+            }
+        )
+
+    if batch_update_gsheet_cells(worksheet, updates, headers=headers):
+        return True
+
+    # Fallback resiliente: conservar funcionalidad aunque falle la operación batch.
+    ok = update_gsheet_cell(
+        worksheet,
+        headers,
+        gsheet_row_index,
+        "Modificacion_Surtido",
+        texto_confirmado,
+    )
+    if ok and "Estado" in headers:
+        ok = update_gsheet_cell(
+            worksheet,
+            headers,
+            gsheet_row_index,
+            "Estado",
+            "🔵 En Proceso",
+        )
+    if ok and "Hora_Proceso" in headers:
+        ok = update_gsheet_cell(
+            worksheet,
+            headers,
+            gsheet_row_index,
+            "Hora_Proceso",
+            mx_now_str(),
+        )
+
+    return ok
+
+
 def mirror_guide_value(
     worksheet,
     headers,
@@ -3567,32 +3644,19 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
                         button_label="✅ Confirmar Cambios de Surtido",
                     ):
                         st.session_state["expanded_pedidos"][row['ID_Pedido']] = True
-                        st.session_state["scroll_to_pedido_id"] = row["ID_Pedido"]
-                        nuevo_texto = mod_texto + " [✔CONFIRMADO]"
-                        success = update_gsheet_cell(
-                            worksheet, headers, gsheet_row_index, "Modificacion_Surtido", nuevo_texto
-                        )
-                        if success and "Estado" in headers:
-                            success = update_gsheet_cell(
+                        st.session_state["expanded_subir_guia"][row['ID_Pedido']] = True
+                        with st.spinner("Confirmando cambios de surtido…"):
+                            success = confirmar_modificacion_surtido(
                                 worksheet,
                                 headers,
                                 gsheet_row_index,
-                                "Estado",
-                                "🔵 En Proceso",
-                            )
-                        if success and "Hora_Proceso" in headers:
-                            success = update_gsheet_cell(
-                                worksheet,
-                                headers,
-                                gsheet_row_index,
-                                "Hora_Proceso",
-                                mx_now_str(),
+                                mod_texto,
                             )
                         if success:
                             row["Estado"] = "🔵 En Proceso"
                             st.success("✅ Cambios de surtido confirmados y pedido en '🔵 En Proceso'.")
                             st.cache_data.clear()
-                            marcar_contexto_pedido(row["ID_Pedido"], origen_tab)
+                            marcar_contexto_pedido(row["ID_Pedido"], origen_tab, scroll=False)
                             st.rerun()
                         else:
                             st.error("❌ No se pudo confirmar la modificación.")
@@ -3618,30 +3682,13 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
                             button_label="✅ Confirmar Cambios de Surtido",
                         ):
                             st.session_state["expanded_pedidos"][row["ID_Pedido"]] = True
-                            st.session_state["scroll_to_pedido_id"] = row["ID_Pedido"]
-                            nuevo_texto = mod_texto + " [✔CONFIRMADO]"
-                            success = update_gsheet_cell(
-                                worksheet,
-                                headers,
-                                gsheet_row_index,
-                                "Modificacion_Surtido",
-                                nuevo_texto,
-                            )
-                            if success and "Estado" in headers:
-                                success = update_gsheet_cell(
+                            st.session_state["expanded_subir_guia"][row["ID_Pedido"]] = True
+                            with st.spinner("Confirmando cambios de surtido…"):
+                                success = confirmar_modificacion_surtido(
                                     worksheet,
                                     headers,
                                     gsheet_row_index,
-                                    "Estado",
-                                    "🔵 En Proceso",
-                                )
-                            if success and "Hora_Proceso" in headers:
-                                success = update_gsheet_cell(
-                                    worksheet,
-                                    headers,
-                                    gsheet_row_index,
-                                    "Hora_Proceso",
-                                    mx_now_str(),
+                                    mod_texto,
                                 )
                             if success:
                                 row["Estado"] = "🔵 En Proceso"
@@ -3649,7 +3696,7 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
                                     "✅ Cambios de surtido confirmados y pedido en '🔵 En Proceso'."
                                 )
                                 st.cache_data.clear()
-                                marcar_contexto_pedido(row["ID_Pedido"], origen_tab)
+                                marcar_contexto_pedido(row["ID_Pedido"], origen_tab, scroll=False)
                                 st.rerun()
                             else:
                                 st.error("❌ No se pudo confirmar la modificación.")
@@ -6004,23 +6051,12 @@ if df_main is not None:
                                     if gsheet_row_idx is None:
                                         st.error("❌ No se encontró el caso para confirmar la modificación.")
                                     else:
-                                        nuevo_texto = mod_texto + " [✔CONFIRMADO]"
-                                        ok = update_gsheet_cell(worksheet_casos, headers_casos, gsheet_row_idx, "Modificacion_Surtido", nuevo_texto)
-                                        if ok and "Estado" in headers_casos:
-                                            ok = update_gsheet_cell(
+                                        with st.spinner("Confirmando cambios de surtido…"):
+                                            ok = confirmar_modificacion_surtido(
                                                 worksheet_casos,
                                                 headers_casos,
                                                 gsheet_row_idx,
-                                                "Estado",
-                                                "🔵 En Proceso",
-                                            )
-                                        if ok and "Hora_Proceso" in headers_casos:
-                                            ok = update_gsheet_cell(
-                                                worksheet_casos,
-                                                headers_casos,
-                                                gsheet_row_idx,
-                                                "Hora_Proceso",
-                                                mx_now_str(),
+                                                mod_texto,
                                             )
 
                                         if ok:
@@ -6675,23 +6711,12 @@ if df_main is not None:
                                     if gsheet_row_idx is None:
                                         st.error("❌ No se encontró el caso para confirmar la modificación.")
                                     else:
-                                        nuevo_texto = mod_texto + " [✔CONFIRMADO]"
-                                        ok = update_gsheet_cell(worksheet_casos, headers_casos, gsheet_row_idx, "Modificacion_Surtido", nuevo_texto)
-                                        if ok and "Estado" in headers_casos:
-                                            ok = update_gsheet_cell(
+                                        with st.spinner("Confirmando cambios de surtido…"):
+                                            ok = confirmar_modificacion_surtido(
                                                 worksheet_casos,
                                                 headers_casos,
                                                 gsheet_row_idx,
-                                                "Estado",
-                                                "🔵 En Proceso",
-                                            )
-                                        if ok and "Hora_Proceso" in headers_casos:
-                                            ok = update_gsheet_cell(
-                                                worksheet_casos,
-                                                headers_casos,
-                                                gsheet_row_idx,
-                                                "Hora_Proceso",
-                                                mx_now_str(),
+                                                mod_texto,
                                             )
 
                                         if ok:
