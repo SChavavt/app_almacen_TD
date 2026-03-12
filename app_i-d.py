@@ -305,7 +305,13 @@ def assign_flow_numbers(entries_local, entries_foraneo, df_all: pd.DataFrame) ->
             manual_numbers.add(parsed)
 
     used_numbers: set[int] = set(manual_numbers)
-    next_foraneo = (max(manual_numbers) + 1) if manual_numbers else 1
+    # Mantener continuidad del flujo: pedidos foráneos normales deben
+    # ocupar el menor número libre, respetando los manuales reservados
+    # por devoluciones/casos (Numero_Foraneo).
+    #
+    # Si un caso manual toma 23, los pedidos previos siguen 01-22 y el
+    # siguiente libre será 24.
+    next_foraneo = 1
 
     # 1) Casos/devoluciones foráneos con Numero_Foraneo manual.
     for entry in active_foraneo_entries:
