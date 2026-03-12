@@ -781,7 +781,13 @@ def build_flow_number_maps(
             manual_numbers.add(parsed)
 
     used_numbers: set[int] = set(manual_numbers)
-    next_number = (max(manual_numbers) + 1) if manual_numbers else 1
+    # Mantener continuidad: pedidos foráneos normales deben tomar
+    # el menor número disponible (01, 02, 03, ...), saltando únicamente
+    # los números manuales ya reservados por casos/devoluciones.
+    #
+    # Ejemplo: si aparece un caso manual con 23, los pedidos existentes
+    # se mantienen 01-22 y los nuevos continúan en 24+.
+    next_number = 1
 
     # 1) Casos/devoluciones foráneos con Numero_Foraneo manual (se respeta tal cual).
     for _, _, source_kind, row in combined_rows:
