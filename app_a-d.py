@@ -395,8 +395,19 @@ def _clear_offscreen_guide_flags(visible_ids: set[str]) -> None:
             continue
 
 
-def _render_confirmar_modificacion_flow(context_key: str, button_label: str) -> bool:
-    """Renderiza una confirmación en 2 pasos para evitar clics accidentales."""
+def _render_confirmar_modificacion_flow(
+    context_key: str,
+    button_label: str,
+    *,
+    include_write_option: bool = False,
+) -> Optional[str]:
+    """Renderiza una confirmación en 2 pasos para evitar clics accidentales.
+
+    Returns:
+        - "confirm": confirmar sin escritura extra
+        - "confirm_write": confirmar y ejecutar escritura extra (si aplica)
+        - None: sin acción
+    """
     flag_key = f"confirm_mod_surtido_{context_key}"
     awaiting_confirmation = st.session_state.get(flag_key, False)
 
@@ -405,21 +416,41 @@ def _render_confirmar_modificacion_flow(context_key: str, button_label: str) -> 
             st.session_state[flag_key] = True
             st.info("⚠️ Vuelve a confirmar para aplicar los cambios de surtido.")
             st.rerun()
-        return False
+        return None
 
     st.warning("¿Confirmas que deseas marcar esta modificación de surtido como confirmada?")
-    confirm_col, cancel_col = st.columns(2)
-    with confirm_col:
-        if st.button("✅ Sí, confirmar ahora", key=f"{flag_key}_approve"):
-            st.session_state[flag_key] = False
-            return True
+    if include_write_option:
+        confirm_no_write_col, confirm_write_col, cancel_col = st.columns(3)
+
+        with confirm_no_write_col:
+            if st.button(
+                "✅ Sí, confirmar ahora y no escribir",
+                key=f"{flag_key}_approve_no_write",
+            ):
+                st.session_state[flag_key] = False
+                return "confirm"
+
+        with confirm_write_col:
+            if st.button(
+                "✅ Sí, confirmar ahora y escribir",
+                key=f"{flag_key}_approve_write",
+            ):
+                st.session_state[flag_key] = False
+                return "confirm_write"
+    else:
+        confirm_col, cancel_col = st.columns(2)
+        with confirm_col:
+            if st.button("✅ Sí, confirmar ahora", key=f"{flag_key}_approve"):
+                st.session_state[flag_key] = False
+                return "confirm"
+
     with cancel_col:
         if st.button("❌ Cancelar", key=f"{flag_key}_cancel"):
             st.session_state[flag_key] = False
             st.info("Confirmación cancelada.")
             st.rerun()
 
-    return False
+    return None
 
 
 def _get_first_query_value(params: Any, key: str) -> Optional[str]:
@@ -3639,10 +3670,12 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
                     st.info(f"🟡 Modificación de Surtido:\n{mod_texto}")
                 else:
                     st.warning(f"🟡 Modificación de Surtido:\n{mod_texto}")
-                    if _render_confirmar_modificacion_flow(
+                    mod_confirmation_action = _render_confirmar_modificacion_flow(
                         context_key=f"{row['ID_Pedido']}_{idx}_{origen_tab}",
                         button_label="✅ Confirmar Cambios de Surtido",
-                    ):
+                        include_write_option=origen_tab == "Foráneo",
+                    )
+                    if mod_confirmation_action:
                         st.session_state["expanded_pedidos"][row['ID_Pedido']] = True
                         st.session_state["expanded_subir_guia"][row['ID_Pedido']] = True
                         with st.spinner("Confirmando cambios de surtido…"):
@@ -3654,6 +3687,12 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
                             )
                         if success:
                             row["Estado"] = "🔵 En Proceso"
+                            if mod_confirmation_action == "confirm_write" and origen_tab == "Foráneo":
+                                escribir_en_reporte_guias(
+                                    cliente=row.get("Cliente", ""),
+                                    vendedor=row.get("Vendedor_Registro", ""),
+                                    tipo_envio=row.get("Tipo_Envio", ""),
+                                )
                             st.success("✅ Cambios de surtido confirmados y pedido en '🔵 En Proceso'.")
                             st.cache_data.clear()
                             marcar_contexto_pedido(row["ID_Pedido"], origen_tab, scroll=False)
@@ -3677,10 +3716,12 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
                         st.info(f"✉️ Modificación (Datos Fiscales):\n{mod_texto}")
                     else:
                         st.warning(f"✉️ Modificación (Datos Fiscales):\n{mod_texto}")
-                        if _render_confirmar_modificacion_flow(
+                        mod_confirmation_action = _render_confirmar_modificacion_flow(
                             context_key=f"df_{row['ID_Pedido']}_{idx}_{origen_tab}",
                             button_label="✅ Confirmar Cambios de Surtido",
-                        ):
+                            include_write_option=origen_tab == "Foráneo",
+                        )
+                        if mod_confirmation_action:
                             st.session_state["expanded_pedidos"][row["ID_Pedido"]] = True
                             st.session_state["expanded_subir_guia"][row["ID_Pedido"]] = True
                             with st.spinner("Confirmando cambios de surtido…"):
@@ -3692,6 +3733,12 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
                                 )
                             if success:
                                 row["Estado"] = "🔵 En Proceso"
+                                if mod_confirmation_action == "confirm_write" and origen_tab == "Foráneo":
+                                    escribir_en_reporte_guias(
+                                        cliente=row.get("Cliente", ""),
+                                        vendedor=row.get("Vendedor_Registro", ""),
+                                        tipo_envio=row.get("Tipo_Envio", ""),
+                                    )
                                 st.success(
                                     "✅ Cambios de surtido confirmados y pedido en '🔵 En Proceso'."
                                 )
@@ -6029,10 +6076,12 @@ if df_main is not None:
                             st.info(mod_texto)
                         else:
                             st.warning(mod_texto)
-                            if _render_confirmar_modificacion_flow(
+                            mod_confirmation_action = _render_confirmar_modificacion_flow(
                                 context_key=f"caso_{idp or folio or cliente}",
                                 button_label="✅ Confirmar Cambios de Surtido",
-                            ):
+                                include_write_option=origen_tab == "Foráneo",
+                            )
+                            if mod_confirmation_action:
                                 try:
                                     gsheet_row_idx = None
                                     if "ID_Pedido" in df_casos.columns and idp:
@@ -6061,6 +6110,12 @@ if df_main is not None:
 
                                         if ok:
                                             row["Estado"] = "🔵 En Proceso"
+                                            if mod_confirmation_action == "confirm_write" and origen_tab == "Foráneo":
+                                                escribir_en_reporte_guias(
+                                                    cliente=row.get("Cliente", ""),
+                                                    vendedor=row.get("Vendedor_Registro", ""),
+                                                    tipo_envio=row.get("Tipo_Envio", ""),
+                                                )
                                             st.success("✅ Cambios de surtido confirmados y pedido en '🔵 En Proceso'.")
                                             st.cache_data.clear()
                                             st.rerun()
@@ -6689,10 +6744,12 @@ if df_main is not None:
                             st.info(mod_texto)
                         else:
                             st.warning(mod_texto)
-                            if _render_confirmar_modificacion_flow(
+                            mod_confirmation_action = _render_confirmar_modificacion_flow(
                                 context_key=f"garantia_{unique_suffix}",
                                 button_label="✅ Confirmar Cambios de Surtido (Garantía)",
-                            ):
+                                include_write_option=origen_tab == "Foráneo",
+                            )
+                            if mod_confirmation_action:
                                 try:
                                     gsheet_row_idx = None
                                     if "ID_Pedido" in df_casos.columns and idp:
@@ -6721,6 +6778,12 @@ if df_main is not None:
 
                                         if ok:
                                             row["Estado"] = "🔵 En Proceso"
+                                            if mod_confirmation_action == "confirm_write" and origen_tab == "Foráneo":
+                                                escribir_en_reporte_guias(
+                                                    cliente=row.get("Cliente", ""),
+                                                    vendedor=row.get("Vendedor_Registro", ""),
+                                                    tipo_envio=row.get("Tipo_Envio", ""),
+                                                )
                                             st.success("✅ Cambios de surtido confirmados y pedido en '🔵 En Proceso'.")
                                             st.cache_data.clear()
                                             st.rerun()
