@@ -19,8 +19,8 @@ import calendar
 from zoneinfo import ZoneInfo
 
 # --- CONFIGURACIÓN DE STREAMLIT ---
-st.set_page_config(page_title="🔍 Buscador de Guías y Descargas", layout="wide")
-st.title("🔍 Buscador de Pedidos por Guía o Cliente")
+st.set_page_config(page_title="📦 Panel de Gestión", layout="wide")
+st.title("📦 Panel de Gestión de Pedidos")
 
 MESES_ES = ["", "Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"]
 
