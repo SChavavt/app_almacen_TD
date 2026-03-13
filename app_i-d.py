@@ -1959,7 +1959,7 @@ def build_ultimos_pedidos(df_pedidos: pd.DataFrame, vendedor: str):
 @st.cache_data(ttl=120)
 def build_temporal_sales_dataset(df_pedidos: pd.DataFrame, vendedor: str) -> pd.DataFrame:
     if df_pedidos.empty:
-        return pd.DataFrame(columns=["Fecha", "Monto", "Pedidos"])
+        return pd.DataFrame(columns=["Fecha", "Monto", "Pedidos", "Vendedor"])
 
     work = df_pedidos.copy()
     if vendedor != "(Todos)":
@@ -1972,11 +1972,13 @@ def build_temporal_sales_dataset(df_pedidos: pd.DataFrame, vendedor: str) -> pd.
     work["Monto"] = pd.to_numeric(work.get("Monto_Comprobante", 0), errors="coerce").fillna(0.0)
     work = work.dropna(subset=["Fecha"]).copy()
     if work.empty:
-        return pd.DataFrame(columns=["Fecha", "Monto", "Pedidos"])
+        return pd.DataFrame(columns=["Fecha", "Monto", "Pedidos", "Vendedor"])
 
     work["Fecha"] = work["Fecha"].dt.normalize()
     work["Pedidos"] = 1
-    return work[["Fecha", "Monto", "Pedidos"]]
+    work["Vendedor"] = work.get("Vendedor_Registro", "").map(sanitize_text)
+    work.loc[work["Vendedor"] == "", "Vendedor"] = "Sin vendedor"
+    return work[["Fecha", "Monto", "Pedidos", "Vendedor"]]
 
 
 def aggregate_temporal_view(
@@ -2803,14 +2805,26 @@ if selected_tab == 0:
                         key="dashboard_temporal_metrica",
                     )
 
+                fechas_validas = False
+                fecha_inicio = None
+                fecha_fin = None
+                if isinstance(rango, tuple):
+                    rango = tuple(r for r in rango if r is not None)
                 if isinstance(rango, tuple) and len(rango) == 2:
                     fecha_inicio = pd.Timestamp(rango[0])
                     fecha_fin = pd.Timestamp(rango[1])
+                    if fecha_fin >= fecha_inicio:
+                        fechas_validas = True
+                    else:
+                        st.warning("La fecha final no puede ser menor que la fecha inicial.")
                 else:
-                    fecha_inicio = pd.Timestamp(rango)
-                    fecha_fin = pd.Timestamp(rango)
+                    st.warning("Selecciona fecha inicial y final para analizar el periodo.")
 
-                actual_df, prev_df = aggregate_temporal_view(temporal_base, gran_sel, fecha_inicio, fecha_fin)
+                if fechas_validas:
+                    actual_df, prev_df = aggregate_temporal_view(temporal_base, gran_sel, fecha_inicio, fecha_fin)
+                else:
+                    actual_df, prev_df = pd.DataFrame(), pd.DataFrame()
+
                 if actual_df.empty:
                     st.warning("No hay datos en el periodo seleccionado.")
                 else:
@@ -2820,17 +2834,76 @@ if selected_tab == 0:
                     total_prev = float(prev_df[metric_col].sum()) if not prev_df.empty else 0.0
                     delta = ((total_actual / total_prev) - 1) if total_prev > 0 else np.nan
 
-                    m1, m2, m3 = st.columns(3)
+                    periodo_label = {
+                        "Día": "día",
+                        "Semana": "semana",
+                        "Mes": "mes",
+                    }.get(gran_sel, "periodo")
+                    punto_idx = actual_df[metric_col].idxmax()
+                    mejor_fecha = actual_df.loc[punto_idx, "Fecha"]
+
+                    m1, m2, m3, m4 = st.columns(4)
                     m1.metric(
                         f"{metrica_sel} del periodo",
                         f"{metric_label}{total_actual:,.0f}",
                         f"{delta * 100:.1f}%" if pd.notna(delta) else "Sin comparativo",
                     )
                     m2.metric("Puntos analizados", f"{len(actual_df):,}")
-                    m3.metric(
-                        "Mejor punto",
-                        f"{actual_df.loc[actual_df[metric_col].idxmax(), 'Fecha'].strftime('%d/%m/%Y')}",
+                    m3.metric("Rango seleccionado", f"{(fecha_fin - fecha_inicio).days + 1} días")
+                    m4.metric(
+                        f"Mejor {periodo_label}",
+                        f"{mejor_fecha.strftime('%d/%m/%Y')} ({metric_label}{actual_df.loc[punto_idx, metric_col]:,.0f})",
                     )
+
+                    resumen = actual_df[["Fecha", "Monto", "Pedidos"]].copy()
+                    resumen["Ticket_Promedio"] = np.where(
+                        resumen["Pedidos"] > 0,
+                        resumen["Monto"] / resumen["Pedidos"],
+                        0.0,
+                    )
+                    resumen["Periodo"] = resumen["Fecha"].dt.strftime(
+                        "%d/%m/%Y" if gran_sel == "Día" else ("Semana %V - %Y" if gran_sel == "Semana" else "%m/%Y")
+                    )
+                    st.caption("Detalle del comportamiento de ventas en el rango seleccionado")
+                    st.dataframe(
+                        resumen[["Periodo", "Monto", "Pedidos", "Ticket_Promedio"]].rename(
+                            columns={
+                                "Monto": "Ventas",
+                                "Pedidos": "Pedidos",
+                                "Ticket_Promedio": "Ticket promedio",
+                            }
+                        ),
+                        use_container_width=True,
+                        hide_index=True,
+                        height=220,
+                    )
+
+                    venta_por_vendedor = (
+                        temporal_base[(temporal_base["Fecha"] >= fecha_inicio) & (temporal_base["Fecha"] <= fecha_fin)]
+                        .groupby("Vendedor", as_index=False)[["Monto", "Pedidos"]]
+                        .sum()
+                        .sort_values("Monto", ascending=False)
+                    )
+                    if not venta_por_vendedor.empty:
+                        venta_por_vendedor["Ticket_Promedio"] = np.where(
+                            venta_por_vendedor["Pedidos"] > 0,
+                            venta_por_vendedor["Monto"] / venta_por_vendedor["Pedidos"],
+                            0.0,
+                        )
+                        st.caption("Ranking de vendedores por ventas en el periodo")
+                        st.dataframe(
+                            venta_por_vendedor.rename(
+                                columns={
+                                    "Vendedor": "Vendedor",
+                                    "Monto": "Ventas",
+                                    "Pedidos": "Pedidos",
+                                    "Ticket_Promedio": "Ticket promedio",
+                                }
+                            ),
+                            use_container_width=True,
+                            hide_index=True,
+                            height=220,
+                        )
 
                     serie = actual_df[["Fecha", metric_col]].copy()
                     if not prev_df.empty:
@@ -2845,6 +2918,35 @@ if selected_tab == 0:
                     bars = actual_df[["Fecha", metric_col]].copy()
                     bars["Etiqueta"] = bars["Fecha"].dt.strftime("%d/%m")
                     st.bar_chart(bars.set_index("Etiqueta")[[metric_col]], height=220)
+
+                    st.caption("Ranking histórico por periodo (top 5)")
+                    rank_cols = st.columns(3)
+                    rank_specs = [
+                        ("Día", "D", "%d/%m/%Y"),
+                        ("Semana", "W-MON", "Semana %V - %Y"),
+                        ("Mes", "MS", "%m/%Y"),
+                    ]
+                    for rank_col, (rank_label, rank_freq, rank_fmt) in zip(rank_cols, rank_specs):
+                        rank_df = (
+                            temporal_base.groupby(pd.Grouper(key="Fecha", freq=rank_freq))[["Monto", "Pedidos"]]
+                            .sum()
+                            .reset_index()
+                            .sort_values("Monto", ascending=False)
+                            .head(5)
+                        )
+                        if rank_df.empty:
+                            rank_col.info(f"Sin datos para ranking de {rank_label.lower()}.")
+                            continue
+                        rank_df["Periodo"] = rank_df["Fecha"].dt.strftime(rank_fmt)
+                        rank_col.markdown(f"**Top {rank_label.lower()}s**")
+                        rank_col.dataframe(
+                            rank_df[["Periodo", "Monto", "Pedidos"]].rename(
+                                columns={"Monto": "Ventas", "Pedidos": "Pedidos"}
+                            ),
+                            use_container_width=True,
+                            hide_index=True,
+                            height=210,
+                        )
 
         st.markdown("---")
 
