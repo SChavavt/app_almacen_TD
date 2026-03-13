@@ -5134,12 +5134,145 @@ if "organizador" in tab_map:
                 cols = [c for c in ["Fecha_Limite","Titulo","Prioridad","Estatus","Cliente_Relacionado"] if c in tareas_vencidas.columns]
                 st.dataframe(tareas_vencidas[cols], use_container_width=True)
 
+                st.caption("Acciones rápidas: actualiza aquí mismo el estatus sin cambiar de sección.")
+                tareas_vencidas_accion = tareas_vencidas.copy()
+                tareas_vencidas_accion["_id"] = tareas_vencidas_accion.get("Tarea_ID", "").astype(str)
+                tareas_vencidas_accion["_titulo"] = tareas_vencidas_accion.get("Titulo", "").astype(str)
+                tareas_vencidas_accion["_estatus"] = tareas_vencidas_accion.get("Estatus", "").astype(str)
+
+                opciones_vencidas = [o for o in tareas_vencidas_accion["_id"].tolist() if str(o).strip()]
+                if opciones_vencidas:
+                    def format_vencida(tid):
+                        r = tareas_vencidas_accion[tareas_vencidas_accion["_id"] == tid].iloc[0]
+                        return f"{tid} | {r.get('_estatus', '')} | {r.get('Fecha_Limite', '')} | {r.get('_titulo', '')}"
+
+                    with st.form("form_accion_rapida_vencidos"):
+                        tarea_sel_vencida = st.selectbox(
+                            "Selecciona pendiente vencido:",
+                            opciones_vencidas,
+                            format_func=format_vencida,
+                            key="hoy_tarea_vencida_sel",
+                        )
+
+                        col_v_a, col_v_b = st.columns(2)
+                        with col_v_a:
+                            enviar_completar_vencida = st.form_submit_button(
+                                "✅ Marcar como COMPLETADA",
+                                use_container_width=True,
+                            )
+                        with col_v_b:
+                            enviar_reabrir_vencida = st.form_submit_button(
+                                "↩️ Reabrir (PENDIENTE)",
+                                use_container_width=True,
+                            )
+
+                    if enviar_completar_vencida:
+                        try:
+                            ok = safe_update_by_id(
+                                "TAREAS",
+                                id_col="Tarea_ID",
+                                id_value=tarea_sel_vencida,
+                                updates={
+                                    "Estatus": "Completada",
+                                    "Fecha_Completado": now_iso(),
+                                    "Last_Updated_At": now_iso(),
+                                    "Last_Updated_By": "ALEJANDRO",
+                                }
+                            )
+                            if ok:
+                                st.success("🎈 Pendiente vencido marcado como completado.")
+                                st.rerun()
+                        except Exception as e:
+                            st.error(f"❌ Error actualizando pendiente vencido: {e}")
+
+                    if enviar_reabrir_vencida:
+                        try:
+                            ok = safe_update_by_id(
+                                "TAREAS",
+                                id_col="Tarea_ID",
+                                id_value=tarea_sel_vencida,
+                                updates={
+                                    "Estatus": "Pendiente",
+                                    "Fecha_Completado": "",
+                                    "Last_Updated_At": now_iso(),
+                                    "Last_Updated_By": "ALEJANDRO",
+                                }
+                            )
+                            if ok:
+                                st.success("🎈 Pendiente vencido reabierto (Pendiente).")
+                                st.rerun()
+                        except Exception as e:
+                            st.error(f"❌ Error reabriendo pendiente vencido: {e}")
+
             st.markdown("### 💰 Cotizaciones vencidas de seguimiento")
             if cot_venc.empty:
                 st.info("No hay cotizaciones vencidas de seguimiento 🎉")
             else:
                 cols = [c for c in ["Folio","Fecha_Cotizacion","Cliente","Monto","Estatus","Fecha_Proximo_Seguimiento","Notas"] if c in cot_venc.columns]
                 st.dataframe(cot_venc[cols], use_container_width=True)
+
+                st.caption("Acciones rápidas: actualiza aquí mismo el estatus de la cotización.")
+                cot_venc_accion = cot_venc.copy()
+                cot_venc_accion["_id"] = cot_venc_accion.get("Cotizacion_ID", "").astype(str)
+                cot_venc_accion["_folio"] = cot_venc_accion.get("Folio", "").astype(str)
+                cot_venc_accion["_cliente"] = cot_venc_accion.get("Cliente", "").astype(str)
+                cot_venc_accion["_estatus"] = cot_venc_accion.get("Estatus", "").astype(str)
+                cot_venc_accion["_prox"] = cot_venc_accion.get("Fecha_Proximo_Seguimiento", "").astype(str)
+                cot_venc_accion["_monto"] = cot_venc_accion.get("Monto", "").astype(str)
+
+                opciones_cot_venc = [o for o in cot_venc_accion["_id"].tolist() if str(o).strip()]
+                if opciones_cot_venc:
+                    def format_cot_vencida(cid):
+                        r = cot_venc_accion[cot_venc_accion["_id"] == cid].iloc[0]
+                        fol = r.get("_folio", "")
+                        cli = r.get("_cliente", "")
+                        est = r.get("_estatus", "")
+                        prox = r.get("_prox", "")
+                        mon = r.get("_monto", "")
+                        return f"{fol} | {cli} | {est} | seg: {prox} | ${mon}"
+
+                    with st.form("form_accion_rapida_cot_vencidas"):
+                        cot_sel_vencida = st.selectbox(
+                            "Selecciona cotización vencida:",
+                            opciones_cot_venc,
+                            format_func=format_cot_vencida,
+                            key="hoy_cot_vencida_sel",
+                        )
+                        estado_cierre_hoy = st.radio(
+                            "Nuevo estatus de cotización:",
+                            ["Cerrada – Ganada", "Cerrada – Perdida", "En seguimiento"],
+                            horizontal=True,
+                            key="hoy_estado_cierre_cot",
+                        )
+
+                        enviar_cierre_hoy = st.form_submit_button(
+                            "🏁 Actualizar estatus de cotización",
+                            use_container_width=True,
+                        )
+
+                    if enviar_cierre_hoy:
+                        try:
+                            updates_cot_hoy = {
+                                "Estatus": estado_cierre_hoy,
+                                "Last_Updated_At": now_iso(),
+                                "Last_Updated_By": "ALEJANDRO",
+                            }
+                            if estado_cierre_hoy == "En seguimiento":
+                                updates_cot_hoy["Resultado_Cierre"] = ""
+                                updates_cot_hoy["Ultimo_Seguimiento_Fecha"] = date.today().strftime("%Y-%m-%d")
+                            else:
+                                updates_cot_hoy["Resultado_Cierre"] = "Ganada" if "Ganada" in estado_cierre_hoy else "Perdida"
+
+                            safe_update_by_id(
+                                "COTIZACIONES",
+                                id_col="Cotizacion_ID",
+                                id_value=cot_sel_vencida,
+                                updates=updates_cot_hoy,
+                            )
+                            st.success(f"✅ Estatus actualizado a: {estado_cierre_hoy}")
+                            st.rerun()
+                        except Exception as e:
+                            st.error(f"❌ Error al actualizar cotización: {e}")
 
             st.markdown("### ⏱️ Recordatorios de citas activos")
             if recordatorios_visibles.empty:
