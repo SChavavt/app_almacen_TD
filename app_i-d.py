@@ -1956,6 +1956,71 @@ def build_ultimos_pedidos(df_pedidos: pd.DataFrame, vendedor: str):
     return vista
 
 
+@st.cache_data(ttl=120)
+def build_temporal_sales_dataset(df_pedidos: pd.DataFrame, vendedor: str) -> pd.DataFrame:
+    if df_pedidos.empty:
+        return pd.DataFrame(columns=["Fecha", "Monto", "Pedidos"])
+
+    work = df_pedidos.copy()
+    if vendedor != "(Todos)":
+        vend_norm = _normalize_vendedor_name(vendedor)
+        work = work[
+            work["Vendedor_Registro"].map(_normalize_vendedor_name) == vend_norm
+        ]
+
+    work["Fecha"] = _resolve_sales_datetime(work)
+    work["Monto"] = pd.to_numeric(work.get("Monto_Comprobante", 0), errors="coerce").fillna(0.0)
+    work = work.dropna(subset=["Fecha"]).copy()
+    if work.empty:
+        return pd.DataFrame(columns=["Fecha", "Monto", "Pedidos"])
+
+    work["Fecha"] = work["Fecha"].dt.normalize()
+    work["Pedidos"] = 1
+    return work[["Fecha", "Monto", "Pedidos"]]
+
+
+def aggregate_temporal_view(
+    base_df: pd.DataFrame,
+    granularidad: str,
+    fecha_inicio: pd.Timestamp,
+    fecha_fin: pd.Timestamp,
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    if base_df.empty:
+        return pd.DataFrame(), pd.DataFrame()
+
+    freq_map = {"Día": "D", "Semana": "W-MON", "Mes": "MS"}
+    freq = freq_map.get(granularidad, "D")
+    actual_range = base_df[(base_df["Fecha"] >= fecha_inicio) & (base_df["Fecha"] <= fecha_fin)].copy()
+    if actual_range.empty:
+        return pd.DataFrame(), pd.DataFrame()
+
+    actual = (
+        actual_range.groupby(pd.Grouper(key="Fecha", freq=freq))[["Monto", "Pedidos"]]
+        .sum()
+        .reset_index()
+        .sort_values("Fecha")
+    )
+
+    period_days = max(1, int((fecha_fin - fecha_inicio).days) + 1)
+    prev_fin = fecha_inicio - pd.Timedelta(days=1)
+    prev_inicio = prev_fin - pd.Timedelta(days=period_days - 1)
+    prev_range = base_df[(base_df["Fecha"] >= prev_inicio) & (base_df["Fecha"] <= prev_fin)].copy()
+    if prev_range.empty:
+        return actual, pd.DataFrame()
+
+    prev = (
+        prev_range.groupby(pd.Grouper(key="Fecha", freq=freq))[["Monto", "Pedidos"]]
+        .sum()
+        .reset_index()
+        .sort_values("Fecha")
+    )
+    min_len = min(len(actual), len(prev))
+    if min_len:
+        prev = prev.tail(min_len).copy()
+        prev["Fecha"] = actual.tail(min_len)["Fecha"].values
+    return actual, prev
+
+
 def _format_detail_value(value) -> str:
     formatted = sanitize_text(value)
     return formatted if formatted else "—"
@@ -2705,6 +2770,81 @@ if selected_tab == 0:
         row2_col2.metric("🆕 Nuevos/Sin historial", f"{nuevos:,}")
         row2_col3.metric("👥 Clientes totales actuales", f"{total_clientes_actuales:,}")
         row2_col4.metric("🎟️ Ticket prom (global)", f"${ticket_prom:,.0f}")
+
+        st.markdown("### 🔀 Vista temporal de ventas")
+        temporal_enabled = st.toggle(
+            "Activar análisis por periodo (día / semana / mes)",
+            key="dashboard_temporal_toggle",
+            value=False,
+        )
+        if temporal_enabled:
+            temporal_base = build_temporal_sales_dataset(df_conf, vendedor_sel)
+            if temporal_base.empty:
+                st.info("No hay fechas válidas para construir la vista temporal.")
+            else:
+                ctrl1, ctrl2, ctrl3 = st.columns([0.24, 0.46, 0.3])
+                with ctrl1:
+                    gran_sel = st.selectbox("Granularidad", ["Día", "Semana", "Mes"], key="dashboard_temporal_gran")
+                with ctrl2:
+                    fecha_min = temporal_base["Fecha"].min().date()
+                    fecha_max = temporal_base["Fecha"].max().date()
+                    rango = st.date_input(
+                        "Periodo a analizar",
+                        value=(max(fecha_min, fecha_max - timedelta(days=60)), fecha_max),
+                        min_value=fecha_min,
+                        max_value=fecha_max,
+                        key="dashboard_temporal_rango",
+                    )
+                with ctrl3:
+                    metrica_sel = st.radio(
+                        "Métrica",
+                        options=["Ventas", "Pedidos"],
+                        horizontal=True,
+                        key="dashboard_temporal_metrica",
+                    )
+
+                if isinstance(rango, tuple) and len(rango) == 2:
+                    fecha_inicio = pd.Timestamp(rango[0])
+                    fecha_fin = pd.Timestamp(rango[1])
+                else:
+                    fecha_inicio = pd.Timestamp(rango)
+                    fecha_fin = pd.Timestamp(rango)
+
+                actual_df, prev_df = aggregate_temporal_view(temporal_base, gran_sel, fecha_inicio, fecha_fin)
+                if actual_df.empty:
+                    st.warning("No hay datos en el periodo seleccionado.")
+                else:
+                    metric_col = "Monto" if metrica_sel == "Ventas" else "Pedidos"
+                    metric_label = "$" if metrica_sel == "Ventas" else ""
+                    total_actual = float(actual_df[metric_col].sum())
+                    total_prev = float(prev_df[metric_col].sum()) if not prev_df.empty else 0.0
+                    delta = ((total_actual / total_prev) - 1) if total_prev > 0 else np.nan
+
+                    m1, m2, m3 = st.columns(3)
+                    m1.metric(
+                        f"{metrica_sel} del periodo",
+                        f"{metric_label}{total_actual:,.0f}",
+                        f"{delta * 100:.1f}%" if pd.notna(delta) else "Sin comparativo",
+                    )
+                    m2.metric("Puntos analizados", f"{len(actual_df):,}")
+                    m3.metric(
+                        "Mejor punto",
+                        f"{actual_df.loc[actual_df[metric_col].idxmax(), 'Fecha'].strftime('%d/%m/%Y')}",
+                    )
+
+                    serie = actual_df[["Fecha", metric_col]].copy()
+                    if not prev_df.empty:
+                        serie = serie.merge(
+                            prev_df[["Fecha", metric_col]].rename(columns={metric_col: f"{metric_col}_Prev"}),
+                            on="Fecha",
+                            how="left",
+                        )
+                    st.caption("Comparativa del periodo actual vs periodo anterior equivalente")
+                    st.line_chart(serie.set_index("Fecha"), height=220)
+
+                    bars = actual_df[["Fecha", metric_col]].copy()
+                    bars["Etiqueta"] = bars["Fecha"].dt.strftime("%d/%m")
+                    st.bar_chart(bars.set_index("Etiqueta")[[metric_col]], height=220)
 
         st.markdown("---")
 
