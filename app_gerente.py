@@ -3582,6 +3582,94 @@ def render_seguimiento_cobranza_tab_gerente(usuario_actual: str | None):
     st.success(f"✅ Seguimiento actualizado en {len(row_sel_multi)} folio(s).")
     st.rerun()
 
+
+def render_macheo_tool_tab_gerente():
+    st.subheader("🧩 Macheo Tool")
+    st.caption(
+        "Herramienta independiente para cruzar REPORTE.xlsx y ANTIGÜEDAD_SALDOS.xlsx "
+        "sin comentarios, sin días y sin usar otras hojas."
+    )
+
+    mes_ref = now_cdmx().strftime("%Y-%m")
+    with st.form("ger_macheo_form", clear_on_submit=False):
+        reporte = st.file_uploader("REPORTE.xlsx", type=["xlsx"], key="ger_macheo_reporte")
+        antig = st.file_uploader("ANTIGÜEDAD_SALDOS.xlsx", type=["xlsx"], key="ger_macheo_ant")
+        procesar = st.form_submit_button("Procesar macheo")
+
+    if procesar:
+        try:
+            if reporte is None or antig is None:
+                raise Exception("Carga ambos archivos para procesar el macheo.")
+
+            df_base = parse_reporte_cobranza_excel(reporte, mes_ref)
+            df_venc = parse_antiguedad_cobranza_excel(antig, mes_ref)
+
+            if df_venc.empty:
+                raise Exception("No se encontraron folios válidos en ANTIGÜEDAD_SALDOS.xlsx.")
+
+            base_lookup = (
+                df_base[["Codigo", "Razon_Social", "Saldo"]]
+                .copy()
+                .drop_duplicates(subset=["Codigo"], keep="last")
+            )
+
+            out = df_venc.merge(base_lookup, on="Codigo", how="left")
+            out["Razon_Social"] = out["Razon_Social"].fillna("SIN RAZON SOCIAL")
+            out["Saldo"] = pd.to_numeric(out["Saldo"], errors="coerce").fillna(0.0)
+            out["Saldo_Vence"] = pd.to_numeric(out["Saldo_Vence"], errors="coerce").fillna(0.0)
+            out["Estatus_Cobranza"] = np.where(
+                (out["Saldo"] <= 0.0) & (out["Saldo_Vence"] <= 0.0),
+                "PAGADO",
+                "CON SALDO",
+            )
+
+            cols_salida = [
+                "Codigo",
+                "Razon_Social",
+                "Folio",
+                "Saldo_Vence",
+                "Fecha_Vencimiento",
+                "Condicion",
+                "Moneda",
+                "Estatus_Cobranza",
+            ]
+            out = out[cols_salida].copy()
+            out = out.sort_values(["Codigo", "Fecha_Vencimiento", "Folio"]).reset_index(drop=True)
+            st.session_state["ger_macheo_resultado"] = out
+
+            meses_detectados = sorted({m for m in df_venc.get("Mes", "").astype(str) if re.match(r"^\d{4}-\d{2}$", m)})
+            if meses_detectados:
+                st.success(f"✅ Macheo generado. Mes(es) detectado(s) por Fecha_Vencimiento: {', '.join(meses_detectados)}")
+            else:
+                st.success("✅ Macheo generado correctamente.")
+        except Exception as e:
+            st.error(f"❌ No se pudo procesar el macheo: {e}")
+
+    resultado = st.session_state.get("ger_macheo_resultado")
+    if isinstance(resultado, pd.DataFrame) and not resultado.empty:
+        st.markdown("### Previsualización")
+        st.dataframe(resultado, use_container_width=True, hide_index=True)
+
+        bio = io.BytesIO()
+        with pd.ExcelWriter(bio, engine="xlsxwriter") as writer:
+            resultado.to_excel(writer, sheet_name="Macheo", index=False)
+            ws = writer.sheets["Macheo"]
+            for idx, col in enumerate(resultado.columns):
+                width = max(len(str(col)), 14)
+                ws.set_column(idx, idx, min(max(width, 14), 28))
+            fmt_money = writer.book.add_format({"num_format": "$#,##0.00"})
+            if "Saldo_Vence" in resultado.columns:
+                col_idx = resultado.columns.get_loc("Saldo_Vence")
+                ws.set_column(col_idx, col_idx, 16, fmt_money)
+
+        st.download_button(
+            "Descargar Excel de macheo",
+            data=bio.getvalue(),
+            file_name="macheo_tool.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            key="ger_macheo_download",
+        )
+
 # --- INTERFAZ ---
 USUARIOS_VALIDOS = ["AlejandroVTD", "CeciliaATD", "SChava", "BreydaFTD", "SaraiFTD"]
 
@@ -3650,6 +3738,7 @@ if usuario_actual in COBRANZA_ONLY_USERS:
     tab_specs = [
         ("cobranza", "📒 Cobranza"),
         ("seguimiento_cobranza", "📊 Seguimiento Cobranza"),
+        ("macheo_tool", "🧩 Macheo Tool"),
         ("buscar", "🔍 Buscar Pedido"),
     ]
 else:
@@ -3661,6 +3750,7 @@ else:
     if usuario_puede(usuario_actual, "cobranza"):
         tab_specs.append(("cobranza", "📒 Cobranza"))
         tab_specs.append(("seguimiento_cobranza", "📊 Seguimiento Cobranza"))
+        tab_specs.append(("macheo_tool", "🧩 Macheo Tool"))
 
     if usuario_puede(usuario_actual, "organizador"):
         tab_specs.insert(0, ("organizador", "🗂️ Organizador"))
@@ -6319,3 +6409,7 @@ if "cobranza" in tab_map:
 if "seguimiento_cobranza" in tab_map:
     with tab_map["seguimiento_cobranza"]:
         render_seguimiento_cobranza_tab_gerente(usuario_actual)
+
+if "macheo_tool" in tab_map:
+    with tab_map["macheo_tool"]:
+        render_macheo_tool_tab_gerente()
