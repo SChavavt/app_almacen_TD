@@ -5652,8 +5652,8 @@ if "organizador" in tab_map:
                             key="cot_sel_cierre"
                         )
                         estado_cierre = st.radio(
-                            "Nuevo estatus de cierre:",
-                            ["Cerrada – Ganada", "Cerrada – Perdida"],
+                            "Nuevo estatus de cotización:",
+                            ["Cerrada – Ganada", "Cerrada – Perdida", "En seguimiento"],
                             horizontal=True,
                             key="estado_cierre_cot"
                         )
@@ -5665,21 +5665,27 @@ if "organizador" in tab_map:
 
                     if enviar_cierre:
                         try:
+                            updates_cot = {
+                                "Estatus": estado_cierre,
+                                "Last_Updated_At": now_iso(),
+                                "Last_Updated_By": "ALEJANDRO",
+                            }
+                            if estado_cierre == "En seguimiento":
+                                updates_cot["Resultado_Cierre"] = ""
+                                updates_cot["Ultimo_Seguimiento_Fecha"] = date.today().strftime("%Y-%m-%d")
+                            else:
+                                updates_cot["Resultado_Cierre"] = "Ganada" if "Ganada" in estado_cierre else "Perdida"
+
                             safe_update_by_id(
                                 "COTIZACIONES",
                                 id_col="Cotizacion_ID",
                                 id_value=cot_sel_cierre,
-                                updates={
-                                    "Estatus": estado_cierre,
-                                    "Resultado_Cierre": "Ganada" if "Ganada" in estado_cierre else "Perdida",
-                                    "Last_Updated_At": now_iso(),
-                                    "Last_Updated_By": "ALEJANDRO",
-                                }
+                                updates=updates_cot,
                             )
                             st.success(f"✅ Estatus actualizado a: {estado_cierre}")
                             st.rerun()
                         except Exception as e:
-                            st.error(f"❌ Error al cerrar cotización: {e}")
+                            st.error(f"❌ Error al actualizar cotización: {e}")
 
             with st.expander("🔁 Convertir cotización a: Pendiente o Cita", expanded=False):
                 if not opciones_cot:
