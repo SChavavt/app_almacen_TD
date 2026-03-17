@@ -3675,10 +3675,10 @@ def render_macheo_tool_tab_gerente():
         )
 
 # --- INTERFAZ ---
-USUARIOS_VALIDOS = ["AlejandroVTD", "CeciliaATD", "SChava", "BreydaFTD", "SaraiFTD"]
+USUARIOS_VALIDOS = ["ALEJANDRO38", "CeciliaATD", "SChava", "BreydaFTD", "SaraiFTD"]
 
 PERMISOS_USUARIO = {
-    "AlejandroVTD": {"organizador": True, "modificar": False, "cobranza": False},
+    "ALEJANDRO38": {"organizador": True, "modificar": False, "cobranza": False},
     "CeciliaATD": {"organizador": False, "modificar": True, "cobranza": False},
     "SChava": {"organizador": True, "modificar": True, "cobranza": True},
     "BreydaFTD": {"organizador": False, "modificar": False, "cobranza": True},
@@ -3686,6 +3686,11 @@ PERMISOS_USUARIO = {
 }
 
 COBRANZA_ONLY_USERS = {"BreydaFTD", "SaraiFTD"}
+USUARIOS_VALIDOS_LOOKUP = {u.upper(): u for u in USUARIOS_VALIDOS}
+
+
+def _resolve_usuario_valido(usuario: str) -> str:
+    return USUARIOS_VALIDOS_LOOKUP.get(usuario.strip().upper(), "")
 
 
 def _query_param_value(nombre_param: str) -> str:
@@ -3699,10 +3704,13 @@ def ensure_user_logged_in():
     usuario_session = st.session_state.get("usuario", "").strip()
 
     if not usuario_session:
-        usuario_qp = _query_param_value("usuario")
-        if usuario_qp in USUARIOS_VALIDOS:
+        usuario_qp = _resolve_usuario_valido(_query_param_value("usuario"))
+        if usuario_qp:
             st.session_state.usuario = usuario_qp
             usuario_session = usuario_qp
+
+    if usuario_session:
+        st.query_params["usuario"] = usuario_session
 
     with st.sidebar:
         st.markdown("### 👤 Acceso")
@@ -3721,9 +3729,10 @@ def ensure_user_logged_in():
             placeholder="Ingresa tu usuario",
         ).strip()
         if st.button("🔐 Iniciar sesión", key="login_usuario_btn"):
-            if usuario_input in USUARIOS_VALIDOS:
-                st.session_state.usuario = usuario_input
-                st.query_params["usuario"] = usuario_input
+            usuario_resuelto = _resolve_usuario_valido(usuario_input)
+            if usuario_resuelto:
+                st.session_state.usuario = usuario_resuelto
+                st.query_params["usuario"] = usuario_resuelto
                 st.rerun()
             else:
                 st.error("❌ Usuario no autorizado.")
