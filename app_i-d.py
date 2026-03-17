@@ -3095,6 +3095,7 @@ if selected_tab == 1:
                 st.session_state.td_assistant_messages.append(
                     {"role": "assistant", "content": assistant_reply}
                 )
+                st.rerun()
 
 # ---------------------------
 # TAB 1: Auto Local (Casos asignados) — 2 columnas
