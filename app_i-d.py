@@ -1,5 +1,6 @@
 import streamlit as st
 from openai import OpenAI
+import base64
 import pandas as pd
 import numpy as np
 from datetime import datetime, timedelta
@@ -452,6 +453,8 @@ def fetch_td_assistant_reply(
     df_actual: pd.DataFrame,
     df_historicos: pd.DataFrame,
     df_casos: pd.DataFrame,
+    image_bytes: Optional[bytes] = None,
+    image_mime_type: Optional[str] = None,
 ) -> str:
     api_key = get_openai_api_key()
     if not api_key:
@@ -464,7 +467,22 @@ def fetch_td_assistant_reply(
         df_casos=df_casos,
         user_message=user_message,
     )
-    context.append({"role": "user", "content": user_message})
+    if image_bytes and image_mime_type:
+        encoded_image = base64.b64encode(image_bytes).decode("utf-8")
+        context.append(
+            {
+                "role": "user",
+                "content": [
+                    {"type": "input_text", "text": user_message},
+                    {
+                        "type": "input_image",
+                        "image_url": f"data:{image_mime_type};base64,{encoded_image}",
+                    },
+                ],
+            }
+        )
+    else:
+        context.append({"role": "user", "content": user_message})
 
     response = client.responses.create(
         model=TD_ASSISTANT_MODEL,
@@ -2952,15 +2970,35 @@ if selected_tab == 1:
     if not api_key:
         st.warning("Falta configurar OPENAI_API_KEY en st.secrets para usar el asistente.")
     else:
+        uploaded_image = st.file_uploader(
+            "Adjunta imagen para analizar en tu consulta (opcional)",
+            type=["png", "jpg", "jpeg", "webp"],
+            key="td_assistant_image_upload",
+            help="Puedes subir una captura, comprobante o foto para que el asistente la considere en su respuesta.",
+        )
+        if uploaded_image is not None:
+            st.image(uploaded_image, caption=f"Imagen adjunta: {uploaded_image.name}", use_container_width=True)
+
         user_prompt = st.chat_input("Escribe tu duda operativa...")
         if user_prompt:
             user_prompt = sanitize_text(user_prompt)
             if user_prompt:
+                image_bytes = uploaded_image.getvalue() if uploaded_image is not None else None
+                image_name = uploaded_image.name if uploaded_image is not None else ""
+                image_type = uploaded_image.type if uploaded_image is not None else ""
                 st.session_state.td_assistant_messages.append(
-                    {"role": "user", "content": user_prompt}
+                    {
+                        "role": "user",
+                        "content": (
+                            user_prompt
+                            + (f"\n\n📎 Imagen adjunta: {image_name}" if image_bytes else "")
+                        ),
+                    }
                 )
                 with st.chat_message("user"):
                     st.markdown(user_prompt)
+                    if uploaded_image is not None:
+                        st.image(uploaded_image, caption=f"Imagen enviada: {image_name}", use_container_width=True)
 
                 with st.chat_message("assistant"):
                     with st.spinner("Pensando..."):
@@ -2970,6 +3008,8 @@ if selected_tab == 1:
                                 df_all,
                                 df_hist,
                                 df_casos_assistant,
+                                image_bytes=image_bytes,
+                                image_mime_type=image_type,
                             )
                         except ValueError:
                             assistant_reply = (
