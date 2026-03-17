@@ -1,4 +1,5 @@
 import streamlit as st
+from openai import OpenAI
 import pandas as pd
 import numpy as np
 from datetime import datetime, timedelta
@@ -18,6 +19,34 @@ from textwrap import dedent
 from urllib.parse import urlsplit, urlunsplit, quote
 
 TZ = ZoneInfo("America/Mexico_City")
+
+TD_ASSISTANT_SYSTEM_PROMPT = dedent(
+    """
+    Eres el asistente interno de TD para apoyar a vendedores y personal comercial.
+    Tu función es resolver dudas operativas internas de forma clara, breve, útil y profesional.
+    Ayudas especialmente con:
+    - claves de materiales
+    - zonas remotas
+    - cobertura
+    - envíos
+    - pedidos locales y foráneos
+    - procesos internos
+    - criterios operativos para vendedores
+
+    Reglas:
+    - Responde como asistente interno de TD.
+    - Usa respuestas cortas, claras y prácticas.
+    - Si no tienes certeza de un dato, no lo inventes.
+    - Si falta información, pide solo el dato necesario.
+    - Si algo depende de una validación interna no confirmada, dilo claramente.
+    - No respondas como vendedor a cliente final.
+    - No menciones OpenAI, IA, modelo, sistema ni detalles técnicos.
+    - Mantén tono profesional, útil y natural.
+    - Prioriza claridad operativa sobre texto largo.
+    """
+).strip()
+
+TD_ASSISTANT_MODEL = "gpt-4.1-mini"
 
 st.set_page_config(page_title="Panel de Almacén Integrado", layout="wide")
 
@@ -118,6 +147,226 @@ def sanitize_text(value) -> str:
         return cleaned
     return str(value)
 
+
+def init_td_assistant_state() -> None:
+    if "td_assistant_messages" not in st.session_state:
+        st.session_state.td_assistant_messages = []
+
+
+def get_openai_api_key() -> str:
+    try:
+        return sanitize_text(st.secrets["OPENAI_API_KEY"])
+    except Exception:
+        return ""
+
+
+def _select_relevant_rows_for_assistant(
+    df: pd.DataFrame,
+    user_message: str,
+    candidate_columns: list[str],
+    max_rows: int,
+) -> pd.DataFrame:
+    if df.empty:
+        return df
+
+    work = df.copy()
+    for col in candidate_columns:
+        if col in work.columns:
+            work[col] = work[col].apply(sanitize_text)
+
+    tokens = [
+        t.lower()
+        for t in sanitize_text(user_message).replace("#", " ").split()
+        if len(t.strip()) >= 3
+    ]
+    if not tokens:
+        return work.head(max_rows)
+
+    match_columns = [
+        c
+        for c in ["ID_Pedido", "Folio_Factura", "Cliente", "Vendedor", "Vendedor_Registro", "Estado"]
+        if c in work.columns
+    ]
+    if not match_columns:
+        return work.head(max_rows)
+
+    mask = pd.Series(False, index=work.index)
+    for token in tokens[:8]:
+        for col in match_columns:
+            try:
+                mask = mask | work[col].astype(str).str.lower().str.contains(token, na=False)
+            except Exception:
+                continue
+
+    if mask.any():
+        return work.loc[mask, candidate_columns].head(max_rows)
+    return work[candidate_columns].head(max_rows)
+
+
+@st.cache_data(ttl=120)
+def load_historicos_from_gsheets() -> pd.DataFrame:
+    """Intenta leer 'datos_pedidos' (históricos). Si no existe, usa pedidos_confirmados."""
+
+    try:
+        ws_hist = spreadsheet.worksheet(SHEET_PEDIDOS_HISTORICOS)
+        data = _fetch_with_retry(ws_hist, "_cache_datos_pedidos_historicos")
+        if not data:
+            return pd.DataFrame()
+        headers = data[0]
+        df = pd.DataFrame(data[1:], columns=headers)
+    except Exception:
+        df = load_confirmados_from_gsheets(
+            GSHEETS_CREDENTIALS,
+            GOOGLE_SHEET_ID,
+            SHEET_CONFIRMADOS,
+        )
+
+    for col in ["ID_Pedido", "Folio_Factura", "Cliente", "Vendedor", "Vendedor_Registro", "Estado", "Tipo_Envio"]:
+        if col not in df.columns:
+            df[col] = ""
+        df[col] = df[col].apply(sanitize_text)
+
+    if "Hora_Registro" in df.columns:
+        df["Hora_Registro"] = pd.to_datetime(df["Hora_Registro"], errors="coerce")
+
+    return df
+
+
+def build_td_orders_data_context(
+    df_actual: pd.DataFrame,
+    df_historicos: pd.DataFrame,
+    df_casos: pd.DataFrame,
+    user_message: str,
+    max_rows_per_source: int = 15,
+) -> str:
+    sources = [
+        {
+            "name": "data_pedidos",
+            "description": "Pedidos en flujo actual (normalmente no han viajado)",
+            "df": df_actual,
+            "columns": ["ID_Pedido", "Folio_Factura", "Cliente", "Vendedor", "Estado", "Tipo_Envio", "Turno", "Fecha_Entrega", "Hora_Registro"],
+        },
+        {
+            "name": "datos_pedidos_historicos",
+            "description": "Pedidos históricos que ya viajaron (o fallback a pedidos_confirmados)",
+            "df": df_historicos,
+            "columns": ["ID_Pedido", "Folio_Factura", "Cliente", "Vendedor", "Vendedor_Registro", "Estado", "Tipo_Envio", "Hora_Registro", "Fecha_Entrega", "Fecha_Completado"],
+        },
+        {
+            "name": "casos_especiales",
+            "description": "Devoluciones, garantías y casos especiales",
+            "df": df_casos,
+            "columns": ["ID_Pedido", "Folio_Factura", "Cliente", "Vendedor_Registro", "Estado", "Tipo_Envio", "Tipo_Envio_Original", "Hora_Registro", "Fecha_Recepcion_Devolucion"],
+        },
+    ]
+
+    chunks: list[str] = []
+    for source in sources:
+        df = source["df"]
+        if df is None or df.empty:
+            chunks.append(
+                f"Fuente: {source['name']} | {source['description']} | registros cargados: 0"
+            )
+            continue
+
+        available_columns = [c for c in source["columns"] if c in df.columns]
+        if not available_columns:
+            available_columns = list(df.columns[:8])
+
+        relevant = _select_relevant_rows_for_assistant(
+            df=df,
+            user_message=user_message,
+            candidate_columns=available_columns,
+            max_rows=max_rows_per_source,
+        )
+        records = relevant.to_dict(orient="records")
+        chunks.append(
+            dedent(
+                f"""
+                Fuente: {source['name']}
+                Descripción: {source['description']}
+                Registros cargados: {len(df)}
+                Registros relevantes para esta consulta: {len(records)} (máximo {max_rows_per_source})
+                Columnas usadas: {', '.join(available_columns)}
+                Datos: {json.dumps(records, ensure_ascii=False)}
+                """
+            ).strip()
+        )
+
+    return dedent(
+        f"""
+        Contexto de datos internos TD para consulta operativa:
+        - Usa estas fuentes para verificar si un pedido existe en sistema, su estado, vendedor y tipo.
+        - Si está en data_pedidos: sigue en flujo actual.
+        - Si está en datos_pedidos_historicos: se considera histórico (ya viajó / ya procesado).
+        - Si está en casos_especiales: tratarlo como devolución/garantía/caso especial.
+        - Si no aparece en ninguna fuente, dilo claramente y pide ID/Folio/Cliente + fecha.
+
+        {chr(10).join(chunks)}
+        """
+    ).strip()
+
+
+def build_td_assistant_context(
+    df_actual: pd.DataFrame,
+    df_historicos: pd.DataFrame,
+    df_casos: pd.DataFrame,
+    user_message: str,
+    max_messages: int = 12,
+) -> list[dict[str, str]]:
+    history = st.session_state.get("td_assistant_messages", [])
+    recent_history = history[-max_messages:]
+    data_context = build_td_orders_data_context(
+        df_actual=df_actual,
+        df_historicos=df_historicos,
+        df_casos=df_casos,
+        user_message=user_message,
+    )
+
+    context = [{"role": "system", "content": TD_ASSISTANT_SYSTEM_PROMPT}]
+    context.append(
+        {
+            "role": "system",
+            "content": f"Contexto interno para esta consulta\n{data_context}",
+        }
+    )
+
+    for item in recent_history:
+        role = sanitize_text(item.get("role", ""))
+        content = sanitize_text(item.get("content", ""))
+        if role in {"user", "assistant"} and content:
+            context.append({"role": role, "content": content})
+    return context
+
+
+def fetch_td_assistant_reply(
+    user_message: str,
+    df_actual: pd.DataFrame,
+    df_historicos: pd.DataFrame,
+    df_casos: pd.DataFrame,
+) -> str:
+    api_key = get_openai_api_key()
+    if not api_key:
+        raise ValueError("missing_api_key")
+
+    client = OpenAI(api_key=api_key)
+    context = build_td_assistant_context(
+        df_actual=df_actual,
+        df_historicos=df_historicos,
+        df_casos=df_casos,
+        user_message=user_message,
+    )
+    context.append({"role": "user", "content": user_message})
+
+    response = client.responses.create(
+        model=TD_ASSISTANT_MODEL,
+        input=context,
+    )
+
+    answer = sanitize_text(getattr(response, "output_text", ""))
+    if answer:
+        return answer
+    return "No pude responder en este momento. Intenta de nuevo."
 
 def parse_datetime(value):
     if value is None:
@@ -1362,6 +1611,7 @@ GOOGLE_SHEET_ID = "1aWkSelodaz0nWfQx7FZAysGnIYGQFJxAN7RO3YgCiZY"
 SHEET_PEDIDOS = "data_pedidos"
 SHEET_CASOS = "casos_especiales"
 SHEET_CONFIRMADOS = "pedidos_confirmados"
+SHEET_PEDIDOS_HISTORICOS = "datos_pedidos"
 
 
 # --- Auth helpers ---
@@ -2390,6 +2640,7 @@ df_all = load_data_from_gsheets()
 # Tabs principales
 tab_labels = [
     "📈 Dashboard",
+    "🤖 Asistente TD",
     "⚙️ Auto Local",
     "🚚 Auto Foráneo",
     "🧑‍🔧 Surtidores",
@@ -2424,7 +2675,7 @@ tabs = [None] * len(tab_labels)
 # Entradas compartidas para numeración única entre Auto Local y Auto Foráneo
 auto_local_entries = []
 auto_foraneo_entries = []
-if selected_tab in (1, 2, 3):
+if selected_tab in (2, 3, 4):
     df_local_auto = get_local_orders(df_all)
     casos_local_auto, _ = get_case_envio_assignments(df_all)
     df_local_auto = drop_local_duplicates_for_cases(df_local_auto, casos_local_auto)
@@ -2449,9 +2700,69 @@ if selected_tab in (1, 2, 3):
     assign_display_numbers(auto_local_entries, auto_foraneo_entries, datetime.now(TZ).date())
 
 # ---------------------------
-# TAB 1: Auto Local (Casos asignados) — 2 columnas
+# TAB 1: Asistente interno TD
 # ---------------------------
 if selected_tab == 1:
+    init_td_assistant_state()
+
+    st.markdown("### 🤖 Asistente TD")
+    st.caption("Consulta dudas operativas internas usando data_pedidos, datos_pedidos históricos y casos_especiales.")
+
+    # Fuentes para el asistente interno
+    df_casos_assistant = load_casos_from_gsheets()
+    df_hist = load_historicos_from_gsheets()
+
+    if st.button("🧹 Limpiar conversación", use_container_width=False):
+        st.session_state.td_assistant_messages = []
+        st.rerun()
+
+    for message in st.session_state.td_assistant_messages:
+        role = message.get("role", "assistant")
+        content = sanitize_text(message.get("content", ""))
+        if role not in {"user", "assistant"} or not content:
+            continue
+        with st.chat_message(role):
+            st.markdown(content)
+
+    api_key = get_openai_api_key()
+    if not api_key:
+        st.warning("Falta configurar OPENAI_API_KEY en st.secrets para usar el asistente.")
+    else:
+        user_prompt = st.chat_input("Escribe tu duda operativa...")
+        if user_prompt:
+            user_prompt = sanitize_text(user_prompt)
+            if user_prompt:
+                st.session_state.td_assistant_messages.append(
+                    {"role": "user", "content": user_prompt}
+                )
+                with st.chat_message("user"):
+                    st.markdown(user_prompt)
+
+                with st.chat_message("assistant"):
+                    with st.spinner("Pensando..."):
+                        try:
+                            assistant_reply = fetch_td_assistant_reply(
+                                user_prompt,
+                                df_all,
+                                df_hist,
+                                df_casos_assistant,
+                            )
+                        except ValueError:
+                            assistant_reply = (
+                                "Falta configurar OPENAI_API_KEY en st.secrets para usar el asistente."
+                            )
+                        except Exception:
+                            assistant_reply = "No pude responder en este momento. Intenta de nuevo."
+                    st.markdown(assistant_reply)
+
+                st.session_state.td_assistant_messages.append(
+                    {"role": "assistant", "content": assistant_reply}
+                )
+
+# ---------------------------
+# TAB 1: Auto Local (Casos asignados) — 2 columnas
+# ---------------------------
+if selected_tab == 2:
     st_autorefresh(interval=60000, key="auto_refresh_local_casos")
 
     combined_entries = [
@@ -2506,7 +2817,7 @@ if selected_tab == 1:
 # ---------------------------
 # TAB 2: Auto Foráneo (Casos asignados) — 2 columnas
 # ---------------------------
-if selected_tab == 2:
+if selected_tab == 3:
     st_autorefresh(interval=60000, key="auto_refresh_foraneo_cdmx")
 
     hoy = datetime.now(TZ).date()
@@ -2575,7 +2886,7 @@ if selected_tab == 2:
 # ---------------------------
 # TAB 3: Surtidores (Asignación)
 # ---------------------------
-if selected_tab == 3:
+if selected_tab == 4:
 
     st.markdown("### 🧑‍🔧 Asignación de surtidores")
     st.caption("Selecciona pedidos visibles y escribe tu nombre o inicial para asignarlos.")
