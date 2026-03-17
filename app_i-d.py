@@ -181,6 +181,8 @@ def sanitize_text(value) -> str:
 def init_td_assistant_state() -> None:
     if "td_assistant_messages" not in st.session_state:
         st.session_state.td_assistant_messages = []
+    if "td_assistant_enable_image" not in st.session_state:
+        st.session_state.td_assistant_enable_image = False
 
 
 def init_login_state() -> None:
@@ -3042,14 +3044,24 @@ if selected_tab == 1:
     if not api_key:
         st.warning("Falta configurar OPENAI_API_KEY en st.secrets para usar el asistente.")
     else:
-        uploaded_image = st.file_uploader(
-            "Adjunta imagen para analizar en tu consulta (opcional)",
-            type=["png", "jpg", "jpeg", "webp"],
-            key="td_assistant_image_upload",
-            help="Puedes subir una captura, comprobante o foto para que el asistente la considere en su respuesta.",
+        st.checkbox(
+            "📎 Habilitar espacio para adjuntar imagen",
+            key="td_assistant_enable_image",
+            help="Actívalo solo cuando necesites enviar una imagen para que no estorbe en el chat.",
         )
-        if uploaded_image is not None:
-            st.image(uploaded_image, caption=f"Imagen adjunta: {uploaded_image.name}", use_container_width=True)
+
+        uploaded_image = None
+        if st.session_state.td_assistant_enable_image:
+            uploaded_image = st.file_uploader(
+                "Adjunta imagen para analizar en tu consulta (opcional)",
+                type=["png", "jpg", "jpeg", "webp"],
+                key="td_assistant_image_upload",
+                help="Puedes subir una captura, comprobante o foto para que el asistente la considere en su respuesta.",
+            )
+            if uploaded_image is not None:
+                st.image(uploaded_image, caption=f"Imagen adjunta: {uploaded_image.name}", use_container_width=True)
+        else:
+            st.session_state.pop("td_assistant_image_upload", None)
 
         user_prompt = st.chat_input("Escribe tu duda operativa...")
         if user_prompt:
