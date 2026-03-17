@@ -55,6 +55,8 @@ TD_ASSISTANT_SYSTEM_PROMPT = dedent(
     - Si consultan por nombre de cliente (sin folio/ID), busca y responde priorizando data_pedidos; si no aparece, usa datos_pedidos.
     - Si el mensaje menciona devolución o garantía, prioriza casos_especiales.
     - ID_Pedido es un identificador interno: nunca lo expongas ni lo uses en la respuesta al usuario.
+    - Para dudas de productos, usa la hoja "Productos" como fuente principal; prioriza devolver Código + Descripción exacta.
+    - Si una descripción coincide con varios productos, muestra opciones cortas con sus códigos y pide precisión.
     """
 ).strip()
 
@@ -246,6 +248,7 @@ def _select_relevant_rows_for_assistant(
     user_message: str,
     candidate_columns: list[str],
     max_rows: int,
+    match_columns: Optional[list[str]] = None,
 ) -> pd.DataFrame:
     if df.empty:
         return df
@@ -268,18 +271,21 @@ def _select_relevant_rows_for_assistant(
     if not tokens:
         return work.head(max_rows)
 
-    match_columns = [
+    columns_for_match = [
         c
-        for c in ["ID_Pedido", "Folio_Factura", "Cliente", "Vendedor", "Vendedor_Registro", "Estado"]
+        for c in (
+            match_columns
+            or ["ID_Pedido", "Folio_Factura", "Cliente", "Vendedor", "Vendedor_Registro", "Estado"]
+        )
         if c in work.columns
     ]
-    if not match_columns:
+    if not columns_for_match:
         return work.head(max_rows)
 
     mask = pd.Series(False, index=work.index)
     normalized_cache: dict[str, pd.Series] = {}
 
-    for col in match_columns:
+    for col in columns_for_match:
         try:
             normalized_cache[col] = work[col].apply(normalize_for_match)
         except Exception:
@@ -349,6 +355,24 @@ def load_remote_postal_codes() -> set[str]:
         codes.add(digits)
         codes.add(digits.lstrip("0") or "0")
     return codes
+
+
+@st.cache_data(ttl=300)
+def load_productos_from_gsheets() -> pd.DataFrame:
+    try:
+        ws_products = spreadsheet.worksheet(SHEET_PRODUCTOS)
+        data = _fetch_with_retry(ws_products, "_cache_productos")
+    except Exception:
+        return pd.DataFrame()
+
+    if not data:
+        return pd.DataFrame()
+
+    headers = data[0]
+    df = pd.DataFrame(data[1:], columns=headers)
+    for col in df.columns:
+        df[col] = df[col].apply(sanitize_text)
+    return df
 
 
 def build_remote_cp_context(user_message: str, remote_postal_codes: set[str]) -> str:
@@ -467,10 +491,79 @@ def build_td_orders_data_context(
     ).strip()
 
 
+def build_td_products_context(
+    df_productos: pd.DataFrame,
+    user_message: str,
+    max_rows: int = 20,
+) -> str:
+    if df_productos is None or df_productos.empty:
+        return "Catálogo de productos (hoja Productos): sin datos cargados."
+
+    preferred_columns = [
+        "Código",
+        "Codigo",
+        "Descripción",
+        "Descripcion",
+        "Descripción inglés",
+        "Descripción Adicional",
+        "Marca",
+        "Línea",
+        "Sublínea",
+        "Subsublínea",
+        "Tipo",
+        "Subtipo",
+        "Medida",
+        "Precio de venta",
+        "Costo",
+        "Moneda del producto",
+        "ClaveProdServ",
+        "Tags e-commerce",
+        "Descontinuado",
+    ]
+    available_columns = [c for c in preferred_columns if c in df_productos.columns]
+    if not available_columns:
+        available_columns = list(df_productos.columns[:12])
+
+    relevant = _select_relevant_rows_for_assistant(
+        df=df_productos,
+        user_message=user_message,
+        candidate_columns=available_columns,
+        max_rows=max_rows,
+        match_columns=[
+            "Código",
+            "Codigo",
+            "Descripción",
+            "Descripcion",
+            "Descripción inglés",
+            "Descripción Adicional",
+            "Marca",
+            "Línea",
+            "Sublínea",
+            "Subsublínea",
+            "Tags e-commerce",
+            "ClaveProdServ",
+        ],
+    )
+    records = relevant.to_dict(orient="records")
+
+    return dedent(
+        f"""
+        Catálogo de productos (hoja Productos):
+        - Registros cargados: {len(df_productos)}
+        - Registros relevantes para esta consulta: {len(records)} (máximo {max_rows})
+        - Columnas usadas: {', '.join(available_columns)}
+        - Regla de respuesta: cuando te pidan identificar un producto, prioriza mostrar Código + Descripción y, si existe, Marca/Línea/Precio de venta.
+        - Si hay más de una coincidencia plausible, presenta opciones breves y pide confirmación.
+        Datos: {json.dumps(records, ensure_ascii=False)}
+        """
+    ).strip()
+
+
 def build_td_assistant_context(
     df_actual: pd.DataFrame,
     df_historicos: pd.DataFrame,
     df_casos: pd.DataFrame,
+    df_productos: pd.DataFrame,
     remote_postal_codes: set[str],
     user_message: str,
     max_messages: int = 12,
@@ -482,6 +575,10 @@ def build_td_assistant_context(
         df_historicos=df_historicos,
         df_casos=df_casos,
         remote_postal_codes=remote_postal_codes,
+        user_message=user_message,
+    )
+    products_context = build_td_products_context(
+        df_productos=df_productos,
         user_message=user_message,
     )
 
@@ -506,7 +603,7 @@ def build_td_assistant_context(
     context.append(
         {
             "role": "system",
-            "content": f"Contexto interno para esta consulta\n{data_context}",
+            "content": f"Contexto interno para esta consulta\n{data_context}\n\n{products_context}",
         }
     )
 
@@ -523,6 +620,7 @@ def fetch_td_assistant_reply(
     df_actual: pd.DataFrame,
     df_historicos: pd.DataFrame,
     df_casos: pd.DataFrame,
+    df_productos: pd.DataFrame,
     remote_postal_codes: set[str],
     image_bytes: Optional[bytes] = None,
     image_mime_type: Optional[str] = None,
@@ -536,6 +634,7 @@ def fetch_td_assistant_reply(
         df_actual=df_actual,
         df_historicos=df_historicos,
         df_casos=df_casos,
+        df_productos=df_productos,
         remote_postal_codes=remote_postal_codes,
         user_message=user_message,
     )
@@ -1811,6 +1910,7 @@ SHEET_CASOS = "casos_especiales"
 SHEET_CONFIRMADOS = "pedidos_confirmados"
 SHEET_PEDIDOS_HISTORICOS = "datos_pedidos"
 SHEET_ZONAS_REMOTAS = "Zonas_Remotas"
+SHEET_PRODUCTOS = "Productos"
 
 
 # --- Auth helpers ---
@@ -3015,7 +3115,7 @@ if selected_tab == 1:
         """
         <div class="td-assistant-shell">
             <h3>🧠 Asistente TD</h3>
-            <p>Tu asistente inteligente para resolver dudas de pedidos, estatus, incidencias y seguimiento operativo.</p>
+            <p>Tu asistente inteligente para resolver dudas de pedidos, estatus, incidencias y claves de productos (hoja Productos).</p>
         </div>
         """,
         unsafe_allow_html=True,
@@ -3026,6 +3126,7 @@ if selected_tab == 1:
     # Fuentes para el asistente interno
     df_casos_assistant = load_casos_from_gsheets()
     df_hist = load_historicos_from_gsheets()
+    df_productos_assistant = load_productos_from_gsheets()
     remote_postal_codes = load_remote_postal_codes()
 
     if st.button("🧹 Limpiar conversación", use_container_width=False):
@@ -3095,6 +3196,7 @@ if selected_tab == 1:
                                 df_all,
                                 df_hist,
                                 df_casos_assistant,
+                                df_productos_assistant,
                                 remote_postal_codes,
                                 image_bytes=image_bytes,
                                 image_mime_type=image_type,
