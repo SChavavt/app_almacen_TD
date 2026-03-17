@@ -3032,15 +3032,8 @@ if selected_tab == 1:
         st.session_state.td_assistant_messages = []
         st.rerun()
 
-    for message in st.session_state.td_assistant_messages:
-        role = message.get("role", "assistant")
-        content = sanitize_text(message.get("content", ""))
-        if role not in {"user", "assistant"} or not content:
-            continue
-        with st.chat_message(role):
-            st.markdown(content)
-
     api_key = get_openai_api_key()
+    uploaded_image = None
     if not api_key:
         st.warning("Falta configurar OPENAI_API_KEY en st.secrets para usar el asistente.")
     else:
@@ -3050,7 +3043,6 @@ if selected_tab == 1:
             help="Actívalo solo cuando necesites enviar una imagen para que no estorbe en el chat.",
         )
 
-        uploaded_image = None
         if st.session_state.td_assistant_enable_image:
             uploaded_image = st.file_uploader(
                 "Adjunta imagen para analizar en tu consulta (opcional)",
@@ -3059,10 +3051,20 @@ if selected_tab == 1:
                 help="Puedes subir una captura, comprobante o foto para que el asistente la considere en su respuesta.",
             )
             if uploaded_image is not None:
-                st.image(uploaded_image, caption=f"Imagen adjunta: {uploaded_image.name}", use_container_width=True)
+                st.caption(f"Vista previa mínima: {uploaded_image.name}")
+                st.image(uploaded_image, width=120)
         else:
             st.session_state.pop("td_assistant_image_upload", None)
 
+    for message in st.session_state.td_assistant_messages:
+        role = message.get("role", "assistant")
+        content = sanitize_text(message.get("content", ""))
+        if role not in {"user", "assistant"} or not content:
+            continue
+        with st.chat_message(role):
+            st.markdown(content)
+
+    if api_key:
         user_prompt = st.chat_input("Escribe tu duda operativa...")
         if user_prompt:
             user_prompt = sanitize_text(user_prompt)
@@ -3082,7 +3084,8 @@ if selected_tab == 1:
                 with st.chat_message("user"):
                     st.markdown(user_prompt)
                     if uploaded_image is not None:
-                        st.image(uploaded_image, caption=f"Imagen enviada: {image_name}", use_container_width=True)
+                        st.caption(f"📎 Imagen enviada: {image_name}")
+                        st.image(uploaded_image, width=120)
 
                 with st.chat_message("assistant"):
                     with st.spinner("Pensando..."):
