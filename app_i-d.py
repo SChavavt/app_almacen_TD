@@ -55,24 +55,6 @@ TD_ASSISTANT_SYSTEM_PROMPT = dedent(
 
 TD_ASSISTANT_MODEL = "gpt-4.1-mini"
 
-VENDEDOR_CREDENTIALS = {
-    "DIANASOFIA47": "DIANA SOFIA",
-    "ALEJANDRO38": "ALEJANDRO RODRIGUEZ",
-    "ANA45": "ANA KAREN ORTEGA MAHUAD",
-    "CURSOS92": "CURSOS Y EVENTOS",
-    "CASSANDRA93": "CASSANDRA MIROSLAVA",
-    "CECILIA94": "CECILIA SEPULVEDA",
-    "DANIELA73": "DANIELA LOPEZ RAMIREZ",
-    "GRISELDA82": "GRISELDA CAROLINA SANCHEZ GARCIA",
-    "GLORIA53": "GLORIA MICHELLE GARCIA TORRES",
-    "JUAN24": "JUAN CASTILLEJO",
-    "JOSE31": "JOSE CORTES",
-    "KAREN58": "KAREN JAQUELINE",
-    "PAULINA57": "PAULINA TREJO",
-    "RUBEN67": "RUBEN",
-    "ROBERTO51": "DISTRIBUCION Y UNIVERSIDADES",
-}
-
 st.set_page_config(page_title="Panel de Almacén Integrado", layout="wide")
 
 # --- Ajustes UI compactos ---
@@ -176,21 +158,6 @@ def sanitize_text(value) -> str:
 def init_td_assistant_state() -> None:
     if "td_assistant_messages" not in st.session_state:
         st.session_state.td_assistant_messages = []
-
-
-def init_login_state() -> None:
-    if "auth_user" not in st.session_state:
-        st.session_state.auth_user = ""
-    if "auth_vendor" not in st.session_state:
-        st.session_state.auth_vendor = ""
-
-
-def get_logged_vendor() -> str:
-    return sanitize_text(st.session_state.get("auth_vendor", ""))
-
-
-def get_logged_user() -> str:
-    return sanitize_text(st.session_state.get("auth_user", ""))
 
 
 def get_openai_api_key() -> str:
@@ -378,20 +345,6 @@ def build_td_assistant_context(
     )
 
     context = [{"role": "system", "content": TD_ASSISTANT_SYSTEM_PROMPT}]
-    logged_vendor = get_logged_vendor()
-    logged_user = get_logged_user()
-    if logged_vendor:
-        context.append(
-            {
-                "role": "system",
-                "content": (
-                    "Vendedor logueado en esta sesión: "
-                    f"{logged_vendor}"
-                    + (f" (usuario: {logged_user})" if logged_user else "")
-                    + ". Usa este dato para personalizar la respuesta y para priorizar búsquedas del vendedor."
-                ),
-            }
-        )
     context.append(
         {
             "role": "system",
@@ -2739,37 +2692,6 @@ selected_tab = st.radio(
 # helper para "simular" tabs
 tabs = [None] * len(tab_labels)
 
-init_login_state()
-logged_vendor = get_logged_vendor()
-logged_user = get_logged_user()
-
-if not logged_vendor:
-    st.markdown("### 🔐 Acceso de vendedores")
-    with st.form("vendor_login_form", clear_on_submit=False):
-        user_input = st.text_input("Usuario", value="").strip().upper()
-        submitted = st.form_submit_button("Ingresar")
-    if submitted:
-        vendor_name = VENDEDOR_CREDENTIALS.get(user_input, "")
-        if vendor_name:
-            st.session_state.auth_user = user_input
-            st.session_state.auth_vendor = vendor_name
-            st.session_state.dashboard_vendedor_sel = vendor_name
-            st.success(f"Bienvenido(a), {vendor_name}.")
-            st.rerun()
-        st.error("Usuario no válido. Verifica la clave e intenta de nuevo.")
-    st.stop()
-
-status_col, action_col = st.columns([0.8, 0.2])
-with status_col:
-    st.caption(f"Sesión activa: {logged_vendor} ({logged_user})")
-with action_col:
-    if st.button("Cerrar sesión", use_container_width=True):
-        st.session_state.auth_user = ""
-        st.session_state.auth_vendor = ""
-        st.session_state.dashboard_vendedor_sel = "(Todos)"
-        st.session_state.td_assistant_messages = []
-        st.rerun()
-
 
 # Entradas compartidas para numeración única entre Auto Local y Auto Foráneo
 auto_local_entries = []
@@ -2862,8 +2784,6 @@ if selected_tab == 1:
         """,
         unsafe_allow_html=True,
     )
-    if get_logged_vendor():
-        st.caption(f"Atendiendo como vendedor: {get_logged_vendor()}.")
 
     # Fuentes para el asistente interno
     df_casos_assistant = load_casos_from_gsheets()
@@ -3209,12 +3129,10 @@ if selected_tab == 0:
     with colf1:
         vendedor_options = ["(Todos)"] + _vendedores
         vendedor_state_key = "dashboard_vendedor_sel"
-        logged_vendor = get_logged_vendor()
-        default_vendor = logged_vendor if logged_vendor in vendedor_options else "(Todos)"
         if vendedor_state_key not in st.session_state:
-            st.session_state[vendedor_state_key] = default_vendor
+            st.session_state[vendedor_state_key] = "(Todos)"
         if st.session_state[vendedor_state_key] not in vendedor_options:
-            st.session_state[vendedor_state_key] = default_vendor
+            st.session_state[vendedor_state_key] = "(Todos)"
         vendedor_sel = st.selectbox(
             "Filtrar por vendedor (opcional)",
             options=vendedor_options,
