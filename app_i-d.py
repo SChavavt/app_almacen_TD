@@ -43,6 +43,13 @@ TD_ASSISTANT_SYSTEM_PROMPT = dedent(
     - No menciones OpenAI, IA, modelo, sistema ni detalles técnicos.
     - Mantén tono profesional, útil y natural.
     - Prioriza claridad operativa sobre texto largo.
+    - Aclara siempre el significado operativo de estados/fuentes:
+      * data_pedidos = flujo actual; si dice "Completado" significa listo para recolección de paquetería, NO necesariamente enviado/entregado.
+      * datos_pedidos = históricos que ya salieron de almacén.
+      * casos_especiales = devoluciones/garantías/casos especiales; confirma salida solo con Completados_Limpiado = "sí".
+    - Si preguntan "¿sí llegó/está en sistema?" responde primero confirmando existencia del pedido (sí/no), y si sí, agrega fecha/hora de registro, vendedor y estado.
+    - Si consultan por nombre de cliente (sin folio/ID), busca y responde priorizando data_pedidos; si no aparece, usa datos_pedidos.
+    - Si el mensaje menciona devolución o garantía, prioriza casos_especiales.
     """
 ).strip()
 
@@ -174,8 +181,13 @@ def _select_relevant_rows_for_assistant(
         if col in work.columns:
             work[col] = work[col].apply(sanitize_text)
 
+    def normalize_for_match(text: object) -> str:
+        raw = sanitize_text(text).lower()
+        normalized = unicodedata.normalize("NFKD", raw)
+        return "".join(ch for ch in normalized if not unicodedata.combining(ch))
+
     tokens = [
-        t.lower()
+        normalize_for_match(t)
         for t in sanitize_text(user_message).replace("#", " ").split()
         if len(t.strip()) >= 3
     ]
@@ -191,10 +203,18 @@ def _select_relevant_rows_for_assistant(
         return work.head(max_rows)
 
     mask = pd.Series(False, index=work.index)
+    normalized_cache: dict[str, pd.Series] = {}
+
+    for col in match_columns:
+        try:
+            normalized_cache[col] = work[col].apply(normalize_for_match)
+        except Exception:
+            continue
+
     for token in tokens[:8]:
-        for col in match_columns:
+        for col, normalized_series in normalized_cache.items():
             try:
-                mask = mask | work[col].astype(str).str.lower().str.contains(token, na=False)
+                mask = mask | normalized_series.str.contains(token, na=False)
             except Exception:
                 continue
 
@@ -256,7 +276,7 @@ def build_td_orders_data_context(
             "name": "casos_especiales",
             "description": "Devoluciones, garantías y casos especiales",
             "df": df_casos,
-            "columns": ["ID_Pedido", "Folio_Factura", "Cliente", "Vendedor_Registro", "Estado", "Tipo_Envio", "Tipo_Envio_Original", "Hora_Registro", "Fecha_Recepcion_Devolucion"],
+            "columns": ["ID_Pedido", "Folio_Factura", "Cliente", "Vendedor_Registro", "Estado", "Completados_Limpiado", "Tipo_Envio", "Tipo_Envio_Original", "Hora_Registro", "Fecha_Recepcion_Devolucion"],
         },
     ]
 
@@ -297,9 +317,10 @@ def build_td_orders_data_context(
         f"""
         Contexto de datos internos TD para consulta operativa:
         - Usa estas fuentes para verificar si un pedido existe en sistema, su estado, vendedor y tipo.
-        - Si está en data_pedidos: sigue en flujo actual.
-        - Si está en datos_pedidos_historicos: se considera histórico (ya viajó / ya procesado).
-        - Si está en casos_especiales: tratarlo como devolución/garantía/caso especial.
+        - Si está en data_pedidos: sigue en flujo actual. OJO: estado "Completado" aquí = pedido listo para recolección, no confirma entrega/envío final.
+        - Si está en datos_pedidos_historicos: se considera histórico y ya salió de almacén.
+        - Si está en casos_especiales: tratarlo como devolución/garantía/caso especial; confirmar salida con Completados_Limpiado = "sí".
+        - Si piden búsqueda por nombre de cliente, prioriza data_pedidos y si no hay match continúa en datos_pedidos_historicos.
         - Si no aparece en ninguna fuente, dilo claramente y pide ID/Folio/Cliente + fecha.
 
         {chr(10).join(chunks)}
