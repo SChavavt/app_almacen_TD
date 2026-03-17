@@ -188,12 +188,46 @@ def init_login_state() -> None:
         st.session_state.auth_vendor = ""
 
 
+def get_query_param_value(param_name: str) -> str:
+    value = st.query_params.get(param_name, "")
+    if isinstance(value, list):
+        return sanitize_text(value[0]) if value else ""
+    return sanitize_text(value)
+
+
+def clear_query_param(param_name: str) -> None:
+    try:
+        st.query_params.pop(param_name, None)
+    except Exception:
+        pass
+
+
 def get_logged_vendor() -> str:
     return sanitize_text(st.session_state.get("auth_vendor", ""))
 
 
 def get_logged_user() -> str:
     return sanitize_text(st.session_state.get("auth_user", ""))
+
+
+def get_user_tone_instruction() -> str:
+    logged_user = get_logged_user().upper()
+    if logged_user == "GRISELDA82":
+        return (
+            "Cuando el usuario logueado sea GRISELDA82, puedes dirigirte a ella como Caro y usar "
+            "un tono cercano, relajado y ligeramente juguetón, sin perder claridad operativa."
+        )
+    if logged_user == "ALEJANDRO38":
+        return (
+            "Cuando el usuario logueado sea ALEJANDRO38, trátalo con tono ejecutivo y de respeto, "
+            "asumiendo que es gerente de ventas."
+        )
+    if logged_user == "CECILIA94":
+        return (
+            "Cuando el usuario logueado sea CECILIA94, trátala con tono ejecutivo y de respeto, "
+            "asumiendo que es gerente de almacén."
+        )
+    return ""
 
 
 def get_openai_api_key() -> str:
@@ -395,6 +429,9 @@ def build_td_assistant_context(
                 ),
             }
         )
+    tone_instruction = get_user_tone_instruction()
+    if tone_instruction:
+        context.append({"role": "system", "content": tone_instruction})
     context.append(
         {
             "role": "system",
@@ -2720,10 +2757,23 @@ tab_labels = [
 # ---------------------------
 # Persistencia de tab activa (para autorefresh)
 # ---------------------------
+init_login_state()
+
+if not get_logged_user():
+    usuario_qp = get_query_param_value("usuario").upper()
+    if usuario_qp in VENDEDOR_CREDENTIALS:
+        st.session_state.auth_user = usuario_qp
+        st.session_state.auth_vendor = VENDEDOR_CREDENTIALS[usuario_qp]
+
+tab_qp = get_query_param_value("tab")
 if "active_main_tab" not in st.session_state:
     st.session_state.active_main_tab = 0
 elif st.session_state.active_main_tab >= len(tab_labels):
     st.session_state.active_main_tab = 0
+if tab_qp.isdigit():
+    tab_index = int(tab_qp)
+    if 0 <= tab_index < len(tab_labels):
+        st.session_state.active_main_tab = tab_index
 
 def _set_active_main_tab(i: int):
     st.session_state.active_main_tab = i
@@ -2742,9 +2792,14 @@ selected_tab = st.radio(
 # helper para "simular" tabs
 tabs = [None] * len(tab_labels)
 
-init_login_state()
 logged_vendor = get_logged_vendor()
 logged_user = get_logged_user()
+
+st.query_params["tab"] = str(selected_tab)
+if logged_user:
+    st.query_params["usuario"] = logged_user
+else:
+    clear_query_param("usuario")
 
 with st.sidebar:
     st.markdown("### 👤 Acceso")
@@ -2758,6 +2813,7 @@ with st.sidebar:
             st.session_state.auth_vendor = ""
             st.session_state.dashboard_vendedor_sel = "(Todos)"
             st.session_state.td_assistant_messages = []
+            clear_query_param("usuario")
             st.rerun()
     else:
         st.caption("Iniciar sesión es opcional. Si no inicias sesión, la app funciona normal sin vendedor preseleccionado.")
@@ -2772,8 +2828,14 @@ with st.sidebar:
                 st.session_state.auth_user = user_input
                 st.session_state.auth_vendor = vendor_name
                 st.session_state.dashboard_vendedor_sel = vendor_name
+                st.query_params["usuario"] = user_input
                 st.rerun()
             st.error("Usuario no válido. Verifica la clave e intenta de nuevo.")
+
+if not logged_vendor:
+    st.warning(
+        "⚠️ Aún no has iniciado sesión. Para guardar tu usuario en el enlace y evitar volver a loguearte, inicia sesión desde la barra lateral."
+    )
 
 
 # Entradas compartidas para numeración única entre Auto Local y Auto Foráneo
