@@ -2726,8 +2726,64 @@ if selected_tab in (2, 3, 4):
 if selected_tab == 1:
     init_td_assistant_state()
 
-    st.markdown("### 🧠 Asistente TD")
-    st.caption("Tu asistente inteligente para resolver dudas de pedidos, estatus, incidencias y seguimiento operativo.")
+    st.markdown(
+        """
+        <style>
+        .td-assistant-shell {
+            background: linear-gradient(180deg, #0f2027 0%, #12232d 45%, #0e1d23 100%);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            border-radius: 14px;
+            padding: 0.8rem 0.9rem 0.2rem;
+            margin-bottom: 0.75rem;
+        }
+        .td-assistant-shell h3 {
+            margin-bottom: 0.1rem;
+        }
+        .td-assistant-shell p {
+            margin-top: 0;
+            color: #b9d8cf;
+            font-size: 0.9rem;
+        }
+        div[data-testid="stChatMessage"] {
+            border-radius: 16px;
+            padding: 0.4rem 0.75rem;
+            margin-bottom: 0.45rem;
+            border: 1px solid transparent;
+            box-shadow: 0 4px 10px rgba(0, 0, 0, 0.25);
+        }
+        div[data-testid="stChatMessage"]:has(div[data-testid="chatAvatarIcon-user"]) {
+            background: linear-gradient(130deg, #0f766e 0%, #14b8a6 100%);
+            border-color: rgba(15, 118, 110, 0.55);
+        }
+        div[data-testid="stChatMessage"]:has(div[data-testid="chatAvatarIcon-assistant"]) {
+            background: linear-gradient(145deg, #1e293b 0%, #111827 100%);
+            border-color: rgba(148, 163, 184, 0.28);
+        }
+        div[data-testid="stChatMessage"] [data-testid="stMarkdownContainer"] p {
+            margin-bottom: 0;
+            line-height: 1.4;
+            font-size: 0.95rem;
+        }
+        div[data-testid="stChatInput"] {
+            background: rgba(15, 23, 42, 0.68);
+            border: 1px solid rgba(148, 163, 184, 0.35);
+            border-radius: 999px;
+            padding: 0.25rem 0.65rem;
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    st.markdown(
+        """
+        <div class="td-assistant-shell">
+            <h3>🧠 Asistente TD</h3>
+            <p>Tu asistente inteligente para resolver dudas de pedidos, estatus, incidencias y seguimiento operativo.</p>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
 
     # Fuentes para el asistente interno
     df_casos_assistant = load_casos_from_gsheets()
