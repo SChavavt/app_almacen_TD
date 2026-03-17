@@ -5,6 +5,7 @@ import pandas as pd
 import numpy as np
 from datetime import datetime, timedelta
 import json
+import re
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 import boto3
@@ -323,10 +324,67 @@ def load_historicos_from_gsheets() -> pd.DataFrame:
     return df
 
 
+@st.cache_data(ttl=300)
+def load_remote_postal_codes() -> set[str]:
+    """Lee hoja Zonas_Remotas y devuelve CPs normalizados en formato texto."""
+    try:
+        ws_remote = spreadsheet.worksheet(SHEET_ZONAS_REMOTAS)
+        data = _fetch_with_retry(ws_remote, "_cache_zonas_remotas")
+    except Exception:
+        return set()
+
+    if not data:
+        return set()
+
+    codes: set[str] = set()
+    for row in data[1:]:
+        if not row:
+            continue
+        raw = sanitize_text(row[0])
+        digits = "".join(ch for ch in raw if ch.isdigit())
+        if not digits:
+            continue
+        codes.add(digits)
+        codes.add(digits.lstrip("0") or "0")
+    return codes
+
+
+def build_remote_cp_context(user_message: str, remote_postal_codes: set[str]) -> str:
+    found = re.findall(r"\b\d{4,5}\b", sanitize_text(user_message))
+    cleaned_candidates = []
+    for cp in found:
+        normalized = cp.strip()
+        if normalized and normalized not in cleaned_candidates:
+            cleaned_candidates.append(normalized)
+
+    rows: list[dict[str, str]] = []
+    for cp in cleaned_candidates[:8]:
+        variants = {cp, cp.lstrip("0") or "0"}
+        is_remote = any(v in remote_postal_codes for v in variants)
+        rows.append(
+            {
+                "codigo_postal": cp,
+                "zona_remota": "sí" if is_remote else "no",
+            }
+        )
+
+    return dedent(
+        f"""
+        Validación de Zonas Remotas:
+        - Fuente: hoja '{SHEET_ZONAS_REMOTAS}'.
+        - Total de códigos cargados: {len(remote_postal_codes)}.
+        - Si el usuario pregunta por zona remota, responde directo con "sí/no" por cada CP detectado.
+        - Si no detectas CP en el mensaje, pide el código postal exacto (4 o 5 dígitos).
+        - Resultado para esta consulta: {json.dumps(rows, ensure_ascii=False)}
+        """
+    ).strip()
+
+
 def build_td_orders_data_context(
     df_actual: pd.DataFrame,
     df_historicos: pd.DataFrame,
     df_casos: pd.DataFrame,
+    remote_postal_codes: set[str],
     user_message: str,
     max_rows_per_source: int = 15,
 ) -> str:
@@ -384,6 +442,11 @@ def build_td_orders_data_context(
             ).strip()
         )
 
+    remote_cp_context = build_remote_cp_context(
+        user_message=user_message,
+        remote_postal_codes=remote_postal_codes,
+    )
+
     return dedent(
         f"""
         Contexto de datos internos TD para consulta operativa:
@@ -393,6 +456,9 @@ def build_td_orders_data_context(
         - Si está en casos_especiales: tratarlo como devolución/garantía/caso especial; confirmar salida con Completados_Limpiado = "sí".
         - Si piden búsqueda por nombre de cliente, prioriza data_pedidos y si no hay match continúa en datos_pedidos_historicos.
         - Si no aparece en ninguna fuente, dilo claramente y pide ID/Folio/Cliente + fecha.
+        - Para dudas de zona remota por CP, prioriza "Validación de Zonas Remotas".
+
+        {remote_cp_context}
 
         {chr(10).join(chunks)}
         """
@@ -403,6 +469,7 @@ def build_td_assistant_context(
     df_actual: pd.DataFrame,
     df_historicos: pd.DataFrame,
     df_casos: pd.DataFrame,
+    remote_postal_codes: set[str],
     user_message: str,
     max_messages: int = 12,
 ) -> list[dict[str, str]]:
@@ -412,6 +479,7 @@ def build_td_assistant_context(
         df_actual=df_actual,
         df_historicos=df_historicos,
         df_casos=df_casos,
+        remote_postal_codes=remote_postal_codes,
         user_message=user_message,
     )
 
@@ -453,6 +521,7 @@ def fetch_td_assistant_reply(
     df_actual: pd.DataFrame,
     df_historicos: pd.DataFrame,
     df_casos: pd.DataFrame,
+    remote_postal_codes: set[str],
     image_bytes: Optional[bytes] = None,
     image_mime_type: Optional[str] = None,
 ) -> str:
@@ -465,6 +534,7 @@ def fetch_td_assistant_reply(
         df_actual=df_actual,
         df_historicos=df_historicos,
         df_casos=df_casos,
+        remote_postal_codes=remote_postal_codes,
         user_message=user_message,
     )
     if image_bytes and image_mime_type:
@@ -1738,6 +1808,7 @@ SHEET_PEDIDOS = "data_pedidos"
 SHEET_CASOS = "casos_especiales"
 SHEET_CONFIRMADOS = "pedidos_confirmados"
 SHEET_PEDIDOS_HISTORICOS = "datos_pedidos"
+SHEET_ZONAS_REMOTAS = "Zonas_Remotas"
 
 
 # --- Auth helpers ---
@@ -2953,6 +3024,7 @@ if selected_tab == 1:
     # Fuentes para el asistente interno
     df_casos_assistant = load_casos_from_gsheets()
     df_hist = load_historicos_from_gsheets()
+    remote_postal_codes = load_remote_postal_codes()
 
     if st.button("🧹 Limpiar conversación", use_container_width=False):
         st.session_state.td_assistant_messages = []
@@ -3008,6 +3080,7 @@ if selected_tab == 1:
                                 df_all,
                                 df_hist,
                                 df_casos_assistant,
+                                remote_postal_codes,
                                 image_bytes=image_bytes,
                                 image_mime_type=image_type,
                             )
