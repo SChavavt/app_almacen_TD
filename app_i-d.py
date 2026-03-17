@@ -23,7 +23,9 @@ TZ = ZoneInfo("America/Mexico_City")
 TD_ASSISTANT_SYSTEM_PROMPT = dedent(
     """
     Eres el asistente interno de TD para apoyar a vendedores y personal comercial.
+    TD es una empresa mexicana que vende material dental especializado en ortodoncia a nivel nacional.
     Tu función es resolver dudas operativas internas de forma clara, breve, útil y profesional.
+    Cuando haya términos clínicos del giro dental (por ejemplo: arco), interprétalos en contexto de ortodoncia dental.
     Ayudas especialmente con:
     - claves de materiales
     - zonas remotas
@@ -50,6 +52,7 @@ TD_ASSISTANT_SYSTEM_PROMPT = dedent(
     - Si preguntan "¿sí llegó/está en sistema?" responde primero confirmando existencia del pedido (sí/no), y si sí, agrega fecha/hora de registro, vendedor y estado.
     - Si consultan por nombre de cliente (sin folio/ID), busca y responde priorizando data_pedidos; si no aparece, usa datos_pedidos.
     - Si el mensaje menciona devolución o garantía, prioriza casos_especiales.
+    - ID_Pedido es un identificador interno: nunca lo expongas ni lo uses en la respuesta al usuario.
     """
 ).strip()
 
@@ -297,19 +300,19 @@ def build_td_orders_data_context(
             "name": "data_pedidos",
             "description": "Pedidos en flujo actual (normalmente no han viajado)",
             "df": df_actual,
-            "columns": ["ID_Pedido", "Folio_Factura", "Cliente", "Vendedor", "Estado", "Tipo_Envio", "Turno", "Fecha_Entrega", "Hora_Registro"],
+            "columns": ["Folio_Factura", "Cliente", "Vendedor", "Estado", "Tipo_Envio", "Turno", "Fecha_Entrega", "Hora_Registro"],
         },
         {
             "name": "datos_pedidos_historicos",
             "description": "Pedidos históricos que ya viajaron (o fallback a pedidos_confirmados)",
             "df": df_historicos,
-            "columns": ["ID_Pedido", "Folio_Factura", "Cliente", "Vendedor", "Vendedor_Registro", "Estado", "Tipo_Envio", "Hora_Registro", "Fecha_Entrega", "Fecha_Completado"],
+            "columns": ["Folio_Factura", "Cliente", "Vendedor", "Vendedor_Registro", "Estado", "Tipo_Envio", "Hora_Registro", "Fecha_Entrega", "Fecha_Completado"],
         },
         {
             "name": "casos_especiales",
             "description": "Devoluciones, garantías y casos especiales",
             "df": df_casos,
-            "columns": ["ID_Pedido", "Folio_Factura", "Cliente", "Vendedor_Registro", "Estado", "Completados_Limpiado", "Tipo_Envio", "Tipo_Envio_Original", "Hora_Registro", "Fecha_Recepcion_Devolucion"],
+            "columns": ["Folio_Factura", "Cliente", "Vendedor_Registro", "Estado", "Completados_Limpiado", "Tipo_Envio", "Tipo_Envio_Original", "Hora_Registro", "Fecha_Recepcion_Devolucion"],
         },
     ]
 
