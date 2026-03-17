@@ -3675,10 +3675,10 @@ def render_macheo_tool_tab_gerente():
         )
 
 # --- INTERFAZ ---
-USUARIOS_VALIDOS = ["ALEJANDRO38", "CeciliaATD", "SChava", "BreydaFTD", "SaraiFTD"]
+USUARIOS_VALIDOS = ["AlejandroVTD", "CeciliaATD", "SChava", "BreydaFTD", "SaraiFTD"]
 
 PERMISOS_USUARIO = {
-    "ALEJANDRO38": {"organizador": True, "modificar": False, "cobranza": False},
+    "AlejandroVTD": {"organizador": True, "modificar": False, "cobranza": False},
     "CeciliaATD": {"organizador": False, "modificar": True, "cobranza": False},
     "SChava": {"organizador": True, "modificar": True, "cobranza": True},
     "BreydaFTD": {"organizador": False, "modificar": False, "cobranza": True},
@@ -3699,13 +3699,10 @@ def ensure_user_logged_in():
     usuario_session = st.session_state.get("usuario", "").strip()
 
     if not usuario_session:
-        usuario_qp = _query_param_value("usuario").upper()
+        usuario_qp = _query_param_value("usuario")
         if usuario_qp in USUARIOS_VALIDOS:
             st.session_state.usuario = usuario_qp
             usuario_session = usuario_qp
-
-    if usuario_session:
-        st.query_params["usuario"] = usuario_session
 
     with st.sidebar:
         st.markdown("### 👤 Acceso")
@@ -3724,7 +3721,6 @@ def ensure_user_logged_in():
             placeholder="Ingresa tu usuario",
         ).strip()
         if st.button("🔐 Iniciar sesión", key="login_usuario_btn"):
-            usuario_input = usuario_input.upper()
             if usuario_input in USUARIOS_VALIDOS:
                 st.session_state.usuario = usuario_input
                 st.query_params["usuario"] = usuario_input
