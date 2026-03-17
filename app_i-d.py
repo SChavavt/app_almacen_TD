@@ -263,11 +263,22 @@ def _select_relevant_rows_for_assistant(
         normalized = unicodedata.normalize("NFKD", raw)
         return "".join(ch for ch in normalized if not unicodedata.combining(ch))
 
-    tokens = [
-        normalize_for_match(t)
-        for t in sanitize_text(user_message).replace("#", " ").split()
-        if len(t.strip()) >= 3
-    ]
+    stopwords = {
+        "que", "cual", "cuál", "para", "por", "con", "sin", "del", "de", "los", "las",
+        "una", "uno", "unos", "unas", "este", "esta", "eso", "esa", "material", "producto",
+        "clave", "codigo", "código", "sera", "será", "me", "dice", "dime", "oye", "tal",
+    }
+    tokens: list[str] = []
+    for raw_token in sanitize_text(user_message).replace("#", " ").split():
+        token = normalize_for_match(raw_token)
+        if not token:
+            continue
+        looks_like_code = any(ch.isdigit() for ch in token) and len(token) >= 2
+        if looks_like_code:
+            tokens.append(token)
+            continue
+        if len(token) >= 3 and token not in stopwords:
+            tokens.append(token)
     if not tokens:
         return work.head(max_rows)
 
@@ -523,6 +534,33 @@ def build_td_products_context(
     available_columns = [c for c in preferred_columns if c in df_productos.columns]
     if not available_columns:
         available_columns = list(df_productos.columns[:12])
+
+    code_col = "Código" if "Código" in df_productos.columns else ("Codigo" if "Codigo" in df_productos.columns else "")
+    explicit_code_tokens = []
+    for raw_token in sanitize_text(user_message).replace("#", " ").split():
+        token = sanitize_text(raw_token).upper()
+        clean_token = "".join(ch for ch in token if ch.isalnum() or ch in {"-", "_"})
+        if len(clean_token) >= 4 and any(ch.isdigit() for ch in clean_token):
+            explicit_code_tokens.append(clean_token)
+
+    if code_col and explicit_code_tokens:
+        code_series = df_productos[code_col].astype(str).str.upper()
+        code_mask = pd.Series(False, index=df_productos.index)
+        for token in explicit_code_tokens[:5]:
+            code_mask = code_mask | code_series.str.contains(re.escape(token), na=False)
+        if code_mask.any():
+            exact_by_code = df_productos.loc[code_mask, available_columns].head(max_rows)
+            records = exact_by_code.to_dict(orient="records")
+            return dedent(
+                f"""
+                Catálogo de productos (hoja Productos):
+                - Registros cargados: {len(df_productos)}
+                - Registros relevantes para esta consulta: {len(records)} (máximo {max_rows})
+                - Columnas usadas: {', '.join(available_columns)}
+                - Regla de respuesta: se detectó una posible clave de producto en la consulta; prioriza responder con Código + Descripción exacta.
+                Datos: {json.dumps(records, ensure_ascii=False)}
+                """
+            ).strip()
 
     relevant = _select_relevant_rows_for_assistant(
         df=df_productos,
