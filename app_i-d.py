@@ -2661,7 +2661,7 @@ df_all = load_data_from_gsheets()
 # Tabs principales
 tab_labels = [
     "📈 Dashboard",
-    "🤖 Asistente TD",
+    "🧠 Asistente TD",
     "⚙️ Auto Local",
     "🚚 Auto Foráneo",
     "🧑‍🔧 Surtidores",
@@ -2726,8 +2726,8 @@ if selected_tab in (2, 3, 4):
 if selected_tab == 1:
     init_td_assistant_state()
 
-    st.markdown("### 🤖 Asistente TD")
-    st.caption("Consulta dudas operativas internas usando data_pedidos, datos_pedidos históricos y casos_especiales.")
+    st.markdown("### 🧠 Asistente TD")
+    st.caption("Tu asistente inteligente para resolver dudas de pedidos, estatus, incidencias y seguimiento operativo.")
 
     # Fuentes para el asistente interno
     df_casos_assistant = load_casos_from_gsheets()
