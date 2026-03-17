@@ -1971,6 +1971,7 @@ def parse_antiguedad_cobranza_excel(file, mes: str = "") -> pd.DataFrame:
             )
         i_cond = next((k for k, v in headers_idx.items() if "condicion" in v or "condición" in v), None)
         i_mon = next((k for k, v in headers_idx.items() if "moneda" in v), None)
+        i_vendedor = next((k for k, v in headers_idx.items() if v.strip() == "vendedor"), None)
 
         folio = _cobranza_clean_text(row[i_folio]) if i_folio is not None and i_folio < len(row) else ""
         fv = _cobranza_to_date(row[i_fv]) if i_fv is not None and i_fv < len(row) else ""
@@ -1978,6 +1979,7 @@ def parse_antiguedad_cobranza_excel(file, mes: str = "") -> pd.DataFrame:
         saldo = _cobranza_to_float(row[i_sal]) if i_sal is not None and i_sal < len(row) else 0.0
         cond = _cobranza_clean_text(row[i_cond]) if i_cond is not None and i_cond < len(row) else ""
         mon = _cobranza_clean_text(row[i_mon]) if i_mon is not None and i_mon < len(row) else ""
+        vendedor = _cobranza_clean_text(row[i_vendedor]) if i_vendedor is not None and i_vendedor < len(row) else ""
 
         if not folio or not fv or saldo <= 0:
             continue
@@ -1991,9 +1993,10 @@ def parse_antiguedad_cobranza_excel(file, mes: str = "") -> pd.DataFrame:
             "Saldo_Vence": saldo,
             "Condicion": cond,
             "Moneda": mon,
+            "Vendedor": vendedor,
         })
 
-    cols = ["Mes", "Codigo", "Folio", "Fecha_Factura", "Fecha_Vencimiento", "Saldo_Vence", "Condicion", "Moneda"]
+    cols = ["Mes", "Codigo", "Folio", "Fecha_Factura", "Fecha_Vencimiento", "Saldo_Vence", "Condicion", "Moneda", "Vendedor"]
     return pd.DataFrame(out, columns=cols)
 
 
@@ -3626,6 +3629,7 @@ def render_macheo_tool_tab_gerente():
             cols_salida = [
                 "Codigo",
                 "Razon_Social",
+                "Vendedor",
                 "Folio",
                 "Saldo_Vence",
                 "Fecha_Vencimiento",
