@@ -5014,6 +5014,38 @@ if "organizador" in tab_map:
 
         with sub[0]:
             st.subheader("📌 Hoy")
+            st.markdown(
+                """
+                <style>
+                .hoy-quick-card {
+                    border: 1px solid rgba(151, 166, 195, 0.35);
+                    border-radius: 12px;
+                    padding: 0.75rem;
+                    margin-bottom: 0.75rem;
+                    background: rgba(28, 34, 52, 0.35);
+                }
+                .hoy-quick-title {
+                    font-weight: 700;
+                    font-size: 1rem;
+                    margin-bottom: 0.35rem;
+                }
+                @media (max-width: 900px) {
+                    .stButton > button,
+                    .stDownloadButton > button,
+                    button[kind="primary"] {
+                        width: 100%;
+                        min-height: 2.9rem;
+                        font-size: 1rem;
+                    }
+                    .hoy-quick-card {
+                        padding: 0.7rem;
+                        border-radius: 10px;
+                    }
+                }
+                </style>
+                """,
+                unsafe_allow_html=True,
+            )
 
             hoy = date.today()
             # chk_hoy base (por si no se sincroniza en este rerun)
@@ -5103,6 +5135,149 @@ if "organizador" in tab_map:
                 cot_pend = cot.iloc[0:0]
                 cot_venc = cot.iloc[0:0]
 
+            col_kpi1, col_kpi2, col_kpi3, col_kpi4 = st.columns(4)
+            col_kpi1.metric("📅 Citas hoy", len(citas_hoy))
+            col_kpi2.metric("✅ Pendientes hoy", tareas_hoy_total)
+            col_kpi3.metric("⚠️ Vencidos", len(tareas_vencidas))
+            col_kpi4.metric("💰 Cot. vencidas", len(cot_venc))
+
+            st.markdown("### ⚡ Acciones rápidas")
+            modo_movil = st.toggle(
+                "Modo rápido celular",
+                value=True,
+                help="Muestra controles grandes y directos para operar rápido desde teléfono.",
+                key="hoy_modo_movil",
+            )
+
+            secciones_ocultas_movil = []
+            if modo_movil:
+                if citas_hoy.empty:
+                    secciones_ocultas_movil.append("Citas de hoy")
+                if citas_otras.empty:
+                    secciones_ocultas_movil.append("Citas pendientes (pasadas/futuras)")
+                if tareas_hoy.empty:
+                    secciones_ocultas_movil.append("Pendientes de hoy")
+                if tareas_vencidas.empty:
+                    secciones_ocultas_movil.append("Pendientes vencidos")
+                if cot_venc.empty:
+                    secciones_ocultas_movil.append("Cotizaciones vencidas")
+
+            if modo_movil:
+                if not citas_hoy.empty:
+                    cita_top = citas_hoy.iloc[0]
+                    cita_id_top = str(cita_top.get("Cita_ID", "")).strip()
+                    cliente_top = str(cita_top.get("Cliente_Persona", "")).strip() or "Sin cliente"
+                    hora_top = str(cita_top.get("Fecha_Inicio", "")).strip()
+                    telefono_top = str(cita_top.get("Telefono", "")).strip()
+                    st.markdown('<div class="hoy-quick-card">', unsafe_allow_html=True)
+                    st.markdown(f'<div class="hoy-quick-title">📞 Próxima cita: {cliente_top}</div>', unsafe_allow_html=True)
+                    st.caption(f"Hora: {hora_top}")
+                    if telefono_top:
+                        st.link_button("📲 Llamar", f"tel:{telefono_top}", use_container_width=True)
+                    col_cita_a, col_cita_b = st.columns(2)
+                    with col_cita_a:
+                        if st.button("✅ Marcar realizada", key=f"quick_done_cita_{cita_id_top}", use_container_width=True):
+                            try:
+                                safe_update_by_id(
+                                    "CITAS",
+                                    "Cita_ID",
+                                    cita_id_top,
+                                    {
+                                        "Estatus": "Realizada",
+                                        "Last_Updated_At": now_iso(),
+                                        "Last_Updated_By": "ALEJANDRO",
+                                    },
+                                )
+                                st.success("Cita marcada como realizada.")
+                                st.rerun()
+                            except Exception as e:
+                                st.error(f"❌ No se pudo actualizar la cita: {e}")
+                    with col_cita_b:
+                        if st.button("⏭️ Reprogramar", key=f"quick_reprog_cita_{cita_id_top}", use_container_width=True):
+                            try:
+                                safe_update_by_id(
+                                    "CITAS",
+                                    "Cita_ID",
+                                    cita_id_top,
+                                    {
+                                        "Estatus": "Reprogramada",
+                                        "Last_Updated_At": now_iso(),
+                                        "Last_Updated_By": "ALEJANDRO",
+                                    },
+                                )
+                                st.success("Cita marcada como reprogramada.")
+                                st.rerun()
+                            except Exception as e:
+                                st.error(f"❌ No se pudo reprogramar: {e}")
+                    st.markdown('</div>', unsafe_allow_html=True)
+
+                if not tareas_vencidas.empty:
+                    tarea_top = tareas_vencidas.iloc[0]
+                    tarea_id_top = str(tarea_top.get("Tarea_ID", "")).strip()
+                    titulo_top = str(tarea_top.get("Titulo", "")).strip() or "Pendiente vencido"
+                    fecha_top = str(tarea_top.get("Fecha_Limite", "")).strip()
+                    st.markdown('<div class="hoy-quick-card">', unsafe_allow_html=True)
+                    st.markdown(f'<div class="hoy-quick-title">⚠️ Vencido prioritario: {titulo_top}</div>', unsafe_allow_html=True)
+                    st.caption(f"Fecha límite: {fecha_top}")
+                    if st.button("✅ Resolver pendiente", key=f"quick_done_tarea_{tarea_id_top}", use_container_width=True):
+                        try:
+                            safe_update_by_id(
+                                "TAREAS",
+                                "Tarea_ID",
+                                tarea_id_top,
+                                {
+                                    "Estatus": "Completada",
+                                    "Fecha_Completado": now_iso(),
+                                    "Last_Updated_At": now_iso(),
+                                    "Last_Updated_By": "ALEJANDRO",
+                                },
+                            )
+                            st.success("Pendiente marcado como completado.")
+                            st.rerun()
+                        except Exception as e:
+                            st.error(f"❌ Error al completar pendiente: {e}")
+                    st.markdown('</div>', unsafe_allow_html=True)
+
+                if not cot_venc.empty:
+                    cot_top = cot_venc.iloc[0]
+                    cot_id_top = str(cot_top.get("Cotizacion_ID", "")).strip()
+                    folio_top = str(cot_top.get("Folio", "")).strip()
+                    cliente_cot_top = str(cot_top.get("Cliente", "")).strip() or "Sin cliente"
+                    st.markdown('<div class="hoy-quick-card">', unsafe_allow_html=True)
+                    st.markdown(f'<div class="hoy-quick-title">💰 Cotización por cerrar: {folio_top or cot_id_top}</div>', unsafe_allow_html=True)
+                    st.caption(f"Cliente: {cliente_cot_top}")
+                    decision_rapida = st.radio(
+                        "Cierre rápido",
+                        ["Ganada", "Perdida", "En seguimiento"],
+                        horizontal=True,
+                        key=f"quick_estado_cot_{cot_id_top}",
+                    )
+                    if st.button("🏁 Guardar cierre rápido", key=f"quick_save_cot_{cot_id_top}", use_container_width=True):
+                        try:
+                            estatus_map = {
+                                "Ganada": "Cerrada – Ganada",
+                                "Perdida": "Cerrada – Perdida",
+                                "En seguimiento": "En seguimiento",
+                            }
+                            nuevo_estatus = estatus_map.get(decision_rapida, "En seguimiento")
+                            updates_cot_hoy = {
+                                "Estatus": nuevo_estatus,
+                                "Last_Updated_At": now_iso(),
+                                "Last_Updated_By": "ALEJANDRO",
+                            }
+                            if nuevo_estatus == "En seguimiento":
+                                updates_cot_hoy["Resultado_Cierre"] = ""
+                                updates_cot_hoy["Ultimo_Seguimiento_Fecha"] = date.today().strftime("%Y-%m-%d")
+                            else:
+                                updates_cot_hoy["Resultado_Cierre"] = "Ganada" if "Ganada" in nuevo_estatus else "Perdida"
+
+                            safe_update_by_id("COTIZACIONES", "Cotizacion_ID", cot_id_top, updates_cot_hoy)
+                            st.success(f"Cotización actualizada: {nuevo_estatus}")
+                            st.rerun()
+                        except Exception as e:
+                            st.error(f"❌ Error al actualizar cotización: {e}")
+                    st.markdown('</div>', unsafe_allow_html=True)
+
             # --- RECORDATORIOS DE CITA ACTIVOS ---
             recordatorios_activos = pd.DataFrame()
             if not df_citas.empty and "Fecha_Inicio" in df_citas.columns:
@@ -5140,6 +5315,9 @@ if "organizador" in tab_map:
             else:
                 recordatorios_visibles = recordatorios_activos.copy()
 
+            if modo_movil and recordatorios_visibles.empty:
+                secciones_ocultas_movil.append("Recordatorios activos")
+
             # --- CHECKLIST (% cumplimiento del día) ---
             chk = df_checklist_daily.copy()
             if "Fecha" in chk.columns:
@@ -5154,6 +5332,13 @@ if "organizador" in tab_map:
             else:
                 chk_hoy = chk.iloc[0:0]
                 total, done, pct = 0, 0, 0
+
+            if modo_movil and secciones_ocultas_movil:
+                st.caption(
+                    "🧹 Modo rápido limpio: se ocultan secciones sin contenido hoy ("
+                    + ", ".join(secciones_ocultas_movil)
+                    + ")."
+                )
 
             # ===== RESUMEN (KPIs) =====
             k1, k2, k3, k4, k5, k6 = st.columns(6)
@@ -5193,7 +5378,8 @@ if "organizador" in tab_map:
             st.markdown("---")
 
             # ===== DETALLES =====
-            st.markdown("### 📅 Citas de hoy")
+            if (not modo_movil) or (not citas_hoy.empty):
+                st.markdown("### 📅 Citas de hoy")
             def render_citas_lista(df_lista: pd.DataFrame, key_prefix: str, empty_text: str):
                 if df_lista.empty:
                     st.info(empty_text)
@@ -5245,26 +5431,135 @@ if "organizador" in tab_map:
                             except Exception as e:
                                 st.error(f"❌ No se pudo actualizar la cita: {e}")
 
-            render_citas_lista(citas_hoy, "hoy", "Sin citas para hoy (pendientes por atender).")
+            if modo_movil:
+                if not citas_hoy.empty:
+                    cols = [c for c in ["Fecha_Inicio", "Cliente_Persona", "Empresa_Clinica", "Tipo", "Prioridad", "Estatus", "Notas"] if c in citas_hoy.columns]
+                    st.dataframe(citas_hoy[cols], use_container_width=True)
 
-            st.markdown("### 📚 Citas pasadas y futuras (pendientes por atender)")
-            render_citas_lista(citas_otras, "otras", "No hay citas pasadas/futuras pendientes por atender.")
+                    citas_hoy_q = citas_hoy.copy()
+                    citas_hoy_q["_id"] = citas_hoy_q.get("Cita_ID", "").astype(str)
+                    citas_hoy_q["_cliente"] = citas_hoy_q.get("Cliente_Persona", "").astype(str)
+                    opciones_citas_hoy = [o for o in citas_hoy_q["_id"].tolist() if str(o).strip()]
+                    if opciones_citas_hoy:
+                        def _fmt_cita_hoy(cid):
+                            r = citas_hoy_q[citas_hoy_q["_id"] == cid].iloc[0]
+                            return f"{r.get('Fecha_Inicio','')} | {r.get('_cliente','Sin cliente')}"
+
+                        with st.form("form_citas_hoy_rapida_movil"):
+                            cita_sel = st.selectbox("Cita", opciones_citas_hoy, format_func=_fmt_cita_hoy, key="sel_cita_hoy_movil")
+                            c_a, c_b, c_c = st.columns(3)
+                            with c_a:
+                                enviar_realizada = st.form_submit_button("✅ Realizada", use_container_width=True)
+                            with c_b:
+                                enviar_reprog = st.form_submit_button("⏭️ Reprogramar", use_container_width=True)
+                            with c_c:
+                                enviar_cancel = st.form_submit_button("🚫 Cancelar", use_container_width=True)
+
+                        if enviar_realizada or enviar_reprog or enviar_cancel:
+                            try:
+                                nuevo = "Realizada" if enviar_realizada else "Reprogramada" if enviar_reprog else "Cancelada"
+                                safe_update_by_id("CITAS", "Cita_ID", cita_sel, {
+                                    "Estatus": nuevo,
+                                    "Last_Updated_At": now_iso(),
+                                    "Last_Updated_By": "ALEJANDRO",
+                                })
+                                st.success(f"✅ Cita actualizada a {nuevo}.")
+                                st.rerun()
+                            except Exception as e:
+                                st.error(f"❌ No se pudo actualizar la cita: {e}")
+            else:
+                render_citas_lista(citas_hoy, "hoy", "Sin citas para hoy (pendientes por atender).")
+
+            if (not modo_movil) or (not citas_otras.empty):
+                st.markdown("### 📚 Citas pasadas y futuras (pendientes por atender)")
+            if modo_movil:
+                if not citas_otras.empty:
+                    cols = [c for c in ["Fecha_Inicio", "Cliente_Persona", "Empresa_Clinica", "Tipo", "Prioridad", "Estatus", "Notas"] if c in citas_otras.columns]
+                    st.dataframe(citas_otras[cols], use_container_width=True)
+
+                    citas_otras_q = citas_otras.copy()
+                    citas_otras_q["_id"] = citas_otras_q.get("Cita_ID", "").astype(str)
+                    citas_otras_q["_cliente"] = citas_otras_q.get("Cliente_Persona", "").astype(str)
+                    opciones_citas_otras = [o for o in citas_otras_q["_id"].tolist() if str(o).strip()]
+                    if opciones_citas_otras:
+                        def _fmt_cita_otra(cid):
+                            r = citas_otras_q[citas_otras_q["_id"] == cid].iloc[0]
+                            return f"{r.get('Fecha_Inicio','')} | {r.get('_cliente','Sin cliente')}"
+
+                        with st.form("form_citas_otras_rapida_movil"):
+                            cita_otra_sel = st.selectbox("Cita pendiente", opciones_citas_otras, format_func=_fmt_cita_otra, key="sel_cita_otra_movil")
+                            co_a, co_b = st.columns(2)
+                            with co_a:
+                                enviar_realizada_otra = st.form_submit_button("✅ Realizada", use_container_width=True)
+                            with co_b:
+                                enviar_reprog_otra = st.form_submit_button("⏭️ Reprogramar", use_container_width=True)
+
+                        if enviar_realizada_otra or enviar_reprog_otra:
+                            try:
+                                nuevo = "Realizada" if enviar_realizada_otra else "Reprogramada"
+                                safe_update_by_id("CITAS", "Cita_ID", cita_otra_sel, {
+                                    "Estatus": nuevo,
+                                    "Last_Updated_At": now_iso(),
+                                    "Last_Updated_By": "ALEJANDRO",
+                                })
+                                st.success(f"✅ Cita pendiente actualizada a {nuevo}.")
+                                st.rerun()
+                            except Exception as e:
+                                st.error(f"❌ No se pudo actualizar la cita pendiente: {e}")
+            else:
+                render_citas_lista(citas_otras, "otras", "No hay citas pasadas/futuras pendientes por atender.")
 
             if not seguimientos_pend.empty:
                 st.markdown("### 🔁 Seguimientos pendientes")
                 cols = [c for c in ["Fecha_Inicio","Cliente_Persona","Empresa_Clinica","Tipo","Prioridad","Estatus","Notas"] if c in seguimientos_pend.columns]
                 st.dataframe(seguimientos_pend[cols], use_container_width=True)
 
-            st.markdown("### ✅ Pendientes de hoy")
+            if (not modo_movil) or (not tareas_hoy.empty):
+                st.markdown("### ✅ Pendientes de hoy")
             if tareas_hoy.empty:
-                st.info("Sin pendientes para hoy.")
+                if not modo_movil:
+                    st.info("Sin pendientes para hoy.")
             else:
                 cols = [c for c in ["Fecha_Limite","Titulo","Prioridad","Estatus","Cliente_Relacionado","Cotizacion_Folio_Relacionado"] if c in tareas_hoy.columns]
                 st.dataframe(tareas_hoy[cols], use_container_width=True)
 
-            st.markdown("### ⏰ Pendientes vencidos")
+                if modo_movil:
+                    tareas_hoy_acc = tareas_hoy.copy()
+                    tareas_hoy_acc["_id"] = tareas_hoy_acc.get("Tarea_ID", "").astype(str)
+                    tareas_hoy_acc["_titulo"] = tareas_hoy_acc.get("Titulo", "").astype(str)
+                    opciones_t_hoy = [o for o in tareas_hoy_acc["_id"].tolist() if str(o).strip()]
+                    if opciones_t_hoy:
+                        def _fmt_tarea_hoy(tid):
+                            r = tareas_hoy_acc[tareas_hoy_acc["_id"] == tid].iloc[0]
+                            return f"{r.get('Fecha_Limite','')} | {r.get('_titulo','')}"
+
+                        with st.form("form_accion_rapida_tareas_hoy_movil"):
+                            tarea_hoy_sel = st.selectbox("Pendiente", opciones_t_hoy, format_func=_fmt_tarea_hoy, key="sel_tarea_hoy_movil")
+                            col_th1, col_th2 = st.columns(2)
+                            with col_th1:
+                                enviar_comp_hoy = st.form_submit_button("✅ Completar", use_container_width=True)
+                            with col_th2:
+                                enviar_reabrir_hoy = st.form_submit_button("↩️ Pendiente", use_container_width=True)
+
+                        if enviar_comp_hoy or enviar_reabrir_hoy:
+                            try:
+                                updates_t = {
+                                    "Estatus": "Completada" if enviar_comp_hoy else "Pendiente",
+                                    "Fecha_Completado": now_iso() if enviar_comp_hoy else "",
+                                    "Last_Updated_At": now_iso(),
+                                    "Last_Updated_By": "ALEJANDRO",
+                                }
+                                safe_update_by_id("TAREAS", "Tarea_ID", tarea_hoy_sel, updates_t)
+                                st.success("✅ Pendiente actualizado.")
+                                st.rerun()
+                            except Exception as e:
+                                st.error(f"❌ Error actualizando pendiente: {e}")
+
+            if (not modo_movil) or (not tareas_vencidas.empty):
+                st.markdown("### ⏰ Pendientes vencidos")
             if tareas_vencidas.empty:
-                st.info("No hay pendientes vencidos 🎉")
+                if not modo_movil:
+                    st.info("No hay pendientes vencidos 🎉")
             else:
                 cols = [c for c in ["Fecha_Limite","Titulo","Prioridad","Estatus","Cliente_Relacionado"] if c in tareas_vencidas.columns]
                 st.dataframe(tareas_vencidas[cols], use_container_width=True)
@@ -5339,9 +5634,11 @@ if "organizador" in tab_map:
                         except Exception as e:
                             st.error(f"❌ Error reabriendo pendiente vencido: {e}")
 
-            st.markdown("### 💰 Cotizaciones vencidas de seguimiento")
+            if (not modo_movil) or (not cot_venc.empty):
+                st.markdown("### 💰 Cotizaciones vencidas de seguimiento")
             if cot_venc.empty:
-                st.info("No hay cotizaciones vencidas de seguimiento 🎉")
+                if not modo_movil:
+                    st.info("No hay cotizaciones vencidas de seguimiento 🎉")
             else:
                 cols = [c for c in ["Folio","Fecha_Cotizacion","Cliente","Monto","Estatus","Fecha_Proximo_Seguimiento","Notas"] if c in cot_venc.columns]
                 st.dataframe(cot_venc[cols], use_container_width=True)
@@ -5409,9 +5706,11 @@ if "organizador" in tab_map:
                         except Exception as e:
                             st.error(f"❌ Error al actualizar cotización: {e}")
 
-            st.markdown("### ⏱️ Recordatorios de citas activos")
+            if (not modo_movil) or (not recordatorios_visibles.empty):
+                st.markdown("### ⏱️ Recordatorios de citas activos")
             if recordatorios_visibles.empty:
-                st.info("No hay recordatorios activos por atender en este momento.")
+                if not modo_movil:
+                    st.info("No hay recordatorios activos por atender en este momento.")
             else:
                 cols = [c for c in ["Cita_ID","Fecha_Inicio","Cliente_Persona","Tipo","Reminder_Minutes_Before","Reminder_Status","Estatus"] if c in recordatorios_activos.columns]
                 st.dataframe(recordatorios_visibles[cols], use_container_width=True)
