@@ -1,4 +1,5 @@
 import streamlit as st
+from openai import OpenAI
 import pandas as pd
 import numpy as np
 from datetime import datetime, timedelta
@@ -18,6 +19,34 @@ from textwrap import dedent
 from urllib.parse import urlsplit, urlunsplit, quote
 
 TZ = ZoneInfo("America/Mexico_City")
+
+TD_ASSISTANT_SYSTEM_PROMPT = dedent(
+    """
+    Eres el asistente interno de TD para apoyar a vendedores y personal comercial.
+    Tu función es resolver dudas operativas internas de forma clara, breve, útil y profesional.
+    Ayudas especialmente con:
+    - claves de materiales
+    - zonas remotas
+    - cobertura
+    - envíos
+    - pedidos locales y foráneos
+    - procesos internos
+    - criterios operativos para vendedores
+
+    Reglas:
+    - Responde como asistente interno de TD.
+    - Usa respuestas cortas, claras y prácticas.
+    - Si no tienes certeza de un dato, no lo inventes.
+    - Si falta información, pide solo el dato necesario.
+    - Si algo depende de una validación interna no confirmada, dilo claramente.
+    - No respondas como vendedor a cliente final.
+    - No menciones OpenAI, IA, modelo, sistema ni detalles técnicos.
+    - Mantén tono profesional, útil y natural.
+    - Prioriza claridad operativa sobre texto largo.
+    """
+).strip()
+
+TD_ASSISTANT_MODEL = "gpt-4.1-mini"
 
 st.set_page_config(page_title="Panel de Almacén Integrado", layout="wide")
 
@@ -117,6 +146,50 @@ def sanitize_text(value) -> str:
             return ""
         return cleaned
     return str(value)
+
+
+def init_td_assistant_state() -> None:
+    if "td_assistant_messages" not in st.session_state:
+        st.session_state.td_assistant_messages = []
+
+
+def get_openai_api_key() -> str:
+    try:
+        return sanitize_text(st.secrets["OPENAI_API_KEY"])
+    except Exception:
+        return ""
+
+
+def build_td_assistant_context(max_messages: int = 12) -> list[dict[str, str]]:
+    history = st.session_state.get("td_assistant_messages", [])
+    recent_history = history[-max_messages:]
+    context = [{"role": "system", "content": TD_ASSISTANT_SYSTEM_PROMPT}]
+    for item in recent_history:
+        role = sanitize_text(item.get("role", ""))
+        content = sanitize_text(item.get("content", ""))
+        if role in {"user", "assistant"} and content:
+            context.append({"role": role, "content": content})
+    return context
+
+
+def fetch_td_assistant_reply(user_message: str) -> str:
+    api_key = get_openai_api_key()
+    if not api_key:
+        raise ValueError("missing_api_key")
+
+    client = OpenAI(api_key=api_key)
+    context = build_td_assistant_context()
+    context.append({"role": "user", "content": user_message})
+
+    response = client.responses.create(
+        model=TD_ASSISTANT_MODEL,
+        input=context,
+    )
+
+    answer = sanitize_text(getattr(response, "output_text", ""))
+    if answer:
+        return answer
+    return "No pude responder en este momento. Intenta de nuevo."
 
 
 def parse_datetime(value):
@@ -2390,6 +2463,7 @@ df_all = load_data_from_gsheets()
 # Tabs principales
 tab_labels = [
     "📈 Dashboard",
+    "🤖 Asistente TD",
     "⚙️ Auto Local",
     "🚚 Auto Foráneo",
     "🧑‍🔧 Surtidores",
@@ -2424,7 +2498,7 @@ tabs = [None] * len(tab_labels)
 # Entradas compartidas para numeración única entre Auto Local y Auto Foráneo
 auto_local_entries = []
 auto_foraneo_entries = []
-if selected_tab in (1, 2, 3):
+if selected_tab in (2, 3, 4):
     df_local_auto = get_local_orders(df_all)
     casos_local_auto, _ = get_case_envio_assignments(df_all)
     df_local_auto = drop_local_duplicates_for_cases(df_local_auto, casos_local_auto)
@@ -2449,9 +2523,60 @@ if selected_tab in (1, 2, 3):
     assign_display_numbers(auto_local_entries, auto_foraneo_entries, datetime.now(TZ).date())
 
 # ---------------------------
-# TAB 1: Auto Local (Casos asignados) — 2 columnas
+# TAB 1: Asistente interno TD
 # ---------------------------
 if selected_tab == 1:
+    init_td_assistant_state()
+
+    st.markdown("### 🤖 Asistente TD")
+    st.caption("Consulta dudas operativas internas del equipo comercial.")
+
+    if st.button("🧹 Limpiar conversación", use_container_width=False):
+        st.session_state.td_assistant_messages = []
+        st.rerun()
+
+    for message in st.session_state.td_assistant_messages:
+        role = message.get("role", "assistant")
+        content = sanitize_text(message.get("content", ""))
+        if role not in {"user", "assistant"} or not content:
+            continue
+        with st.chat_message(role):
+            st.markdown(content)
+
+    api_key = get_openai_api_key()
+    if not api_key:
+        st.warning("Falta configurar OPENAI_API_KEY en st.secrets para usar el asistente.")
+    else:
+        user_prompt = st.chat_input("Escribe tu duda operativa...")
+        if user_prompt:
+            user_prompt = sanitize_text(user_prompt)
+            if user_prompt:
+                st.session_state.td_assistant_messages.append(
+                    {"role": "user", "content": user_prompt}
+                )
+                with st.chat_message("user"):
+                    st.markdown(user_prompt)
+
+                with st.chat_message("assistant"):
+                    with st.spinner("Pensando..."):
+                        try:
+                            assistant_reply = fetch_td_assistant_reply(user_prompt)
+                        except ValueError:
+                            assistant_reply = (
+                                "Falta configurar OPENAI_API_KEY en st.secrets para usar el asistente."
+                            )
+                        except Exception:
+                            assistant_reply = "No pude responder en este momento. Intenta de nuevo."
+                    st.markdown(assistant_reply)
+
+                st.session_state.td_assistant_messages.append(
+                    {"role": "assistant", "content": assistant_reply}
+                )
+
+# ---------------------------
+# TAB 1: Auto Local (Casos asignados) — 2 columnas
+# ---------------------------
+if selected_tab == 2:
     st_autorefresh(interval=60000, key="auto_refresh_local_casos")
 
     combined_entries = [
@@ -2506,7 +2631,7 @@ if selected_tab == 1:
 # ---------------------------
 # TAB 2: Auto Foráneo (Casos asignados) — 2 columnas
 # ---------------------------
-if selected_tab == 2:
+if selected_tab == 3:
     st_autorefresh(interval=60000, key="auto_refresh_foraneo_cdmx")
 
     hoy = datetime.now(TZ).date()
@@ -2575,7 +2700,7 @@ if selected_tab == 2:
 # ---------------------------
 # TAB 3: Surtidores (Asignación)
 # ---------------------------
-if selected_tab == 3:
+if selected_tab == 4:
 
     st.markdown("### 🧑‍🔧 Asignación de surtidores")
     st.caption("Selecciona pedidos visibles y escribe tu nombre o inicial para asignarlos.")
