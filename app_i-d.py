@@ -60,6 +60,10 @@ TD_ASSISTANT_SYSTEM_PROMPT = dedent(
     - Si una descripción coincide con varios productos, muestra opciones cortas con sus códigos y pide precisión.
     - Si no encuentras una coincidencia exacta en productos, no cierres con un simple "no hay": explica que no se encontró exacto y ofrece las coincidencias más cercanas disponibles en la base.
     - Si preguntan por el último pedido subido del vendedor logueado, prioriza data_pedidos y usa históricos solo como respaldo si no hay pedidos actuales.
+    - Antes de afirmar que no existe un folio/material, valida las coincidencias exactas incluidas en el contexto; si hay una coincidencia exacta, debes reconocerla.
+    - Para pedidos, la gente consulta sobre todo por folio o por nombre de cliente; no bases la respuesta en ID_Pedido.
+    - Si hay coincidencias parciales por nombre de cliente pero más de un pedido posible, dilo claramente y ofrece opciones cortas en vez de negar existencia.
+    - Si el folio o nombre parece venir con un pequeño error de captura (una letra/número faltante o cambiado), revisa coincidencias aproximadas antes de decir que no existe.
     """
 ).strip()
 
@@ -333,6 +337,267 @@ def _select_relevant_rows_for_assistant(
     return work[candidate_columns].head(max_rows) if fallback_to_head else work.iloc[0:0][candidate_columns]
 
 
+def _normalize_lookup_text(value: object) -> str:
+    raw = sanitize_text(value).strip().lower()
+    normalized = unicodedata.normalize("NFKD", raw)
+    normalized = "".join(ch for ch in normalized if not unicodedata.combining(ch))
+    return "".join(ch for ch in normalized if ch.isalnum())
+
+
+def _extract_lookup_tokens(user_message: str, min_length: int = 4, max_tokens: int = 10) -> list[str]:
+    raw_tokens = re.findall(r"\b[a-zA-Z0-9\-_]+\b", sanitize_text(user_message))
+    tokens: list[str] = []
+    for raw_token in raw_tokens:
+        cleaned = _normalize_lookup_text(raw_token)
+        if len(cleaned) < min_length:
+            continue
+        if not any(ch.isdigit() for ch in cleaned):
+            continue
+        if cleaned not in tokens:
+            tokens.append(cleaned)
+        if len(tokens) >= max_tokens:
+            break
+    return tokens
+
+
+def _extract_name_tokens(user_message: str, min_length: int = 3, max_tokens: int = 6) -> list[str]:
+    stopwords = {
+        "que", "cual", "cuál", "para", "por", "con", "sin", "del", "de", "los", "las",
+        "una", "uno", "unos", "unas", "este", "esta", "eso", "esa", "material", "producto",
+        "clave", "codigo", "código", "sera", "será", "me", "dice", "dime", "oye", "tal",
+        "folio", "pedido", "cliente", "busca", "buscar", "encuentra", "enviar", "envio",
+        "cuando", "quien", "quién", "donde", "dónde", "dato", "datos", "registrado",
+    }
+    raw_tokens = re.findall(r"\b[^\W\d_]+\b", sanitize_text(user_message), flags=re.UNICODE)
+    tokens: list[str] = []
+    for raw_token in raw_tokens:
+        cleaned = _normalize_lookup_text(raw_token)
+        if len(cleaned) < min_length or cleaned in stopwords:
+            continue
+        if cleaned not in tokens:
+            tokens.append(cleaned)
+        if len(tokens) >= max_tokens:
+            break
+    return tokens
+
+
+def _build_exact_match_summary(
+    df: pd.DataFrame,
+    source_name: str,
+    lookup_tokens: list[str],
+    candidate_columns: list[str],
+    match_columns: list[str],
+    max_rows: int = 10,
+) -> list[dict[str, object]]:
+    if df is None or df.empty or not lookup_tokens:
+        return []
+
+    available_columns = [col for col in candidate_columns if col in df.columns]
+    if not available_columns:
+        available_columns = [col for col in match_columns if col in df.columns]
+    if not available_columns:
+        return []
+
+    work = df.copy()
+    available_match_columns = [col for col in match_columns if col in work.columns]
+    if not available_match_columns:
+        return []
+
+    normalized_cache = {
+        col: work[col].apply(_normalize_lookup_text)
+        for col in available_match_columns
+    }
+
+    matched_indexes: list[int] = []
+    matched_tokens_by_index: dict[int, set[str]] = {}
+    for idx in work.index:
+        row_tokens = {
+            normalized_cache[col].get(idx, "")
+            for col in available_match_columns
+        }
+        row_tokens.discard("")
+        exact_hits = [token for token in lookup_tokens if token in row_tokens]
+        if exact_hits:
+            matched_indexes.append(idx)
+            matched_tokens_by_index[idx] = set(exact_hits)
+
+    if not matched_indexes:
+        return []
+
+    results: list[dict[str, object]] = []
+    for idx in matched_indexes[:max_rows]:
+        row = {
+            key: _serialize_context_value(value)
+            for key, value in work.loc[idx, available_columns].to_dict().items()
+        }
+        row["_source"] = source_name
+        row["_matched_tokens"] = sorted(matched_tokens_by_index.get(idx, set()))
+        results.append(row)
+    return results
+
+
+def _build_client_match_summary(
+    df: pd.DataFrame,
+    source_name: str,
+    client_tokens: list[str],
+    candidate_columns: list[str],
+    client_column: str = "Cliente",
+    max_rows: int = 10,
+) -> list[dict[str, object]]:
+    if df is None or df.empty or not client_tokens or client_column not in df.columns:
+        return []
+
+    available_columns = [col for col in candidate_columns if col in df.columns]
+    if not available_columns:
+        available_columns = [client_column]
+
+    work = df.copy()
+    client_series = work[client_column].apply(_normalize_lookup_text)
+    strong_mask = pd.Series(True, index=work.index)
+    broad_mask = pd.Series(False, index=work.index)
+
+    for token in client_tokens:
+        contains_token = client_series.str.contains(re.escape(token), na=False)
+        strong_mask = strong_mask & contains_token
+        broad_mask = broad_mask | contains_token
+
+    selected = work.loc[strong_mask].copy()
+    match_level = "all_tokens"
+    if selected.empty:
+        selected = work.loc[broad_mask].copy()
+        match_level = "partial_tokens"
+    if selected.empty:
+        return []
+
+    if client_column in selected.columns:
+        selected["__client_match_score"] = selected[client_column].apply(
+            lambda value: sum(1 for token in client_tokens if token in _normalize_lookup_text(value))
+        )
+        selected = selected.sort_values(
+            by=["__client_match_score", client_column],
+            ascending=[False, True],
+            na_position="last",
+        )
+
+    results: list[dict[str, object]] = []
+    for _, row_data in selected.head(max_rows).iterrows():
+        row = {
+            key: _serialize_context_value(value)
+            for key, value in row_data[available_columns].to_dict().items()
+        }
+        row["_source"] = source_name
+        row["_client_match_level"] = match_level
+        row["_matched_name_tokens"] = [
+            token for token in client_tokens if token in _normalize_lookup_text(row_data.get(client_column, ""))
+        ]
+        results.append(row)
+    return results
+
+
+def _build_approx_folio_match_summary(
+    df: pd.DataFrame,
+    source_name: str,
+    lookup_tokens: list[str],
+    candidate_columns: list[str],
+    folio_column: str = "Folio_Factura",
+    max_rows: int = 10,
+    min_ratio: float = 0.78,
+) -> list[dict[str, object]]:
+    if df is None or df.empty or not lookup_tokens or folio_column not in df.columns:
+        return []
+
+    available_columns = [col for col in candidate_columns if col in df.columns]
+    if not available_columns:
+        available_columns = [folio_column]
+
+    normalized_folios = df[folio_column].apply(_normalize_lookup_text)
+    candidates: list[tuple[float, int, str]] = []
+    for idx, normalized_folio in normalized_folios.items():
+        if not normalized_folio:
+            continue
+        best_ratio = 0.0
+        best_token = ""
+        for token in lookup_tokens:
+            if not token:
+                continue
+            length_gap = abs(len(token) - len(normalized_folio))
+            if length_gap > 2:
+                continue
+            ratio = SequenceMatcher(None, token, normalized_folio).ratio()
+            if ratio > best_ratio:
+                best_ratio = ratio
+                best_token = token
+        if best_ratio >= min_ratio:
+            candidates.append((best_ratio, idx, best_token))
+
+    if not candidates:
+        return []
+
+    candidates.sort(key=lambda item: (-item[0], str(df.at[item[1], folio_column])))
+    results: list[dict[str, object]] = []
+    for ratio, idx, token in candidates[:max_rows]:
+        row = {
+            key: _serialize_context_value(value)
+            for key, value in df.loc[idx, available_columns].to_dict().items()
+        }
+        row["_source"] = source_name
+        row["_approx_match_token"] = token
+        row["_approx_match_ratio"] = round(ratio, 3)
+        results.append(row)
+    return results
+
+
+def _build_approx_client_match_summary(
+    df: pd.DataFrame,
+    source_name: str,
+    client_tokens: list[str],
+    candidate_columns: list[str],
+    client_column: str = "Cliente",
+    max_rows: int = 10,
+    min_ratio: float = 0.72,
+) -> list[dict[str, object]]:
+    if df is None or df.empty or not client_tokens or client_column not in df.columns:
+        return []
+
+    available_columns = [col for col in candidate_columns if col in df.columns]
+    if not available_columns:
+        available_columns = [client_column]
+
+    query_text = "".join(client_tokens)
+    if not query_text:
+        return []
+
+    candidates: list[tuple[float, int]] = []
+    for idx, client_value in df[client_column].items():
+        normalized_client = _normalize_lookup_text(client_value)
+        if not normalized_client:
+            continue
+        ratio = SequenceMatcher(None, query_text, normalized_client).ratio()
+        token_hits = sum(1 for token in client_tokens if token in normalized_client)
+        adjusted_ratio = ratio + min(token_hits * 0.06, 0.18)
+        if adjusted_ratio >= min_ratio:
+            candidates.append((adjusted_ratio, idx))
+
+    if not candidates:
+        return []
+
+    candidates.sort(key=lambda item: (-item[0], str(df.at[item[1], client_column])))
+    results: list[dict[str, object]] = []
+    for ratio, idx in candidates[:max_rows]:
+        row_data = df.loc[idx]
+        row = {
+            key: _serialize_context_value(value)
+            for key, value in row_data[available_columns].to_dict().items()
+        }
+        row["_source"] = source_name
+        row["_approx_client_ratio"] = round(ratio, 3)
+        row["_matched_name_tokens"] = [
+            token for token in client_tokens if token in _normalize_lookup_text(row_data.get(client_column, ""))
+        ]
+        results.append(row)
+    return results
+
+
 @st.cache_data(ttl=120)
 def load_historicos_from_gsheets() -> pd.DataFrame:
     """Intenta leer 'datos_pedidos' (históricos). Si no existe, usa pedidos_confirmados."""
@@ -538,28 +803,37 @@ def build_td_orders_data_context(
     user_message: str,
     max_rows_per_source: int = 15,
 ) -> str:
+    lookup_tokens = _extract_lookup_tokens(user_message)
+    client_tokens = _extract_name_tokens(user_message)
     sources = [
         {
             "name": "data_pedidos",
             "description": "Pedidos en flujo actual (normalmente no han viajado)",
             "df": df_actual,
             "columns": ["Folio_Factura", "Cliente", "Vendedor", "Estado", "Tipo_Envio", "Turno", "Fecha_Entrega", "Hora_Registro"],
+            "match_columns": ["Folio_Factura"],
         },
         {
             "name": "datos_pedidos_historicos",
             "description": "Pedidos históricos que ya viajaron (o fallback a pedidos_confirmados)",
             "df": df_historicos,
             "columns": ["Folio_Factura", "Cliente", "Vendedor", "Vendedor_Registro", "Estado", "Tipo_Envio", "Hora_Registro", "Fecha_Entrega", "Fecha_Completado"],
+            "match_columns": ["Folio_Factura"],
         },
         {
             "name": "casos_especiales",
             "description": "Devoluciones, garantías y casos especiales",
             "df": df_casos,
             "columns": ["Folio_Factura", "Cliente", "Vendedor_Registro", "Estado", "Completados_Limpiado", "Tipo_Envio", "Tipo_Envio_Original", "Hora_Registro", "Fecha_Recepcion_Devolucion"],
+            "match_columns": ["Folio_Factura"],
         },
     ]
 
     chunks: list[str] = []
+    exact_matches: list[dict[str, object]] = []
+    approx_folio_matches: list[dict[str, object]] = []
+    client_matches: list[dict[str, object]] = []
+    approx_client_matches: list[dict[str, object]] = []
     for source in sources:
         df = source["df"]
         if df is None or df.empty:
@@ -581,6 +855,43 @@ def build_td_orders_data_context(
             sort_by_recent=_looks_like_latest_query(user_message),
         )
         records = _records_to_json_ready(relevant)
+        exact_matches.extend(
+            _build_exact_match_summary(
+                df=df,
+                source_name=source["name"],
+                lookup_tokens=lookup_tokens,
+                candidate_columns=available_columns,
+                match_columns=source["match_columns"],
+                max_rows=max_rows_per_source,
+            )
+        )
+        approx_folio_matches.extend(
+            _build_approx_folio_match_summary(
+                df=df,
+                source_name=source["name"],
+                lookup_tokens=lookup_tokens,
+                candidate_columns=available_columns,
+                max_rows=max_rows_per_source,
+            )
+        )
+        client_matches.extend(
+            _build_client_match_summary(
+                df=df,
+                source_name=source["name"],
+                client_tokens=client_tokens,
+                candidate_columns=available_columns,
+                max_rows=max_rows_per_source,
+            )
+        )
+        approx_client_matches.extend(
+            _build_approx_client_match_summary(
+                df=df,
+                source_name=source["name"],
+                client_tokens=client_tokens,
+                candidate_columns=available_columns,
+                max_rows=max_rows_per_source,
+            )
+        )
         chunks.append(
             dedent(
                 f"""
@@ -598,6 +909,27 @@ def build_td_orders_data_context(
         user_message=user_message,
         remote_postal_codes=remote_postal_codes,
     )
+    exact_match_context = dedent(
+        f"""
+        Resumen de verificación exacta de pedidos:
+        - Tokens de búsqueda detectados: {json.dumps(lookup_tokens, ensure_ascii=False)}
+        - Coincidencias exactas por Folio_Factura: {json.dumps(exact_matches, ensure_ascii=False)}
+        - Coincidencias aproximadas por Folio_Factura (posible error de captura): {json.dumps(approx_folio_matches, ensure_ascii=False)}
+        - Regla crítica: si aquí aparece al menos una coincidencia exacta, debes afirmar que SÍ existe el pedido y responder con esa fila.
+        - Si no hay coincidencia exacta pero sí aproximada, di que probablemente se refiere a ese folio y pide confirmación breve.
+        - Solo puedes decir que "no encontré" un pedido cuando la lista de coincidencias exactas y aproximadas esté vacía y tampoco exista evidencia suficiente en los registros relevantes o en coincidencias de cliente.
+        """
+    ).strip()
+    client_match_context = dedent(
+        f"""
+        Resumen de coincidencias por nombre de cliente:
+        - Tokens de nombre detectados: {json.dumps(client_tokens, ensure_ascii=False)}
+        - Coincidencias por cliente: {json.dumps(client_matches, ensure_ascii=False)}
+        - Coincidencias aproximadas por cliente (nombre incompleto o con error): {json.dumps(approx_client_matches, ensure_ascii=False)}
+        - Si hay varias coincidencias por cliente, no niegues la existencia: responde que encontraste varias opciones y enumera las más útiles (folio, estado, fecha, vendedor).
+        - Si solo hay coincidencias parciales o aproximadas por nombre, aclara que puede haber un nombre incompleto/error de captura y pide confirmar el cliente o el folio si hace falta.
+        """
+    ).strip()
 
     return dedent(
         f"""
@@ -607,10 +939,14 @@ def build_td_orders_data_context(
         - Si está en datos_pedidos_historicos: se considera histórico y ya salió de almacén.
         - Si está en casos_especiales: tratarlo como devolución/garantía/caso especial; confirmar salida con Completados_Limpiado = "sí".
         - Si piden búsqueda por nombre de cliente, prioriza data_pedidos y si no hay match continúa en datos_pedidos_historicos.
-        - Si no aparece en ninguna fuente, dilo claramente y pide ID/Folio/Cliente + fecha.
+        - Si no aparece en ninguna fuente, dilo claramente y pide Folio/Cliente + fecha.
         - Nunca uses registros no relacionados como si fueran respuesta válida; si no hay match exacto, dilo.
         - Si la consulta pide el "último" o "más reciente", ordena por Hora_Registro descendente y aclara de qué fuente salió el dato.
         - Para dudas de zona remota por CP, prioriza "Validación de Zonas Remotas".
+
+        {exact_match_context}
+
+        {client_match_context}
 
         {remote_cp_context}
 
@@ -626,6 +962,8 @@ def build_td_products_context(
 ) -> str:
     if df_productos is None or df_productos.empty:
         return "Catálogo de productos (hoja Productos): sin datos cargados."
+
+    lookup_tokens = _extract_lookup_tokens(user_message)
 
     preferred_columns = [
         "Código",
@@ -679,6 +1017,15 @@ def build_td_products_context(
                 """
             ).strip()
 
+    exact_product_matches = _build_exact_match_summary(
+        df=df_productos,
+        source_name="Productos",
+        lookup_tokens=lookup_tokens,
+        candidate_columns=available_columns,
+        match_columns=[col for col in ["Código", "Codigo", "ClaveProdServ"] if col in df_productos.columns],
+        max_rows=max_rows,
+    )
+
     relevant = _select_relevant_rows_for_assistant(
         df=df_productos,
         user_message=user_message,
@@ -715,10 +1062,12 @@ def build_td_products_context(
         Catálogo de productos (hoja Productos):
         - Registros cargados: {len(df_productos)}
         - Registros relevantes para esta consulta: {len(records)} (máximo {max_rows})
+        - Coincidencias exactas por código detectado: {json.dumps(exact_product_matches, ensure_ascii=False)}
         - Columnas usadas: {', '.join(available_columns)}
         - Regla de respuesta: cuando te pidan identificar un producto, prioriza mostrar Código + Descripción y, si existe, Marca/Línea/Precio de venta.
         - Si el producto exacto no aparece, dilo explícitamente y sugiere solo coincidencias plausibles de la hoja Productos; no respondas solo "no hay".
         - Si hay más de una coincidencia plausible, presenta opciones breves y pide confirmación.
+        - Si existen coincidencias exactas por código, no digas que el material no existe.
         Datos: {json.dumps(records, ensure_ascii=False)}
         """
     ).strip()
