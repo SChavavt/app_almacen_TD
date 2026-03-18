@@ -18,6 +18,7 @@ from typing import Optional, Tuple
 from zoneinfo import ZoneInfo
 from streamlit_autorefresh import st_autorefresh
 from textwrap import dedent
+from difflib import SequenceMatcher
 from urllib.parse import urlsplit, urlunsplit, quote
 
 TZ = ZoneInfo("America/Mexico_City")
@@ -57,6 +58,8 @@ TD_ASSISTANT_SYSTEM_PROMPT = dedent(
     - ID_Pedido es un identificador interno: nunca lo expongas ni lo uses en la respuesta al usuario.
     - Para dudas de productos, usa la hoja "Productos" como fuente principal; prioriza devolver Código + Descripción exacta.
     - Si una descripción coincide con varios productos, muestra opciones cortas con sus códigos y pide precisión.
+    - Si no encuentras una coincidencia exacta en productos, no cierres con un simple "no hay": explica que no se encontró exacto y ofrece las coincidencias más cercanas disponibles en la base.
+    - Si preguntan por el último pedido subido del vendedor logueado, prioriza data_pedidos y usa históricos solo como respaldo si no hay pedidos actuales.
     """
 ).strip()
 
@@ -223,16 +226,6 @@ def get_user_tone_instruction() -> str:
             "Cuando el usuario logueado sea GRISELDA82, puedes dirigirte a ella como Caro y usar "
             "un tono cercano, relajado y ligeramente juguetón, sin perder claridad operativa."
         )
-    if logged_user == "ALEJANDRO38":
-        return (
-            "Cuando el usuario logueado sea ALEJANDRO38, trátalo con tono ejecutivo y de respeto, "
-            "asumiendo que es gerente de ventas."
-        )
-    if logged_user == "CECILIA94":
-        return (
-            "Cuando el usuario logueado sea CECILIA94, trátala con tono ejecutivo y de respeto, "
-            "asumiendo que es gerente de almacén."
-        )
     return ""
 
 
@@ -243,12 +236,30 @@ def get_openai_api_key() -> str:
         return ""
 
 
+def _looks_like_latest_query(user_message: str) -> bool:
+    normalized = unicodedata.normalize("NFKD", sanitize_text(user_message).lower())
+    normalized = "".join(ch for ch in normalized if not unicodedata.combining(ch))
+    latest_patterns = [
+        "ultimo pedido",
+        "ultima orden",
+        "pedido mas reciente",
+        "pedido reciente",
+        "mas reciente",
+        "ultimo que subi",
+        "ultimo que subio",
+        "reciente",
+    ]
+    return any(pattern in normalized for pattern in latest_patterns)
+
+
 def _select_relevant_rows_for_assistant(
     df: pd.DataFrame,
     user_message: str,
     candidate_columns: list[str],
     max_rows: int,
     match_columns: Optional[list[str]] = None,
+    fallback_to_head: bool = False,
+    sort_by_recent: bool = False,
 ) -> pd.DataFrame:
     if df.empty:
         return df
@@ -279,8 +290,16 @@ def _select_relevant_rows_for_assistant(
             continue
         if len(token) >= 3 and token not in stopwords:
             tokens.append(token)
+    if sort_by_recent and "Hora_Registro" in work.columns:
+        try:
+            work = work.assign(Hora_Registro=pd.to_datetime(work["Hora_Registro"], errors="coerce")).sort_values(
+                "Hora_Registro", ascending=False, na_position="last"
+            )
+        except Exception:
+            pass
+
     if not tokens:
-        return work.head(max_rows)
+        return work.head(max_rows) if fallback_to_head else work.iloc[0:0][candidate_columns]
 
     columns_for_match = [
         c
@@ -291,7 +310,7 @@ def _select_relevant_rows_for_assistant(
         if c in work.columns
     ]
     if not columns_for_match:
-        return work.head(max_rows)
+        return work.head(max_rows) if fallback_to_head else work.iloc[0:0][candidate_columns]
 
     mask = pd.Series(False, index=work.index)
     normalized_cache: dict[str, pd.Series] = {}
@@ -311,7 +330,7 @@ def _select_relevant_rows_for_assistant(
 
     if mask.any():
         return work.loc[mask, candidate_columns].head(max_rows)
-    return work[candidate_columns].head(max_rows)
+    return work[candidate_columns].head(max_rows) if fallback_to_head else work.iloc[0:0][candidate_columns]
 
 
 @st.cache_data(ttl=120)
@@ -384,6 +403,100 @@ def load_productos_from_gsheets() -> pd.DataFrame:
     for col in df.columns:
         df[col] = df[col].apply(sanitize_text)
     return df
+
+
+def _filter_rows_by_vendor(df: pd.DataFrame, vendor_name: str) -> pd.DataFrame:
+    if df is None or df.empty or not vendor_name:
+        return pd.DataFrame() if df is None else df.copy()
+
+    vend_norm = _normalize_vendedor_name(vendor_name)
+    vendor_columns = [col for col in ["Vendedor", "Vendedor_Registro"] if col in df.columns]
+    if not vendor_columns:
+        return df.iloc[0:0].copy()
+
+    mask = pd.Series(False, index=df.index)
+    for col in vendor_columns:
+        mask = mask | (df[col].map(_normalize_vendedor_name) == vend_norm)
+    return df.loc[mask].copy()
+
+
+def _serialize_context_value(value):
+    if value is None:
+        return ""
+    try:
+        if pd.isna(value):  # type: ignore[arg-type]
+            return ""
+    except Exception:
+        pass
+    if isinstance(value, pd.Timestamp):
+        return value.isoformat(sep=" ")
+    if hasattr(value, "isoformat") and not isinstance(value, str):
+        try:
+            return value.isoformat()
+        except Exception:
+            pass
+    return value
+
+
+def _records_to_json_ready(df: pd.DataFrame) -> list[dict[str, object]]:
+    records = df.to_dict(orient="records")
+    return [
+        {key: _serialize_context_value(val) for key, val in record.items()}
+        for record in records
+    ]
+
+
+def build_logged_vendor_context(
+    df_actual: pd.DataFrame,
+    df_historicos: pd.DataFrame,
+    df_casos: pd.DataFrame,
+    user_message: str,
+) -> str:
+    logged_vendor = get_logged_vendor()
+    if not logged_vendor:
+        return ""
+
+    latest_query = _looks_like_latest_query(user_message)
+    sources = [
+        ("data_pedidos", _filter_rows_by_vendor(df_actual, logged_vendor), ["Folio_Factura", "Cliente", "Vendedor", "Estado", "Tipo_Envio", "Hora_Registro", "Fecha_Entrega"]),
+        ("datos_pedidos_historicos", _filter_rows_by_vendor(df_historicos, logged_vendor), ["Folio_Factura", "Cliente", "Vendedor", "Vendedor_Registro", "Estado", "Tipo_Envio", "Hora_Registro", "Fecha_Completado"]),
+        ("casos_especiales", _filter_rows_by_vendor(df_casos, logged_vendor), ["Folio_Factura", "Cliente", "Vendedor_Registro", "Estado", "Completados_Limpiado", "Tipo_Envio", "Hora_Registro", "Fecha_Recepcion_Devolucion"]),
+    ]
+
+    snippets: list[str] = []
+    for source_name, df_source, columns in sources:
+        if df_source.empty:
+            continue
+        available_columns = [col for col in columns if col in df_source.columns]
+        if not available_columns:
+            continue
+        try:
+            df_source = df_source.assign(Hora_Registro=pd.to_datetime(df_source.get("Hora_Registro"), errors="coerce"))
+            df_source = df_source.sort_values("Hora_Registro", ascending=False, na_position="last")
+        except Exception:
+            pass
+        top_records = _records_to_json_ready(df_source[available_columns].head(3))
+        snippets.append(f"Fuente {source_name}: {json.dumps(top_records, ensure_ascii=False)}")
+
+    if not snippets:
+        return ""
+
+    latest_instruction = (
+        "Si el usuario pregunta por el último pedido subido, usa primero el registro más reciente de data_pedidos para el vendedor logueado; "
+        "solo usa históricos si no hay registros actuales. "
+        if latest_query
+        else ""
+    )
+
+    return dedent(
+        f"""
+        Contexto priorizado para el vendedor logueado:
+        - Vendedor logueado: {logged_vendor}.
+        - {latest_instruction}No asumas pedidos de otros vendedores si la pregunta está en primera persona o se refiere al contexto del vendedor logueado.
+        - Registros recientes por vendedor:
+        {chr(10).join(snippets)}
+        """
+    ).strip()
 
 
 def build_remote_cp_context(user_message: str, remote_postal_codes: set[str]) -> str:
@@ -464,8 +577,10 @@ def build_td_orders_data_context(
             user_message=user_message,
             candidate_columns=available_columns,
             max_rows=max_rows_per_source,
+            fallback_to_head=_looks_like_latest_query(user_message),
+            sort_by_recent=_looks_like_latest_query(user_message),
         )
-        records = relevant.to_dict(orient="records")
+        records = _records_to_json_ready(relevant)
         chunks.append(
             dedent(
                 f"""
@@ -493,6 +608,8 @@ def build_td_orders_data_context(
         - Si está en casos_especiales: tratarlo como devolución/garantía/caso especial; confirmar salida con Completados_Limpiado = "sí".
         - Si piden búsqueda por nombre de cliente, prioriza data_pedidos y si no hay match continúa en datos_pedidos_historicos.
         - Si no aparece en ninguna fuente, dilo claramente y pide ID/Folio/Cliente + fecha.
+        - Nunca uses registros no relacionados como si fueran respuesta válida; si no hay match exacto, dilo.
+        - Si la consulta pide el "último" o "más reciente", ordena por Hora_Registro descendente y aclara de qué fuente salió el dato.
         - Para dudas de zona remota por CP, prioriza "Validación de Zonas Remotas".
 
         {remote_cp_context}
@@ -582,7 +699,16 @@ def build_td_products_context(
             "ClaveProdServ",
         ],
     )
-    records = relevant.to_dict(orient="records")
+    if relevant.empty:
+        normalized_query = sanitize_text(user_message).strip().lower()
+        similarity_col = "Descripción" if "Descripción" in df_productos.columns else ("Descripcion" if "Descripcion" in df_productos.columns else "")
+        if similarity_col:
+            work = df_productos.copy()
+            work["__similaridad"] = work[similarity_col].map(
+                lambda value: SequenceMatcher(None, sanitize_text(value).lower(), normalized_query).ratio()
+            )
+            relevant = work.sort_values("__similaridad", ascending=False)[available_columns].head(min(max_rows, 8))
+    records = _records_to_json_ready(relevant)
 
     return dedent(
         f"""
@@ -591,6 +717,7 @@ def build_td_products_context(
         - Registros relevantes para esta consulta: {len(records)} (máximo {max_rows})
         - Columnas usadas: {', '.join(available_columns)}
         - Regla de respuesta: cuando te pidan identificar un producto, prioriza mostrar Código + Descripción y, si existe, Marca/Línea/Precio de venta.
+        - Si el producto exacto no aparece, dilo explícitamente y sugiere solo coincidencias plausibles de la hoja Productos; no respondas solo "no hay".
         - Si hay más de una coincidencia plausible, presenta opciones breves y pide confirmación.
         Datos: {json.dumps(records, ensure_ascii=False)}
         """
@@ -619,6 +746,12 @@ def build_td_assistant_context(
         df_productos=df_productos,
         user_message=user_message,
     )
+    logged_vendor_context = build_logged_vendor_context(
+        df_actual=df_actual,
+        df_historicos=df_historicos,
+        df_casos=df_casos,
+        user_message=user_message,
+    )
 
     context = [{"role": "system", "content": TD_ASSISTANT_SYSTEM_PROMPT}]
     logged_vendor = get_logged_vendor()
@@ -638,6 +771,8 @@ def build_td_assistant_context(
     tone_instruction = get_user_tone_instruction()
     if tone_instruction:
         context.append({"role": "system", "content": tone_instruction})
+    if logged_vendor_context:
+        context.append({"role": "system", "content": logged_vendor_context})
     context.append(
         {
             "role": "system",
