@@ -3319,20 +3319,30 @@ if selected_tab == 3:
     # 1) Entradas (foráneo + casos asignados a foráneo)
     combined_entries = list(auto_foraneo_entries)
 
-    ant = filter_entries_before_date(combined_entries, hoy)
-    ant = [e for e in ant if _is_visible_auto_entry(e)]
+    visible_entries = [e for e in combined_entries if _is_visible_auto_entry(e)]
+
+    # Devoluciones/casos foráneos con Numero_Foraneo manual deben aparecer
+    # junto a los de HOY/FUTUROS, ordenados por número de flujo.
+    asignados = [
+        e for e in visible_entries if _parse_foraneo_number(e.get("numero_foraneo", "")) is not None
+    ]
+    asignados = sort_entries_by_flow_number_desc(asignados)
+
+    restantes = [
+        e for e in visible_entries if _parse_foraneo_number(e.get("numero_foraneo", "")) is None
+    ]
+
+    ant = filter_entries_before_date(restantes, hoy)
     ant = sort_entries_by_flow_number_desc(ant)
 
-    sin_fecha = filter_entries_no_entrega_date(combined_entries)
-    sin_fecha = [e for e in sin_fecha if _is_visible_auto_entry(e)]
+    sin_fecha = filter_entries_no_entrega_date(restantes)
     sin_fecha = sort_entries_by_flow_number_desc(sin_fecha)
 
-    hoy_entries = filter_entries_on_or_after(combined_entries, hoy)
-    hoy_entries = [e for e in hoy_entries if _is_visible_auto_entry(e)]
+    # En HOY incluimos también devoluciones/casos con número manual,
+    # sin depender de fecha de registro para conservar su secuencia.
+    hoy_entries = filter_entries_on_or_after(restantes, hoy) + asignados
     hoy_entries = sort_entries_by_flow_number_desc(hoy_entries)
 
-    # Mantener una sola secuencia por número de flujo para que pedidos y
-    # devoluciones foráneas (incluyendo sin Fecha_Entrega) queden consecutivos.
     anteriores = sort_entries_by_flow_number_desc(ant + sin_fecha)
 
     # Distribución inteligente: usar el espacio libre de "Anteriores"
