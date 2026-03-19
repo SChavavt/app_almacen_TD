@@ -722,6 +722,9 @@ def cargar_casos_especiales():
     for c in columnas_ejemplo:
         if c not in df.columns:
             df[c] = ""
+    # Fila real en Google Sheets (encabezado en fila 1) para ubicar el caso exacto
+    # incluso cuando existan IDs_Pedido repetidos en la hoja.
+    df["__sheet_row"] = df.index + 2
     return df
 
 
@@ -4389,6 +4392,7 @@ if "modificar" in tab_map:
 
         pedido_sel = None
         source_sel = None
+        sheet_row_sel = None
 
         # Mostrar todos los pedidos de la hoja casos_especiales en esta sección.
         df_garantias = df_casos_garantias.copy()
@@ -4500,6 +4504,7 @@ if "modificar" in tab_map:
                     row_garantia = df_garantias_filtrado.loc[idx_garantia]
                     pedido_sel = row_garantia.get("ID_Pedido")
                     source_sel = "casos"
+                    sheet_row_sel = row_garantia.get("__sheet_row")
                     st.markdown("#### 📘 Detalles del caso especial seleccionado")
 
                     def limpiar(valor):
@@ -4620,6 +4625,7 @@ if "modificar" in tab_map:
                 else:
                     pedido_sel = None
                     source_sel = None
+                    sheet_row_sel = None
                     st.info("Selecciona un caso especial para ver detalles o modificarlo.")
                     st.stop()
 
@@ -4629,9 +4635,12 @@ if "modificar" in tab_map:
             source_sel = st.session_state.get(
                 "pedido_modificado_source", source_sel or "pedidos"
             )
+            sheet_row_sel = st.session_state.get("pedido_modificado_sheet_row", sheet_row_sel)
             del st.session_state["pedido_modificado"]  # ✅ limpia la variable tras usarla
             if "pedido_modificado_source" in st.session_state:
                 del st.session_state["pedido_modificado_source"]
+            if "pedido_modificado_sheet_row" in st.session_state:
+                del st.session_state["pedido_modificado_sheet_row"]
 
 
         if pedido_sel is None:
@@ -4668,6 +4677,7 @@ if "modificar" in tab_map:
             )
             pedido_sel = df_lista.loc[idx_seleccion, "ID_Pedido"]
             source_sel = df_lista.loc[idx_seleccion, "__source"]
+            sheet_row_sel = df_lista.loc[idx_seleccion, "__sheet_row"]
 
 
         # --- Cargar datos del pedido seleccionado ---
@@ -4678,10 +4688,14 @@ if "modificar" in tab_map:
             st.stop()
 
         row_df = df_pedidos if source_sel == "pedidos" else df_casos_garantias
-        row_sel = row_df[row_df["ID_Pedido"].astype(str) == str(pedido_sel)]
+        if sheet_row_sel is not None and "__sheet_row" in row_df.columns:
+            row_sel = row_df[row_df["__sheet_row"].astype(str) == str(sheet_row_sel)]
+        else:
+            row_sel = row_df[row_df["ID_Pedido"].astype(str) == str(pedido_sel)]
         if row_sel.empty:
             st.session_state.pop("pedido_modificado", None)
             st.session_state.pop("pedido_modificado_source", None)
+            st.session_state.pop("pedido_modificado_sheet_row", None)
             st.warning(
                 "⚠️ El pedido seleccionado ya no está disponible en la lista actual. Selecciona otro pedido."
             )
@@ -4744,6 +4758,7 @@ if "modificar" in tab_map:
 
                 st.session_state["pedido_modificado"] = pedido_sel
                 st.session_state["pedido_modificado_source"] = source_sel
+                st.session_state["pedido_modificado_sheet_row"] = gspread_row_idx
                 st.session_state["mensaje_exito"] = mensaje_exito
                 return True
             except Exception as e:
