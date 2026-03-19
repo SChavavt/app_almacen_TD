@@ -3937,29 +3937,42 @@ with tab_map["buscar"]:
                 })
 
             # 2.2) Buscar en casos_especiales (mostrar campos de la hoja + links de Adjuntos y Hoja_Ruta_Mensajero)
-                df_casos = cargar_casos_especiales()
-                # Ordenar por Hora_Registro si existe
-                if "Hora_Registro" in df_casos.columns:
-                    df_casos["Hora_Registro"] = pd.to_datetime(df_casos["Hora_Registro"], errors="coerce")
-                    df_casos = df_casos.sort_values(by="Hora_Registro", ascending=not recientes_primero)
-                    if filtro_fechas_activo:
-                        mask_validas_casos = df_casos["Hora_Registro"].notna()
-                        df_casos = df_casos[mask_validas_casos & df_casos["Hora_Registro"].between(fecha_inicio_dt, fecha_fin_dt)]
-                    df_casos = df_casos.reset_index(drop=True)
+            df_casos = cargar_casos_especiales()
+            # Ordenar por Hora_Registro si existe
+            if "Hora_Registro" in df_casos.columns:
+                df_casos["Hora_Registro"] = pd.to_datetime(df_casos["Hora_Registro"], errors="coerce")
+                df_casos = df_casos.sort_values(by="Hora_Registro", ascending=not recientes_primero)
+                if filtro_fechas_activo:
+                    mask_validas_casos = df_casos["Hora_Registro"].notna()
+                    df_casos = df_casos[mask_validas_casos & df_casos["Hora_Registro"].between(fecha_inicio_dt, fecha_fin_dt)]
+                df_casos = df_casos.reset_index(drop=True)
 
-                for _, row in df_casos.iterrows():
-                    nombre = str(row.get("Cliente", "")).strip()
-                    folio = str(row.get("Folio_Factura", "")).strip()
+            casos_agregados = set()
+            for _, row in df_casos.iterrows():
+                nombre = str(row.get("Cliente", "")).strip()
+                folio = str(row.get("Folio_Factura", "")).strip()
 
-                    nombre_normalizado = normalizar(nombre) if nombre else ""
-                    folio_normalizado = normalizar_folio(folio)
+                nombre_normalizado = normalizar(nombre) if nombre else ""
+                folio_normalizado = normalizar_folio(folio)
 
-                    coincide_cliente = bool(nombre) and keyword_cliente_normalizado in nombre_normalizado
-                    coincide_folio = bool(folio_normalizado) and keyword_folio_normalizado == folio_normalizado
+                coincide_cliente = bool(nombre) and keyword_cliente_normalizado in nombre_normalizado
+                coincide_folio = bool(folio_normalizado) and keyword_folio_normalizado == folio_normalizado
 
-                    if not coincide_cliente and not coincide_folio:
-                        continue
-                    resultados.append(preparar_resultado_caso(row))
+                if not coincide_cliente and not coincide_folio:
+                    continue
+
+                identificador_caso = (
+                    str(row.get("ID_Pedido", "")).strip(),
+                    folio_normalizado,
+                    normalizar_folio(str(row.get("Folio_Factura_Error", "")).strip()),
+                    str(row.get("Hora_Registro", "")).strip(),
+                    normalizar(nombre),
+                )
+                if identificador_caso in casos_agregados:
+                    continue
+
+                casos_agregados.add(identificador_caso)
+                resultados.append(preparar_resultado_caso(row))
 
 
         # ====== BÚSQUEDA POR NÚMERO DE GUÍA (tu flujo original sobre datos_pedidos + S3) ======
