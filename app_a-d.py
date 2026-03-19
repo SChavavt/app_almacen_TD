@@ -3678,7 +3678,7 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
                     mod_confirmation_action = _render_confirmar_modificacion_flow(
                         context_key=f"{row['ID_Pedido']}_{idx}_{origen_tab}",
                         button_label="✅ Confirmar Cambios de Surtido",
-                        include_write_option=caso_es_foraneo
+                        include_write_option=origen_tab == "Foráneo"
                     )
                     if mod_confirmation_action:
                         st.session_state["expanded_pedidos"][row['ID_Pedido']] = True
@@ -3692,7 +3692,7 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
                             )
                         if success:
                             row["Estado"] = "🔵 En Proceso"
-                            if mod_confirmation_action == "confirm_write" and caso_es_foraneo:
+                            if mod_confirmation_action == "confirm_write" and origen_tab == "Foráneo":
                                 escribir_en_reporte_guias(
                                     cliente=row.get("Cliente", ""),
                                     vendedor=row.get("Vendedor_Registro", ""),
@@ -3724,7 +3724,7 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
                         mod_confirmation_action = _render_confirmar_modificacion_flow(
                             context_key=f"df_{row['ID_Pedido']}_{idx}_{origen_tab}",
                             button_label="✅ Confirmar Cambios de Surtido",
-                            include_write_option=caso_es_foraneo
+                            include_write_option=origen_tab == "Foráneo"
                         )
                         if mod_confirmation_action:
                             st.session_state["expanded_pedidos"][row["ID_Pedido"]] = True
@@ -3738,7 +3738,7 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
                                 )
                             if success:
                                 row["Estado"] = "🔵 En Proceso"
-                                if mod_confirmation_action == "confirm_write" and caso_es_foraneo:
+                                if mod_confirmation_action == "confirm_write" and origen_tab == "Foráneo":
                                     escribir_en_reporte_guias(
                                         cliente=row.get("Cliente", ""),
                                         vendedor=row.get("Vendedor_Registro", ""),
@@ -5873,8 +5873,6 @@ if df_main is not None:
                     if turno_key not in st.session_state:
                         st.session_state[turno_key] = turno_actual if turno_actual in TURNO_OPTS else TURNO_OPTS[0]
 
-                    caso_es_foraneo = st.session_state.get(tipo_key, tipo_envio_actual) == "🚚 Pedido Foráneo"
-
                     if fecha_key not in st.session_state:
                         st.session_state[fecha_key] = (
                             fecha_actual_dt.date() if pd.notna(fecha_actual_dt) and fecha_actual_dt.date() >= today_date else today_date
@@ -6086,7 +6084,7 @@ if df_main is not None:
                             mod_confirmation_action = _render_confirmar_modificacion_flow(
                                 context_key=f"caso_{idp or folio or cliente}",
                                 button_label="✅ Confirmar Cambios de Surtido",
-                                include_write_option=caso_es_foraneo
+                                include_write_option=origen_tab == "Foráneo"
                             )
                             if mod_confirmation_action:
                                 try:
@@ -6117,7 +6115,7 @@ if df_main is not None:
 
                                         if ok:
                                             row["Estado"] = "🔵 En Proceso"
-                                            if mod_confirmation_action == "confirm_write" and caso_es_foraneo:
+                                            if mod_confirmation_action == "confirm_write" and origen_tab == "Foráneo":
                                                 escribir_en_reporte_guias(
                                                     cliente=row.get("Cliente", ""),
                                                     vendedor=row.get("Vendedor_Registro", ""),
@@ -6569,8 +6567,6 @@ if df_main is not None:
                 if turno_key not in st.session_state:
                     st.session_state[turno_key] = turno_actual if turno_actual in TURNO_OPTS else TURNO_OPTS[0]
     
-                caso_es_foraneo = st.session_state.get(tipo_key, tipo_envio_actual) == "🚚 Pedido Foráneo"
-
                 if fecha_key not in st.session_state:
                     st.session_state[fecha_key] = (
                         fecha_actual_dt.date() if pd.notna(fecha_actual_dt) and fecha_actual_dt.date() >= today_date else today_date
@@ -6756,7 +6752,7 @@ if df_main is not None:
                             mod_confirmation_action = _render_confirmar_modificacion_flow(
                                 context_key=f"garantia_{unique_suffix}",
                                 button_label="✅ Confirmar Cambios de Surtido (Garantía)",
-                                include_write_option=caso_es_foraneo
+                                include_write_option=origen_tab == "Foráneo"
                             )
                             if mod_confirmation_action:
                                 try:
@@ -6787,7 +6783,7 @@ if df_main is not None:
 
                                         if ok:
                                             row["Estado"] = "🔵 En Proceso"
-                                            if mod_confirmation_action == "confirm_write" and caso_es_foraneo:
+                                            if mod_confirmation_action == "confirm_write" and origen_tab == "Foráneo":
                                                 escribir_en_reporte_guias(
                                                     cliente=row.get("Cliente", ""),
                                                     vendedor=row.get("Vendedor_Registro", ""),
