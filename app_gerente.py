@@ -156,7 +156,8 @@ PEDIDOS_COLUMNAS_MINIMAS = [
     "ID_Pedido", "Hora_Registro", "Cliente", "Estado", "Vendedor_Registro", "Folio_Factura",
     "Comentario", "Comentarios", "Modificacion_Surtido", "Adjuntos_Surtido", "Adjuntos_Guia",
     "Adjuntos", "Direccion_Guia_Retorno", "Nota_Venta", "Tiene_Nota_Venta", "Motivo_NotaVenta",
-    "Refacturacion_Tipo", "Refacturacion_Subtipo", "Folio_Factura_Refacturada", "fecha_modificacion", "Fecha_Modificacion"
+    "Refacturacion_Tipo", "Refacturacion_Subtipo", "Folio_Factura_Refacturada", "fecha_modificacion", "Fecha_Modificacion",
+    "Tipo_Envio", "id_vendedor", "ID_Vendedor", "Id_Vendedor"
 ]
 
 # ===== ALEJANDRO DATA (Organizador) =====
@@ -262,6 +263,15 @@ def _extract_sheet_id(value: str) -> str:
 
 def _is_truthy(value) -> bool:
     return str(value).strip().lower() in {"1", "true", "yes", "si", "sí", "on"}
+
+
+def obtener_id_vendedor(row) -> str:
+    """Obtiene el id del vendedor contemplando variantes de nombre de columna."""
+    for col in ("id_vendedor", "ID_Vendedor", "Id_Vendedor"):
+        valor = str(row.get(col, "") or "").strip()
+        if valor:
+            return valor
+    return ""
 
 
 def _drive_api_get_file_meta(file_id: str) -> dict:
@@ -707,7 +717,7 @@ def cargar_casos_especiales():
         # Campos específicos de garantías
         "Numero_Serie","Fecha_Compra",
         "Comentario","Comentarios","Direccion_Guia_Retorno","Nota_Venta",
-        "Tiene_Nota_Venta","Motivo_NotaVenta"
+        "Tiene_Nota_Venta","Motivo_NotaVenta", "id_vendedor", "ID_Vendedor", "Id_Vendedor"
     ]
     for c in columnas_ejemplo:
         if c not in df.columns:
@@ -1157,6 +1167,7 @@ def preparar_resultado_caso(row):
         "ID_Pedido": str(row.get("ID_Pedido", "")).strip(),
         "Cliente": row.get("Cliente", ""),
         "Vendedor": row.get("Vendedor_Registro", ""),
+        "ID_Vendedor": obtener_id_vendedor(row),
         "Folio": row.get("Folio_Factura", ""),
         "Folio_Factura_Error": row.get("Folio_Factura_Error", ""),
         "Hora_Registro": row.get("Hora_Registro", ""),
@@ -1215,12 +1226,14 @@ def render_caso_especial(res):
         folio_error = res.get("Folio_Factura_Error","") or "N/A"
         st.markdown(
             f"📄 **Folio Nuevo:** `{folio_nuevo}`  |  📄 **Folio Error:** `{folio_error}`  |  "
-            f"🧑‍💼 **Vendedor:** `{res.get('Vendedor','') or 'N/A'}`  |  🕒 **Hora:** `{res.get('Hora_Registro','') or 'N/A'}`"
+            f"🧑‍💼 **Vendedor:** `{res.get('Vendedor','') or 'N/A'}`  |  🆔 **ID vendedor:** `{res.get('ID_Vendedor') or 'N/A'}`  |  "
+            f"🚚 **Tipo envío original:** `{res.get('Tipo_Envio_Original','') or 'N/A'}`  |  🕒 **Hora:** `{res.get('Hora_Registro','') or 'N/A'}`"
         )
     else:
         st.markdown(
             f"📄 **Folio:** `{res.get('Folio','') or 'N/A'}`  |  "
-            f"🧑‍💼 **Vendedor:** `{res.get('Vendedor','') or 'N/A'}`  |  🕒 **Hora:** `{res.get('Hora_Registro','') or 'N/A'}`"
+            f"🧑‍💼 **Vendedor:** `{res.get('Vendedor','') or 'N/A'}`  |  🆔 **ID vendedor:** `{res.get('ID_Vendedor') or 'N/A'}`  |  "
+            f"🚚 **Tipo envío original:** `{res.get('Tipo_Envio_Original','') or 'N/A'}`  |  🕒 **Hora:** `{res.get('Hora_Registro','') or 'N/A'}`"
         )
 
     st.markdown(
@@ -3895,6 +3908,8 @@ with tab_map["buscar"]:
                     "Cliente": row.get("Cliente", ""),
                     "Estado": row.get("Estado", ""),
                     "Vendedor": row.get("Vendedor_Registro", ""),
+                    "ID_Vendedor": obtener_id_vendedor(row),
+                    "Tipo_Envio": str(row.get("Tipo_Envio", "") or "").strip(),
                     "Folio": row.get("Folio_Factura", ""),
                     "Hora_Registro": row.get("Hora_Registro", ""),
                     "Comentario": str(row.get("Comentario", "")).strip(),
@@ -3997,6 +4012,8 @@ with tab_map["buscar"]:
                             "Cliente": row.get("Cliente", ""),
                             "Estado": row.get("Estado", ""),
                             "Vendedor": row.get("Vendedor_Registro", ""),
+                            "ID_Vendedor": obtener_id_vendedor(row),
+                            "Tipo_Envio": str(row.get("Tipo_Envio", "") or "").strip(),
                             "Folio": row.get("Folio_Factura", ""),
                             "Hora_Registro": row.get("Hora_Registro", ""),
                             "Comentario": str(row.get("Comentario", "")).strip(),
@@ -4062,7 +4079,7 @@ with tab_map["buscar"]:
                     # ---------- Render de PEDIDOS (flujo actual) ----------
                     st.markdown(f"### 🤝 {res['Cliente'] or 'Cliente N/D'}")
                     st.markdown(
-                        f"📄 **Folio:** `{res['Folio'] or 'N/D'}`  |  🔍 **Estado:** `{res['Estado'] or 'N/D'}`  |  🧑‍💼 **Vendedor:** `{res['Vendedor'] or 'N/D'}`  |  🕒 **Hora:** `{res['Hora_Registro'] or 'N/D'}`"
+                        f"📄 **Folio:** `{res['Folio'] or 'N/D'}`  |  🔍 **Estado:** `{res['Estado'] or 'N/D'}`  |  🚚 **Tipo de envío:** `{res.get('Tipo_Envio') or 'N/D'}`  |  🧑‍💼 **Vendedor:** `{res['Vendedor'] or 'N/D'}`  |  🆔 **ID vendedor:** `{res.get('ID_Vendedor') or 'N/D'}`  |  🕒 **Hora:** `{res['Hora_Registro'] or 'N/D'}`"
                     )
 
                     comentario_txt = str(res.get("Comentario", "") or res.get("Comentarios", "")).strip()
