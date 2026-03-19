@@ -4717,8 +4717,8 @@ if "modificar" in tab_map:
             hoja_nombre = "casos_especiales"
         hoja = get_main_worksheet(hoja_nombre)
 
-        def actualizar_celdas_y_confirmar(cambios, mensaje_exito):
-            """Actualiza celdas en lote y valida lectura de los nuevos valores."""
+        def actualizar_celdas_y_confirmar(cambios, mensaje_exito, resetear_completado=False):
+            """Actualiza celdas en lote, limpia Completados_Limpiado si aplica y valida lectura de los nuevos valores."""
             try:
                 headers = hoja.row_values(1)
                 mapa_columnas_hoja = {
@@ -4727,9 +4727,20 @@ if "modificar" in tab_map:
                     if str(nombre).strip()
                 }
 
+                cambios_finales = list(cambios)
+                completado_actual = str(row.get("Completados_Limpiado", "") or "").strip().lower()
+                if (
+                    source_sel == "casos"
+                    and resetear_completado
+                    and completado_actual == "sí"
+                    and "Completados_Limpiado" in mapa_columnas_hoja
+                    and not any(nombre_col == "Completados_Limpiado" for nombre_col, _ in cambios_finales)
+                ):
+                    cambios_finales.append(("Completados_Limpiado", ""))
+
                 updates = []
                 celdas = []
-                for nombre_col, valor in cambios:
+                for nombre_col, valor in cambios_finales:
                     if nombre_col not in mapa_columnas_hoja:
                         raise ValueError(
                             f"No existe la columna '{nombre_col}' en la hoja {hoja_nombre}."
@@ -4746,7 +4757,7 @@ if "modificar" in tab_map:
                 else:
                     hoja.update_cells(celdas, value_input_option="USER_ENTERED")
 
-                for nombre_col, valor_esperado in cambios:
+                for nombre_col, valor_esperado in cambios_finales:
                     col_idx = mapa_columnas_hoja[nombre_col]
                     valor_real = hoja.cell(gspread_row_idx, col_idx).value
                     esperado = "" if valor_esperado is None else str(valor_esperado).strip()
@@ -4816,7 +4827,11 @@ if "modificar" in tab_map:
                     cambios_archivos.append(("Adjuntos", nuevo_valor))
 
                 if cambios_archivos:
-                    if actualizar_celdas_y_confirmar(cambios_archivos, "📎 Archivos subidos correctamente."):
+                    if actualizar_celdas_y_confirmar(
+                        cambios_archivos,
+                        "📎 Archivos subidos correctamente.",
+                        resetear_completado=True,
+                    ):
                         st.rerun()
                 else:
                     st.warning("⚠️ No se cargaron archivos nuevos para actualizar en Excel.")
@@ -4853,6 +4868,7 @@ if "modificar" in tab_map:
                     if actualizar_celdas_y_confirmar(
                         [("Seguimiento", seguimiento_sel)],
                         "🔄 Seguimiento de garantía guardado correctamente.",
+                        resetear_completado=True,
                     ):
                         st.rerun()
 
@@ -4871,6 +4887,7 @@ if "modificar" in tab_map:
                 if actualizar_celdas_y_confirmar(
                     [("Comentario", valor_final)],
                     "📝 Comentario guardado correctamente.",
+                    resetear_completado=True,
                 ):
                     st.session_state["comentario_almacen"] = ""
                     st.rerun()
@@ -4918,6 +4935,7 @@ if "modificar" in tab_map:
                 if actualizar_celdas_y_confirmar(
                     [("Vendedor_Registro", vendedor_destino)],
                     "🎈 Vendedor actualizado correctamente.",
+                    resetear_completado=True,
                 ):
                     st.rerun()
 
@@ -4988,6 +5006,7 @@ if "modificar" in tab_map:
                         if actualizar_celdas_y_confirmar(
                             [("Estado", nuevo_estado)],
                             "🟣 Pedido marcado como CANCELADO correctamente.",
+                            resetear_completado=True,
                         ):
                             st.rerun()
                     except Exception as e:
