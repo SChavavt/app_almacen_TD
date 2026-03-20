@@ -2320,6 +2320,17 @@ def es_tab_solicitudes_guia(origen_tab: Any) -> bool:
     }
 
 
+def es_main_tab_pedidos_locales(current_main_tab_label: Any) -> bool:
+    """Devuelve ``True`` cuando el pedido se renderiza dentro de Pedidos Locales."""
+
+    normalized = str(current_main_tab_label or "").strip().lower()
+    return normalized in {
+        "📍 pedidos locales",
+        "pedidos locales",
+        "pedido local",
+    }
+
+
 def _mark_skip_demorado_check_once() -> None:
     """Evita el auto-cambio a Demorado en el rerun inmediato tras una acción manual."""
 
@@ -2965,7 +2976,8 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
         )
         return
     folio = row.get("Folio_Factura", "").strip() or "S/F"
-    guia_marker = "📋 " if pedido_sin_guia(row) else ""
+    is_local_main_tab = es_main_tab_pedidos_locales(current_main_tab_label)
+    guia_marker = "📋 " if (not is_local_main_tab and pedido_sin_guia(row)) else ""
     st.markdown(f'<a name="pedido_{row["ID_Pedido"]}"></a>', unsafe_allow_html=True)
     _render_bulk_selector(row)
     with st.expander(
@@ -3338,7 +3350,7 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
 
         # Complete Button with streamlined confirmation
         if not es_local_no_entregado:
-            requires = pedido_requiere_guia(row)
+            requires = False if is_local_main_tab else pedido_requiere_guia(row)
             has_file = pedido_tiene_guia_adjunta(row)
             is_tab_guias = es_tab_solicitudes_guia(origen_tab)
 
@@ -3478,7 +3490,10 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
                     st.error(f"❌ Error al procesar la modificación: {e}")
 
         # --- Adjuntar archivos de guía ---
-        if row['Estado'] not in ["🟢 Completado", "✅ Viajó"]:
+        if (
+            not is_local_main_tab
+            and row['Estado'] not in ["🟢 Completado", "✅ Viajó"]
+        ):
             with st.expander(
                 "📦 Subir Archivos de Guía",
                 expanded=st.session_state["expanded_subir_guia"].get(row['ID_Pedido'], False),
