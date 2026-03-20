@@ -3278,8 +3278,6 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
             "📎 Archivos (Adjuntos y Guía)",
             expanded=True,
         ):
-            st.markdown(f"##### Adjuntos para ID: {row['ID_Pedido']}")
-
             contenido_attachments = False
             sheet_attachments = _normalize_urls(row.get("Adjuntos", ""))
             sheet_attachment_keys = {
@@ -3288,7 +3286,6 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
 
             if sheet_attachments:
                 contenido_attachments = True
-                st.markdown("**Adjuntos registrados en la hoja:**")
                 for attachment in sheet_attachments:
                     attachment_url = resolve_storage_url(s3_client_param, attachment)
                     parsed = urlparse(attachment)
