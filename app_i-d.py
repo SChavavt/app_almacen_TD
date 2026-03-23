@@ -140,7 +140,6 @@ with col_update:
 with col_actions:
     if st.button("🔄 Refrescar ahora", use_container_width=True):
         st.cache_data.clear()
-        st.cache_resource.clear()
         st.rerun()
 
 # CSS tabla compacta
@@ -2468,9 +2467,9 @@ def get_gspread_client(_credentials_json_dict, max_attempts: int = 3):
             client.open_by_key(GOOGLE_SHEET_ID)
             return client
         except gspread.exceptions.APIError as e:
-            if "expired" in str(e).lower() or "RESOURCE_EXHAUSTED" in str(e):
-                st.cache_resource.clear()
-            wait_time = 2 ** (attempt - 1)
+            if "expired" in str(e).lower() or "UNAUTHENTICATED" in str(e):
+                get_gspread_client.clear()
+            wait_time = min(30, 2 ** (attempt - 1))
             if attempt >= max_attempts:
                 st.error(
                     f"❌ Error al autenticar con Google Sheets después de {max_attempts} intentos: {e}"
@@ -2513,6 +2512,18 @@ def get_s3_client():
         st.stop()
 
 
+@st.cache_resource
+def get_main_sheet_handles(_credentials_json_dict):
+    client = get_gspread_client(_credentials_json_dict=_credentials_json_dict)
+    spreadsheet = client.open_by_key(GOOGLE_SHEET_ID)
+    return {
+        "client": client,
+        "spreadsheet": spreadsheet,
+        "worksheet_main": spreadsheet.worksheet(SHEET_PEDIDOS),
+        "worksheet_casos": spreadsheet.worksheet(SHEET_CASOS),
+    }
+
+
 # --- Clientes iniciales ---
 try:
     if "gsheets" not in st.secrets:
@@ -2525,22 +2536,26 @@ try:
         "\\n", "\n"
     )
 
-    g_spread_client = get_gspread_client(_credentials_json_dict=GSHEETS_CREDENTIALS)
+    handles = get_main_sheet_handles(_credentials_json_dict=GSHEETS_CREDENTIALS)
+    g_spread_client = handles["client"]
     s3_client = get_s3_client()
-    spreadsheet = g_spread_client.open_by_key(GOOGLE_SHEET_ID)
-    worksheet_main = spreadsheet.worksheet(SHEET_PEDIDOS)
-    worksheet_casos = spreadsheet.worksheet(SHEET_CASOS)
+    spreadsheet = handles["spreadsheet"]
+    worksheet_main = handles["worksheet_main"]
+    worksheet_casos = handles["worksheet_casos"]
 
 except gspread.exceptions.APIError as e:
-    if "ACCESS_TOKEN_EXPIRED" in str(e) or "UNAUTHENTICATED" in str(e):
-        st.cache_resource.clear()
-        st.warning("🔄 La sesión con Google Sheets expiró. Reconectando...")
+    auth_error_text = str(e)
+    if any(token in auth_error_text for token in ["ACCESS_TOKEN_EXPIRED", "UNAUTHENTICATED", "RESOURCE_EXHAUSTED", "429"]):
+        st.warning("🔄 Ajustando conexión con Google Sheets...")
         time.sleep(1)
-        g_spread_client = get_gspread_client(_credentials_json_dict=GSHEETS_CREDENTIALS)
+        get_main_sheet_handles.clear()
+        get_gspread_client.clear()
+        handles = get_main_sheet_handles(_credentials_json_dict=GSHEETS_CREDENTIALS)
+        g_spread_client = handles["client"]
         s3_client = get_s3_client()
-        spreadsheet = g_spread_client.open_by_key(GOOGLE_SHEET_ID)
-        worksheet_main = spreadsheet.worksheet(SHEET_PEDIDOS)
-        worksheet_casos = spreadsheet.worksheet(SHEET_CASOS)
+        spreadsheet = handles["spreadsheet"]
+        worksheet_main = handles["worksheet_main"]
+        worksheet_casos = handles["worksheet_casos"]
     else:
         st.error(f"❌ Error al autenticar clientes: {e}")
         st.stop()
@@ -4268,7 +4283,6 @@ if selected_tab == 0:
     with button_col:
         if st.button("🔄 Actualizar lista", key="manual_refresh_ultimos_pedidos", use_container_width=True):
             st.cache_data.clear()
-            st.cache_resource.clear()
             st.rerun()
 
     ultimos_filtrados = build_ultimos_pedidos(df_all, vendedor_sel)
