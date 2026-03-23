@@ -31,6 +31,7 @@ _RECOVERABLE_AUTH_PATTERNS = (
 
 REPORTE_GUIAS_SHEET_NAME = "REPORTE GUÍAS"
 REPORTE_GUIAS_ROW_START = 11163
+REPORTE_GUIAS_EMPTY_SEARCH_START = 13000
 
 
 def _obtener_row_count_worksheet(ws: Any) -> int:
@@ -39,7 +40,7 @@ def _obtener_row_count_worksheet(ws: Any) -> int:
         return int(row_count)
 
     if hasattr(ws, "row_values"):
-        probe_row = REPORTE_GUIAS_ROW_START
+        probe_row = REPORTE_GUIAS_EMPTY_SEARCH_START
         while True:
             values = ws.row_values(probe_row)
             if not values:
@@ -157,22 +158,22 @@ def escribir_en_reporte_guias(cliente: Any, vendedor: Any, tipo_envio: Any) -> b
         client = get_gspread_client(_credentials_json_dict=GSHEETS_CREDENTIALS)
         ws_reporte = client.open_by_key(reportes_sheet_id).worksheet(REPORTE_GUIAS_SHEET_NAME)
 
-        row_count = max(_obtener_row_count_worksheet(ws_reporte), REPORTE_GUIAS_ROW_START)
-        rango_lectura = f"C{REPORTE_GUIAS_ROW_START}:F{row_count}"
+        row_count = max(_obtener_row_count_worksheet(ws_reporte), REPORTE_GUIAS_EMPTY_SEARCH_START)
+        rango_lectura = f"C{REPORTE_GUIAS_EMPTY_SEARCH_START}:F{row_count}"
         valores = _leer_rango_reporte_guias(ws_reporte, rango_lectura)
 
-        total_rows = row_count - REPORTE_GUIAS_ROW_START + 1
+        total_rows = row_count - REPORTE_GUIAS_EMPTY_SEARCH_START + 1
         if len(valores) < total_rows:
             valores.extend([[] for _ in range(total_rows - len(valores))])
 
         fila_destino = None
         ultima_fila_ocupada = None
-        # Elegir la primera fila disponible desde el inicio del bloque (sin brincos).
+        # Elegir la primera fila disponible buscando desde la fila 13000 en adelante.
         for i in range(0, total_rows):
             fila = valores[i] if i < len(valores) else []
             c_val = str(fila[0]).strip() if len(fila) >= 1 else ""
             f_val = str(fila[3]).strip() if len(fila) >= 4 else ""
-            fila_real = REPORTE_GUIAS_ROW_START + i
+            fila_real = REPORTE_GUIAS_EMPTY_SEARCH_START + i
             if c_val or f_val:
                 ultima_fila_ocupada = fila_real
             if c_val == "" and f_val == "":
