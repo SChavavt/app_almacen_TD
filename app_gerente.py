@@ -2085,10 +2085,18 @@ def _cobranza_meses_con_comentarios(com_df: pd.DataFrame) -> list[str]:
     return meses
 
 
-def _cobranza_meses_hojas_creadas(ss) -> list[str]:
-    """Lista meses con hoja mensual ya creada en Drive (Cobranza_YYYY-MM)."""
+def _cobranza_meses_hojas_creadas(ss, fallback_meses: list[str] | None = None) -> list[str]:
+    """Lista meses con hoja mensual ya creada en Drive (Cobranza_YYYY-MM).
+
+    Si Google Sheets rechaza temporalmente la lectura de metadata, devuelve un
+    fallback local para que la UI no truene al abrir la sección de descarga.
+    """
     meses = []
-    worksheets = _retry_gspread_api_call(lambda: ss.worksheets(), retries=4, base_delay=0.9)
+    try:
+        worksheets = _retry_gspread_api_call(lambda: ss.worksheets(), retries=4, base_delay=0.9)
+    except gspread.exceptions.APIError:
+        return sorted(set(fallback_meses or []))
+
     for ws in worksheets:
         title = _cobranza_clean_text(getattr(ws, "title", ""))
         if not title.startswith("Cobranza_"):
@@ -3284,10 +3292,25 @@ def render_cobranza_tab_gerente():
             if hojas_error:
                 st.warning("⚠️ Hubo meses que no se pudieron actualizar: " + " | ".join(hojas_error))
 
+            meses_confirmados = sorted(set(meses_comentarios) - {m.split(":", 1)[0].strip() for m in hojas_error})
+            if meses_confirmados:
+                st.session_state["ger_cob_meses_drive_cache"] = meses_confirmados
+
     st.markdown("### Descargar")
     with st.expander("📥 Descargar hojas de meses disponibles", expanded=False):
         st.caption("Solo se muestran meses que ya tienen hoja creada en Drive.")
-        meses_creados_drive = _cobranza_meses_hojas_creadas(get_cobranza_spreadsheet())
+        fallback_meses = st.session_state.get("ger_cob_meses_drive_cache", [])
+        meses_creados_drive = _cobranza_meses_hojas_creadas(
+            get_cobranza_spreadsheet(),
+            fallback_meses=fallback_meses,
+        )
+        if meses_creados_drive:
+            st.session_state["ger_cob_meses_drive_cache"] = meses_creados_drive
+        elif fallback_meses:
+            st.warning(
+                "⚠️ No se pudo refrescar la lista desde Google Sheets; se muestran los meses confirmados recientemente."
+            )
+            meses_creados_drive = fallback_meses
         if not meses_creados_drive:
             st.info("Aún no hay hojas mensuales creadas en Drive para descargar.")
             return
