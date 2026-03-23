@@ -2018,6 +2018,44 @@ def parse_antiguedad_cobranza_excel(file, mes: str = "") -> pd.DataFrame:
 
 
 
+def reset_cobranza_connection_state(clear_session: bool = True):
+    """Limpia caches de Cobranza para forzar una reconexión fresca a Google Sheets."""
+    global _COBRANZA_SPREADSHEET_CACHE, _COBRANZA_WS_CACHE, _COBRANZA_VALUES_CACHE
+
+    _COBRANZA_SPREADSHEET_CACHE = None
+    _COBRANZA_WS_CACHE = None
+    _COBRANZA_VALUES_CACHE = {}
+
+    if clear_session:
+        for key in [
+            "ger_cob_data_cache",
+            "ger_cob_force_refresh",
+            "ger_cob_stats",
+            "ger_cob_missing",
+        ]:
+            st.session_state.pop(key, None)
+
+
+def _render_cobranza_retry_box(message: str, *, error: Exception | None = None, key_suffix: str = ""):
+    """Muestra un aviso de conexión con una acción visible para reintentar."""
+    col_msg, col_btn = st.columns([5, 1])
+    with col_msg:
+        st.warning(message)
+        st.info(
+            "La pestaña permanece visible, pero sin conexión activa a Google Sheets. "
+            "Puedes reintentar la conexión sin recargar toda la app."
+        )
+        if error is not None:
+            with st.expander("Ver detalle técnico", expanded=False):
+                st.code(str(error))
+    with col_btn:
+        st.write("")
+        st.write("")
+        if st.button("🔄 Recargar conexión", key=f"retry_cobranza_connection_{key_suffix}"):
+            reset_cobranza_connection_state()
+            st.rerun()
+
+
 def get_cobranza_worksheets_safe():
     """Abre hojas de cobranza con manejo robusto de APIError para no romper la app."""
     global _COBRANZA_WS_CACHE
@@ -2043,18 +2081,29 @@ def get_cobranza_worksheets_safe():
         return None, None, None
     except gspread.exceptions.APIError as e:
         if _is_transient_gspread_error(e):
-            st.warning("⚠️ Google Sheets en límite temporal (429). Reintenta en unos segundos.")
-            st.caption(f"Detalle técnico: {e}")
+            _render_cobranza_retry_box(
+                "⚠️ Google Sheets en límite temporal (429). Reintenta en unos segundos.",
+                error=e,
+                key_suffix="worksheets_429",
+            )
             return None, None, None
         st.error("❌ No fue posible abrir las hojas de Cobranza en Google Sheets (permiso o ID).")
         st.caption(f"Spreadsheet usado: {spreadsheet_id}")
         st.caption(f"Comparte el archivo con esta cuenta de servicio: {service_email}")
-        st.caption(f"Detalle técnico: {e}")
+        _render_cobranza_retry_box(
+            "Intenta reconectar después de validar permisos o el ID del archivo.",
+            error=e,
+            key_suffix="worksheets_perm",
+        )
         return None, None, None
     except Exception as e:
         st.error("❌ Error inesperado al abrir las hojas de Cobranza.")
         st.caption(f"Spreadsheet usado: {spreadsheet_id}")
-        st.caption(f"Detalle técnico: {e}")
+        _render_cobranza_retry_box(
+            "Ocurrió un error inesperado al abrir Cobranza.",
+            error=e,
+            key_suffix="worksheets_unexpected",
+        )
         return None, None, None
 
 
@@ -2348,9 +2397,14 @@ def _cobranza_texto_seguimiento_para_calendario(row) -> str:
 def render_cobranza_tab_gerente():
     st.subheader("📒 Cobranza")
 
+    top_actions_col, _ = st.columns([1, 5])
+    with top_actions_col:
+        if st.button("🔄 Recargar conexión", key="ger_cob_top_retry"):
+            reset_cobranza_connection_state()
+            st.rerun()
+
     ws_base, ws_venc, ws_com = get_cobranza_worksheets_safe()
     if not ws_base or not ws_venc or not ws_com:
-        st.info("La pestaña permanece visible, pero sin conexión activa a Google Sheets.")
         return
 
     base_headers = ["Mes", "Codigo", "Razon_Social", "Saldo", "No_Vencido", "Vencido", "Tipo_Pago", "Ultima_Actualizacion"]
@@ -2388,15 +2442,20 @@ def render_cobranza_tab_gerente():
             st.info(f"ℹ️ Se actualizaron {backfill_count} comentario(s) históricos con Mes_Operativo.")
     except gspread.exceptions.APIError as e:
         if _is_transient_gspread_error(e):
-            st.warning(
+            _render_cobranza_retry_box(
                 "⚠️ Google Sheets está con límite temporal de lecturas (quota/rate limit). "
-                "Se continuará con los encabezados actuales y puedes reintentar en unos segundos."
+                "Puedes reintentar en unos segundos.",
+                error=e,
+                key_suffix="headers_cobranza",
             )
-            st.caption(f"Detalle técnico: {e}")
         else:
             st.error("❌ No se pudieron validar encabezados de hojas de Cobranza.")
-            st.caption(f"Detalle técnico: {e}")
-            return
+            _render_cobranza_retry_box(
+                "Revisa la configuración de las hojas y vuelve a intentar.",
+                error=e,
+                key_suffix="headers_cobranza_hard",
+            )
+        return
 
     now_dt = datetime.now()
     mes_sel = now_dt.strftime("%Y-%m")
@@ -2470,7 +2529,22 @@ def render_cobranza_tab_gerente():
         st.dataframe(missing, use_container_width=True, hide_index=True)
 
     force_refresh = bool(st.session_state.pop("ger_cob_force_refresh", False))
-    base_df, venc_df, com_df = _load_cobranza_data(force_refresh=force_refresh)
+    try:
+        base_df, venc_df, com_df = _load_cobranza_data(force_refresh=force_refresh)
+    except gspread.exceptions.APIError as e:
+        _render_cobranza_retry_box(
+            "⚠️ No se pudieron leer los datos de Cobranza desde Google Sheets en este momento.",
+            error=e,
+            key_suffix="load_cobranza_data",
+        )
+        return
+    except Exception as e:
+        _render_cobranza_retry_box(
+            "⚠️ Ocurrió un problema al cargar los datos de Cobranza.",
+            error=e,
+            key_suffix="load_cobranza_data_unexpected",
+        )
+        return
     st.markdown("### Comentarios")
     meses_disponibles = _cobranza_meses_disponibles(base_df)
     mes_actual = now_cdmx().strftime("%Y-%m")
@@ -3344,9 +3418,14 @@ def render_cobranza_tab_gerente():
 def render_seguimiento_cobranza_tab_gerente(usuario_actual: str | None):
     st.subheader("📊 Seguimiento Cobranza")
 
+    top_actions_col, _ = st.columns([1, 5])
+    with top_actions_col:
+        if st.button("🔄 Recargar conexión", key="ger_seg_cob_top_retry"):
+            reset_cobranza_connection_state()
+            st.rerun()
+
     ws_base, _, ws_com = get_cobranza_worksheets_safe()
     if not ws_base or not ws_com:
-        st.info("La pestaña permanece visible, pero sin conexión activa a Google Sheets.")
         return
 
     base_headers = ["Mes", "Codigo", "Razon_Social", "Saldo", "No_Vencido", "Vencido", "Tipo_Pago", "Ultima_Actualizacion"]
@@ -3361,15 +3440,37 @@ def render_seguimiento_cobranza_tab_gerente(usuario_actual: str | None):
         cobranza_backfill_mes_operativo(ws_com)
     except gspread.exceptions.APIError as e:
         if _is_transient_gspread_error(e):
-            st.warning("⚠️ Google Sheets está con límite temporal de lecturas. Reintenta en unos segundos.")
-            st.caption(f"Detalle técnico: {e}")
+            _render_cobranza_retry_box(
+                "⚠️ Google Sheets está con límite temporal de lecturas. Reintenta en unos segundos.",
+                error=e,
+                key_suffix="headers_seg_cob",
+            )
         else:
             st.error("❌ No se pudieron validar encabezados de seguimiento de cobranza.")
-            st.caption(f"Detalle técnico: {e}")
+            _render_cobranza_retry_box(
+                "Revisa la estructura de seguimiento de cobranza y vuelve a intentar.",
+                error=e,
+                key_suffix="headers_seg_cob_hard",
+            )
         return
 
-    base_df = pd.DataFrame(cobranza_load_records_with_rows(ws_base))
-    com_df = pd.DataFrame(cobranza_load_records_with_rows(ws_com))
+    try:
+        base_df = pd.DataFrame(cobranza_load_records_with_rows(ws_base))
+        com_df = pd.DataFrame(cobranza_load_records_with_rows(ws_com))
+    except gspread.exceptions.APIError as e:
+        _render_cobranza_retry_box(
+            "⚠️ No se pudieron leer los seguimientos desde Google Sheets en este momento.",
+            error=e,
+            key_suffix="load_seg_cob_data",
+        )
+        return
+    except Exception as e:
+        _render_cobranza_retry_box(
+            "⚠️ Ocurrió un problema al cargar el seguimiento de cobranza.",
+            error=e,
+            key_suffix="load_seg_cob_data_unexpected",
+        )
+        return
     if com_df.empty:
         st.info("Aún no hay seguimientos capturados.")
         return
