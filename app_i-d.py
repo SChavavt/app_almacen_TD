@@ -2627,11 +2627,64 @@ def _fetch_with_retry(worksheet, cache_key: str, max_attempts: int = 4):
     raise RuntimeError("No se pudieron obtener datos de Google Sheets")
 
 
+def _open_worksheet_with_retry(
+    client,
+    sheet_id: str,
+    sheet_name: str,
+    max_attempts: int = 2,
+    cooldown_seconds: int = 120,
+):
+    """Abre una worksheet con reintentos y *cooldown* para fallas transitorias."""
+
+    cooldown_key = f"_gsheets_open_cooldown_until_{sheet_name}"
+    notice_key = f"_gsheets_open_notice_at_{sheet_name}"
+    now_ts = time.time()
+    blocked_until = float(st.session_state.get(cooldown_key, 0))
+
+    if blocked_until > now_ts:
+        last_notice = float(st.session_state.get(notice_key, 0))
+        if now_ts - last_notice >= 30:
+            remaining = int(blocked_until - now_ts)
+            st.warning(
+                f"⚠️ Google Sheets sigue inestable para '{sheet_name}'. "
+                f"Usando caché local; próximo intento en ~{remaining}s."
+            )
+            st.session_state[notice_key] = now_ts
+        raise RuntimeError(f"Cooldown activo para la hoja '{sheet_name}'")
+
+    last_error: Optional[Exception] = None
+    for attempt in range(1, max_attempts + 1):
+        try:
+            spreadsheet = client.open_by_key(sheet_id)
+            st.session_state[cooldown_key] = 0.0
+            return spreadsheet.worksheet(sheet_name)
+        except gspread.exceptions.APIError as e:
+            last_error = e
+            wait_time = min(5, attempt)
+            if attempt == 1:
+                st.warning(
+                    f"⚠️ Error temporal al abrir la hoja '{sheet_name}'. "
+                    "Reintentando automáticamente..."
+                )
+            time.sleep(wait_time)
+
+    st.session_state[cooldown_key] = time.time() + cooldown_seconds
+    st.session_state[notice_key] = time.time()
+    if last_error is not None:
+        raise last_error
+    raise RuntimeError(f"No se pudo abrir la hoja '{sheet_name}' en Google Sheets")
+
+
 def _warn_and_get_dataframe_fallback(cache_key: str, label: str) -> pd.DataFrame:
     fallback_df = st.session_state.get(cache_key)
-    st.warning(
-        f"⚠️ No se pudo actualizar {label} desde Google Sheets en este momento; se muestran los últimos datos disponibles si existen."
-    )
+    warning_key = f"_warn_once_{cache_key}"
+    now_ts = time.time()
+    last_warn = float(st.session_state.get(warning_key, 0))
+    if now_ts - last_warn >= 30:
+        st.warning(
+            f"⚠️ No se pudo actualizar {label} desde Google Sheets en este momento; se muestran los últimos datos disponibles si existen."
+        )
+        st.session_state[warning_key] = now_ts
     if isinstance(fallback_df, pd.DataFrame):
         return fallback_df.copy()
     return pd.DataFrame()
@@ -2745,12 +2798,20 @@ def load_casos_from_gsheets():
 
 @st.cache_data(ttl=600)
 def load_confirmados_from_gsheets(credentials_dict: dict, sheet_id: str, sheet_name: str):
-    client = get_gspread_client(_credentials_json_dict=credentials_dict)
-    spreadsheet = client.open_by_key(sheet_id)
-    ws = spreadsheet.worksheet(sheet_name)
-    data = _fetch_with_retry(ws, f"_cache_{sheet_name}")
+    cache_df_key = f"_cache_{sheet_name}_df"
+    try:
+        client = get_gspread_client(_credentials_json_dict=credentials_dict)
+        ws = _open_worksheet_with_retry(client, sheet_id, sheet_name)
+        data = _fetch_with_retry(ws, f"_cache_{sheet_name}")
+    except gspread.exceptions.APIError:
+        return _warn_and_get_dataframe_fallback(cache_df_key, "los pedidos confirmados")
+    except RuntimeError:
+        return _warn_and_get_dataframe_fallback(cache_df_key, "los pedidos confirmados")
+
     if not data:
-        return pd.DataFrame()
+        df = pd.DataFrame()
+        st.session_state[cache_df_key] = df.copy()
+        return df
 
     headers = data[0]
     df = pd.DataFrame(data[1:], columns=headers)
@@ -2784,6 +2845,7 @@ def load_confirmados_from_gsheets(credentials_dict: dict, sheet_id: str, sheet_n
         df["AñoMes"] = ""
         df["FechaDia"] = ""
 
+    st.session_state[cache_df_key] = df.copy()
     return df
 
 
