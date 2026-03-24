@@ -31,7 +31,8 @@ _RECOVERABLE_AUTH_PATTERNS = (
 
 REPORTE_GUIAS_SHEET_NAME = "REPORTE GUÍAS"
 REPORTE_GUIAS_ROW_START = 13000
-REPORTE_GUIAS_ROW_END = 14000
+REPORTE_GUIAS_GROWTH_ROWS = 1000
+REPORTE_GUIAS_LOOKBACK_WINDOW = 1000
 
 
 def _is_recoverable_auth_error(exc: Exception) -> bool:
@@ -104,8 +105,50 @@ def _leer_rango_reporte_guias(ws: Any, rango_a1: str) -> list[list[Any]]:
     )
 
 
+def _asegurar_filas_para_reporte_guias(ws: Any, fila_destino: int) -> None:
+    row_count = int(getattr(ws, "row_count", 0) or 0)
+    if fila_destino <= row_count:
+        return
+
+    rows_to_add = max(fila_destino - row_count, REPORTE_GUIAS_GROWTH_ROWS)
+    if hasattr(ws, "add_rows"):
+        ws.add_rows(rows_to_add)
+        return
+
+    raise AttributeError(
+        "La hoja REPORTE GUÍAS no soporta agregar filas automáticamente"
+    )
+
+
+def _obtener_siguiente_fila_reporte_guias(ws: Any) -> int:
+    row_count = int(getattr(ws, "row_count", 0) or 0)
+    fila_inicio = REPORTE_GUIAS_ROW_START
+    fila_fin = max(row_count, fila_inicio)
+
+    while fila_fin >= fila_inicio:
+        bloque_inicio = max(fila_inicio, fila_fin - REPORTE_GUIAS_LOOKBACK_WINDOW + 1)
+        rango_lectura = f"C{bloque_inicio}:F{fila_fin}"
+        valores = _leer_rango_reporte_guias(ws, rango_lectura)
+
+        for offset in range(len(valores) - 1, -1, -1):
+            fila = valores[offset] if offset < len(valores) else []
+            c_val = str(fila[0]).strip() if len(fila) >= 1 else ""
+            f_val = str(fila[3]).strip() if len(fila) >= 4 else ""
+            if c_val or f_val:
+                return bloque_inicio + offset + 1
+
+        if bloque_inicio == fila_inicio:
+            break
+
+        fila_fin = bloque_inicio - 1
+
+    return fila_inicio
+
+
 def _escribir_reporte_guias_c_f(ws: Any, fila_destino: int, cliente_str: str, vendedor_recortado: str) -> None:
     """Escribe C/F con compatibilidad entre versiones de gspread."""
+    _asegurar_filas_para_reporte_guias(ws, fila_destino)
+
     payload = [
         {"range": f"C{fila_destino}", "values": [[cliente_str]]},
         {"range": f"F{fila_destino}", "values": [[vendedor_recortado]]},
@@ -142,30 +185,7 @@ def escribir_en_reporte_guias(cliente: Any, vendedor: Any, tipo_envio: Any) -> b
         client = get_gspread_client(_credentials_json_dict=GSHEETS_CREDENTIALS)
         ws_reporte = client.open_by_key(reportes_sheet_id).worksheet(REPORTE_GUIAS_SHEET_NAME)
 
-        rango_lectura = f"C{REPORTE_GUIAS_ROW_START}:F{REPORTE_GUIAS_ROW_END}"
-        valores = _leer_rango_reporte_guias(ws_reporte, rango_lectura)
-
-        total_rows = REPORTE_GUIAS_ROW_END - REPORTE_GUIAS_ROW_START + 1
-        if len(valores) < total_rows:
-            valores.extend([[] for _ in range(total_rows - len(valores))])
-
-        fila_destino = None
-        # Elegir la primera fila disponible desde el inicio del bloque (sin brincos).
-        for i in range(0, total_rows):
-            fila = valores[i] if i < len(valores) else []
-            c_val = str(fila[0]).strip() if len(fila) >= 1 else ""
-            f_val = str(fila[3]).strip() if len(fila) >= 4 else ""
-            if c_val == "" and f_val == "":
-                fila_destino = REPORTE_GUIAS_ROW_START + i
-                break
-
-        if fila_destino is None:
-            msg = (
-                f"No hay filas disponibles (C y F vacías) en {REPORTE_GUIAS_SHEET_NAME} "
-                f"entre {REPORTE_GUIAS_ROW_START} y {REPORTE_GUIAS_ROW_END}"
-            )
-            st.error(f"❌ {msg}")
-            return False
+        fila_destino = _obtener_siguiente_fila_reporte_guias(ws_reporte)
 
         vendedor_recortado = _recortar_vendedor_para_reporte(vendedor)
         cliente_str = str(cliente or "").strip()
