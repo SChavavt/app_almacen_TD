@@ -100,11 +100,27 @@ st.markdown(
     div[data-testid="stVerticalBlock"] > div:has(iframe) { margin-bottom: 0.2rem; }
     div[data-testid="stRadio"] > label { margin-bottom: 0; }
     div[data-testid="element-container"] { margin-bottom: 0.25rem; }
-    div[data-testid="stRadio"] div[role="radiogroup"] { gap: 0.25rem; }
-    div[data-testid="stRadio"] label { padding: 0.1rem 0.4rem; font-size: 0.8rem; }
-    div[data-testid="stRadio"] input[type="radio"] { display: none; }
-    div[data-testid="stRadio"] div[role="radiogroup"] > label { border: 1px solid rgba(255,255,255,.2); border-radius: .5rem; }
-    div[data-testid="stRadio"] div[role="radiogroup"] > label[data-checked="true"] { background: rgba(255,255,255,.14); border-color: rgba(255,255,255,.35); }
+    div[data-testid="stRadio"] div[role="radiogroup"] {
+        gap: 0.15rem;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.25);
+        padding-bottom: 0.15rem;
+    }
+    div[data-testid="stRadio"] div[role="radiogroup"] > label {
+        background: transparent;
+        border: none;
+        border-radius: 0.45rem 0.45rem 0 0;
+        padding: 0.28rem 0.62rem;
+        font-size: 0.82rem;
+        color: rgba(255,255,255,.75);
+    }
+    div[data-testid="stRadio"] div[role="radiogroup"] > label[data-checked="true"] {
+        background: rgba(255,255,255,.14);
+        color: #fff;
+        box-shadow: inset 0 -2px 0 rgba(255,255,255,.45);
+    }
+    div[data-testid="stRadio"] div[role="radiogroup"] > label svg {
+        display: none !important;
+    }
     </style>
     """,
     unsafe_allow_html=True,
@@ -3527,13 +3543,13 @@ if "active_main_tab" not in st.session_state:
     st.session_state.active_main_tab = 0
 elif st.session_state.active_main_tab >= len(tab_labels):
     st.session_state.active_main_tab = 0
-if tab_qp.isdigit():
+radio_tab_state = st.session_state.get("_radio_main_tab")
+if isinstance(radio_tab_state, int) and 0 <= radio_tab_state < len(tab_labels):
+    st.session_state.active_main_tab = radio_tab_state
+elif tab_qp.isdigit():
     tab_index = int(tab_qp)
     if 0 <= tab_index < len(tab_labels):
         st.session_state.active_main_tab = tab_index
-
-def _set_active_main_tab(i: int):
-    st.session_state.active_main_tab = i
 
 selected_tab = st.radio(
     "Vista",
@@ -3542,9 +3558,9 @@ selected_tab = st.radio(
     index=st.session_state.active_main_tab,
     horizontal=True,
     label_visibility="collapsed",
-    on_change=lambda: _set_active_main_tab(st.session_state["_radio_main_tab"]),
     key="_radio_main_tab",
 )
+st.session_state.active_main_tab = selected_tab
 
 # helper para "simular" tabs
 tabs = [None] * len(tab_labels)
