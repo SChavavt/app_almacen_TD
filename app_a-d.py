@@ -1436,9 +1436,7 @@ def process_sheet_data(all_data: list[list[str]]) -> tuple[pd.DataFrame, list[st
         'Tipo_Envio', 'Fecha_Entrega', 'Comentario', 'Modificacion_Surtido',
         'Adjuntos', 'Adjuntos_Surtido', 'Adjuntos_Guia',
         'Estado', 'Estado_Pago', 'Fecha_Completado', 'Hora_Proceso', 'Turno',
-        'Estado_Entrega', 'Direccion_Guia_Retorno',
-        'Fecha_Pago_Comprobante', 'Forma_Pago_Comprobante', 'Monto_Comprobante',
-        'Banco_Destino_Pago', 'Terminal'
+        'Estado_Entrega', 'Direccion_Guia_Retorno'
     ]
 
 
@@ -2998,212 +2996,15 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
         )
         return
     folio = row.get("Folio_Factura", "").strip() or "S/F"
-    turno_actual = str(row.get("Turno", "")).strip()
-    es_local_bodega = (
-        str(row.get("Tipo_Envio", "")).strip() == "📍 Pedido Local"
-        and turno_actual == "📦 Pasa a Bodega"
-    )
-    estado_pago_actual = str(row.get("Estado_Pago", "")).strip() or "Pendiente"
-    estado_pago_norm = _normalize_text_for_matching(estado_pago_actual)
-    pago_confirmado = "pagad" in estado_pago_norm
-    pago_badge = "✅ Pagado" if pago_confirmado else "🟡 Pendiente"
     is_local_main_tab = es_main_tab_pedidos_locales(current_main_tab_label)
     guia_marker = "📋 " if (not is_local_main_tab and pedido_sin_guia(row)) else ""
     st.markdown(f'<a name="pedido_{row["ID_Pedido"]}"></a>', unsafe_allow_html=True)
     _render_bulk_selector(row)
-    titulo_expander = f"{guia_marker}{row['Estado']} - {folio} - {row['Cliente']}"
-    if es_local_bodega:
-        titulo_expander = f"{titulo_expander} | Estado de pago: {pago_badge}"
-
     with st.expander(
-        titulo_expander,
+        f"{guia_marker}{row['Estado']} - {folio} - {row['Cliente']}",
         expanded=st.session_state["expanded_pedidos"].get(row['ID_Pedido'], False),
     ):
         st.markdown("---")
-
-        if es_local_bodega:
-            st.markdown("##### 💳 Estado de pago")
-            st.info(f"Estado actual: **{pago_badge}**")
-
-            if not pago_confirmado:
-                st.markdown("### 🧾 Comprobante de Pago")
-                pago_widget_suffix = f"{row['ID_Pedido']}_{origen_tab}"
-                form_pago_key = f"form_pago_comprobante_{pago_widget_suffix}"
-                upload_comp_key = f"uploader_comprobante_{pago_widget_suffix}"
-
-                opciones_forma_pago = [
-                    "Transferencia",
-                    "Depósito en Efectivo",
-                    "Tarjeta de Débito",
-                    "Tarjeta de Crédito",
-                    "Cheque",
-                ]
-                opciones_terminal = [
-                    "BANORTE",
-                    "AFIRME",
-                    "VELPAY",
-                    "CLIP",
-                    "PAYPAL",
-                    "BBVA",
-                    "CONEKTA",
-                    "MERCADO PAGO",
-                ]
-                opciones_banco = [
-                    "BANORTE",
-                    "BANAMEX",
-                    "AFIRME",
-                    "BANCOMER OP",
-                    "BANCOMER CURSOS",
-                ]
-
-                fecha_pago_raw = row.get("Fecha_Pago_Comprobante", "")
-                fecha_pago_dt = pd.to_datetime(fecha_pago_raw, errors="coerce")
-                fecha_pago_default = (
-                    fecha_pago_dt.date() if pd.notna(fecha_pago_dt) else mx_today()
-                )
-
-                forma_pago_default = str(
-                    row.get("Forma_Pago_Comprobante", "") or ""
-                ).strip()
-                if forma_pago_default not in opciones_forma_pago:
-                    forma_pago_default = "Tarjeta de Débito"
-
-                monto_default = pd.to_numeric(
-                    row.get("Monto_Comprobante", 0), errors="coerce"
-                )
-                if pd.isna(monto_default):
-                    monto_default = 0.0
-
-                banco_default = str(row.get("Banco_Destino_Pago", "") or "").strip()
-                if banco_default not in opciones_banco:
-                    banco_default = "BANORTE"
-
-                terminal_default = str(row.get("Terminal", "") or "").strip()
-                if terminal_default not in opciones_terminal:
-                    terminal_default = "BANORTE"
-
-                with st.form(key=form_pago_key):
-                    st.markdown("#### 🧾 Detalles del Pago")
-                    fecha_pago = st.date_input(
-                        "📅 Fecha del Pago",
-                        value=fecha_pago_default,
-                        format="YYYY/MM/DD",
-                    )
-                    forma_pago = st.selectbox(
-                        "💳 Forma de Pago",
-                        options=opciones_forma_pago,
-                        index=opciones_forma_pago.index(forma_pago_default),
-                    )
-                    monto_pago = st.number_input(
-                        "💲 Monto del Pago",
-                        min_value=0.0,
-                        value=float(monto_default),
-                        step=100.0,
-                        format="%.2f",
-                    )
-
-                    usa_terminal = forma_pago in ["Tarjeta de Débito", "Tarjeta de Crédito"]
-                    banco_destino = ""
-                    terminal_pago = ""
-
-                    if usa_terminal:
-                        terminal_pago = st.selectbox(
-                            "🏧 Terminal",
-                            options=opciones_terminal,
-                            index=opciones_terminal.index(
-                                terminal_default if terminal_default in opciones_terminal else "BANORTE"
-                            ),
-                        )
-                    else:
-                        banco_destino = st.selectbox(
-                            "🏦 Banco Destino",
-                            options=opciones_banco,
-                            index=opciones_banco.index(
-                                banco_default if banco_default in opciones_banco else "BANORTE"
-                            ),
-                        )
-
-                    archivos_comprobante = st.file_uploader(
-                        "📎 Subir Comprobante(s)",
-                        type=["pdf", "jpg", "jpeg", "png"],
-                        accept_multiple_files=True,
-                        key=upload_comp_key,
-                    )
-
-                    submitted_pago = st.form_submit_button(
-                        "💾 Guardar comprobante",
-                        on_click=preserve_tab_state,
-                    )
-
-                if submitted_pago:
-                    if monto_pago <= 0:
-                        st.warning("⚠️ Captura un monto mayor a 0 para guardar el comprobante.")
-                    else:
-                        updates = []
-                        campos_valores = {
-                            "Fecha_Pago_Comprobante": fecha_pago.strftime("%Y-%m-%d"),
-                            "Forma_Pago_Comprobante": forma_pago,
-                            "Monto_Comprobante": f"{float(monto_pago):.2f}",
-                            "Banco_Destino_Pago": banco_destino if not usa_terminal else "",
-                            "Terminal": terminal_pago if usa_terminal else "",
-                            "Estado_Pago": "Pagado",
-                        }
-                        for col_name, col_value in campos_valores.items():
-                            if col_name in headers:
-                                col_idx = headers.index(col_name) + 1
-                                updates.append(
-                                    {
-                                        "range": gspread.utils.rowcol_to_a1(
-                                            gsheet_row_index, col_idx
-                                        ),
-                                        "values": [[col_value]],
-                                    }
-                                )
-
-                        uploaded_comp_keys = []
-                        if archivos_comprobante:
-                            for archivo in archivos_comprobante:
-                                ext = os.path.splitext(archivo.name)[1].lower()
-                                timestamp = mx_now().strftime("%Y%m%d%H%M%S")
-                                s3_key = (
-                                    f"{row['ID_Pedido']}/comprobante_"
-                                    f"{timestamp}_{uuid.uuid4().hex}{ext}"
-                                )
-                                success, uploaded_key = upload_file_to_s3(
-                                    s3_client_param, S3_BUCKET_NAME, archivo, s3_key
-                                )
-                                if success and uploaded_key:
-                                    uploaded_comp_keys.append(uploaded_key)
-
-                        if updates and batch_update_gsheet_cells(
-                            worksheet, updates, headers=headers
-                        ):
-                            for col_name, col_value in campos_valores.items():
-                                if col_name in df.columns:
-                                    df.at[idx, col_name] = col_value
-                                    row[col_name] = col_value
-
-                            if uploaded_comp_keys and "Adjuntos" in headers:
-                                nueva_lista_adjuntos = _merge_uploaded_urls(
-                                    row.get("Adjuntos", ""), uploaded_comp_keys
-                                )
-                                if update_gsheet_cell(
-                                    worksheet,
-                                    headers,
-                                    gsheet_row_index,
-                                    "Adjuntos",
-                                    nueva_lista_adjuntos,
-                                ):
-                                    df.at[idx, "Adjuntos"] = nueva_lista_adjuntos
-                                    row["Adjuntos"] = nueva_lista_adjuntos
-
-                            ensure_expanders_open(row["ID_Pedido"], "expanded_pedidos")
-                            st.toast("✅ Comprobante guardado correctamente.", icon="✅")
-                            st.session_state["refresh_data_caches_pending"] = True
-                            st.session_state["reload_after_action"] = True
-                            st.rerun()
-                        else:
-                            st.error("❌ No se pudo guardar la información del comprobante.")
         mod_texto = str(row.get("Modificacion_Surtido", "")).strip()
         hay_modificacion = mod_texto != ""
 
