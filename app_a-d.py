@@ -5107,64 +5107,6 @@ if df_main is not None:
             f"⚠️ Hay {lista_casos} en estado pendiente en Casos Especiales."
         )
 
-    # 🚨 Aviso prioritario: pedidos locales en bodega en proceso > 3 días hábiles (base: Hora_Proceso)
-    pedidos_bodega_demorados = pd.DataFrame(columns=df_main.columns)
-    if {
-        "Tipo_Envio",
-        "Turno",
-        "Estado",
-        "Hora_Proceso",
-    }.issubset(df_main.columns):
-        mask_local_bodega_en_proceso = (
-            df_main["Tipo_Envio"].astype(str).str.strip().eq("📍 Pedido Local")
-            & df_main["Turno"].astype(str).str.strip().eq("📦 Pasa a Bodega")
-            & df_main["Estado"].astype(str).str.strip().eq("🔵 En Proceso")
-        )
-
-        if mask_local_bodega_en_proceso.any():
-            candidatos = df_main.loc[mask_local_bodega_en_proceso].copy()
-            candidatos["Hora_Proceso_dt"] = pd.to_datetime(
-                candidatos["Hora_Proceso"], errors="coerce"
-            )
-            candidatos = candidatos[candidatos["Hora_Proceso_dt"].notna()].copy()
-
-            if not candidatos.empty:
-                hoy_habil = pd.Timestamp.now().normalize().date()
-                inicio_habil = candidatos["Hora_Proceso_dt"].dt.date.values.astype("datetime64[D]")
-                fin_habil = np.array(hoy_habil, dtype="datetime64[D]")
-                dias_habiles_transcurridos = np.busday_count(inicio_habil, fin_habil)
-                candidatos["Dias_Habiles_Proceso"] = dias_habiles_transcurridos
-                pedidos_bodega_demorados = candidatos[
-                    candidatos["Dias_Habiles_Proceso"] > 3
-                ].copy()
-
-    if not pedidos_bodega_demorados.empty:
-        total_bodega_alerta = len(pedidos_bodega_demorados)
-        st.error(
-            f"🚨 Hay {total_bodega_alerta} pedido{'s' if total_bodega_alerta != 1 else ''} "
-            "local(es) con turno 📦 Pasa a Bodega en 🔵 En Proceso por más de 3 días hábiles "
-            "(contados desde Hora_Proceso)."
-        )
-        with st.expander("🚨 Ver detalle de alerta de bodega (>3 días hábiles)", expanded=False):
-            pedidos_bodega_demorados = pedidos_bodega_demorados.sort_values(
-                by=["Dias_Habiles_Proceso", "Hora_Proceso_dt"], ascending=[False, True]
-            )
-            for _, row_alerta in pedidos_bodega_demorados.iterrows():
-                folio_alerta = str(row_alerta.get("Folio_Factura", "")).strip() or "s/folio"
-                cliente_alerta = str(row_alerta.get("Cliente", "")).strip() or "s/cliente"
-                id_alerta = str(row_alerta.get("ID_Pedido", "")).strip() or "s/id"
-                fecha_proc = row_alerta.get("Hora_Proceso_dt")
-                fecha_proc_txt = (
-                    fecha_proc.strftime("%Y-%m-%d %H:%M")
-                    if pd.notna(fecha_proc)
-                    else "sin Hora_Proceso"
-                )
-                dias_alerta = int(row_alerta.get("Dias_Habiles_Proceso", 0))
-                st.markdown(
-                    f"- 🚨 **{folio_alerta}** · {cliente_alerta} · ID: `{id_alerta}` · "
-                    f"Hora_Proceso: {fecha_proc_txt} · **{dias_alerta} días hábiles**"
-                )
-
     # --- Implementación de Pestañas con st.tabs ---
     tab_options = [
         "📍 Pedidos Locales",
