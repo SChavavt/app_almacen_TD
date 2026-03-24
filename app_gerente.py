@@ -820,8 +820,13 @@ def construir_descarga_flujo_por_categoria():
     df_locales = df_data[~mask_foraneos].copy().reset_index(drop=True)
     df_casos = df_casos.reset_index(drop=True)
 
-    # Numeración en orden natural de captura (de arriba a abajo en la hoja)
-    df_foraneos["#"] = (df_foraneos.index + 1).map(lambda n: f"{n:02d}")
+    # Numeración de flujo foráneo alineada con app_i/app_a:
+    # respeta Numero_Foraneo manual de casos y asigna secuencia continua al resto.
+    flow_map_foraneos = construir_mapa_numeracion_foraneos(df_data, df_casos)
+    df_foraneos["#"] = [
+        resolver_numero_foraneo_flujo(row, flow_map_foraneos) or f"{idx + 1:02d}"
+        for idx, (_, row) in enumerate(df_foraneos.iterrows())
+    ]
     df_locales["#"] = (df_locales.index + 1).astype(str)
     df_casos["#"] = (df_casos.index + 1).map(lambda n: f"{n:03d}")
 
@@ -837,6 +842,162 @@ def construir_descarga_flujo_por_categoria():
     }
 
 
+def _flow_key(value):
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    text_norm = normalizar(text)
+    return re.sub(r"\s+", "", text_norm)
+
+
+def _parse_foraneo_number(raw):
+    text = str(raw or "").strip()
+    if not text:
+        return None
+    digits = "".join(ch for ch in text if ch.isdigit())
+    if not digits:
+        return None
+    try:
+        value = int(digits)
+    except ValueError:
+        return None
+    return value if value > 0 else None
+
+
+def _parse_row_sort_datetime(row):
+    """Replica el orden operativo de app_i/app_a para numeración foránea."""
+    for field in (
+        "Hora_Registro",
+        "Fecha_Entrega",
+        "Fecha_Completado",
+        "Fecha_Pago_Comprobante",
+        "Hora_Proceso",
+        "Fecha_Registro",
+    ):
+        parsed = pd.to_datetime(row.get(field, ""), errors="coerce")
+        if pd.notna(parsed):
+            return parsed
+    return pd.Timestamp.max
+
+
+def _es_cancelado_estado(value):
+    estado = normalizar(str(value or ""))
+    return "cancel" in estado
+
+
+def _es_limpiado(row):
+    return normalizar(str(row.get("Completados_Limpiado", ""))) == "si"
+
+
+def _es_row_foraneo(row):
+    tipo_envio = normalizar(str(row.get("Tipo_Envio", "") or ""))
+    tipo_envio_original = normalizar(str(row.get("Tipo_Envio_Original", "") or ""))
+    return "foraneo" in f"{tipo_envio} {tipo_envio_original}"
+
+
+def resolver_numero_foraneo_flujo(row, flow_map_foraneos):
+    for key in (_flow_key(row.get("ID_Pedido", "")), _flow_key(row.get("Folio_Factura", ""))):
+        if key and key in flow_map_foraneos:
+            return flow_map_foraneos[key]
+    return ""
+
+
+def construir_mapa_numeracion_foraneos(df_data, df_casos):
+    """Construye mapa de numeración foránea igual al flujo de app_i/app_a."""
+    if df_data is None or df_data.empty:
+        return {}
+
+    work_data = df_data.copy()
+    for col in ("Tipo_Envio", "ID_Pedido", "Folio_Factura", "Completados_Limpiado", "Estado"):
+        if col not in work_data.columns:
+            work_data[col] = ""
+
+    tipo_norm = work_data["Tipo_Envio"].astype(str).map(normalizar)
+    df_foraneo = work_data[tipo_norm.str.contains("foraneo", na=False)].copy()
+
+    work_cases = pd.DataFrame() if df_casos is None else df_casos.copy()
+    if not work_cases.empty:
+        for col in (
+            "Tipo_Envio_Original",
+            "Tipo_Envio",
+            "ID_Pedido",
+            "Folio_Factura",
+            "Numero_Foraneo",
+            "Completados_Limpiado",
+            "Estado",
+        ):
+            if col not in work_cases.columns:
+                work_cases[col] = ""
+        envio_norm = (
+            work_cases["Tipo_Envio_Original"].astype(str).map(normalizar)
+            + " "
+            + work_cases["Tipo_Envio"].astype(str).map(normalizar)
+        )
+        work_cases = work_cases[envio_norm.str.contains("foraneo", na=False)].copy()
+
+    combined_rows = []
+    if not df_foraneo.empty:
+        for _, row in df_foraneo.iterrows():
+            combined_rows.append((_parse_row_sort_datetime(row), 0, "main", row))
+    if not work_cases.empty:
+        for _, row in work_cases.iterrows():
+            combined_rows.append((_parse_row_sort_datetime(row), 1, "caso", row))
+    combined_rows.sort(key=lambda item: (item[0], item[1]))
+
+    manual_numbers = set()
+    for _, _, source_kind, row in combined_rows:
+        if _es_cancelado_estado(row.get("Estado", "")) or _es_limpiado(row):
+            continue
+        if source_kind != "caso":
+            continue
+        parsed = _parse_foraneo_number(row.get("Numero_Foraneo", ""))
+        if parsed is not None:
+            manual_numbers.add(parsed)
+
+    map_foraneo = {}
+    used_numbers = set(manual_numbers)
+    next_number = 1
+
+    for _, _, source_kind, row in combined_rows:
+        if _es_cancelado_estado(row.get("Estado", "")) or _es_limpiado(row):
+            continue
+        if source_kind != "caso":
+            continue
+        keys = [_flow_key(row.get("ID_Pedido", "")), _flow_key(row.get("Folio_Factura", ""))]
+        if not any(keys):
+            continue
+        parsed = _parse_foraneo_number(row.get("Numero_Foraneo", ""))
+        if parsed is None:
+            continue
+        numero_fmt = f"{parsed:02d}"
+        for key in keys:
+            if key and key not in map_foraneo:
+                map_foraneo[key] = numero_fmt
+
+    for _, _, source_kind, row in combined_rows:
+        if _es_cancelado_estado(row.get("Estado", "")) or _es_limpiado(row):
+            continue
+        if source_kind == "caso":
+            continue
+        keys = [_flow_key(row.get("ID_Pedido", "")), _flow_key(row.get("Folio_Factura", ""))]
+        if not any(keys):
+            continue
+        existing = next((map_foraneo[k] for k in keys if k and k in map_foraneo), None)
+        if existing is not None:
+            continue
+        while next_number in used_numbers:
+            next_number += 1
+        number = next_number
+        next_number += 1
+        used_numbers.add(number)
+        numero_fmt = f"{number:02d}"
+        for key in keys:
+            if key and key not in map_foraneo:
+                map_foraneo[key] = numero_fmt
+
+    return map_foraneo
+
+
 def construir_descarga_solo_completados():
     """
     Construye el DataFrame para la vista "🟢 Solo pedidos completados".
@@ -845,8 +1006,11 @@ def construir_descarga_solo_completados():
     - Pedidos completados de data_pedidos.
     - Casos especiales completados con Completados_Limpiado vacío.
     """
-    df_data = cargar_hoja_pedidos("data_pedidos").copy()
-    df_casos = cargar_casos_especiales().copy()
+    df_data_full = cargar_hoja_pedidos("data_pedidos").copy()
+    df_casos_full = cargar_casos_especiales().copy()
+
+    df_data = df_data_full.copy()
+    df_casos = df_casos_full.copy()
 
     if "Estado" not in df_data.columns:
         df_data["Estado"] = ""
@@ -862,7 +1026,18 @@ def construir_descarga_solo_completados():
     mask_casos_no_limpiados = df_casos["Completados_Limpiado"].astype(str).str.strip() == ""
     df_casos = df_casos[mask_casos_completados & mask_casos_no_limpiados]
 
-    return pd.concat([df_data, df_casos], ignore_index=True, sort=False)
+    salida = pd.concat([df_data, df_casos], ignore_index=True, sort=False)
+
+    flow_map_foraneos = construir_mapa_numeracion_foraneos(df_data_full, df_casos_full)
+    salida["#"] = ""
+    if not salida.empty:
+        mask_foraneo = salida.apply(_es_row_foraneo, axis=1)
+        salida.loc[mask_foraneo, "#"] = salida.loc[mask_foraneo].apply(
+            lambda row: resolver_numero_foraneo_flujo(row, flow_map_foraneos),
+            axis=1,
+        )
+
+    return salida
 
 
 def render_descarga_tabla(df_base, key_prefix, permitir_filtros=True, ordenar_por_id=True, mostrar_descarga=True):
