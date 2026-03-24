@@ -2627,6 +2627,28 @@ def _fetch_with_retry(worksheet, cache_key: str, max_attempts: int = 4):
     raise RuntimeError("No se pudieron obtener datos de Google Sheets")
 
 
+def _open_worksheet_with_retry(client, sheet_id: str, sheet_name: str, max_attempts: int = 4):
+    """Abre una worksheet con reintentos para errores transitorios de la API."""
+
+    last_error: Optional[Exception] = None
+    for attempt in range(1, max_attempts + 1):
+        try:
+            spreadsheet = client.open_by_key(sheet_id)
+            return spreadsheet.worksheet(sheet_name)
+        except gspread.exceptions.APIError as e:
+            last_error = e
+            wait_time = min(30, 2 ** attempt)
+            st.warning(
+                f"⚠️ Error temporal al abrir la hoja '{sheet_name}'. "
+                f"Reintentando en {wait_time} s (intento {attempt}/{max_attempts})."
+            )
+            time.sleep(wait_time)
+
+    if last_error is not None:
+        raise last_error
+    raise RuntimeError(f"No se pudo abrir la hoja '{sheet_name}' en Google Sheets")
+
+
 def _warn_and_get_dataframe_fallback(cache_key: str, label: str) -> pd.DataFrame:
     fallback_df = st.session_state.get(cache_key)
     st.warning(
@@ -2745,12 +2767,20 @@ def load_casos_from_gsheets():
 
 @st.cache_data(ttl=600)
 def load_confirmados_from_gsheets(credentials_dict: dict, sheet_id: str, sheet_name: str):
-    client = get_gspread_client(_credentials_json_dict=credentials_dict)
-    spreadsheet = client.open_by_key(sheet_id)
-    ws = spreadsheet.worksheet(sheet_name)
-    data = _fetch_with_retry(ws, f"_cache_{sheet_name}")
+    cache_df_key = f"_cache_{sheet_name}_df"
+    try:
+        client = get_gspread_client(_credentials_json_dict=credentials_dict)
+        ws = _open_worksheet_with_retry(client, sheet_id, sheet_name)
+        data = _fetch_with_retry(ws, f"_cache_{sheet_name}")
+    except gspread.exceptions.APIError:
+        return _warn_and_get_dataframe_fallback(cache_df_key, "los pedidos confirmados")
+    except RuntimeError:
+        return _warn_and_get_dataframe_fallback(cache_df_key, "los pedidos confirmados")
+
     if not data:
-        return pd.DataFrame()
+        df = pd.DataFrame()
+        st.session_state[cache_df_key] = df.copy()
+        return df
 
     headers = data[0]
     df = pd.DataFrame(data[1:], columns=headers)
@@ -2784,6 +2814,7 @@ def load_confirmados_from_gsheets(credentials_dict: dict, sheet_id: str, sheet_n
         df["AñoMes"] = ""
         df["FechaDia"] = ""
 
+    st.session_state[cache_df_key] = df.copy()
     return df
 
 
