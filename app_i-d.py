@@ -1341,7 +1341,7 @@ def _build_flow_number_maps(df_all: pd.DataFrame) -> tuple[dict[str, str], dict[
                     out[key] = numero
         return out
 
-    local_map = build_map(df_local, lambda idx: str(idx + 101))
+    local_map = build_map(df_local, lambda idx: str(idx + 1))
     foraneo_map = build_map(df_foraneo, lambda idx: f"{idx + 1:02d}")
     return local_map, foraneo_map
 

@@ -744,7 +744,7 @@ def construir_descarga_completados_sin_limpieza():
 
     También crea la columna '#' con numeración única según tipo de registro:
     - Foráneos (data_pedidos): 01, 02, ..., 10, 11, ...
-    - Locales (data_pedidos): 101, 102, 103, ...
+    - Locales (data_pedidos): 1, 2, 3, ...
     - Casos especiales sin limpiar: 001, 002, 003, ...
     """
     columnas_salida = [
@@ -766,7 +766,7 @@ def construir_descarga_completados_sin_limpieza():
             df_casos[col] = ""
 
     foraneo_count = 1
-    local_count = 101
+    local_count = 1
     ids_data = []
     for _, row in df_data.iterrows():
         tipo_envio = normalizar(str(row.get("Tipo_Envio", "") or ""))
@@ -822,7 +822,7 @@ def construir_descarga_flujo_por_categoria():
 
     # Numeración en orden natural de captura (de arriba a abajo en la hoja)
     df_foraneos["#"] = (df_foraneos.index + 1).map(lambda n: f"{n:02d}")
-    df_locales["#"] = (df_locales.index + 101).astype(str)
+    df_locales["#"] = (df_locales.index + 1).astype(str)
     df_casos["#"] = (df_casos.index + 1).map(lambda n: f"{n:03d}")
 
     # Orden visual: más reciente primero (última fila capturada)
