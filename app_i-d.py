@@ -140,7 +140,6 @@ with col_update:
 with col_actions:
     if st.button("🔄 Refrescar ahora", use_container_width=True):
         st.cache_data.clear()
-        st.cache_resource.clear()
         st.rerun()
 
 # CSS tabla compacta
@@ -2468,9 +2467,9 @@ def get_gspread_client(_credentials_json_dict, max_attempts: int = 3):
             client.open_by_key(GOOGLE_SHEET_ID)
             return client
         except gspread.exceptions.APIError as e:
-            if "expired" in str(e).lower() or "RESOURCE_EXHAUSTED" in str(e):
-                st.cache_resource.clear()
-            wait_time = 2 ** (attempt - 1)
+            if "expired" in str(e).lower() or "UNAUTHENTICATED" in str(e):
+                get_gspread_client.clear()
+            wait_time = min(30, 2 ** (attempt - 1))
             if attempt >= max_attempts:
                 st.error(
                     f"❌ Error al autenticar con Google Sheets después de {max_attempts} intentos: {e}"
@@ -2513,6 +2512,18 @@ def get_s3_client():
         st.stop()
 
 
+@st.cache_resource
+def get_main_sheet_handles(_credentials_json_dict):
+    client = get_gspread_client(_credentials_json_dict=_credentials_json_dict)
+    spreadsheet = client.open_by_key(GOOGLE_SHEET_ID)
+    return {
+        "client": client,
+        "spreadsheet": spreadsheet,
+        "worksheet_main": spreadsheet.worksheet(SHEET_PEDIDOS),
+        "worksheet_casos": spreadsheet.worksheet(SHEET_CASOS),
+    }
+
+
 # --- Clientes iniciales ---
 try:
     if "gsheets" not in st.secrets:
@@ -2525,22 +2536,26 @@ try:
         "\\n", "\n"
     )
 
-    g_spread_client = get_gspread_client(_credentials_json_dict=GSHEETS_CREDENTIALS)
+    handles = get_main_sheet_handles(_credentials_json_dict=GSHEETS_CREDENTIALS)
+    g_spread_client = handles["client"]
     s3_client = get_s3_client()
-    spreadsheet = g_spread_client.open_by_key(GOOGLE_SHEET_ID)
-    worksheet_main = spreadsheet.worksheet(SHEET_PEDIDOS)
-    worksheet_casos = spreadsheet.worksheet(SHEET_CASOS)
+    spreadsheet = handles["spreadsheet"]
+    worksheet_main = handles["worksheet_main"]
+    worksheet_casos = handles["worksheet_casos"]
 
 except gspread.exceptions.APIError as e:
-    if "ACCESS_TOKEN_EXPIRED" in str(e) or "UNAUTHENTICATED" in str(e):
-        st.cache_resource.clear()
-        st.warning("🔄 La sesión con Google Sheets expiró. Reconectando...")
+    auth_error_text = str(e)
+    if any(token in auth_error_text for token in ["ACCESS_TOKEN_EXPIRED", "UNAUTHENTICATED", "RESOURCE_EXHAUSTED", "429"]):
+        st.warning("🔄 Ajustando conexión con Google Sheets...")
         time.sleep(1)
-        g_spread_client = get_gspread_client(_credentials_json_dict=GSHEETS_CREDENTIALS)
+        get_main_sheet_handles.clear()
+        get_gspread_client.clear()
+        handles = get_main_sheet_handles(_credentials_json_dict=GSHEETS_CREDENTIALS)
+        g_spread_client = handles["client"]
         s3_client = get_s3_client()
-        spreadsheet = g_spread_client.open_by_key(GOOGLE_SHEET_ID)
-        worksheet_main = spreadsheet.worksheet(SHEET_PEDIDOS)
-        worksheet_casos = spreadsheet.worksheet(SHEET_CASOS)
+        spreadsheet = handles["spreadsheet"]
+        worksheet_main = handles["worksheet_main"]
+        worksheet_casos = handles["worksheet_casos"]
     else:
         st.error(f"❌ Error al autenticar clientes: {e}")
         st.stop()
@@ -2560,8 +2575,11 @@ def _fetch_with_retry(worksheet, cache_key: str, max_attempts: int = 4):
     """
 
     def _is_rate_limit_error(error: Exception) -> bool:
+        status_code = getattr(getattr(error, "response", None), "status_code", None)
+        if status_code == 429:
+            return True
         text = str(error).lower()
-        return "rate_limit" in text or "quota" in text or "429" in text
+        return "rate_limit" in text or "quota" in text or "429" in text or "resource_exhausted" in text
 
     last_success = st.session_state.get(cache_key)
     last_error: Optional[Exception] = None
@@ -2593,11 +2611,28 @@ def _fetch_with_retry(worksheet, cache_key: str, max_attempts: int = 4):
     raise RuntimeError("No se pudieron obtener datos de Google Sheets")
 
 
+def _warn_and_get_dataframe_fallback(cache_key: str, label: str) -> pd.DataFrame:
+    fallback_df = st.session_state.get(cache_key)
+    st.warning(
+        f"⚠️ No se pudo actualizar {label} desde Google Sheets en este momento; se muestran los últimos datos disponibles si existen."
+    )
+    if isinstance(fallback_df, pd.DataFrame):
+        return fallback_df.copy()
+    return pd.DataFrame()
+
+
 @st.cache_data(ttl=60)
 def load_data_from_gsheets():
-    data = _fetch_with_retry(worksheet_main, "_cache_datos_pedidos")
+    try:
+        data = _fetch_with_retry(worksheet_main, "_cache_datos_pedidos")
+    except gspread.exceptions.APIError:
+        return _warn_and_get_dataframe_fallback("_cache_datos_pedidos_df", "los pedidos")
+    except RuntimeError:
+        return _warn_and_get_dataframe_fallback("_cache_datos_pedidos_df", "los pedidos")
     if not data:
-        return pd.DataFrame()
+        df = pd.DataFrame()
+        st.session_state["_cache_datos_pedidos_df"] = df.copy()
+        return df
     headers = data[0]
     df = pd.DataFrame(data[1:], columns=headers)
     df["gsheet_row_index"] = df.index + 2
@@ -2622,15 +2657,23 @@ def load_data_from_gsheets():
     else:
         df["Turno"] = ""
 
+    st.session_state["_cache_datos_pedidos_df"] = df.copy()
     return df
 
 
 @st.cache_data(ttl=60)
 def load_casos_from_gsheets():
     """Lee 'casos_especiales' y normaliza headers/fechas."""
-    data = _fetch_with_retry(worksheet_casos, "_cache_casos_especiales")
+    try:
+        data = _fetch_with_retry(worksheet_casos, "_cache_casos_especiales")
+    except gspread.exceptions.APIError:
+        return _warn_and_get_dataframe_fallback("_cache_casos_especiales_df", "los casos especiales")
+    except RuntimeError:
+        return _warn_and_get_dataframe_fallback("_cache_casos_especiales_df", "los casos especiales")
     if not data:
-        return pd.DataFrame()
+        df = pd.DataFrame()
+        st.session_state["_cache_casos_especiales_df"] = df.copy()
+        return df
     raw_headers = data[0]
     fixed = []
     seen_empty = 0
@@ -2680,6 +2723,7 @@ def load_casos_from_gsheets():
         df["Turno"] = df["Turno"].apply(normalize_turno_label)
     else:
         df["Turno"] = ""
+    st.session_state["_cache_casos_especiales_df"] = df.copy()
     return df
 
 
@@ -4268,7 +4312,6 @@ if selected_tab == 0:
     with button_col:
         if st.button("🔄 Actualizar lista", key="manual_refresh_ultimos_pedidos", use_container_width=True):
             st.cache_data.clear()
-            st.cache_resource.clear()
             st.rerun()
 
     ultimos_filtrados = build_ultimos_pedidos(df_all, vendedor_sel)
