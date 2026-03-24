@@ -3460,44 +3460,54 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
 
                 with st.form(key=form_pago_key):
                     st.markdown("#### 🧾 Detalles del Pago")
-                    fecha_pago = st.date_input(
-                        "📅 Fecha del Pago",
-                        value=fecha_pago_default,
-                        format="YYYY/MM/DD",
-                    )
-                    forma_pago = st.selectbox(
-                        "💳 Forma de Pago",
-                        options=opciones_forma_pago,
-                        index=opciones_forma_pago.index(forma_pago_default),
-                    )
-                    monto_pago = st.number_input(
-                        "💲 Monto del Pago",
-                        min_value=0.0,
-                        value=float(monto_default),
-                        step=100.0,
-                        format="%.2f",
-                    )
+                    col_pago_izq, col_pago_der = st.columns(2, gap="large")
 
-                    usa_terminal = forma_pago in ["Tarjeta de Débito", "Tarjeta de Crédito"]
-                    banco_destino = ""
-                    terminal_pago = ""
+                    with col_pago_izq:
+                        fecha_pago = st.date_input(
+                            "📅 Fecha del Pago",
+                            value=fecha_pago_default,
+                            format="YYYY/MM/DD",
+                        )
+                        forma_pago = st.selectbox(
+                            "💳 Forma de Pago",
+                            options=opciones_forma_pago,
+                            index=opciones_forma_pago.index(forma_pago_default),
+                        )
 
-                    if usa_terminal:
-                        terminal_pago = st.selectbox(
-                            "🏧 Terminal",
-                            options=opciones_terminal,
-                            index=opciones_terminal.index(
-                                terminal_default if terminal_default in opciones_terminal else "BANORTE"
-                            ),
+                    with col_pago_der:
+                        monto_pago = st.number_input(
+                            "💲 Monto del Pago",
+                            min_value=0.0,
+                            value=float(monto_default),
+                            step=100.0,
+                            format="%.2f",
                         )
-                    else:
-                        banco_destino = st.selectbox(
-                            "🏦 Banco Destino",
-                            options=opciones_banco,
-                            index=opciones_banco.index(
-                                banco_default if banco_default in opciones_banco else "BANORTE"
-                            ),
-                        )
+
+                        usa_terminal = forma_pago in [
+                            "Tarjeta de Débito",
+                            "Tarjeta de Crédito",
+                        ]
+                        banco_destino = ""
+                        terminal_pago = ""
+
+                        if usa_terminal:
+                            terminal_pago = st.selectbox(
+                                "🏧 Terminal",
+                                options=opciones_terminal,
+                                index=opciones_terminal.index(
+                                    terminal_default if terminal_default in opciones_terminal else "BANORTE"
+                                ),
+                            )
+                        else:
+                            banco_destino = st.selectbox(
+                                "🏦 Banco Destino",
+                                options=opciones_banco,
+                                index=opciones_banco.index(
+                                    banco_default if banco_default in opciones_banco else "BANORTE"
+                                ),
+                            )
+
+                    st.markdown("<div style='height: 0.5rem'></div>", unsafe_allow_html=True)
 
                     archivos_comprobante = st.file_uploader(
                         "📎 Subir Comprobante(s)",
@@ -3574,6 +3584,10 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
                                     row["Adjuntos"] = nueva_lista_adjuntos
 
                             ensure_expanders_open(row["ID_Pedido"], "expanded_pedidos")
+                            marcar_contexto_pedido(
+                                row["ID_Pedido"], origen_tab, scroll=False
+                            )
+                            preserve_tab_state()
                             st.toast("✅ Comprobante guardado correctamente.", icon="✅")
                             st.session_state["refresh_data_caches_pending"] = True
                             st.session_state["reload_after_action"] = True
