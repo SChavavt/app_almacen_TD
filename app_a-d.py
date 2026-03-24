@@ -49,6 +49,31 @@ def mx_today():
     return mx_now().date()
 
 
+def _business_days_elapsed(start_value: Any, end_date: Optional[Any] = None) -> Optional[int]:
+    """Cuenta días hábiles transcurridos (lunes-viernes) desde ``start_value``."""
+    start_dt = pd.to_datetime(start_value, errors="coerce", dayfirst=True)
+    if pd.isna(start_dt):
+        return None
+
+    start_date = start_dt.date()
+    target_date = end_date or mx_today()
+    if target_date <= start_date:
+        return 0
+
+    elapsed = 0
+    current = start_date + timedelta(days=1)
+    while current <= target_date:
+        if current.weekday() < 5:
+            elapsed += 1
+        current += timedelta(days=1)
+    return elapsed
+
+
+def _get_local_bodega_reference_date(row: pd.Series) -> Any:
+    """Obtiene la fecha base para alertas de bodega: Hora_Proceso."""
+    return row.get("Hora_Proceso", "")
+
+
 def _recortar_vendedor_para_reporte(vendedor: Any) -> str:
     palabras = [p for p in str(vendedor or "").strip().split() if p]
     if not palabras:
@@ -3007,11 +3032,17 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
     estado_pago_norm = _normalize_text_for_matching(estado_pago_actual)
     pago_confirmado = "pagad" in estado_pago_norm
     pago_badge = "✅ Pagado" if pago_confirmado else "🟡 Pendiente"
+    dias_habiles_bodega = None
+    alerta_bodega_expander = False
+    if es_local_bodega and str(row.get("Estado", "")).strip() == "🔵 En Proceso":
+        dias_habiles_bodega = _business_days_elapsed(_get_local_bodega_reference_date(row))
+        alerta_bodega_expander = dias_habiles_bodega is not None and dias_habiles_bodega > 3
     is_local_main_tab = es_main_tab_pedidos_locales(current_main_tab_label)
     guia_marker = "📋 " if (not is_local_main_tab and pedido_sin_guia(row)) else ""
+    alerta_marker = "🚨 " if alerta_bodega_expander else ""
     st.markdown(f'<a name="pedido_{row["ID_Pedido"]}"></a>', unsafe_allow_html=True)
     _render_bulk_selector(row)
-    titulo_expander = f"{guia_marker}{row['Estado']} - {folio} - {row['Cliente']}"
+    titulo_expander = f"{guia_marker}{alerta_marker}{row['Estado']} - {folio} - {row['Cliente']}"
     if es_local_bodega:
         titulo_expander = f"{titulo_expander} | Estado de pago: {pago_badge}"
 
@@ -3022,6 +3053,11 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
         st.markdown("---")
 
         if es_local_bodega:
+            if alerta_bodega_expander:
+                st.error(
+                    f"🚨 Este pedido lleva **{dias_habiles_bodega} días hábiles** en 🔵 En Proceso "
+                    "contados desde la Hora_Proceso para 📦 Pasa a Bodega."
+                )
             st.markdown("##### 💳 Estado de pago")
             st.info(f"Estado actual: **{pago_badge}**")
 
@@ -5089,6 +5125,46 @@ if df_main is not None:
         st.warning(
             f"⚠️ Hay {lista_casos} en estado pendiente en Casos Especiales."
         )
+
+    # 🚨 Aviso de pedidos locales en "Pasa a Bodega" en proceso por más de 3 días hábiles
+    alertas_bodega = []
+    if not df_main.empty and "Estado" in df_main.columns:
+        for _, row_local in df_main.iterrows():
+            tipo_envio = str(row_local.get("Tipo_Envio", "")).strip()
+            turno_local = str(row_local.get("Turno", "")).strip()
+            estado_local = str(row_local.get("Estado", "")).strip()
+            if (
+                tipo_envio == "📍 Pedido Local"
+                and turno_local == "📦 Pasa a Bodega"
+                and estado_local == "🔵 En Proceso"
+            ):
+                fecha_base = _get_local_bodega_reference_date(row_local)
+                dias_habiles = _business_days_elapsed(fecha_base)
+                if dias_habiles is not None and dias_habiles > 3:
+                    alertas_bodega.append(
+                        {
+                            "folio": str(row_local.get("Folio_Factura", "")).strip() or "S/F",
+                            "cliente": str(row_local.get("Cliente", "")).strip() or "Sin cliente",
+                            "dias_habiles": dias_habiles,
+                        }
+                    )
+
+    if alertas_bodega:
+        total_alertas_bodega = len(alertas_bodega)
+        st.error(
+            f"🚨 Hay {total_alertas_bodega} pedido{'s' if total_alertas_bodega != 1 else ''} local"
+            f"{'es' if total_alertas_bodega != 1 else ''} con turno 📦 Pasa a Bodega en 🔵 En Proceso "
+            "por más de 3 días hábiles."
+        )
+        with st.expander(
+            f"🚨 Ver detalle de alerta de bodega ({total_alertas_bodega})",
+            expanded=False,
+        ):
+            for alerta in alertas_bodega:
+                st.markdown(
+                    f"- 🚨 **{alerta['folio']}** · {alerta['cliente']} — "
+                    f"**{alerta['dias_habiles']} días hábiles** en proceso."
+                )
 
     # --- Implementación de Pestañas con st.tabs ---
     tab_options = [
