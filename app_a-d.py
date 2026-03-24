@@ -3404,7 +3404,6 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
 
             if not pago_confirmado:
                 pago_widget_suffix = f"{row['ID_Pedido']}_{origen_tab}"
-                form_pago_key = f"form_pago_comprobante_{pago_widget_suffix}"
                 upload_comp_key = f"uploader_comprobante_{pago_widget_suffix}"
 
                 opciones_forma_pago = [
@@ -3458,60 +3457,87 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
                 if terminal_default not in opciones_terminal:
                     terminal_default = "BANORTE"
 
-                with st.form(key=form_pago_key):
-                    st.markdown("#### 🧾 Detalles del Pago")
-                    fecha_pago = st.date_input(
+                fecha_pago_key = f"fecha_pago_{pago_widget_suffix}"
+                forma_pago_key = f"forma_pago_{pago_widget_suffix}"
+                monto_pago_key = f"monto_pago_{pago_widget_suffix}"
+                banco_destino_key = f"banco_destino_{pago_widget_suffix}"
+                terminal_pago_key = f"terminal_pago_{pago_widget_suffix}"
+
+                if fecha_pago_key not in st.session_state:
+                    st.session_state[fecha_pago_key] = fecha_pago_default
+                if st.session_state.get(forma_pago_key) not in opciones_forma_pago:
+                    st.session_state[forma_pago_key] = forma_pago_default
+                if monto_pago_key not in st.session_state:
+                    st.session_state[monto_pago_key] = float(monto_default)
+                if st.session_state.get(banco_destino_key) not in opciones_banco:
+                    st.session_state[banco_destino_key] = banco_default
+                if st.session_state.get(terminal_pago_key) not in opciones_terminal:
+                    st.session_state[terminal_pago_key] = terminal_default
+
+                st.markdown("#### 🧾 Detalles del Pago")
+                col_pago_izq, col_pago_der = st.columns(2, gap="large")
+
+                with col_pago_izq:
+                    st.date_input(
                         "📅 Fecha del Pago",
-                        value=fecha_pago_default,
                         format="YYYY/MM/DD",
+                        key=fecha_pago_key,
                     )
-                    forma_pago = st.selectbox(
+                    st.selectbox(
                         "💳 Forma de Pago",
                         options=opciones_forma_pago,
-                        index=opciones_forma_pago.index(forma_pago_default),
+                        key=forma_pago_key,
                     )
-                    monto_pago = st.number_input(
+
+                with col_pago_der:
+                    st.number_input(
                         "💲 Monto del Pago",
                         min_value=0.0,
-                        value=float(monto_default),
                         step=100.0,
                         format="%.2f",
+                        key=monto_pago_key,
                     )
 
-                    usa_terminal = forma_pago in ["Tarjeta de Débito", "Tarjeta de Crédito"]
-                    banco_destino = ""
-                    terminal_pago = ""
-
+                    usa_terminal = st.session_state.get(forma_pago_key) in [
+                        "Tarjeta de Débito",
+                        "Tarjeta de Crédito",
+                    ]
                     if usa_terminal:
-                        terminal_pago = st.selectbox(
+                        st.selectbox(
                             "🏧 Terminal",
                             options=opciones_terminal,
-                            index=opciones_terminal.index(
-                                terminal_default if terminal_default in opciones_terminal else "BANORTE"
-                            ),
+                            key=terminal_pago_key,
                         )
                     else:
-                        banco_destino = st.selectbox(
+                        st.selectbox(
                             "🏦 Banco Destino",
                             options=opciones_banco,
-                            index=opciones_banco.index(
-                                banco_default if banco_default in opciones_banco else "BANORTE"
-                            ),
+                            key=banco_destino_key,
                         )
 
-                    archivos_comprobante = st.file_uploader(
-                        "📎 Subir Comprobante(s)",
-                        type=["pdf", "jpg", "jpeg", "png"],
-                        accept_multiple_files=True,
-                        key=upload_comp_key,
-                    )
+                st.markdown("<div style='height: 0.5rem'></div>", unsafe_allow_html=True)
 
-                    submitted_pago = st.form_submit_button(
-                        "💾 Guardar comprobante",
-                        on_click=preserve_tab_state,
-                    )
+                archivos_comprobante = st.file_uploader(
+                    "📎 Subir Comprobante(s)",
+                    type=["pdf", "jpg", "jpeg", "png"],
+                    accept_multiple_files=True,
+                    key=upload_comp_key,
+                )
+
+                submitted_pago = st.button(
+                    "💾 Guardar comprobante",
+                    key=f"save_comprobante_{pago_widget_suffix}",
+                    on_click=preserve_tab_state,
+                )
 
                 if submitted_pago:
+                    fecha_pago = st.session_state.get(fecha_pago_key, fecha_pago_default)
+                    forma_pago = st.session_state.get(forma_pago_key, forma_pago_default)
+                    monto_pago = float(st.session_state.get(monto_pago_key, monto_default))
+                    banco_destino = st.session_state.get(banco_destino_key, banco_default)
+                    terminal_pago = st.session_state.get(terminal_pago_key, terminal_default)
+                    usa_terminal = forma_pago in ["Tarjeta de Débito", "Tarjeta de Crédito"]
+
                     if monto_pago <= 0:
                         st.warning("⚠️ Captura un monto mayor a 0 para guardar el comprobante.")
                     else:
@@ -3574,6 +3600,10 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
                                     row["Adjuntos"] = nueva_lista_adjuntos
 
                             ensure_expanders_open(row["ID_Pedido"], "expanded_pedidos")
+                            marcar_contexto_pedido(
+                                row["ID_Pedido"], origen_tab, scroll=False
+                            )
+                            preserve_tab_state()
                             st.toast("✅ Comprobante guardado correctamente.", icon="✅")
                             st.session_state["refresh_data_caches_pending"] = True
                             st.session_state["reload_after_action"] = True
