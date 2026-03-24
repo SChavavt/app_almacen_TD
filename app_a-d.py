@@ -3574,6 +3574,10 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
                                     row["Adjuntos"] = nueva_lista_adjuntos
 
                             ensure_expanders_open(row["ID_Pedido"], "expanded_pedidos")
+                            marcar_contexto_pedido(
+                                row["ID_Pedido"], origen_tab, scroll=False
+                            )
+                            preserve_tab_state()
                             st.toast("✅ Comprobante guardado correctamente.", icon="✅")
                             st.session_state["refresh_data_caches_pending"] = True
                             st.session_state["reload_after_action"] = True
