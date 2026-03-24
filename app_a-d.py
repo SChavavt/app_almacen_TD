@@ -784,7 +784,7 @@ def build_flow_number_maps(
     df_source: pd.DataFrame,
     df_casos: Optional[pd.DataFrame] = None,
 ) -> tuple[dict[str, str], dict[str, str], list[tuple[int, str]]]:
-    """Construye mapas de numeración de flujo: foráneos 01+, locales 101+."""
+    """Construye mapas de numeración de flujo: foráneos 01+, locales 1+."""
     if df_source is None or df_source.empty:
         return {}, {}, []
 
@@ -811,7 +811,7 @@ def build_flow_number_maps(
         return out
 
     map_foraneo: dict[str, str] = {}
-    map_local = _build_map(df_local, lambda idx: str(idx + 101))
+    map_local = _build_map(df_local, lambda idx: str(idx + 1))
 
     casos_foraneo = pd.DataFrame()
     if df_casos is not None and not df_casos.empty:
