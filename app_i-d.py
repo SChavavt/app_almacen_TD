@@ -202,6 +202,28 @@ def sanitize_text(value) -> str:
     return str(value)
 
 
+def get_numeric_column(df: pd.DataFrame, column_name: str, default: float = 0.0) -> pd.Series:
+    if not isinstance(df, pd.DataFrame):
+        return pd.Series(dtype="float64")
+    if column_name not in df.columns:
+        return pd.Series(default, index=df.index, dtype="float64")
+    return pd.to_numeric(df[column_name], errors="coerce").fillna(default)
+
+
+def filter_df_by_vendedor(
+    df: pd.DataFrame, vendedor: str, candidate_cols: list[str] | None = None
+) -> pd.DataFrame:
+    if not isinstance(df, pd.DataFrame) or df.empty or vendedor == "(Todos)":
+        return df.copy() if isinstance(df, pd.DataFrame) else pd.DataFrame()
+    cols = candidate_cols or ["Vendedor_Registro", "Vendedor", "id_vendedor"]
+    vend_norm = _normalize_vendedor_name(vendedor)
+    mask = pd.Series(False, index=df.index)
+    for col in cols:
+        if col in df.columns:
+            mask = mask | (df[col].map(_normalize_vendedor_name) == vend_norm)
+    return df[mask].copy()
+
+
 def init_td_assistant_state() -> None:
     if "td_assistant_messages" not in st.session_state:
         st.session_state.td_assistant_messages = []
@@ -625,11 +647,7 @@ def load_historicos_from_gsheets() -> pd.DataFrame:
         headers = data[0]
         df = pd.DataFrame(data[1:], columns=headers)
     except Exception:
-        df = load_confirmados_from_gsheets(
-            GSHEETS_CREDENTIALS,
-            GOOGLE_SHEET_ID,
-            SHEET_CONFIRMADOS,
-        )
+        df = get_cached_confirmados_df(SHEET_CONFIRMADOS)
 
     for col in ["ID_Pedido", "Folio_Factura", "Cliente", "Vendedor", "Vendedor_Registro", "Estado", "Tipo_Envio"]:
         if col not in df.columns:
@@ -2849,6 +2867,23 @@ def load_confirmados_from_gsheets(credentials_dict: dict, sheet_id: str, sheet_n
     return df
 
 
+def get_cached_confirmados_df(sheet_name: str = SHEET_CONFIRMADOS) -> pd.DataFrame:
+    cache_df_key = f"_cache_{sheet_name}_df"
+    cached_df = st.session_state.get(cache_df_key)
+    if isinstance(cached_df, pd.DataFrame):
+        return cached_df.copy()
+    return pd.DataFrame()
+
+
+def refresh_confirmados_cache(
+    credentials_dict: dict,
+    sheet_id: str,
+    sheet_name: str = SHEET_CONFIRMADOS,
+) -> pd.DataFrame:
+    load_confirmados_from_gsheets.clear()
+    return load_confirmados_from_gsheets(credentials_dict, sheet_id, sheet_name)
+
+
 def _clean_cliente_name(x: str) -> str:
     x = sanitize_text(str(x)).upper()
     x = unicodedata.normalize("NFKD", x)
@@ -3155,14 +3190,10 @@ def build_temporal_sales_dataset(df_pedidos: pd.DataFrame, vendedor: str) -> pd.
         return pd.DataFrame(columns=["Fecha", "Monto", "Pedidos", "Vendedor"])
 
     work = df_pedidos.copy()
-    if vendedor != "(Todos)":
-        vend_norm = _normalize_vendedor_name(vendedor)
-        work = work[
-            work["Vendedor_Registro"].map(_normalize_vendedor_name) == vend_norm
-        ]
+    work = filter_df_by_vendedor(work, vendedor)
 
     work["Fecha"] = _resolve_sales_datetime(work)
-    work["Monto"] = pd.to_numeric(work.get("Monto_Comprobante", 0), errors="coerce").fillna(0.0)
+    work["Monto"] = get_numeric_column(work, "Monto_Comprobante", default=0.0)
     work = work.dropna(subset=["Fecha"]).copy()
     if work.empty:
         return pd.DataFrame(columns=["Fecha", "Monto", "Pedidos", "Vendedor"])
@@ -4121,31 +4152,57 @@ if selected_tab == 4:
 if selected_tab == 0:
     st_autorefresh(interval=60000, key="auto_refresh_dashboard")
 
-    df_conf = load_confirmados_from_gsheets(
-        GSHEETS_CREDENTIALS, GOOGLE_SHEET_ID, SHEET_CONFIRMADOS
-    )
-    if df_conf.empty:
-        st.info("No hay datos en pedidos_confirmados.")
-        st.stop()
+    st.caption("📦 pedidos_confirmados se consulta solo bajo demanda; en autorefresh se usa caché local.")
 
-    tabla_clientes, hoy = build_cliente_risk_table(df_conf)
-    if tabla_clientes.empty:
-        st.warning(
-            "No se pudo construir tabla de clientes (revisa que Hora_Registro y Cliente tengan datos)."
+    df_conf = get_cached_confirmados_df(SHEET_CONFIRMADOS)
+    hoy = pd.Timestamp.now()
+    confirmados_cache_missing = df_conf.empty
+    if confirmados_cache_missing:
+        tabla_clientes = pd.DataFrame(
+            columns=[
+                "Cliente",
+                "Vendedor",
+                "Estado",
+                "Ticket_Promedio",
+                "Ventas_Total",
+                "Num_Pedidos",
+                "Proxima_Estimada",
+            ]
         )
-        st.stop()
+    else:
+        tabla_clientes, hoy = build_cliente_risk_table(df_conf)
+        if tabla_clientes.empty:
+            st.warning(
+                "No se pudo construir tabla de clientes con los confirmados actuales; "
+                "se mantiene visible el dashboard de flujo y puedes reintentar la actualización manual."
+            )
+            tabla_clientes = pd.DataFrame(
+                columns=[
+                    "Cliente",
+                    "Vendedor",
+                    "Estado",
+                    "Ticket_Promedio",
+                    "Ventas_Total",
+                    "Num_Pedidos",
+                    "Proxima_Estimada",
+                ]
+            )
 
-    _vendedores = sorted(
-        [
-            v
-            for v in tabla_clientes["Vendedor"].dropna().astype(str).unique().tolist()
-            if sanitize_text(v)
-        ]
-    )
+    if not tabla_clientes.empty and "Vendedor" in tabla_clientes.columns:
+        vendedores_raw = tabla_clientes["Vendedor"].dropna().astype(str).unique().tolist()
+    else:
+        vendedores_raw = []
+        for col in ["Vendedor_Registro", "Vendedor"]:
+            if col in df_all.columns:
+                vendedores_raw.extend(df_all[col].dropna().astype(str).unique().tolist())
+        if not vendedores_raw:
+            logged_vendor = get_logged_vendor()
+            if logged_vendor:
+                vendedores_raw = [logged_vendor]
 
-    total_ventas = float(
-        pd.to_numeric(df_conf.get("Monto_Comprobante", 0), errors="coerce").fillna(0).sum()
-    )
+    _vendedores = sorted({sanitize_text(v) for v in vendedores_raw if sanitize_text(v)})
+
+    total_ventas = float(get_numeric_column(df_conf, "Monto_Comprobante", default=0.0).sum())
     total_pedidos = int(len(df_conf))
     ticket_prom = float(total_ventas / total_pedidos) if total_pedidos else 0.0
 
@@ -4162,7 +4219,13 @@ if selected_tab == 0:
         vendedor_options = ["(Todos)"] + _vendedores
         vendedor_state_key = "dashboard_vendedor_sel"
         logged_vendor = get_logged_vendor()
-        default_vendor = logged_vendor if logged_vendor in vendedor_options else "(Todos)"
+        default_vendor = "(Todos)"
+        if logged_vendor:
+            logged_vendor_norm = _normalize_vendedor_name(logged_vendor)
+            for opt in vendedor_options:
+                if _normalize_vendedor_name(opt) == logged_vendor_norm:
+                    default_vendor = opt
+                    break
         if vendedor_state_key not in st.session_state:
             st.session_state[vendedor_state_key] = default_vendor
         if st.session_state[vendedor_state_key] not in vendedor_options:
@@ -4389,7 +4452,7 @@ if selected_tab == 0:
         )
     with button_col:
         if st.button("🔄 Actualizar lista", key="manual_refresh_ultimos_pedidos", use_container_width=True):
-            st.cache_data.clear()
+            load_data_from_gsheets.clear()
             st.rerun()
 
     ultimos_filtrados = build_ultimos_pedidos(df_all, vendedor_sel)
@@ -4508,17 +4571,10 @@ if selected_tab == 0:
     tc["Ticket_Promedio"] = pd.to_numeric(tc["Ticket_Promedio"], errors="coerce").fillna(0.0)
     tc_top = tc[tc["Ticket_Promedio"] > 0].copy()
 
-    df_metricas_v = df_conf.copy()
-    if vendedor_sel != "(Todos)":
-        df_metricas_v = df_metricas_v[
-            df_metricas_v["Vendedor_Registro"].map(_normalize_vendedor_name)
-            == _normalize_vendedor_name(vendedor_sel)
-        ]
+    df_metricas_v = filter_df_by_vendedor(df_conf, vendedor_sel)
 
     ventas_v = float(
-        pd.to_numeric(df_metricas_v.get("Monto_Comprobante", 0), errors="coerce")
-        .fillna(0)
-        .sum()
+        get_numeric_column(df_metricas_v, "Monto_Comprobante", default=0.0).sum()
     )
     pedidos_v = int(len(df_metricas_v))
     ticket_v = float(ventas_v / pedidos_v) if pedidos_v else 0.0
@@ -4539,6 +4595,18 @@ if selected_tab == 0:
         sm3.metric("⚠️ Alerta", f"{int(fila_v['Alerta']):,}")
         sm4.metric("🚨 Riesgo", f"{int(fila_v['Riesgo']):,}")
         sm5.metric("🆕 Nuevo/SinHistorial", f"{int(fila_v['Nuevo/SinHistorial']):,}")
+
+    if confirmados_cache_missing:
+        st.info(
+            "No hay caché de pedidos_confirmados todavía. "
+            "Si necesitas esas métricas, usa este botón para cargar confirmados manualmente."
+        )
+
+    if st.button("🔄 Actualizar pedidos confirmados", key="refresh_confirmados_dashboard", use_container_width=True):
+        with st.spinner("Actualizando pedidos_confirmados desde Google Sheets..."):
+            refresh_confirmados_cache(GSHEETS_CREDENTIALS, GOOGLE_SHEET_ID, SHEET_CONFIRMADOS)
+        st.success("✅ pedidos_confirmados actualizado.")
+        st.rerun()
 
     st.markdown("### 📊 Vista rápida y accionable")
     view_col1, view_col2 = st.columns([0.48, 0.52])
@@ -4585,9 +4653,9 @@ if selected_tab == 0:
 
             monthly_df = df_metricas_v.copy()
             monthly_df["Fecha"] = _resolve_sales_datetime(monthly_df)
-            monthly_df["Monto"] = pd.to_numeric(
-                monthly_df.get("Monto_Comprobante", 0), errors="coerce"
-            ).fillna(0)
+            monthly_df["Monto"] = get_numeric_column(
+                monthly_df, "Monto_Comprobante", default=0.0
+            )
             monthly_df = monthly_df.dropna(subset=["Fecha"])
 
             if monthly_df.empty:
@@ -4709,9 +4777,9 @@ if selected_tab == 0:
         st.caption("Tendencia semanal de ventas (basada en confirmados)")
         trend_df = df_metricas_v.copy()
         trend_df["Fecha"] = _resolve_sales_datetime(trend_df)
-        trend_df["Monto"] = pd.to_numeric(
-            trend_df.get("Monto_Comprobante", 0), errors="coerce"
-        ).fillna(0)
+        trend_df["Monto"] = get_numeric_column(
+            trend_df, "Monto_Comprobante", default=0.0
+        )
         trend_df = trend_df.dropna(subset=["Fecha"])
         if trend_df.empty:
             st.info("No hay fechas válidas para graficar tendencia.")
