@@ -2635,6 +2635,22 @@ except Exception as e:
     st.stop()
 
 
+def refresh_main_sheet_handles() -> bool:
+    """Fuerza reconexión de handles principales a Google Sheets en caliente."""
+    global g_spread_client, spreadsheet, worksheet_main, worksheet_casos
+    try:
+        get_main_sheet_handles.clear()
+        get_gspread_client.clear()
+        handles = get_main_sheet_handles(_credentials_json_dict=GSHEETS_CREDENTIALS)
+        g_spread_client = handles["client"]
+        spreadsheet = handles["spreadsheet"]
+        worksheet_main = handles["worksheet_main"]
+        worksheet_casos = handles["worksheet_casos"]
+        return True
+    except Exception:
+        return False
+
+
 # --- Carga de datos ---
 def _fetch_with_retry(worksheet, cache_key: str, max_attempts: int = 4):
     """Lee datos de una worksheet con reintentos y respaldo local.
@@ -2750,9 +2766,21 @@ def load_data_from_gsheets():
     try:
         data = _fetch_with_retry(worksheet_main, "_cache_datos_pedidos")
     except gspread.exceptions.APIError:
-        return _warn_and_get_dataframe_fallback("_cache_datos_pedidos_df", "los pedidos")
+        if refresh_main_sheet_handles():
+            try:
+                data = _fetch_with_retry(worksheet_main, "_cache_datos_pedidos")
+            except Exception:
+                return _warn_and_get_dataframe_fallback("_cache_datos_pedidos_df", "los pedidos")
+        else:
+            return _warn_and_get_dataframe_fallback("_cache_datos_pedidos_df", "los pedidos")
     except RuntimeError:
-        return _warn_and_get_dataframe_fallback("_cache_datos_pedidos_df", "los pedidos")
+        if refresh_main_sheet_handles():
+            try:
+                data = _fetch_with_retry(worksheet_main, "_cache_datos_pedidos")
+            except Exception:
+                return _warn_and_get_dataframe_fallback("_cache_datos_pedidos_df", "los pedidos")
+        else:
+            return _warn_and_get_dataframe_fallback("_cache_datos_pedidos_df", "los pedidos")
     if not data:
         df = pd.DataFrame()
         st.session_state["_cache_datos_pedidos_df"] = df.copy()
@@ -2791,9 +2819,21 @@ def load_casos_from_gsheets():
     try:
         data = _fetch_with_retry(worksheet_casos, "_cache_casos_especiales")
     except gspread.exceptions.APIError:
-        return _warn_and_get_dataframe_fallback("_cache_casos_especiales_df", "los casos especiales")
+        if refresh_main_sheet_handles():
+            try:
+                data = _fetch_with_retry(worksheet_casos, "_cache_casos_especiales")
+            except Exception:
+                return _warn_and_get_dataframe_fallback("_cache_casos_especiales_df", "los casos especiales")
+        else:
+            return _warn_and_get_dataframe_fallback("_cache_casos_especiales_df", "los casos especiales")
     except RuntimeError:
-        return _warn_and_get_dataframe_fallback("_cache_casos_especiales_df", "los casos especiales")
+        if refresh_main_sheet_handles():
+            try:
+                data = _fetch_with_retry(worksheet_casos, "_cache_casos_especiales")
+            except Exception:
+                return _warn_and_get_dataframe_fallback("_cache_casos_especiales_df", "los casos especiales")
+        else:
+            return _warn_and_get_dataframe_fallback("_cache_casos_especiales_df", "los casos especiales")
     if not data:
         df = pd.DataFrame()
         st.session_state["_cache_casos_especiales_df"] = df.copy()
