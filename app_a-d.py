@@ -690,6 +690,18 @@ def _flow_key(value: Any) -> str:
     return normalize_sheet_text(value).lower()
 
 
+def _flow_row_key(row: pd.Series) -> str:
+    """Clave estable por fila para evitar colisiones cuando folio/ID se repiten."""
+    for field in ("_gsheet_row_index", "__sheet_row", "gsheet_row_index"):
+        raw = row.get(field)
+        try:
+            if raw is not None and not pd.isna(raw):
+                return f"row:{int(float(raw))}"
+        except Exception:
+            continue
+    return ""
+
+
 def _is_cancelado_estado(value: Any) -> bool:
     estado = _normalize_text_for_matching(str(value))
     return "cancelado" in estado
@@ -804,8 +816,9 @@ def build_flow_number_maps(
         out: dict[str, str] = {}
         for idx, row in df_block.iterrows():
             numero = formatter(idx)
-            for raw in (row.get("ID_Pedido", ""), row.get("Folio_Factura", "")):
-                key = _flow_key(raw)
+            row_key = _flow_row_key(row)
+            for raw in (row_key, row.get("ID_Pedido", ""), row.get("Folio_Factura", "")):
+                key = raw if isinstance(raw, str) and raw.startswith("row:") else _flow_key(raw)
                 if key and key not in out:
                     out[key] = numero
         return out
@@ -871,7 +884,8 @@ def build_flow_number_maps(
         if source_kind != "caso":
             continue
 
-        keys = [_flow_key(row.get("ID_Pedido", "")), _flow_key(row.get("Folio_Factura", ""))]
+        row_key = _flow_row_key(row)
+        keys = [row_key, _flow_key(row.get("ID_Pedido", "")), _flow_key(row.get("Folio_Factura", ""))]
         if not any(keys):
             continue
 
@@ -891,16 +905,14 @@ def build_flow_number_maps(
         if source_kind == "caso":
             continue
 
-        keys = [_flow_key(row.get("ID_Pedido", "")), _flow_key(row.get("Folio_Factura", ""))]
+        row_key = _flow_row_key(row)
+        keys = [row_key, _flow_key(row.get("ID_Pedido", "")), _flow_key(row.get("Folio_Factura", ""))]
         if not any(keys):
             continue
 
-        existing = None
-        for key in keys:
-            if key and key in map_foraneo:
-                existing = map_foraneo[key]
-                break
-        if existing is not None:
+        # Evitar colisión por folio/ID repetidos entre filas diferentes:
+        # solo tratamos como "ya asignado" si la fila actual ya tiene clave row:.
+        if row_key and row_key in map_foraneo:
             continue
 
         while next_number in used_numbers:
@@ -925,11 +937,12 @@ def resolve_flow_display_number(row: pd.Series, fallback_order: Any) -> str:
     if not is_foraneo:
         return str(fallback_order)
 
+    row_key = _flow_row_key(row)
     id_key = _flow_key(row.get("ID_Pedido", ""))
     folio_key = _flow_key(row.get("Folio_Factura", ""))
     map_foraneo = st.session_state.get("flow_number_map_foraneo", {})
 
-    for key in (id_key, folio_key):
+    for key in (row_key, id_key, folio_key):
         if key and key in map_foraneo:
             return map_foraneo[key]
 
@@ -939,11 +952,12 @@ def resolve_flow_display_number(row: pd.Series, fallback_order: Any) -> str:
 def resolve_case_foraneo_display_number(row: pd.Series, fallback_order: Any) -> str:
     """Resuelve número visible de casos foráneos alineado al flujo visible de app_i."""
 
+    row_key = _flow_row_key(row)
     id_key = _flow_key(row.get("ID_Pedido", ""))
     folio_key = _flow_key(row.get("Folio_Factura", ""))
     map_foraneo = st.session_state.get("flow_number_map_foraneo", {})
 
-    for key in (id_key, folio_key):
+    for key in (row_key, id_key, folio_key):
         if key and key in map_foraneo:
             return map_foraneo[key]
 
@@ -6829,7 +6843,7 @@ if df_main is not None:
             return out
     
         # ====== RECORRER CADA GARANTÍA ======
-        for _, row in garantias_display.iterrows():
+        for orden_garantia, (_, row) in enumerate(garantias_display.iterrows(), start=1):
             idp         = str(row.get("ID_Pedido", "")).strip()
             folio       = str(row.get("Folio_Factura", "")).strip()
             cliente     = str(row.get("Cliente", "")).strip()
@@ -6840,6 +6854,16 @@ if df_main is not None:
             numero_serie = str(row.get("Numero_Serie", "")).strip()
             fecha_compra = str(row.get("Fecha_Compra", "")).strip()
             row_key     = (idp or f"{folio}_{cliente}").replace(" ", "_")
+
+            tipo_case = _normalize_text_for_matching(
+                f"{row.get('Tipo_Envio', '')} {row.get('Tipo_Envio_Original', '')}"
+            )
+            is_foraneo_case = "foraneo" in tipo_case
+            numero_foraneo_visible = (
+                resolve_case_foraneo_display_number(row, orden_garantia)
+                if is_foraneo_case
+                else None
+            )
     
             raw_suffix = row.get("_gsheet_row_index")
             if pd.notna(raw_suffix) and str(raw_suffix).strip():
@@ -6851,6 +6875,49 @@ if df_main is not None:
             # Título del expander
             expander_title = f"🛠 {folio or 's/folio'} – {cliente or 's/cliente'} | Estado: {estado} | Estado_Recepcion: {estado_rec}"
             with st.expander(expander_title, expanded=st.session_state["expanded_garantias"].get(row_key, False)):
+                if is_foraneo_case and numero_foraneo_visible:
+                    st.markdown(f"**🔢 Número foráneo asignado:** `{numero_foraneo_visible}`")
+
+                row_idx_case = row.get("_gsheet_row_index", row.get("gsheet_row_index"))
+                numero_case_actual = _parse_foraneo_number(row.get("Numero_Foraneo", ""))
+                if is_foraneo_case:
+                    assign_col, info_col = st.columns([1, 2])
+                    with assign_col:
+                        if st.button("Asignar número foráneo", key=f"assign_num_foraneo_g_{unique_suffix}"):
+                            max_actual = 0
+                            for val in st.session_state.get("flow_number_map_foraneo", {}).values():
+                                parsed = _parse_foraneo_number(val)
+                                if parsed and parsed > max_actual:
+                                    max_actual = parsed
+                            siguiente = f"{max_actual + 1:02d}"
+
+                            try:
+                                row_idx_int = int(float(row_idx_case)) if row_idx_case is not None and not pd.isna(row_idx_case) else None
+                            except Exception:
+                                row_idx_int = None
+
+                            if row_idx_int is None or "Numero_Foraneo" not in headers_casos:
+                                st.error("❌ No se pudo identificar la fila para guardar Numero_Foraneo.")
+                            else:
+                                ok_update = update_gsheet_cell(
+                                    worksheet_casos,
+                                    headers_casos,
+                                    row_idx_int,
+                                    "Numero_Foraneo",
+                                    siguiente,
+                                )
+                                if ok_update:
+                                    st.success(f"✅ Número foráneo asignado: {siguiente}")
+                                    st.session_state["reload_after_action"] = True
+                                    st.rerun()
+                                else:
+                                    st.error("❌ No se pudo guardar Numero_Foraneo en la hoja.")
+                    with info_col:
+                        if numero_case_actual is not None:
+                            st.caption(f"Número actual en hoja: {numero_case_actual:02d}")
+                        else:
+                            st.caption("Este caso aún no tiene Número_Foraneo guardado.")
+
                 st.markdown("#### 📋 Información de la Garantía")
     
                 col1, col2 = st.columns(2)
