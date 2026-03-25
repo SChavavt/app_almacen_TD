@@ -1990,6 +1990,63 @@ def filter_entries_on_date(entries, reference_date):
     return out
 
 
+def keep_local_entries_prioritizing_today_or_overdue(entries, reference_date):
+    """
+    Para cada turno local:
+    - Si existe al menos un pedido sin fecha o con Fecha_Entrega <= reference_date,
+      oculta los pedidos con Fecha_Entrega futura.
+    - Si no existe ninguno en esa condición, muestra los futuros.
+    """
+    grouped: dict[str, list] = {}
+    for entry in entries:
+        turno = normalize_turno_label(entry.get("turno", "")) or "📍 Local (sin turno)"
+        grouped.setdefault(turno, []).append(entry)
+
+    filtered: list[dict] = []
+    for _, turno_entries in grouped.items():
+        has_today_or_overdue = False
+        for entry in turno_entries:
+            dt = entry.get("fecha_entrega_dt")
+            if dt is None:
+                has_today_or_overdue = True
+                break
+            try:
+                if pd.isna(dt):
+                    has_today_or_overdue = True
+                    break
+            except Exception:
+                has_today_or_overdue = True
+                break
+
+            delivery_date = pd.to_datetime(dt).date()
+            if delivery_date <= reference_date:
+                has_today_or_overdue = True
+                break
+
+        if not has_today_or_overdue:
+            filtered.extend(turno_entries)
+            continue
+
+        for entry in turno_entries:
+            dt = entry.get("fecha_entrega_dt")
+            if dt is None:
+                filtered.append(entry)
+                continue
+            try:
+                if pd.isna(dt):
+                    filtered.append(entry)
+                    continue
+            except Exception:
+                filtered.append(entry)
+                continue
+
+            delivery_date = pd.to_datetime(dt).date()
+            if delivery_date <= reference_date:
+                filtered.append(entry)
+
+    return filtered
+
+
 def filter_entries_no_entrega_date(entries):
     """Entries sin Fecha_Entrega (para que no se pierdan)."""
     out = []
@@ -3972,9 +4029,11 @@ if selected_tab == 1:
 if selected_tab == 2:
     st_autorefresh(interval=60000, key="auto_refresh_local_casos")
 
-    combined_entries = [
-        e for e in auto_local_entries if _is_visible_auto_entry(e)
-    ]
+    today_local = datetime.now(TZ).date()
+    combined_entries = [e for e in auto_local_entries if _is_visible_auto_entry(e)]
+    combined_entries = keep_local_entries_prioritizing_today_or_overdue(
+        combined_entries, today_local
+    )
 
     turno_priority = [
         "☀️ Local Mañana",
