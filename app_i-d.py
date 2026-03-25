@@ -625,11 +625,7 @@ def load_historicos_from_gsheets() -> pd.DataFrame:
         headers = data[0]
         df = pd.DataFrame(data[1:], columns=headers)
     except Exception:
-        df = load_confirmados_from_gsheets(
-            GSHEETS_CREDENTIALS,
-            GOOGLE_SHEET_ID,
-            SHEET_CONFIRMADOS,
-        )
+        df = get_cached_confirmados_df(SHEET_CONFIRMADOS)
 
     for col in ["ID_Pedido", "Folio_Factura", "Cliente", "Vendedor", "Vendedor_Registro", "Estado", "Tipo_Envio"]:
         if col not in df.columns:
@@ -2849,6 +2845,23 @@ def load_confirmados_from_gsheets(credentials_dict: dict, sheet_id: str, sheet_n
     return df
 
 
+def get_cached_confirmados_df(sheet_name: str = SHEET_CONFIRMADOS) -> pd.DataFrame:
+    cache_df_key = f"_cache_{sheet_name}_df"
+    cached_df = st.session_state.get(cache_df_key)
+    if isinstance(cached_df, pd.DataFrame):
+        return cached_df.copy()
+    return pd.DataFrame()
+
+
+def refresh_confirmados_cache(
+    credentials_dict: dict,
+    sheet_id: str,
+    sheet_name: str = SHEET_CONFIRMADOS,
+) -> pd.DataFrame:
+    load_confirmados_from_gsheets.clear()
+    return load_confirmados_from_gsheets(credentials_dict, sheet_id, sheet_name)
+
+
 def _clean_cliente_name(x: str) -> str:
     x = sanitize_text(str(x)).upper()
     x = unicodedata.normalize("NFKD", x)
@@ -4121,11 +4134,15 @@ if selected_tab == 4:
 if selected_tab == 0:
     st_autorefresh(interval=60000, key="auto_refresh_dashboard")
 
-    df_conf = load_confirmados_from_gsheets(
-        GSHEETS_CREDENTIALS, GOOGLE_SHEET_ID, SHEET_CONFIRMADOS
-    )
+    st.caption("📦 pedidos_confirmados se consulta solo bajo demanda; en autorefresh se usa caché local.")
+    if st.button("🔄 Actualizar pedidos confirmados", key="refresh_confirmados_dashboard"):
+        with st.spinner("Actualizando pedidos_confirmados desde Google Sheets..."):
+            refresh_confirmados_cache(GSHEETS_CREDENTIALS, GOOGLE_SHEET_ID, SHEET_CONFIRMADOS)
+        st.success("✅ pedidos_confirmados actualizado.")
+
+    df_conf = get_cached_confirmados_df(SHEET_CONFIRMADOS)
     if df_conf.empty:
-        st.info("No hay datos en pedidos_confirmados.")
+        st.info("No hay caché de pedidos_confirmados. Usa el botón de actualización manual para cargarlo.")
         st.stop()
 
     tabla_clientes, hoy = build_cliente_risk_table(df_conf)
