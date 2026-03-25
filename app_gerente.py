@@ -2213,6 +2213,7 @@ def reset_cobranza_connection_state(clear_session: bool = True):
 
 def _render_cobranza_retry_box(message: str, *, error: Exception | None = None, key_suffix: str = ""):
     """Muestra un aviso de conexión con una acción visible para reintentar."""
+    retry_key = f"retry_cobranza_connection_{key_suffix}_{uuid.uuid4().hex}"
     col_msg, col_btn = st.columns([5, 1])
     with col_msg:
         st.warning(message)
@@ -2226,7 +2227,7 @@ def _render_cobranza_retry_box(message: str, *, error: Exception | None = None, 
     with col_btn:
         st.write("")
         st.write("")
-        if st.button("🔄 Recargar conexión", key=f"retry_cobranza_connection_{key_suffix}"):
+        if st.button("🔄 Recargar conexión", key=retry_key):
             reset_cobranza_connection_state()
             st.rerun()
 
