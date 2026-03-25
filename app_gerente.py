@@ -3506,45 +3506,71 @@ def render_cobranza_tab_gerente():
 
     st.markdown("### Actualizar Excel")
     st.caption("Actualiza en Drive el Excel de todos los meses que ya tengan comentarios. Si la hoja mensual no existe, se crea automáticamente.")
-    if st.button("Actualizar Excel de todos los comentarios", key="ger_cob_excel_actualizar"):
-        meses_comentarios = _cobranza_meses_con_comentarios(com_df)
-        if not meses_comentarios:
-            st.info("No hay comentarios con Mes_Operativo válido para actualizar en Drive.")
-        else:
-            st.session_state["ger_cob_excel_descargas"] = st.session_state.get("ger_cob_excel_descargas", {})
-            hojas_creadas = []
-            hojas_actualizadas = []
-            hojas_error = []
+    estado_actualizacion_key = "ger_cob_excel_actualizacion_en_proceso"
+    if estado_actualizacion_key not in st.session_state:
+        st.session_state[estado_actualizacion_key] = False
 
-            for mes_actualizar in meses_comentarios:
-                excel_bytes, drive_result = _generar_excel_cobranza_mes(
-                    mes_actualizar,
-                    actualizar_drive=True,
-                    mostrar_toast_drive=False,
-                )
-                if excel_bytes:
-                    st.session_state["ger_cob_excel_descargas"][mes_actualizar] = excel_bytes
-                if not drive_result:
-                    hojas_error.append(f"{mes_actualizar} (sin respuesta de Drive)")
-                    continue
-                if drive_result.get("ok"):
-                    if drive_result.get("creada"):
-                        hojas_creadas.append(drive_result.get("hoja", f"Cobranza_{mes_actualizar}"))
-                    else:
-                        hojas_actualizadas.append(drive_result.get("hoja", f"Cobranza_{mes_actualizar}"))
-                else:
-                    hojas_error.append(f"{mes_actualizar}: {drive_result.get('error', 'Error desconocido')}")
+    iniciar_actualizacion = st.button(
+        "Actualizar Excel de todos los comentarios",
+        key="ger_cob_excel_actualizar",
+        disabled=st.session_state.get(estado_actualizacion_key, False),
+    )
+    if iniciar_actualizacion and not st.session_state.get(estado_actualizacion_key, False):
+        st.session_state[estado_actualizacion_key] = True
+        st.rerun()
 
-            if hojas_creadas:
-                st.success(f"✅ Se crearon hojas nuevas: {', '.join(hojas_creadas)}")
-            if hojas_actualizadas:
-                st.success(f"✅ Se actualizaron hojas existentes: {', '.join(hojas_actualizadas)}")
-            if hojas_error:
-                st.warning("⚠️ Hubo meses que no se pudieron actualizar: " + " | ".join(hojas_error))
+    if st.session_state.get(estado_actualizacion_key, False):
+        try:
+            meses_comentarios = _cobranza_meses_con_comentarios(com_df)
+            if not meses_comentarios:
+                st.info("No hay comentarios con Mes_Operativo válido para actualizar en Drive.")
+            else:
+                st.session_state["ger_cob_excel_descargas"] = st.session_state.get("ger_cob_excel_descargas", {})
+                hojas_creadas = []
+                hojas_actualizadas = []
+                hojas_error = []
+                total_meses = len(meses_comentarios)
+                barra_progreso = st.progress(0, text="Iniciando actualización de hojas en Drive...")
 
-            meses_confirmados = sorted(set(meses_comentarios) - {m.split(":", 1)[0].strip() for m in hojas_error})
-            if meses_confirmados:
-                st.session_state["ger_cob_meses_drive_cache"] = meses_confirmados
+                with st.spinner("Actualizando Excel en Drive, por favor espera..."):
+                    for idx, mes_actualizar in enumerate(meses_comentarios, start=1):
+                        barra_progreso.progress(
+                            int(((idx - 1) / total_meses) * 100),
+                            text=f"Actualizando {mes_actualizar} ({idx}/{total_meses})...",
+                        )
+                        excel_bytes, drive_result = _generar_excel_cobranza_mes(
+                            mes_actualizar,
+                            actualizar_drive=True,
+                            mostrar_toast_drive=False,
+                        )
+                        if excel_bytes:
+                            st.session_state["ger_cob_excel_descargas"][mes_actualizar] = excel_bytes
+                        if not drive_result:
+                            hojas_error.append(f"{mes_actualizar} (sin respuesta de Drive)")
+                            continue
+                        if drive_result.get("ok"):
+                            if drive_result.get("creada"):
+                                hojas_creadas.append(drive_result.get("hoja", f"Cobranza_{mes_actualizar}"))
+                            else:
+                                hojas_actualizadas.append(drive_result.get("hoja", f"Cobranza_{mes_actualizar}"))
+                        else:
+                            hojas_error.append(f"{mes_actualizar}: {drive_result.get('error', 'Error desconocido')}")
+
+                barra_progreso.progress(100, text="Actualización completada.")
+
+                if hojas_creadas:
+                    st.success(f"✅ Se crearon hojas nuevas: {', '.join(hojas_creadas)}")
+                if hojas_actualizadas:
+                    st.success(f"✅ Se actualizaron hojas existentes: {', '.join(hojas_actualizadas)}")
+                if hojas_error:
+                    st.warning("⚠️ Hubo meses que no se pudieron actualizar: " + " | ".join(hojas_error))
+
+                meses_confirmados = sorted(set(meses_comentarios) - {m.split(":", 1)[0].strip() for m in hojas_error})
+                if meses_confirmados:
+                    st.session_state["ger_cob_meses_drive_cache"] = meses_confirmados
+        finally:
+            st.session_state[estado_actualizacion_key] = False
+            st.rerun()
 
     st.markdown("### Descargar")
     with st.expander("📥 Descargar hojas de meses disponibles", expanded=False):
