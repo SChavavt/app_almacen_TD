@@ -2954,7 +2954,7 @@ def render_cobranza_tab_gerente():
         folios_sel_set = set(folios_sel)
 
         dia_actual = datetime.now().day
-        dias_opciones = [dia_actual]
+        dias_opciones = list(range(1, 32))
         if not com_df.empty:
             com_mes_cliente = com_df[
                 (com_df.get("Codigo", "").astype(str) == str(codigo))
@@ -2966,7 +2966,7 @@ def render_cobranza_tab_gerente():
                 dias_historicos = [
                     int(d)
                     for d in dias_historicos.dropna().tolist()
-                    if 1 <= int(d) <= 31 and int(d) <= dia_actual
+                    if 1 <= int(d) <= 31
                 ]
                 dias_opciones.extend(dias_historicos)
 
