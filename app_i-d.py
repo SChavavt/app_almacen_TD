@@ -4715,10 +4715,10 @@ if selected_tab == 0:
                     placeholder="Ej. F199985 o nombre del cliente",
                 ).strip()
                 if buscador_hist:
-                    q_norm = sanitize_text(buscador_hist).casefold()
+                    q_norm = _normalize_lookup_text(buscador_hist)
                     mask_busqueda = (
-                        historial_work["Cliente"].map(lambda x: sanitize_text(x).casefold()).str.contains(q_norm, na=False)
-                        | historial_work["Folio_Factura"].map(lambda x: sanitize_text(x).casefold()).str.contains(q_norm, na=False)
+                        historial_work["Cliente"].map(_normalize_lookup_text).str.contains(q_norm, na=False)
+                        | historial_work["Folio_Factura"].map(_normalize_lookup_text).str.contains(q_norm, na=False)
                     )
                     historial_work = historial_work[mask_busqueda].copy()
 
