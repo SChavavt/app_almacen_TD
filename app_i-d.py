@@ -1317,6 +1317,27 @@ def _flow_match_key(value) -> str:
     return sanitize_text(value).lower()
 
 
+def _flow_row_key_from_row(row: pd.Series) -> str:
+    for field in ("gsheet_row_index", "_gsheet_row_index", "__sheet_row"):
+        raw = row.get(field)
+        try:
+            if raw is not None and not pd.isna(raw):
+                return f"row:{int(float(raw))}"
+        except Exception:
+            continue
+    return ""
+
+
+def _flow_row_key_from_entry(entry: dict) -> str:
+    raw = entry.get("gsheet_row_index")
+    try:
+        if raw is not None and not pd.isna(raw):
+            return f"row:{int(float(raw))}"
+    except Exception:
+        pass
+    return ""
+
+
 def _is_cancelado_estado(value: object) -> bool:
     estado = sanitize_text(value).lower()
     return "cancelado" in estado
@@ -1347,8 +1368,9 @@ def _build_flow_number_maps(df_all: pd.DataFrame) -> tuple[dict[str, str], dict[
         out: dict[str, str] = {}
         for idx, row in df_src.iterrows():
             numero = formatter(idx)
-            for raw_key in (row.get("ID_Pedido", ""), row.get("Folio_Factura", "")):
-                key = _flow_match_key(raw_key)
+            row_key = _flow_row_key_from_row(row)
+            for raw_key in (row_key, row.get("ID_Pedido", ""), row.get("Folio_Factura", "")):
+                key = raw_key if isinstance(raw_key, str) and raw_key.startswith("row:") else _flow_match_key(raw_key)
                 if key and key not in out:
                     out[key] = numero
         return out
@@ -1398,6 +1420,7 @@ def assign_flow_numbers(entries_local, entries_foraneo, df_all: pd.DataFrame) ->
             continue
 
         keys = [
+            _flow_row_key_from_entry(entry),
             _flow_match_key(entry.get("id_pedido", "")),
             _flow_match_key(entry.get("folio", "")),
         ]
@@ -1419,13 +1442,14 @@ def assign_flow_numbers(entries_local, entries_foraneo, df_all: pd.DataFrame) ->
             continue
 
         keys = [
+            _flow_row_key_from_entry(entry),
             _flow_match_key(entry.get("id_pedido", "")),
             _flow_match_key(entry.get("folio", "")),
         ]
         if not any(keys):
             continue
-        existing = next((foraneo_map[k] for k in keys if k and k in foraneo_map), None)
-        if existing is not None:
+        row_key = keys[0] if keys else ""
+        if row_key and row_key in foraneo_map:
             continue
 
         while next_foraneo in used_numbers:
@@ -1460,6 +1484,7 @@ def assign_flow_numbers(entries_local, entries_foraneo, df_all: pd.DataFrame) ->
                     continue
 
             keys = [
+                _flow_row_key_from_entry(entry),
                 _flow_match_key(entry.get("id_pedido", "")),
                 _flow_match_key(entry.get("folio", "")),
             ]
@@ -1561,6 +1586,7 @@ def build_base_entry(row, categoria: str):
         "tipo_envio_original": sanitize_text(row.get("Tipo_Envio_Original", "")),
         "tipo": sanitize_text(row.get("Tipo", "")),
         "numero_foraneo": sanitize_text(row.get("Numero_Foraneo", "")),
+        "gsheet_row_index": row.get("gsheet_row_index", row.get("_gsheet_row_index", row.get("__sheet_row"))),
         "badges": [],
         "details": [],
         "sort_key": compute_sort_key(row),
