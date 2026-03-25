@@ -850,6 +850,17 @@ def _flow_key(value):
     return re.sub(r"\s+", "", text_norm)
 
 
+def _flow_row_key(row):
+    for field in ("_gsheet_row_index", "__sheet_row", "gsheet_row_index"):
+        raw = row.get(field)
+        try:
+            if raw is not None and not pd.isna(raw):
+                return f"row:{int(float(raw))}"
+        except Exception:
+            continue
+    return ""
+
+
 def _parse_foraneo_number(raw):
     text = str(raw or "").strip()
     if not text:
@@ -896,7 +907,11 @@ def _es_row_foraneo(row):
 
 
 def resolver_numero_foraneo_flujo(row, flow_map_foraneos):
-    for key in (_flow_key(row.get("ID_Pedido", "")), _flow_key(row.get("Folio_Factura", ""))):
+    for key in (
+        _flow_row_key(row),
+        _flow_key(row.get("ID_Pedido", "")),
+        _flow_key(row.get("Folio_Factura", "")),
+    ):
         if key and key in flow_map_foraneos:
             return flow_map_foraneos[key]
     return ""
@@ -963,7 +978,8 @@ def construir_mapa_numeracion_foraneos(df_data, df_casos):
             continue
         if source_kind != "caso":
             continue
-        keys = [_flow_key(row.get("ID_Pedido", "")), _flow_key(row.get("Folio_Factura", ""))]
+        row_key = _flow_row_key(row)
+        keys = [row_key, _flow_key(row.get("ID_Pedido", "")), _flow_key(row.get("Folio_Factura", ""))]
         if not any(keys):
             continue
         parsed = _parse_foraneo_number(row.get("Numero_Foraneo", ""))
@@ -979,11 +995,11 @@ def construir_mapa_numeracion_foraneos(df_data, df_casos):
             continue
         if source_kind == "caso":
             continue
-        keys = [_flow_key(row.get("ID_Pedido", "")), _flow_key(row.get("Folio_Factura", ""))]
+        row_key = _flow_row_key(row)
+        keys = [row_key, _flow_key(row.get("ID_Pedido", "")), _flow_key(row.get("Folio_Factura", ""))]
         if not any(keys):
             continue
-        existing = next((map_foraneo[k] for k in keys if k and k in map_foraneo), None)
-        if existing is not None:
+        if row_key and row_key in map_foraneo:
             continue
         while next_number in used_numbers:
             next_number += 1
