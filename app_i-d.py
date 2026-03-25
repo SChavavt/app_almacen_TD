@@ -4544,6 +4544,223 @@ if selected_tab == 0:
         )
         st.dataframe(ultimos_filtrados, use_container_width=True, height=260, hide_index=True)
 
+        st.markdown("##### 🧾 Revisado de pedidos que viajaron")
+        h_update_col, h_button_col = st.columns([0.75, 0.25])
+        with h_update_col:
+            st.caption(
+                f"🕒 Última actualización: {datetime.now(TZ).strftime('%d/%m %H:%M:%S')} · "
+                "Auto-actualización cada 60 s"
+            )
+        with h_button_col:
+            if st.button(
+                "🔄 Actualizar datos_pedidos",
+                key="manual_refresh_historial_pedidos",
+                use_container_width=True,
+            ):
+                load_historicos_from_gsheets.clear()
+                st.rerun()
+
+        historial_df = load_historicos_from_gsheets()
+        if historial_df.empty:
+            st.info("No hay datos disponibles en `datos_pedidos` para mostrar.")
+        else:
+            historial_work = historial_df.copy()
+            for col in [
+                "Hora_Registro",
+                "Fecha_Entrega",
+                "Cliente",
+                "Vendedor",
+                "Vendedor_Registro",
+                "Folio_Factura",
+                "Tipo_Envio",
+                "Estado",
+            ]:
+                if col not in historial_work.columns:
+                    historial_work[col] = ""
+
+            historial_work["Hora_Registro"] = pd.to_datetime(
+                historial_work["Hora_Registro"], errors="coerce"
+            )
+            historial_work["Fecha_Entrega"] = pd.to_datetime(
+                historial_work["Fecha_Entrega"], errors="coerce"
+            )
+
+            if vendedor_sel != "(Todos)":
+                vend_norm = _normalize_vendedor_name(vendedor_sel)
+                mask_vendedor = (
+                    historial_work["Vendedor_Registro"].map(_normalize_vendedor_name) == vend_norm
+                ) | (
+                    historial_work["Vendedor"].map(_normalize_vendedor_name) == vend_norm
+                )
+                historial_work = historial_work[mask_vendedor].copy()
+
+            buscador_hist = st.text_input(
+                "🔎 Buscar en historial por cliente o folio",
+                key="dashboard_historial_busqueda",
+                placeholder="Ej. F199985 o nombre del cliente",
+            ).strip()
+            if buscador_hist:
+                q_norm = sanitize_text(buscador_hist).casefold()
+                mask_busqueda = (
+                    historial_work["Cliente"].map(lambda x: sanitize_text(x).casefold()).str.contains(q_norm, na=False)
+                    | historial_work["Folio_Factura"].map(lambda x: sanitize_text(x).casefold()).str.contains(q_norm, na=False)
+                )
+                historial_work = historial_work[mask_busqueda].copy()
+
+            historial_work["_fecha_revision"] = historial_work["Hora_Registro"].dt.date
+            sin_hora = historial_work["_fecha_revision"].isna()
+            historial_work.loc[sin_hora, "_fecha_revision"] = historial_work.loc[
+                sin_hora, "Fecha_Entrega"
+            ].dt.date
+            historial_work = historial_work.sort_values("Hora_Registro", ascending=False)
+
+            historial_cols = [
+                "Hora_Registro",
+                "Cliente",
+                "Vendedor_Registro",
+                "Folio_Factura",
+                "Tipo_Envio",
+                "Fecha_Entrega",
+                "Estado",
+            ]
+            base_historial = historial_work[historial_cols].copy()
+            base_historial["Hora_Registro"] = pd.to_datetime(
+                base_historial["Hora_Registro"], errors="coerce"
+            ).dt.strftime("%d/%m/%Y %H:%M")
+            base_historial["Fecha_Entrega"] = pd.to_datetime(
+                base_historial["Fecha_Entrega"], errors="coerce"
+            ).dt.strftime("%d/%m/%Y")
+            st.markdown("**Últimos 5 registros históricos**")
+            st.dataframe(base_historial.head(5), use_container_width=True, hide_index=True, height=220)
+
+            opciones_fecha = sorted(
+                [f for f in historial_work["_fecha_revision"].dropna().unique().tolist()],
+                reverse=True,
+            )
+            opciones_dia = ["(Todos)"] + opciones_fecha
+            filtro_col1, filtro_col2 = st.columns(2)
+            with filtro_col1:
+                dia_sel = st.selectbox(
+                    "Filtrar por día",
+                    options=opciones_dia,
+                    format_func=lambda d: d.strftime("%d/%m/%Y") if d != "(Todos)" else "(Todos)",
+                    key="dashboard_historial_dia",
+                )
+            with filtro_col2:
+                tipo_sel = st.selectbox(
+                    "Filtrar por tipo de envío",
+                    options=["(Todos)", "📍 Pedido Local", "🚚 Pedido Foráneo"],
+                    key="dashboard_historial_tipo_envio",
+                )
+
+            historial_filtrado = historial_work.copy()
+            if dia_sel != "(Todos)":
+                historial_filtrado = historial_filtrado[
+                    historial_filtrado["_fecha_revision"] == dia_sel
+                ]
+            if tipo_sel != "(Todos)":
+                tipo_norm_sel = _normalize_envio_original(tipo_sel)
+                historial_filtrado = historial_filtrado[
+                    historial_filtrado["Tipo_Envio"].astype(str).apply(_normalize_envio_original).str.contains(
+                        tipo_norm_sel, na=False
+                    )
+                ]
+
+            vista_filtrada = historial_filtrado[historial_cols].copy()
+            vista_filtrada["Hora_Registro"] = pd.to_datetime(
+                vista_filtrada["Hora_Registro"], errors="coerce"
+            ).dt.strftime("%d/%m/%Y %H:%M")
+            vista_filtrada["Fecha_Entrega"] = pd.to_datetime(
+                vista_filtrada["Fecha_Entrega"], errors="coerce"
+            ).dt.strftime("%d/%m/%Y")
+            st.caption(f"Coincidencias encontradas: {len(vista_filtrada)}")
+            if vista_filtrada.empty:
+                st.info("No se encontraron coincidencias para el filtro seleccionado.")
+            else:
+                st.caption(
+                    "Mostrando pedidos históricos enviados"
+                    if vendedor_sel == "(Todos)"
+                    else f"Mostrando pedidos históricos de {vendedor_sel}"
+                )
+                st.dataframe(vista_filtrada, use_container_width=True, hide_index=True, height=260)
+
+                st.markdown("##### 🔎 Ver detalle de un pedido histórico")
+                selector_hist = historial_filtrado.copy()
+                for c in [
+                    "Folio_Factura",
+                    "Cliente",
+                    "Estado",
+                    "Hora_Registro",
+                    "Tipo_Envio",
+                    "Adjuntos_Guia",
+                    "Hoja_Ruta_Mensajero",
+                ]:
+                    if c not in selector_hist.columns:
+                        selector_hist[c] = ""
+
+                selector_hist["_label_hora"] = pd.to_datetime(
+                    selector_hist["Hora_Registro"], errors="coerce"
+                ).dt.strftime("%d/%m/%Y %H:%M").fillna("sin fecha")
+                selector_hist["_label_folio"] = selector_hist["Folio_Factura"].map(sanitize_text)
+                selector_hist.loc[selector_hist["_label_folio"] == "", "_label_folio"] = "Sin folio"
+                selector_hist["_label_cliente"] = selector_hist["Cliente"].map(sanitize_text)
+                selector_hist.loc[selector_hist["_label_cliente"] == "", "_label_cliente"] = "Sin cliente"
+                selector_hist["_label_estado"] = selector_hist["Estado"].map(sanitize_text)
+                selector_hist["_label_envio"] = selector_hist["Tipo_Envio"].map(_pedido_selector_envio_emoji)
+
+                guia_adjuntos_hist = selector_hist.get(
+                    "Adjuntos_Guia", pd.Series("", index=selector_hist.index)
+                ).map(sanitize_text)
+                guia_hoja_ruta_hist = selector_hist.get(
+                    "Hoja_Ruta_Mensajero", pd.Series("", index=selector_hist.index)
+                ).map(sanitize_text)
+                selector_hist["_guia_contenido"] = guia_adjuntos_hist
+                selector_hist.loc[
+                    selector_hist["_guia_contenido"] == "", "_guia_contenido"
+                ] = guia_hoja_ruta_hist
+                selector_hist["_label_guia"] = selector_hist["_guia_contenido"].map(
+                    lambda x: "📋 " if x else ""
+                )
+                selector_hist["_pedido_label"] = selector_hist.apply(
+                    lambda r: (
+                        f"{r['_label_guia']}{r['_label_folio']} · {r['_label_cliente']} · {r['_label_estado']} · {r['_label_hora']}"
+                        f" {r['_label_envio']}" if r["_label_envio"] else f"{r['_label_guia']}{r['_label_folio']} · {r['_label_cliente']} · {r['_label_estado']} · {r['_label_hora']}"
+                    ),
+                    axis=1,
+                )
+
+                idx_hist = st.selectbox(
+                    "🧭 Selecciona un pedido histórico para ver más información",
+                    options=selector_hist.index.tolist(),
+                    format_func=lambda idx: selector_hist.loc[idx, "_pedido_label"],
+                    key="dashboard_detalle_pedido_hist_idx",
+                )
+                pedido_hist_sel = selector_hist.loc[idx_hist]
+
+                with st.container(border=True):
+                    st.markdown("**🧾 Info general**")
+                    hc1, hc2 = st.columns(2)
+                    with hc1:
+                        _render_detail_row("👤 id_vendedor", pedido_hist_sel.get("id_vendedor", ""))
+                        turno_hist = sanitize_text(pedido_hist_sel.get("Turno", ""))
+                        if turno_hist:
+                            _render_detail_row("🕒 Turno", turno_hist)
+                        _render_detail_row("💬 Comentario", pedido_hist_sel.get("Comentario", ""))
+                    with hc2:
+                        _render_detail_row("💳 Estado_Pago", pedido_hist_sel.get("Estado_Pago", ""))
+                        _render_detail_row("📎 Adjuntos", display_attachments(pedido_hist_sel.get("Adjuntos", "")))
+
+                    st.markdown("---")
+                    st.markdown("**📦 Sección de guías**")
+                    hg1, hg2 = st.columns(2)
+                    with hg1:
+                        _render_detail_row("📬 ", pedido_hist_sel.get("Direccion_Guia_Retorno", ""))
+                    with hg2:
+                        _render_detail_row(
+                            "🧷 Adjuntos_Guia",
+                            display_attachments(pedido_hist_sel.get("_guia_contenido", "")),
+                        )
+
         st.markdown("##### 🔎 Ver detalle de un pedido")
         selector_df = ultimos_base.copy()
         if "Folio_Factura" not in selector_df.columns:
