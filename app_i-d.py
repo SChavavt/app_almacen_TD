@@ -4146,11 +4146,8 @@ if selected_tab == 0:
 
     df_conf = get_cached_confirmados_df(SHEET_CONFIRMADOS)
     hoy = pd.Timestamp.now()
-    if df_conf.empty:
-        st.info(
-            "No hay caché de pedidos_confirmados todavía. Puedes seguir usando el dashboard; "
-            "cuando necesites métricas de confirmados, usa el botón manual para cargarlo."
-        )
+    confirmados_cache_missing = df_conf.empty
+    if confirmados_cache_missing:
         tabla_clientes = pd.DataFrame(
             columns=[
                 "Cliente",
@@ -4587,6 +4584,12 @@ if selected_tab == 0:
         sm3.metric("⚠️ Alerta", f"{int(fila_v['Alerta']):,}")
         sm4.metric("🚨 Riesgo", f"{int(fila_v['Riesgo']):,}")
         sm5.metric("🆕 Nuevo/SinHistorial", f"{int(fila_v['Nuevo/SinHistorial']):,}")
+
+    if confirmados_cache_missing:
+        st.info(
+            "No hay caché de pedidos_confirmados todavía. "
+            "Si necesitas esas métricas, usa este botón para cargar confirmados manualmente."
+        )
 
     if st.button("🔄 Actualizar pedidos confirmados", key="refresh_confirmados_dashboard", use_container_width=True):
         with st.spinner("Actualizando pedidos_confirmados desde Google Sheets..."):
