@@ -4128,27 +4128,29 @@ if selected_tab == 3:
     # 2) Layout: izquierda/derecha
     col_left, col_right = st.columns(2, gap="large")
 
-    # --- IZQUIERDA: ANTERIORES + CONTINUACIÓN DE HOY ---
+    # --- IZQUIERDA: HOY (CONTINUACIÓN) + ANTERIORES ---
     with col_left:
+        if hoy_continuacion:
+            next_number = render_auto_list(
+                hoy_continuacion,
+                title=f"🚚 FORÁNEOS • HOY ({hoy.strftime('%d/%m')})",
+                subtitle="Todos los de hoy y fechas futuras",
+                max_rows=140,
+                panel_height=160,
+                mode="foraneo",
+            )
+        else:
+            next_number = 1
+
         next_number = render_auto_list(
             anteriores,
             title="🚚 FORÁNEOS • ANTERIORES",
             subtitle=f"Fechas previas + pedidos sin Fecha_Entrega",
             max_rows=140,
+            start_number=next_number,
             panel_height=220,
             mode="foraneo",
         )
-
-        if hoy_continuacion:
-            render_auto_list(
-                hoy_continuacion,
-                title=f"🚚 FORÁNEOS • HOY ({hoy.strftime('%d/%m')})",
-                subtitle="Todos los de hoy y fechas futuras",
-                max_rows=140,
-                start_number=next_number,
-                panel_height=160,
-                mode="foraneo",
-            )
 
     # --- DERECHA: HOY + FUTUROS + SIN Fecha_Entrega ---
     with col_right:
