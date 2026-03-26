@@ -7126,8 +7126,8 @@ if "organizador" in tab_map:
                 st.info("Selecciona un caso especial para ver detalles o modificarlo.")
             else:
                 row_caso = df_casos_filtrado.loc[idx_caso]
-                st.markdown("#### 📘 Detalles del caso especial seleccionado")
-                render_caso_especial(preparar_resultado_caso(row_caso))
+                with st.expander("📘 Detalles del caso especial seleccionado", expanded=False):
+                    render_caso_especial(preparar_resultado_caso(row_caso))
 
             # Descarga Excel (sobre el filtrado visible para facilitar análisis puntual).
             buffer_casos = BytesIO()
@@ -7153,6 +7153,46 @@ if "organizador" in tab_map:
             estado_caso_norm = df_metricas.get("Estado_Caso", "").astype(str).str.strip().str.lower()
             estado_general_norm = df_metricas.get("Estado", "").astype(str).str.strip().str.lower()
             estado_consolidado = estado_caso_norm.where(estado_caso_norm != "", estado_general_norm)
+            df_metricas["Monto_Devuelto_num"] = pd.to_numeric(df_metricas.get("Monto_Devuelto", 0), errors="coerce").fillna(0.0)
+
+            def normalizar_nombre_persona(valor):
+                raw = str(valor or "").strip()
+                if not raw:
+                    return "Sin responsable"
+                norm = normalizar(raw)
+                if norm in {"no aplica", "n/a", "na", "sin responsable", "noaplica"}:
+                    return "Sin responsable"
+                alias = {
+                    "robert": "Robert51",
+                    "robert51": "Robert51",
+                    "carolina": "Griselda Carolina",
+                    "griselda carolina": "Griselda Carolina",
+                    "gloria": "Gloria Michella",
+                    "gloria michella": "Gloria Michella",
+                }
+                return alias.get(norm, raw)
+
+            df_metricas["Vendedor_Registro_norm"] = (
+                df_metricas.get("Vendedor_Registro", "").astype(str).str.strip().replace("", "Sin vendedor")
+            )
+            df_metricas["Area_Responsable_norm"] = (
+                df_metricas.get("Area_Responsable", "").astype(str).str.strip().replace("", "Sin área")
+            )
+            df_metricas["Nombre_Responsable_norm"] = df_metricas.get("Nombre_Responsable", "").apply(normalizar_nombre_persona)
+            df_metricas["culpa_vendedor"] = df_metricas["Area_Responsable_norm"].astype(str).apply(
+                lambda x: normalizar(x) in {"vendedor", "ventas", "comercial", "distribucion", "distribución"}
+            )
+
+            pedidos_totales = cargar_todos_los_pedidos().copy()
+            col_vendedor_pedidos = next(
+                (c for c in ("Vendedor_Registro", "Nombre_Vendedor", "Vendedor", "Usuario", "id_vendedor", "ID_Vendedor", "Id_Vendedor") if c in pedidos_totales.columns),
+                None,
+            )
+            if col_vendedor_pedidos:
+                pedidos_totales["vendedor_key"] = pedidos_totales[col_vendedor_pedidos].astype(str).str.strip().replace("", "Sin vendedor")
+                pedidos_por_vendedor = pedidos_totales.groupby("vendedor_key").size().rename("Pedidos_Totales")
+            else:
+                pedidos_por_vendedor = pd.Series(dtype="int64", name="Pedidos_Totales")
 
             total_casos = len(df_metricas)
             casos_cerrados = estado_consolidado.isin(["cerrado", "completado", "resuelto", "finalizado"]).sum()
@@ -7170,29 +7210,86 @@ if "organizador" in tab_map:
             k3.metric("Cerrados/Completados", int(casos_cerrados))
             k4.metric("Casos del mes", int(casos_mes))
 
+            total_devuelto = float(df_metricas["Monto_Devuelto_num"].sum())
+            total_devuelto_vendedor = float(df_metricas.loc[df_metricas["culpa_vendedor"], "Monto_Devuelto_num"].sum())
+            total_devuelto_otras_areas = max(total_devuelto - total_devuelto_vendedor, 0.0)
+            k5, k6, k7 = st.columns(3)
+            k5.metric("💸 Monto devuelto total", f"${total_devuelto:,.2f}")
+            k6.metric("🧑‍💼 Impacto atribuible a vendedor", f"${total_devuelto_vendedor:,.2f}")
+            k7.metric("🏢 Impacto por otras áreas", f"${total_devuelto_otras_areas:,.2f}")
+
             col_ch1, col_ch2 = st.columns(2)
             with col_ch1:
-                st.markdown("#### 👥 Vendedores con más incidencias")
-                serie_vendedores = (
-                    df_metricas.get("Vendedor_Registro", "")
-                    .astype(str)
-                    .str.strip()
-                    .replace("", "Sin vendedor")
-                    .value_counts()
-                    .head(10)
+                st.markdown("#### ⚖️ Vendedores con mayor tasa de incidencia")
+                incidencias_por_vendedor = df_metricas.groupby("Vendedor_Registro_norm").size().rename("Incidencias")
+                if not pedidos_por_vendedor.empty:
+                    base_vendedores = incidencias_por_vendedor.to_frame().join(
+                        pedidos_por_vendedor,
+                        how="left",
+                    )
+                    base_vendedores["Pedidos_Totales"] = base_vendedores["Pedidos_Totales"].fillna(base_vendedores["Incidencias"])
+                else:
+                    base_vendedores = incidencias_por_vendedor.to_frame()
+                    base_vendedores["Pedidos_Totales"] = base_vendedores["Incidencias"]
+
+                base_vendedores["Tasa_Incidencia_pct"] = (
+                    (base_vendedores["Incidencias"] / base_vendedores["Pedidos_Totales"].replace(0, pd.NA)) * 100
                 )
-                st.bar_chart(serie_vendedores)
+                base_vendedores["Tasa_Incidencia_pct"] = base_vendedores["Tasa_Incidencia_pct"].fillna(0)
+                base_vendedores["Monto_Devuelto"] = df_metricas.groupby("Vendedor_Registro_norm")["Monto_Devuelto_num"].sum()
+                top_tasa = base_vendedores.sort_values(
+                    by=["Tasa_Incidencia_pct", "Incidencias"],
+                    ascending=False,
+                ).head(10)
+                st.bar_chart(top_tasa["Tasa_Incidencia_pct"])
+                st.caption("Prioriza vendedores con mayor proporción de incidencias vs su volumen de pedidos.")
             with col_ch2:
                 st.markdown("#### 🏢 Áreas con más incidencias")
                 serie_areas = (
-                    df_metricas.get("Area_Responsable", "")
-                    .astype(str)
-                    .str.strip()
-                    .replace("", "Sin área")
+                    df_metricas["Area_Responsable_norm"]
                     .value_counts()
                     .head(10)
                 )
                 st.bar_chart(serie_areas)
+
+            st.markdown("#### 🧠 Patrones detectados de riesgo")
+            patrones = base_vendedores.copy()
+            patrones["Riesgo"] = pd.cut(
+                patrones["Tasa_Incidencia_pct"],
+                bins=[-0.01, 2, 8, 1000],
+                labels=["Bajo", "Medio", "Alto"],
+            )
+            patrones = patrones.sort_values(["Riesgo", "Tasa_Incidencia_pct"], ascending=[False, False])
+            st.dataframe(
+                patrones.head(15).rename(
+                    columns={
+                        "Incidencias": "Incidencias reportadas",
+                        "Pedidos_Totales": "Pedidos totales",
+                        "Tasa_Incidencia_pct": "Tasa incidencia (%)",
+                        "Monto_Devuelto": "Monto devuelto",
+                    }
+                ),
+                use_container_width=True,
+            )
+
+            st.markdown("#### 💸 Monto devuelto por área y responsable")
+            col_montos_1, col_montos_2 = st.columns(2)
+            with col_montos_1:
+                monto_area = (
+                    df_metricas.groupby("Area_Responsable_norm")["Monto_Devuelto_num"]
+                    .sum()
+                    .sort_values(ascending=False)
+                    .head(10)
+                )
+                st.bar_chart(monto_area)
+            with col_montos_2:
+                monto_resp = (
+                    df_metricas.groupby("Nombre_Responsable_norm")["Monto_Devuelto_num"]
+                    .sum()
+                    .sort_values(ascending=False)
+                    .head(10)
+                )
+                st.bar_chart(monto_resp)
 
             st.markdown("#### 📆 Tendencia mensual de errores")
             serie_mensual = (
