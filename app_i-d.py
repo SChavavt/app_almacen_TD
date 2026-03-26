@@ -4726,7 +4726,7 @@ if selected_tab == 0:
     toggle_label = (
         "🔼 Ocultar revisado de pedidos"
         if st.session_state[historial_expander_key]
-        else "🔽 Mostrar revisado de pedidos"
+        else "🔽 Mostrar todos"
     )
     if st.button(toggle_label, key="dashboard_historial_expander_toggle"):
         st.session_state[historial_expander_key] = not st.session_state[historial_expander_key]
@@ -4987,7 +4987,7 @@ if selected_tab == 0:
             "Si necesitas esas métricas, usa este botón para cargar confirmados manualmente."
         )
 
-    if st.button("🔄 Actualizar pedidos confirmados", key="refresh_confirmados_dashboard", use_container_width=True):
+    if st.button("🔄 Actualizar Métricas", key="refresh_confirmados_dashboard", use_container_width=True):
         with st.spinner("Actualizando pedidos_confirmados desde Google Sheets..."):
             refresh_confirmados_cache(GSHEETS_CREDENTIALS, GOOGLE_SHEET_ID, SHEET_CONFIRMADOS)
         st.success("✅ pedidos_confirmados actualizado.")
