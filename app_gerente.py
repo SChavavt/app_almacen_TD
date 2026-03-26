@@ -7064,6 +7064,71 @@ if "organizador" in tab_map:
                 st.info("No se encontraron casos especiales con el criterio de búsqueda proporcionado.")
                 st.stop()
 
+            columnas_tabla = {
+                "ID_Pedido": "Pedido",
+                "Hora_Registro": "Hora Registro",
+                "Vendedor_Registro": "Vendedor Registro",
+                "Cliente": "Cliente",
+                "Folio_Factura": "Folio / Factura",
+                "Numero_Serie": "Número Serie",
+                "Fecha_Compra": "Fecha Compra",
+                "Tipo_Envio": "Tipo Envío",
+                "Estado": "Estado",
+                "Estado_Caso": "Estado Caso",
+                "Seguimiento": "Seguimiento",
+            }
+
+            def formatear_fecha_caso(valor, formato):
+                if pd.isna(valor):
+                    return ""
+                if isinstance(valor, pd.Timestamp):
+                    return valor.strftime(formato)
+                try:
+                    fecha = pd.to_datetime(valor)
+                    if pd.isna(fecha):
+                        return ""
+                    return fecha.strftime(formato)
+                except Exception:
+                    return str(valor)
+
+            tabla_casos = df_casos_filtrado[list(columnas_tabla.keys())].copy()
+            tabla_casos["Hora_Registro"] = tabla_casos["Hora_Registro"].apply(
+                lambda v: formatear_fecha_caso(v, "%d/%m/%Y %H:%M")
+            )
+            tabla_casos["Fecha_Compra"] = tabla_casos["Fecha_Compra"].apply(
+                lambda v: formatear_fecha_caso(v, "%d/%m/%Y") if str(v).strip() else ""
+            )
+            tabla_casos = tabla_casos.rename(columns=columnas_tabla)
+            st.dataframe(tabla_casos, use_container_width=True)
+
+            opciones_select = [None] + df_casos_filtrado.index.tolist()
+
+            def format_caso(idx):
+                if idx is None:
+                    return "Selecciona un caso especial"
+                row = df_casos_filtrado.loc[idx]
+                hora = formatear_fecha_caso(row.get("Hora_Registro"), "%d/%m/%Y %H:%M")
+                estado = row.get("Estado_Caso") or row.get("Estado") or ""
+                return (
+                    f"📦 {row.get('ID_Pedido', '')} | 🧾 {row.get('Folio_Factura', '')} | "
+                    f"👤 {row.get('Cliente', '')} | 🚚 {row.get('Tipo_Envio', '')} | "
+                    f"🔍 {estado} | 🕒 {hora}"
+                )
+
+            idx_caso = st.selectbox(
+                "Selecciona un caso especial para ver detalles o modificarlo:",
+                opciones_select,
+                format_func=format_caso,
+                key="organizador_select_caso_especial",
+            )
+
+            if idx_caso is None or idx_caso not in df_casos_filtrado.index:
+                st.info("Selecciona un caso especial para ver detalles o modificarlo.")
+            else:
+                row_caso = df_casos_filtrado.loc[idx_caso]
+                st.markdown("#### 📘 Detalles del caso especial seleccionado")
+                render_caso_especial(preparar_resultado_caso(row_caso))
+
             # Descarga Excel (sobre el filtrado visible para facilitar análisis puntual).
             buffer_casos = BytesIO()
             with pd.ExcelWriter(
@@ -7141,84 +7206,6 @@ if "organizador" in tab_map:
                 st.info("Aún no hay suficientes fechas válidas para mostrar tendencia mensual.")
             else:
                 st.line_chart(serie_mensual)
-
-            columnas_tabla = {
-                "ID_Pedido": "Pedido",
-                "Hora_Registro": "Hora Registro",
-                "Vendedor_Registro": "Vendedor Registro",
-                "Cliente": "Cliente",
-                "Folio_Factura": "Folio / Factura",
-                "Numero_Serie": "Número Serie",
-                "Fecha_Compra": "Fecha Compra",
-                "Tipo_Envio": "Tipo Envío",
-                "Estado": "Estado",
-                "Estado_Caso": "Estado Caso",
-                "Seguimiento": "Seguimiento",
-            }
-
-            def formatear_fecha_caso(valor, formato):
-                if pd.isna(valor):
-                    return ""
-                if isinstance(valor, pd.Timestamp):
-                    return valor.strftime(formato)
-                try:
-                    fecha = pd.to_datetime(valor)
-                    if pd.isna(fecha):
-                        return ""
-                    return fecha.strftime(formato)
-                except Exception:
-                    return str(valor)
-
-            tabla_casos = df_casos_filtrado[list(columnas_tabla.keys())].copy()
-            tabla_casos["Hora_Registro"] = tabla_casos["Hora_Registro"].apply(
-                lambda v: formatear_fecha_caso(v, "%d/%m/%Y %H:%M")
-            )
-            tabla_casos["Fecha_Compra"] = tabla_casos["Fecha_Compra"].apply(
-                lambda v: formatear_fecha_caso(v, "%d/%m/%Y") if str(v).strip() else ""
-            )
-            tabla_casos = tabla_casos.rename(columns=columnas_tabla)
-            st.dataframe(tabla_casos, use_container_width=True)
-
-            opciones_select = [None] + df_casos_filtrado.index.tolist()
-
-            def format_caso(idx):
-                if idx is None:
-                    return "Selecciona un caso especial"
-                row = df_casos_filtrado.loc[idx]
-                hora = formatear_fecha_caso(row.get("Hora_Registro"), "%d/%m/%Y %H:%M")
-                estado = row.get("Estado_Caso") or row.get("Estado") or ""
-                return (
-                    f"📦 {row.get('ID_Pedido', '')} | 🧾 {row.get('Folio_Factura', '')} | "
-                    f"👤 {row.get('Cliente', '')} | 🚚 {row.get('Tipo_Envio', '')} | "
-                    f"🔍 {estado} | 🕒 {hora}"
-                )
-
-            idx_caso = st.selectbox(
-                "Selecciona un caso especial para ver detalles o modificarlo:",
-                opciones_select,
-                format_func=format_caso,
-                key="organizador_select_caso_especial",
-            )
-
-            if idx_caso is None or idx_caso not in df_casos_filtrado.index:
-                st.info("Selecciona un caso especial para ver detalles o modificarlo.")
-                st.stop()
-
-            row_caso = df_casos_filtrado.loc[idx_caso]
-            st.markdown("#### 📘 Detalles del caso especial seleccionado")
-            c1, c2 = st.columns(2)
-            with c1:
-                st.markdown(f"**📦 Pedido:** {row_caso.get('ID_Pedido', '')}")
-                st.markdown(f"**👤 Cliente:** {row_caso.get('Cliente', '')}")
-                st.markdown(f"**🧾 Folio / Factura:** {row_caso.get('Folio_Factura', '')}")
-                st.markdown(f"**🧑‍💼 Vendedor:** {row_caso.get('Vendedor_Registro', '')}")
-                st.markdown(f"**🕒 Hora registro:** {formatear_fecha_caso(row_caso.get('Hora_Registro'), '%d/%m/%Y %H:%M')}")
-            with c2:
-                st.markdown(f"**🏢 Área responsable:** {row_caso.get('Area_Responsable', '')}")
-                st.markdown(f"**👥 Responsable:** {row_caso.get('Nombre_Responsable', '')}")
-                st.markdown(f"**📊 Estado:** {row_caso.get('Estado', '')}")
-                st.markdown(f"**🧮 Estado caso:** {row_caso.get('Estado_Caso', '')}")
-                st.markdown(f"**🕵️ Seguimiento:** {row_caso.get('Seguimiento', '')}")
 
 
 if "cobranza" in tab_map:
