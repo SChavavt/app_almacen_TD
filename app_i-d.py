@@ -1782,52 +1782,36 @@ def render_auto_list(
             display_number = e.get("display_num", fallback_number)
         number_label = f"#{display_number}" if display_number is not None else "—"
         chips = []
-
-        # Chips principales (máx 3)
-        for b in (e.get("badges", []) or [])[:3]:
+        for b in (e.get("badges", []) or [])[:2]:
             bb = sanitize_text(b)
             if bb:
-                chips.append(f"<span class='chip'>{bb}</span>")
-
-        # Detalles (máx 1)
+                chips.append(bb)
         details = e.get("details", []) or []
         if details:
             d0 = sanitize_text(details[0])
             if d0:
-                chips.append(f"<span class='chip'>{d0}</span>")
-
-        # ⚠️ Marca “Sin fecha”
-        dt_ent = e.get("fecha_entrega_dt")
-        try:
-            is_missing = (dt_ent is None) or pd.isna(dt_ent)
-        except Exception:
-            is_missing = (dt_ent is None)
-        if is_missing:
-            chips.insert(0, "<span class='chip'>⚠️ Sin Fecha_Entrega</span>")
-
-        # 📅 Fecha de entrega visible (si existe)
-        fecha_txt = sanitize_text(e.get("fecha", ""))
-        if fecha_txt:
-            chips.insert(0, f"<span class='chip'>📅 {fecha_txt}</span>")
-
-
-        chips_html = (
-            f"<div class='board-meta'>{''.join(chips)}"
-            f"<span class='board-status'>{sanitize_text(e.get('estado',''))}</span></div>"
-        )
+                chips.append(d0)
+        resumen_tipo = " • ".join(chips) if chips else "—"
+        estado_html = f"<span class='board-status'>{sanitize_text(e.get('estado',''))}</span>"
 
         surtidor = sanitize_text(e.get("surtidor", ""))
         surtidor_html = (
             f"<span class='surtidor-tag'>{surtidor}</span>" if surtidor else ""
         )
+        cliente_html = f"{e.get('cliente','—')}{surtidor_html}"
+        vendedor = sanitize_text(e.get("vendedor", "")) or "—"
+        hora = sanitize_text(e.get("hora", "")) or "—"
+        fecha = sanitize_text(e.get("fecha", "")) or "—"
         rows_html.append(
             f"""
             <tr class='board-row'>
               <td class='board-n'>{number_label}</td>
-              <td class='board-main'>
-                <div class='board-client'>{e.get('cliente','—')}{surtidor_html}</div>
-                {chips_html}
-              </td>
+              <td class='board-hour'>{hora}</td>
+              <td class='board-client'>{cliente_html}</td>
+              <td class='board-vendedor'>{vendedor}</td>
+              <td class='board-tipo'>{resumen_tipo}</td>
+              <td class='board-date'>{fecha}</td>
+              <td class='board-state'>{estado_html}</td>
             </tr>
             """
         )
@@ -1848,7 +1832,7 @@ def render_auto_list(
         else ""
     )
 
-    row_height_px = 44
+    row_height_px = 38
     title_height_px = 58 if show_header else 10
     min_content = 140 if show_header else 100
     safety_padding_px = 24
@@ -1859,25 +1843,40 @@ def render_auto_list(
 
     html = f"""
     <style>
-    .board-col{{flex:1;background:rgba(18,18,20,0.92);border-radius:0.9rem;padding:0.55rem 0.7rem;box-shadow:0 2px 12px rgba(0,0,0,0.25);height:100%;font-family:"Source Sans Pro", sans-serif;}}
-    .board-title{{display:flex;justify-content:space-between;align-items:center;gap:0.6rem;margin-bottom:0.45rem;font-weight:600;font-size:1.03rem;color:#fff;letter-spacing:0.01em;}}
-    .board-sub{{font-size:0.73rem;opacity:0.8;font-weight:500;}}
+    .board-col{{flex:1;background:rgba(18,18,20,0.92);border-radius:0.9rem;padding:0.55rem 0.68rem;box-shadow:0 2px 12px rgba(0,0,0,0.25);height:100%;font-family:"Source Sans Pro", sans-serif;}}
+    .board-title{{display:flex;justify-content:space-between;align-items:center;gap:0.6rem;margin-bottom:0.4rem;font-weight:600;font-size:1.01rem;color:#fff;letter-spacing:0.01em;}}
+    .board-sub{{font-size:0.72rem;opacity:0.8;font-weight:500;}}
     .board-table{{width:100%;border-collapse:collapse;table-layout:fixed;}}
-    .board-row{{border-top:1px solid rgba(255,255,255,0.08);}}
+    .board-head th{{font-size:0.67rem;letter-spacing:0.02em;text-transform:uppercase;color:rgba(255,255,255,.74);font-weight:650;padding:0.16rem 0.18rem;border-bottom:1px solid rgba(255,255,255,0.18);text-align:left;}}
+    .board-row{{border-top:1px solid rgba(255,255,255,0.09);}}
     .board-row:first-child{{border-top:none;}}
-    .board-n{{width:2.3rem;font-size:0.95rem;font-weight:600;padding:0.15rem 0.12rem;opacity:0.95;vertical-align:top;white-space:nowrap;color:#fff;}}
-    .board-main{{padding:0.18rem 0.15rem;vertical-align:top;}}
-    .board-client{{font-size:0.84rem;font-weight:500;line-height:1.05rem;color:#fff;word-break:break-word;display:flex;align-items:center;gap:0.3rem;flex-wrap:wrap;}}
-    .surtidor-tag{{margin-left:0.2rem;padding:0.08rem 0.36rem;border-radius:0.7rem;background:rgba(114,190,255,0.18);color:#a9dcff;font-weight:600;font-size:0.68rem;white-space:nowrap;}}
-    .board-meta{{margin-top:0.08rem;display:flex;flex-wrap:wrap;gap:0.2rem;font-size:0.66rem;opacity:0.85;font-weight:500;align-items:center;color:#fff;line-height:1rem;}}
-    .chip{{padding:0.04rem 0.34rem;border-radius:0.55rem;background:rgba(255,255,255,0.10);white-space:nowrap;}}
-    .board-status{{margin-left:auto;font-size:0.7rem;font-weight:600;white-space:nowrap;opacity:0.95;}}
+    .board-row td{{padding:0.18rem 0.18rem;vertical-align:middle;font-size:0.76rem;color:#fff;line-height:1.05rem;}}
+    .board-n{{width:2.6rem;font-size:0.85rem;font-weight:700;white-space:nowrap;color:#fff;}}
+    .board-hour{{width:4.2rem;white-space:nowrap;color:rgba(255,255,255,.92);}}
+    .board-client{{width:33%;font-weight:560;display:flex;align-items:center;gap:0.25rem;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}}
+    .board-vendedor{{width:22%;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:rgba(255,255,255,.92);}}
+    .board-tipo{{width:18%;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:rgba(255,255,255,.84);}}
+    .board-date{{width:5.1rem;white-space:nowrap;}}
+    .board-state{{width:7.4rem;text-align:left;}}
+    .board-status{{font-size:0.68rem;font-weight:700;white-space:nowrap;opacity:0.97;padding:0.05rem 0.36rem;border-radius:0.56rem;background:rgba(255,255,255,0.12);}}
+    .surtidor-tag{{margin-left:0.1rem;padding:0.07rem 0.34rem;border-radius:0.7rem;background:rgba(114,190,255,0.18);color:#a9dcff;font-weight:650;font-size:0.66rem;white-space:nowrap;}}
     #{list_id} .board-scroll{{max-height:none;overflow:visible;position:relative;}}
     </style>
     <div class="board-col" id="{list_id}">
     {header_html}
     <div class="{scroll_class}">
         <table class="board-table">
+            <thead class="board-head">
+                <tr>
+                    <th>#</th>
+                    <th>Hora</th>
+                    <th>Cliente / Folio</th>
+                    <th>Vendedor</th>
+                    <th>Tipo</th>
+                    <th>Fecha</th>
+                    <th>Estado</th>
+                </tr>
+            </thead>
             {''.join(rows_html)}
         </table>
     </div>
