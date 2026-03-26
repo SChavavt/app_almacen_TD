@@ -155,7 +155,8 @@ with col_update:
     st.markdown(f'<div class="header-meta">🕒 Última actualización: {current_time}</div>', unsafe_allow_html=True)
 with col_actions:
     if st.button("🔄 Refrescar ahora", use_container_width=True):
-        st.cache_data.clear()
+        # Se ejecuta más adelante cuando ya están definidas las funciones de carga.
+        st.session_state["_pending_full_refresh"] = True
         st.rerun()
 
 # CSS tabla compacta
@@ -3018,6 +3019,13 @@ def refresh_confirmados_cache(
     return load_confirmados_from_gsheets(credentials_dict, sheet_id, sheet_name)
 
 
+def refresh_dashboard_sources() -> None:
+    """Actualiza en bloque los orígenes que alimentan dashboard (flujo + confirmados)."""
+    load_data_from_gsheets.clear()
+    load_casos_from_gsheets.clear()
+    refresh_confirmados_cache(GSHEETS_CREDENTIALS, GOOGLE_SHEET_ID, SHEET_CONFIRMADOS)
+
+
 def _clean_cliente_name(x: str) -> str:
     x = sanitize_text(str(x)).upper()
     x = unicodedata.normalize("NFKD", x)
@@ -4286,11 +4294,17 @@ if selected_tab == 4:
 
 
 if selected_tab == 0:
+    if st.session_state.pop("_pending_full_refresh", False):
+        refresh_dashboard_sources()
+
     st_autorefresh(interval=60000, key="auto_refresh_dashboard")
 
-    st.caption("📦 pedidos_confirmados se consulta solo bajo demanda; en autorefresh se usa caché local.")
+    st.caption("📦 pedidos_confirmados usa caché local y, si no existe, se intenta cargar automáticamente.")
 
     df_conf = get_cached_confirmados_df(SHEET_CONFIRMADOS)
+    if df_conf.empty:
+        with st.spinner("Cargando pedidos_confirmados para completar métricas y vendedores..."):
+            df_conf = refresh_confirmados_cache(GSHEETS_CREDENTIALS, GOOGLE_SHEET_ID, SHEET_CONFIRMADOS)
     hoy = pd.Timestamp.now()
     confirmados_cache_missing = df_conf.empty
     if confirmados_cache_missing:
@@ -4588,7 +4602,7 @@ if selected_tab == 0:
         )
     with button_col:
         if st.button("🔄 Actualizar lista", key="manual_refresh_ultimos_pedidos", use_container_width=True):
-            load_data_from_gsheets.clear()
+            refresh_dashboard_sources()
             st.rerun()
 
     ultimos_filtrados = build_ultimos_pedidos(df_all, vendedor_sel)
