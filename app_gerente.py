@@ -4883,7 +4883,7 @@ if "modificar" in tab_map:
                     )
 
                 idx_garantia = st.selectbox(
-                    "Selecciona un caso especial para ver detalles o modificarlo:",
+                    "Selecciona un caso especial para ver detalles:",
                     opciones_select,
                     format_func=format_garantia,
                     key="select_caso_especial",
@@ -5015,7 +5015,7 @@ if "modificar" in tab_map:
                     pedido_sel = None
                     source_sel = None
                     sheet_row_sel = None
-                    st.info("Selecciona un caso especial para ver detalles o modificarlo.")
+                    st.info("Selecciona un caso especial para ver detalles.")
                     st.stop()
 
 
