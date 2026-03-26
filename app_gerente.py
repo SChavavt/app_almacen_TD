@@ -2806,6 +2806,44 @@ def render_cobranza_tab_gerente():
             if mes_com != "TODOS":
                 venc_cliente = venc_cliente[venc_cliente.get("Mes", "").astype(str) == mes_com].copy()
 
+        folios_liquidados: set[str] = set()
+        if not com_df.empty:
+            com_cliente = com_df[
+                (com_df.get("Codigo", "").astype(str) == codigo)
+            ].copy()
+            if mes_com != "TODOS":
+                com_cliente = com_cliente[com_cliente.get("Mes", "").astype(str) == mes_com].copy()
+
+            if not com_cliente.empty:
+                com_cliente["_folio_norm"] = com_cliente.get("Folio", "").apply(_cobranza_clean_text)
+                com_cliente["_ts"] = pd.to_datetime(com_cliente.get("Timestamp", ""), errors="coerce")
+                com_cliente["_dia_num"] = pd.to_numeric(com_cliente.get("Dia", ""), errors="coerce")
+                com_cliente["_row_sort"] = pd.to_numeric(
+                    com_cliente.get("__row", com_cliente.get("__row_number__", pd.Series(index=com_cliente.index, dtype="float64"))),
+                    errors="coerce",
+                )
+                com_cliente = com_cliente.sort_values(
+                    ["_folio_norm", "_ts", "_dia_num", "_row_sort"],
+                    ascending=[True, True, True, True],
+                )
+                com_cliente = com_cliente[com_cliente["_folio_norm"].astype(str).str.strip() != ""].copy()
+                if not com_cliente.empty:
+                    ultimos = com_cliente.drop_duplicates(subset=["_folio_norm"], keep="last").copy()
+                    estatus_norm = ultimos.get("Estatus_Seguimiento", "").astype(str).str.upper().str.strip()
+                    comentario_norm = ultimos.get("Comentario", "").astype(str)
+                    mask_liq = (
+                        estatus_norm.isin({"LIQUIDADO", "PAGO_COMPLETO", "PAGADO", "CERRADO"})
+                        | comentario_norm.apply(_cobranza_es_pago_completo)
+                    )
+                    folios_liquidados = set(
+                        ultimos.loc[mask_liq, "_folio_norm"].astype(str).str.strip().tolist()
+                    )
+
+        if not venc_cliente.empty and "Folio" in venc_cliente.columns and folios_liquidados:
+            venc_cliente["_folio_norm"] = venc_cliente["Folio"].apply(_cobranza_clean_text)
+            venc_cliente = venc_cliente[~venc_cliente["_folio_norm"].isin(folios_liquidados)].copy()
+            venc_cliente = venc_cliente.drop(columns=["_folio_norm"], errors="ignore")
+
         dias_venc = []
         if not venc_cliente.empty and "Fecha_Vencimiento" in venc_cliente.columns:
             fechas_venc = pd.to_datetime(venc_cliente["Fecha_Vencimiento"], errors="coerce")
@@ -3700,6 +3738,19 @@ def render_seguimiento_cobranza_tab_gerente(usuario_actual: str | None):
     if mes_sel != "Todos":
         seg = seg[seg.get("Mes_Operativo", "").astype(str) == mes_sel].copy()
 
+    if not seg.empty:
+        # Consolida al último registro por cliente+folio ANTES de filtrar promesas activas.
+        # Así evitamos mostrar como "activo" un folio que ya quedó liquidado/cerrado
+        # en una actualización posterior.
+        seg["_ts"] = pd.to_datetime(seg.get("Timestamp", ""), errors="coerce")
+        seg["_dia_num"] = pd.to_numeric(seg.get("Dia", ""), errors="coerce")
+        seg["_row_sort"] = pd.to_numeric(
+            seg.get("__row", seg.get("__row_number__", pd.Series(index=seg.index, dtype="float64"))),
+            errors="coerce",
+        )
+        seg = seg.sort_values(["Codigo", "Folio", "_ts", "_dia_num", "_row_sort"], ascending=[True, True, True, True, True])
+        seg = seg.drop_duplicates(subset=["Codigo", "Folio"], keep="last").copy()
+
     fecha_series_raw = seg["Fecha_Proximo_Pago"] if "Fecha_Proximo_Pago" in seg.columns else pd.Series("", index=seg.index, dtype="string")
     fecha_series = pd.to_datetime(fecha_series_raw, errors="coerce")
     seg["Fecha_Proximo_Pago"] = fecha_series
@@ -3721,11 +3772,7 @@ def render_seguimiento_cobranza_tab_gerente(usuario_actual: str | None):
     seg = seg[mask_seg].copy()
 
     if not seg.empty:
-        seg["_ts"] = pd.to_datetime(seg.get("Timestamp", ""), errors="coerce")
-        seg["_dia_num"] = pd.to_numeric(seg.get("Dia", ""), errors="coerce")
-        seg = seg.sort_values(["Codigo", "Folio", "_ts", "_dia_num"], ascending=[True, True, True, True])
-        seg = seg.drop_duplicates(subset=["Codigo", "Folio"], keep="last").copy()
-        seg = seg.drop(columns=[c for c in ["_ts", "_dia_num"] if c in seg.columns], errors="ignore")
+        seg = seg.drop(columns=[c for c in ["_ts", "_dia_num", "_row_sort"] if c in seg.columns], errors="ignore")
 
     if seg.empty:
         st.caption("Sin promesas de pago con fecha pendiente.")
