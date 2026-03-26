@@ -5431,7 +5431,7 @@ if "organizador" in tab_map:
             st.rerun()
 
         # --- Subpestañas internas del organizador ---
-        sub = st.tabs(["📌 Hoy", "🗓️ Agenda", "✅ Pendientes", "💼 Cotizaciones", "📋 Checklist"])
+        sub = st.tabs(["📌 Hoy", "🗓️ Agenda", "✅ Pendientes", "💼 Cotizaciones", "📋 Checklist", "🛡️ Casos especiales"])
 
         errores_alejandro = []
 
@@ -6903,6 +6903,7 @@ if "organizador" in tab_map:
                     chk_key = f"chk_done_{item_key}"
                     if _to_bool(st.session_state.get(chk_key, comp)):
                         done_chk += 1
+
             total_chk = len(chk_hoy_edit)
             pct_chk = (done_chk / total_chk * 100) if total_chk else 0
             st.metric("✅ Cumplimiento hoy", f"{pct_chk:.0f}%")
@@ -7027,6 +7028,197 @@ if "organizador" in tab_map:
                         st.error(f"❌ No se pudieron eliminar los ítems: {e}")
             else:
                 st.info("No hay ítems en plantilla para eliminar.")
+
+
+        with sub[5]:
+            st.subheader("🛡️ Casos especiales registrados")
+
+            df_casos_org = cargar_casos_especiales().copy()
+            if df_casos_org.empty:
+                st.info("No hay casos especiales registrados.")
+                st.stop()
+
+            st.caption("Buscar por cliente o folio")
+            termino_busqueda = st.text_input(
+                "Cliente o folio",
+                key="organizador_casos_busqueda",
+                placeholder="Cliente o folio",
+            )
+
+            termino_normalizado = normalizar(termino_busqueda or "")
+            termino_folio = normalizar_folio(termino_busqueda) if termino_busqueda else ""
+
+            if termino_normalizado:
+                def coincide_caso(row):
+                    cliente = normalizar(str(row.get("Cliente", "")))
+                    folio = normalizar_folio(
+                        row.get("Folio_Factura") or row.get("Folio_Factura_Error") or ""
+                    )
+                    return termino_normalizado in cliente or (termino_folio and termino_folio in folio)
+
+                df_casos_filtrado = df_casos_org[df_casos_org.apply(coincide_caso, axis=1)].copy()
+            else:
+                df_casos_filtrado = df_casos_org.copy()
+
+            if df_casos_filtrado.empty:
+                st.info("No se encontraron casos especiales con el criterio de búsqueda proporcionado.")
+                st.stop()
+
+            # Descarga Excel (sobre el filtrado visible para facilitar análisis puntual).
+            buffer_casos = BytesIO()
+            with pd.ExcelWriter(
+                buffer_casos,
+                engine="xlsxwriter",
+                engine_kwargs={"options": {"strings_to_urls": False}},
+            ) as writer:
+                df_casos_filtrado.to_excel(writer, index=False, sheet_name="Casos_especiales")
+            buffer_casos.seek(0)
+
+            st.download_button(
+                label="⬇️ Descargar Excel de casos especiales",
+                data=buffer_casos.getvalue(),
+                file_name=f"casos_especiales_{datetime.now().strftime('%d-%m-%Y')}.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                key="organizador_casos_descarga_excel",
+            )
+
+            # Métricas y gráficas de operación.
+            df_metricas = df_casos_org.copy()
+            df_metricas["Hora_Registro_dt"] = pd.to_datetime(df_metricas.get("Hora_Registro", ""), errors="coerce")
+            estado_caso_norm = df_metricas.get("Estado_Caso", "").astype(str).str.strip().str.lower()
+            estado_general_norm = df_metricas.get("Estado", "").astype(str).str.strip().str.lower()
+            estado_consolidado = estado_caso_norm.where(estado_caso_norm != "", estado_general_norm)
+
+            total_casos = len(df_metricas)
+            casos_cerrados = estado_consolidado.isin(["cerrado", "completado", "resuelto", "finalizado"]).sum()
+            casos_abiertos = max(total_casos - int(casos_cerrados), 0)
+            mes_actual = pd.Timestamp.now().month
+            anio_actual = pd.Timestamp.now().year
+            casos_mes = (
+                (df_metricas["Hora_Registro_dt"].dt.month == mes_actual)
+                & (df_metricas["Hora_Registro_dt"].dt.year == anio_actual)
+            ).sum()
+
+            k1, k2, k3, k4 = st.columns(4)
+            k1.metric("Total casos", int(total_casos))
+            k2.metric("Abiertos", int(casos_abiertos))
+            k3.metric("Cerrados/Completados", int(casos_cerrados))
+            k4.metric("Casos del mes", int(casos_mes))
+
+            col_ch1, col_ch2 = st.columns(2)
+            with col_ch1:
+                st.markdown("#### 👥 Vendedores con más incidencias")
+                serie_vendedores = (
+                    df_metricas.get("Vendedor_Registro", "")
+                    .astype(str)
+                    .str.strip()
+                    .replace("", "Sin vendedor")
+                    .value_counts()
+                    .head(10)
+                )
+                st.bar_chart(serie_vendedores)
+            with col_ch2:
+                st.markdown("#### 🏢 Áreas con más incidencias")
+                serie_areas = (
+                    df_metricas.get("Area_Responsable", "")
+                    .astype(str)
+                    .str.strip()
+                    .replace("", "Sin área")
+                    .value_counts()
+                    .head(10)
+                )
+                st.bar_chart(serie_areas)
+
+            st.markdown("#### 📆 Tendencia mensual de errores")
+            serie_mensual = (
+                df_metricas[df_metricas["Hora_Registro_dt"].notna()]
+                .assign(Mes=df_metricas["Hora_Registro_dt"].dt.to_period("M").astype(str))
+                .groupby("Mes")
+                .size()
+                .sort_index()
+            )
+            if serie_mensual.empty:
+                st.info("Aún no hay suficientes fechas válidas para mostrar tendencia mensual.")
+            else:
+                st.line_chart(serie_mensual)
+
+            columnas_tabla = {
+                "ID_Pedido": "Pedido",
+                "Hora_Registro": "Hora Registro",
+                "Vendedor_Registro": "Vendedor Registro",
+                "Cliente": "Cliente",
+                "Folio_Factura": "Folio / Factura",
+                "Numero_Serie": "Número Serie",
+                "Fecha_Compra": "Fecha Compra",
+                "Tipo_Envio": "Tipo Envío",
+                "Estado": "Estado",
+                "Estado_Caso": "Estado Caso",
+                "Seguimiento": "Seguimiento",
+            }
+
+            def formatear_fecha_caso(valor, formato):
+                if pd.isna(valor):
+                    return ""
+                if isinstance(valor, pd.Timestamp):
+                    return valor.strftime(formato)
+                try:
+                    fecha = pd.to_datetime(valor)
+                    if pd.isna(fecha):
+                        return ""
+                    return fecha.strftime(formato)
+                except Exception:
+                    return str(valor)
+
+            tabla_casos = df_casos_filtrado[list(columnas_tabla.keys())].copy()
+            tabla_casos["Hora_Registro"] = tabla_casos["Hora_Registro"].apply(
+                lambda v: formatear_fecha_caso(v, "%d/%m/%Y %H:%M")
+            )
+            tabla_casos["Fecha_Compra"] = tabla_casos["Fecha_Compra"].apply(
+                lambda v: formatear_fecha_caso(v, "%d/%m/%Y") if str(v).strip() else ""
+            )
+            tabla_casos = tabla_casos.rename(columns=columnas_tabla)
+            st.dataframe(tabla_casos, use_container_width=True)
+
+            opciones_select = [None] + df_casos_filtrado.index.tolist()
+
+            def format_caso(idx):
+                if idx is None:
+                    return "Selecciona un caso especial"
+                row = df_casos_filtrado.loc[idx]
+                hora = formatear_fecha_caso(row.get("Hora_Registro"), "%d/%m/%Y %H:%M")
+                estado = row.get("Estado_Caso") or row.get("Estado") or ""
+                return (
+                    f"📦 {row.get('ID_Pedido', '')} | 🧾 {row.get('Folio_Factura', '')} | "
+                    f"👤 {row.get('Cliente', '')} | 🚚 {row.get('Tipo_Envio', '')} | "
+                    f"🔍 {estado} | 🕒 {hora}"
+                )
+
+            idx_caso = st.selectbox(
+                "Selecciona un caso especial para ver detalles o modificarlo:",
+                opciones_select,
+                format_func=format_caso,
+                key="organizador_select_caso_especial",
+            )
+
+            if idx_caso is None or idx_caso not in df_casos_filtrado.index:
+                st.info("Selecciona un caso especial para ver detalles o modificarlo.")
+                st.stop()
+
+            row_caso = df_casos_filtrado.loc[idx_caso]
+            st.markdown("#### 📘 Detalles del caso especial seleccionado")
+            c1, c2 = st.columns(2)
+            with c1:
+                st.markdown(f"**📦 Pedido:** {row_caso.get('ID_Pedido', '')}")
+                st.markdown(f"**👤 Cliente:** {row_caso.get('Cliente', '')}")
+                st.markdown(f"**🧾 Folio / Factura:** {row_caso.get('Folio_Factura', '')}")
+                st.markdown(f"**🧑‍💼 Vendedor:** {row_caso.get('Vendedor_Registro', '')}")
+                st.markdown(f"**🕒 Hora registro:** {formatear_fecha_caso(row_caso.get('Hora_Registro'), '%d/%m/%Y %H:%M')}")
+            with c2:
+                st.markdown(f"**🏢 Área responsable:** {row_caso.get('Area_Responsable', '')}")
+                st.markdown(f"**👥 Responsable:** {row_caso.get('Nombre_Responsable', '')}")
+                st.markdown(f"**📊 Estado:** {row_caso.get('Estado', '')}")
+                st.markdown(f"**🧮 Estado caso:** {row_caso.get('Estado_Caso', '')}")
+                st.markdown(f"**🕵️ Seguimiento:** {row_caso.get('Seguimiento', '')}")
 
 
 if "cobranza" in tab_map:
