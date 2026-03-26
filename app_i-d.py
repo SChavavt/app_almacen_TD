@@ -156,7 +156,6 @@ with col_update:
 with col_actions:
     if st.button("🔄 Refrescar ahora", use_container_width=True):
         st.cache_data.clear()
-        st.session_state.pop("_cache_pedidos_confirmados_df", None)
         st.rerun()
 
 # CSS tabla compacta
