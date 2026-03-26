@@ -4727,20 +4727,13 @@ if selected_tab == 0:
         "🧾 Revisado de pedidos que viajaron",
         expanded=st.session_state[historial_expander_key],
     ):
-        h_update_col, h_button_col = st.columns([0.75, 0.25])
-        with h_update_col:
-            st.caption(
-                f"🕒 Última actualización: {datetime.now(TZ).strftime('%d/%m %H:%M:%S')} · "
-                "Auto-actualización cada 60 s"
-            )
-        with h_button_col:
-            if st.button(
-                "🔄 Actualizar datos_pedidos",
-                key="manual_refresh_historial_pedidos",
-                use_container_width=True,
-            ):
-                load_historicos_from_gsheets.clear()
-                st.rerun()
+        if st.button(
+            "🔄 Actualizar datos_pedidos",
+            key="manual_refresh_historial_pedidos",
+            use_container_width=True,
+        ):
+            load_historicos_from_gsheets.clear()
+            st.rerun()
 
         historial_df = load_historicos_from_gsheets()
         if historial_df.empty:
