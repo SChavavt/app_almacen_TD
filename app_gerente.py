@@ -7151,8 +7151,6 @@ if "organizador" in tab_map:
             df_metricas = df_casos_org.copy()
             df_metricas["Hora_Registro_dt"] = pd.to_datetime(df_metricas.get("Hora_Registro", ""), errors="coerce")
             estado_caso_norm = df_metricas.get("Estado_Caso", "").astype(str).str.strip().str.lower()
-            estado_general_norm = df_metricas.get("Estado", "").astype(str).str.strip().str.lower()
-            estado_consolidado = estado_caso_norm.where(estado_caso_norm != "", estado_general_norm)
             df_metricas["Monto_Devuelto_num"] = pd.to_numeric(df_metricas.get("Monto_Devuelto", 0), errors="coerce").fillna(0.0)
 
             def normalizar_nombre_persona(valor):
@@ -7165,6 +7163,11 @@ if "organizador" in tab_map:
                 alias = {
                     "robert": "Robert51",
                     "robert51": "Robert51",
+                    "roberto": "Robert51",
+                    "roberto legra": "Robert51",
+                    "distribucion y universidades": "Robert51",
+                    "distribucion": "Robert51",
+                    "universidades": "Robert51",
                     "carolina": "Griselda Carolina",
                     "griselda carolina": "Griselda Carolina",
                     "gloria": "Gloria Michella",
@@ -7195,7 +7198,8 @@ if "organizador" in tab_map:
                 pedidos_por_vendedor = pd.Series(dtype="int64", name="Pedidos_Totales")
 
             total_casos = len(df_metricas)
-            casos_cerrados = estado_consolidado.isin(["cerrado", "completado", "resuelto", "finalizado"]).sum()
+            estados_cerrados = {"aprobada", "aprobado", "cerrado", "completado", "resuelto", "finalizado"}
+            casos_cerrados = estado_caso_norm.isin(estados_cerrados).sum()
             casos_abiertos = max(total_casos - int(casos_cerrados), 0)
             mes_actual = pd.Timestamp.now().month
             anio_actual = pd.Timestamp.now().year
@@ -7284,12 +7288,16 @@ if "organizador" in tab_map:
                 st.bar_chart(monto_area)
             with col_montos_2:
                 monto_resp = (
-                    df_metricas.groupby("Nombre_Responsable_norm")["Monto_Devuelto_num"]
+                    df_metricas[df_metricas["Nombre_Responsable_norm"] != "Sin responsable"]
+                    .groupby("Nombre_Responsable_norm")["Monto_Devuelto_num"]
                     .sum()
                     .sort_values(ascending=False)
                     .head(10)
                 )
-                st.bar_chart(monto_resp)
+                if monto_resp.empty:
+                    st.info("No hay responsables asignados para mostrar en esta gráfica.")
+                else:
+                    st.bar_chart(monto_resp)
 
             st.markdown("#### 📆 Tendencia mensual de errores")
             serie_mensual = (
