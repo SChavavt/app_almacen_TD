@@ -156,6 +156,8 @@ with col_update:
 with col_actions:
     if st.button("🔄 Refrescar ahora", use_container_width=True):
         st.cache_data.clear()
+        st.session_state.pop("_cache_pedidos_confirmados_df", None)
+        st.session_state["_force_dashboard_full_refresh"] = True
         st.rerun()
 
 # CSS tabla compacta
@@ -4289,8 +4291,13 @@ if selected_tab == 0:
     st_autorefresh(interval=60000, key="auto_refresh_dashboard")
 
     st.caption("📦 pedidos_confirmados se consulta solo bajo demanda; en autorefresh se usa caché local.")
-
-    df_conf = get_cached_confirmados_df(SHEET_CONFIRMADOS)
+    force_dashboard_refresh = bool(st.session_state.pop("_force_dashboard_full_refresh", False))
+    if force_dashboard_refresh:
+        load_data_from_gsheets.clear()
+        with st.spinner("Actualizando lista y pedidos_confirmados..."):
+            df_conf = refresh_confirmados_cache(GSHEETS_CREDENTIALS, GOOGLE_SHEET_ID, SHEET_CONFIRMADOS)
+    else:
+        df_conf = get_cached_confirmados_df(SHEET_CONFIRMADOS)
     hoy = pd.Timestamp.now()
     confirmados_cache_missing = df_conf.empty
     if confirmados_cache_missing:
@@ -4324,17 +4331,16 @@ if selected_tab == 0:
                 ]
             )
 
+    vendedores_raw = []
     if not tabla_clientes.empty and "Vendedor" in tabla_clientes.columns:
-        vendedores_raw = tabla_clientes["Vendedor"].dropna().astype(str).unique().tolist()
-    else:
-        vendedores_raw = []
-        for col in ["Vendedor_Registro", "Vendedor"]:
-            if col in df_all.columns:
-                vendedores_raw.extend(df_all[col].dropna().astype(str).unique().tolist())
-        if not vendedores_raw:
-            logged_vendor = get_logged_vendor()
-            if logged_vendor:
-                vendedores_raw = [logged_vendor]
+        vendedores_raw.extend(tabla_clientes["Vendedor"].dropna().astype(str).unique().tolist())
+    for col in ["Vendedor_Registro", "Vendedor"]:
+        if col in df_all.columns:
+            vendedores_raw.extend(df_all[col].dropna().astype(str).unique().tolist())
+    if not vendedores_raw:
+        logged_vendor = get_logged_vendor()
+        if logged_vendor:
+            vendedores_raw = [logged_vendor]
 
     _vendedores = sorted({sanitize_text(v) for v in vendedores_raw if sanitize_text(v)})
 
