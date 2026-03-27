@@ -4800,6 +4800,37 @@ if "modificar" in tab_map:
                 key="busqueda_casos_especiales",
                 placeholder="Cliente o folio",
             )
+            filtro_tipo_envio_garantia = st.multiselect(
+                "Filtrar por tipo de envío",
+                options=sorted(
+                    {
+                        str(v).strip()
+                        for v in df_garantias.get("Tipo_Envio", pd.Series(dtype="object"))
+                        if str(v).strip()
+                    }
+                ),
+                placeholder="Ej. Devolución, Garantía",
+                key="filtro_tipo_envio_casos_especiales",
+            )
+            modo_fecha_garantia = st.selectbox(
+                "Filtro de fecha de compra",
+                options=["Todas", "Fecha específica", "Rango de fechas"],
+                key="filtro_fecha_modo_casos_especiales",
+            )
+
+            fecha_especifica_garantia = None
+            rango_fechas_garantia = ()
+            if modo_fecha_garantia == "Fecha específica":
+                fecha_especifica_garantia = st.date_input(
+                    "Fecha específica",
+                    key="filtro_fecha_unica_casos_especiales",
+                )
+            elif modo_fecha_garantia == "Rango de fechas":
+                rango_fechas_garantia = st.date_input(
+                    "Rango de fechas",
+                    value=(),
+                    key="filtro_fecha_rango_casos_especiales",
+                )
 
             termino_normalizado = normalizar(termino_busqueda_garantia or "")
             termino_folio = (
@@ -4807,6 +4838,8 @@ if "modificar" in tab_map:
                 if termino_busqueda_garantia
                 else ""
             )
+
+            df_garantias_filtrado = df_garantias.copy()
 
             if termino_normalizado:
 
@@ -4819,11 +4852,28 @@ if "modificar" in tab_map:
                         termino_folio and termino_folio in folio
                     )
 
-                df_garantias_filtrado = df_garantias[
-                    df_garantias.apply(coincide_garantia, axis=1)
+                df_garantias_filtrado = df_garantias_filtrado[
+                    df_garantias_filtrado.apply(coincide_garantia, axis=1)
                 ]
-            else:
-                df_garantias_filtrado = df_garantias
+
+            if filtro_tipo_envio_garantia:
+                tipo_envio_normalizado = {normalizar(t) for t in filtro_tipo_envio_garantia}
+                df_garantias_filtrado = df_garantias_filtrado[
+                    df_garantias_filtrado["Tipo_Envio"].astype(str).apply(normalizar).isin(tipo_envio_normalizado)
+                ]
+
+            fechas_compra = pd.to_datetime(
+                df_garantias_filtrado.get("Fecha_Compra", pd.Series(dtype="object")),
+                errors="coerce",
+            ).dt.date
+            if modo_fecha_garantia == "Fecha específica" and fecha_especifica_garantia:
+                df_garantias_filtrado = df_garantias_filtrado[fechas_compra == fecha_especifica_garantia]
+            elif modo_fecha_garantia == "Rango de fechas" and len(rango_fechas_garantia) == 2:
+                inicio, fin = rango_fechas_garantia
+                if inicio and fin:
+                    df_garantias_filtrado = df_garantias_filtrado[
+                        (fechas_compra >= inicio) & (fechas_compra <= fin)
+                    ]
 
             if df_garantias_filtrado.empty:
                 st.info(
@@ -7046,9 +7096,41 @@ if "organizador" in tab_map:
                 key="organizador_casos_busqueda",
                 placeholder="Cliente o folio",
             )
+            filtro_tipo_envio = st.multiselect(
+                "Filtrar por tipo de envío",
+                options=sorted(
+                    {
+                        str(v).strip()
+                        for v in df_casos_org.get("Tipo_Envio", pd.Series(dtype="object"))
+                        if str(v).strip()
+                    }
+                ),
+                placeholder="Ej. Devolución, Garantía",
+                key="organizador_casos_tipo_envio",
+            )
+            modo_fecha = st.selectbox(
+                "Filtro de fecha de compra",
+                options=["Todas", "Fecha específica", "Rango de fechas"],
+                key="organizador_casos_modo_fecha",
+            )
+
+            fecha_especifica = None
+            rango_fechas = ()
+            if modo_fecha == "Fecha específica":
+                fecha_especifica = st.date_input(
+                    "Fecha específica",
+                    key="organizador_casos_fecha_unica",
+                )
+            elif modo_fecha == "Rango de fechas":
+                rango_fechas = st.date_input(
+                    "Rango de fechas",
+                    value=(),
+                    key="organizador_casos_fecha_rango",
+                )
 
             termino_normalizado = normalizar(termino_busqueda or "")
             termino_folio = normalizar_folio(termino_busqueda) if termino_busqueda else ""
+            df_casos_filtrado = df_casos_org.copy()
 
             if termino_normalizado:
                 def coincide_caso(row):
@@ -7058,9 +7140,26 @@ if "organizador" in tab_map:
                     )
                     return termino_normalizado in cliente or (termino_folio and termino_folio in folio)
 
-                df_casos_filtrado = df_casos_org[df_casos_org.apply(coincide_caso, axis=1)].copy()
-            else:
-                df_casos_filtrado = df_casos_org.copy()
+                df_casos_filtrado = df_casos_filtrado[df_casos_filtrado.apply(coincide_caso, axis=1)].copy()
+
+            if filtro_tipo_envio:
+                tipo_envio_normalizado = {normalizar(t) for t in filtro_tipo_envio}
+                df_casos_filtrado = df_casos_filtrado[
+                    df_casos_filtrado["Tipo_Envio"].astype(str).apply(normalizar).isin(tipo_envio_normalizado)
+                ]
+
+            fechas_compra = pd.to_datetime(
+                df_casos_filtrado.get("Fecha_Compra", pd.Series(dtype="object")),
+                errors="coerce",
+            ).dt.date
+            if modo_fecha == "Fecha específica" and fecha_especifica:
+                df_casos_filtrado = df_casos_filtrado[fechas_compra == fecha_especifica]
+            elif modo_fecha == "Rango de fechas" and len(rango_fechas) == 2:
+                inicio, fin = rango_fechas
+                if inicio and fin:
+                    df_casos_filtrado = df_casos_filtrado[
+                        (fechas_compra >= inicio) & (fechas_compra <= fin)
+                    ]
 
             if df_casos_filtrado.empty:
                 st.info("No se encontraron casos especiales con el criterio de búsqueda proporcionado.")
