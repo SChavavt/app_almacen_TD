@@ -7237,7 +7237,7 @@ if "organizador" in tab_map:
                         df_vendedor_mes.get("Resultado_Esperado", "").astype(str).str.strip().replace("", "Sin resultado")
                     )
                     df_vendedor_mes["Responsable_Detalle"] = df_vendedor_mes["Nombre_Responsable_norm"].astype(str)
-                    df_vendedor_mes["Tipo_Caso_norm"] = df_vendedor_mes.get("Tipo_Caso", "").astype(str).apply(normalizar)
+                    df_vendedor_mes["Tipo_Envio_norm"] = df_vendedor_mes.get("Tipo_Envio", "").astype(str).apply(normalizar)
                     df_vendedor_mes["ID_Vendedor_Caso"] = (
                         df_vendedor_mes.get("id_vendedor", "")
                         .astype(str)
@@ -7261,8 +7261,8 @@ if "organizador" in tab_map:
                     )
 
                     df_mes_sel = df_vendedor_mes[df_vendedor_mes["Mes_Period"] == mes_sel_period].copy()
-                    devoluciones_mes = df_mes_sel["Tipo_Caso_norm"].str.contains("devol", na=False).sum()
-                    garantias_mes = df_mes_sel["Tipo_Caso_norm"].str.contains("garantia", na=False).sum()
+                    devoluciones_mes = df_mes_sel["Tipo_Envio_norm"].str.contains("devol", na=False).sum()
+                    garantias_mes = df_mes_sel["Tipo_Envio_norm"].str.contains("garantia", na=False).sum()
                     monto_mes = float(df_mes_sel["Monto_Devuelto_num"].sum())
 
                     m1, m2, m3, m4 = st.columns(4)
@@ -7292,12 +7292,13 @@ if "organizador" in tab_map:
 
                     st.markdown("#### 📋 Lista del mes seleccionado")
                     columnas_mes = [
-                        "ID_Pedido",
                         "Hora_Registro_dt",
                         "ID_Vendedor_Caso",
                         "Vendedor_Registro_norm",
                         "Responsable_Detalle",
-                        "Tipo_Caso",
+                        "Estado_Caso",
+                        "Tipo_Envio",
+                        "Tipo_Envio_Original",
                         "Monto_Devuelto_num",
                         "Resultado_Esperado_txt",
                         "Cliente",
@@ -7312,12 +7313,13 @@ if "organizador" in tab_map:
 
                     detalle_mes = detalle_mes.rename(
                         columns={
-                            "ID_Pedido": "Pedido",
                             "Hora_Registro_dt": "Fecha registro",
                             "ID_Vendedor_Caso": "ID vendedor",
                             "Vendedor_Registro_norm": "Vendedor (registro)",
                             "Responsable_Detalle": "Nombre responsable",
-                            "Tipo_Caso": "Tipo caso",
+                            "Estado_Caso": "Estado caso",
+                            "Tipo_Envio": "Tipo envío",
+                            "Tipo_Envio_Original": "Tipo envío original",
                             "Monto_Devuelto_num": "Monto devuelto",
                             "Resultado_Esperado_txt": "Resultado esperado",
                             "Cliente": "Cliente",
