@@ -1,6 +1,8 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
+import plotly.express as px
+import plotly.graph_objects as go
 import boto3
 import gspread
 import pdfplumber
@@ -7272,23 +7274,81 @@ if "organizador" in tab_map:
                     m4.metric("Monto total devuelto", f"${monto_mes:,.2f}")
 
                     st.markdown("#### 📈 Incidencias y monto por mes (histórico vendedor)")
-                    c_hist_1, c_hist_2 = st.columns(2)
-                    with c_hist_1:
-                        incidencias_mensuales = (
-                            df_vendedor_mes.groupby("Mes")
-                            .size()
-                            .rename("Incidencias")
-                            .sort_index()
+
+                    # Normalización robusta para atribuir correctamente el vendedor responsable del error.
+                    nombre_responsable = (
+                        df_vendedor_mes.get("Nombre_Responsable", df_vendedor_mes.get("Nombre_Responsable_norm", ""))
+                        .astype(str)
+                        .str.strip()
+                        .replace("", pd.NA)
+                    )
+                    vendedor_registro = (
+                        df_vendedor_mes.get("Vendedor_Registro", df_vendedor_mes.get("Vendedor_Registro_norm", ""))
+                        .astype(str)
+                        .str.strip()
+                        .replace("", pd.NA)
+                    )
+                    id_vendedor = (
+                        df_vendedor_mes.get("ID vendedor", df_vendedor_mes.get("ID_Vendedor_Caso", ""))
+                        .astype(str)
+                        .str.strip()
+                        .replace("", pd.NA)
+                    )
+                    df_vendedor_mes["Vendedor_Responsable"] = (
+                        nombre_responsable.fillna(vendedor_registro).fillna(id_vendedor).fillna("Sin vendedor")
+                    )
+
+                    # Se elimina la gráfica combinada superior por solicitud de UX.
+                    # Conservamos únicamente la dispersión por vendedor.
+
+                    # Gráfica 2: dispersión por vendedor (frecuencia vs impacto económico).
+                    resumen_vendedor = (
+                        df_vendedor_mes.groupby("Vendedor_Responsable", as_index=False)
+                        .agg(
+                            incidencias=("Vendedor_Responsable", "size"),
+                            monto_total=("Monto_Devuelto_num", "sum"),
                         )
-                        st.line_chart(incidencias_mensuales)
-                    with c_hist_2:
-                        monto_mensual = (
-                            df_vendedor_mes.groupby("Mes")["Monto_Devuelto_num"]
-                            .sum()
-                            .rename("Monto_Devuelto")
-                            .sort_index()
-                        )
-                        st.bar_chart(monto_mensual)
+                    )
+                    resumen_vendedor["ticket_promedio"] = np.where(
+                        resumen_vendedor["incidencias"] > 0,
+                        resumen_vendedor["monto_total"] / resumen_vendedor["incidencias"],
+                        0,
+                    )
+
+                    fig_scatter = px.scatter(
+                        resumen_vendedor,
+                        x="incidencias",
+                        y="monto_total",
+                        size="ticket_promedio",
+                        color="monto_total",
+                        color_continuous_scale="Turbo",
+                        hover_name="Vendedor_Responsable",
+                        custom_data=["Vendedor_Responsable", "incidencias", "monto_total", "ticket_promedio"],
+                        labels={
+                            "incidencias": "Incidencias",
+                            "monto_total": "Monto total devuelto ($)",
+                            "ticket_promedio": "Ticket promedio ($)",
+                        },
+                        title="Análisis de vendedores: frecuencia vs impacto económico",
+                    )
+                    fig_scatter.update_traces(
+                        marker=dict(line=dict(width=1, color="rgba(255,255,255,0.35)"), sizemin=8),
+                        hovertemplate=(
+                            "Vendedor: %{customdata[0]}<br>"
+                            "Incidencias: %{customdata[1]}<br>"
+                            "Monto total: $%{customdata[2]:,.2f}<br>"
+                            "Ticket promedio: $%{customdata[3]:,.2f}<extra></extra>"
+                        ),
+                    )
+                    fig_scatter.update_layout(
+                        template="plotly_dark",
+                        xaxis_title="Número de incidencias",
+                        yaxis_title="Monto total devuelto ($)",
+                        margin=dict(l=30, r=30, t=80, b=30),
+                        paper_bgcolor="rgba(0,0,0,0)",
+                        plot_bgcolor="rgba(0,0,0,0)",
+                    )
+                    st.plotly_chart(fig_scatter, use_container_width=True)
 
                     st.markdown("#### 📋 Lista del mes seleccionado")
                     columnas_mes = [
