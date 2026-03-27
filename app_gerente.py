@@ -7578,15 +7578,15 @@ if "organizador" in tab_map:
                         st.markdown(
                             (
                                 "##### 🧾 Resumen de motivos de error\n\n"
-                                f"Durante el mes analizado, el principal motivo de error fue "
-                                f"**{top_freq['Categoria_Error']}**, con **{int(top_freq['incidencias'])} incidencias** "
-                                f"({top_freq['porcentaje']:.1f}% del total). En impacto económico, la categoría con mayor "
-                                f"monto fue **{top_monto['Categoria_Error']}** "
-                                f"(${float(top_monto['monto_total']):,.2f}). "
-                                f"El motivo con menor participación fue **{min_freq['Categoria_Error']}**, con "
-                                f"**{int(min_freq['incidencias'])} incidencias** ({min_freq['porcentaje']:.1f}% del total). "
-                                f"Esto sugiere enfocar acciones correctivas en la causa principal y dar seguimiento preventivo "
-                                f"a los motivos de menor frecuencia."
+                                f"En resumen, la mayor parte de las fallas se concentró en "
+                                f"**{top_freq['Categoria_Error']}**, con **{int(top_freq['incidencias'])} casos** "
+                                f"({top_freq['porcentaje']:.1f}% del total).\n\n"
+                                f"📌 **Mayor impacto económico:** **{top_monto['Categoria_Error']}** "
+                                f"(${float(top_monto['monto_total']):,.2f}).\n"
+                                f"📌 **Menor participación:** **{min_freq['Categoria_Error']}** "
+                                f"({int(min_freq['incidencias'])} casos, {min_freq['porcentaje']:.1f}%).\n\n"
+                                f"👉 Recomendación: priorizar acciones en la causa principal y mantener seguimiento "
+                                f"preventivo en los casos de menor frecuencia."
                             )
                         )
 
