@@ -4795,69 +4795,11 @@ if "modificar" in tab_map:
 
         if mostrar_garantias:
             st.markdown("### 🛡️ Casos especiales registrados")
-            if "Hora_Registro" not in df_garantias.columns:
-                df_garantias["Hora_Registro"] = pd.NaT
-            if not pd.api.types.is_datetime64_any_dtype(df_garantias["Hora_Registro"]):
-                df_garantias["Hora_Registro"] = pd.to_datetime(
-                    df_garantias["Hora_Registro"], errors="coerce"
-                )
-            df_garantias["__hora_registro_fecha"] = df_garantias["Hora_Registro"].dt.date
-            cliente_col = df_garantias.get("Cliente", pd.Series(index=df_garantias.index, dtype="object"))
-            folio_fact_col = df_garantias.get("Folio_Factura", pd.Series(index=df_garantias.index, dtype="object"))
-            folio_col = df_garantias.get("Folio", pd.Series(index=df_garantias.index, dtype="object"))
-            tipo_envio_col = df_garantias.get("Tipo_Envio", pd.Series(index=df_garantias.index, dtype="object"))
-            df_garantias["__cliente_norm"] = cliente_col.astype(str).map(normalizar)
-            df_garantias["__folio_norm"] = folio_fact_col.fillna(folio_col).astype(str).map(normalizar_folio)
-            df_garantias["__tipo_envio_norm"] = tipo_envio_col.astype(str).map(normalizar)
             termino_busqueda_garantia = st.text_input(
                 "Buscar por cliente o folio",
                 key="busqueda_casos_especiales",
                 placeholder="Cliente o folio",
             )
-            filtro_tipo_envio_garantia = st.selectbox(
-                "Filtrar por tipo de envío",
-                options=["Todos", "Devolución", "Garantía"],
-                index=0,
-                key="filtro_tipo_envio_casos_especiales",
-            )
-            modo_fecha_garantia = st.selectbox(
-                "Filtro de fecha de registro",
-                options=["Todas", "Fecha específica", "Rango de fechas"],
-                key="filtro_fecha_modo_casos_especiales",
-            )
-
-            fecha_especifica_garantia = None
-            fecha_inicio_garantia = None
-            fecha_fin_garantia = None
-            rango_key_mod = "filtro_fecha_rango_aplicado_casos_especiales"
-            if modo_fecha_garantia == "Fecha específica":
-                st.session_state.pop(rango_key_mod, None)
-                fecha_especifica_garantia = st.date_input(
-                    "Fecha específica (Hora_Registro)",
-                    key="filtro_fecha_unica_casos_especiales",
-                )
-            elif modo_fecha_garantia == "Rango de fechas":
-                rango_actual = st.session_state.get(rango_key_mod, (None, None))
-                with st.form("form_rango_casos_especiales_modificar"):
-                    col_fecha_ini, col_fecha_fin = st.columns(2)
-                    with col_fecha_ini:
-                        fecha_inicio_tmp = st.date_input(
-                            "Inicio (Hora_Registro)",
-                            value=rango_actual[0] or date.today(),
-                            key="filtro_fecha_inicio_casos_especiales",
-                        )
-                    with col_fecha_fin:
-                        fecha_fin_tmp = st.date_input(
-                            "Fin (Hora_Registro)",
-                            value=rango_actual[1] or date.today(),
-                            key="filtro_fecha_fin_casos_especiales",
-                        )
-                    aplicar_rango = st.form_submit_button("Aplicar rango de fechas")
-                if aplicar_rango:
-                    st.session_state[rango_key_mod] = (fecha_inicio_tmp, fecha_fin_tmp)
-                fecha_inicio_garantia, fecha_fin_garantia = st.session_state.get(rango_key_mod, (None, None))
-            else:
-                st.session_state.pop(rango_key_mod, None)
 
             termino_normalizado = normalizar(termino_busqueda_garantia or "")
             termino_folio = (
@@ -4866,50 +4808,22 @@ if "modificar" in tab_map:
                 else ""
             )
 
-            df_garantias_filtrado = df_garantias.copy()
-
             if termino_normalizado:
-                mask_cliente = df_garantias_filtrado["__cliente_norm"].str.contains(
-                    termino_normalizado, regex=False, na=False
-                )
-                mask_folio = (
-                    df_garantias_filtrado["__folio_norm"].str.contains(
-                        termino_folio, regex=False, na=False
+
+                def coincide_garantia(row):
+                    cliente = normalizar(str(row.get("Cliente", "")))
+                    folio = normalizar_folio(
+                        row.get("Folio_Factura") or row.get("Folio") or ""
                     )
-                    if termino_folio
-                    else False
-                )
-                df_garantias_filtrado = df_garantias_filtrado[mask_cliente | mask_folio]
+                    return termino_normalizado in cliente or (
+                        termino_folio and termino_folio in folio
+                    )
 
-            if filtro_tipo_envio_garantia == "Devolución":
-                df_garantias_filtrado = df_garantias_filtrado[
-                    df_garantias_filtrado["__tipo_envio_norm"].str.contains("devol", na=False)
+                df_garantias_filtrado = df_garantias[
+                    df_garantias.apply(coincide_garantia, axis=1)
                 ]
-            elif filtro_tipo_envio_garantia == "Garantía":
-                df_garantias_filtrado = df_garantias_filtrado[
-                    df_garantias_filtrado["__tipo_envio_norm"].str.contains("garantia", na=False)
-                ]
-
-            fechas_registro = df_garantias_filtrado["__hora_registro_fecha"]
-            if modo_fecha_garantia == "Fecha específica" and fecha_especifica_garantia:
-                df_garantias_filtrado = df_garantias_filtrado[fechas_registro == fecha_especifica_garantia]
-            elif modo_fecha_garantia == "Rango de fechas" and fecha_inicio_garantia and fecha_fin_garantia:
-                inicio, fin = fecha_inicio_garantia, fecha_fin_garantia
-                if inicio > fin:
-                    inicio, fin = fin, inicio
-                df_garantias_filtrado = df_garantias_filtrado[
-                    (fechas_registro >= inicio) & (fechas_registro <= fin)
-                ]
-
-            df_garantias_filtrado = df_garantias_filtrado.drop(
-                columns=[
-                    "__hora_registro_fecha",
-                    "__cliente_norm",
-                    "__folio_norm",
-                    "__tipo_envio_norm",
-                ],
-                errors="ignore",
-            )
+            else:
+                df_garantias_filtrado = df_garantias
 
             if df_garantias_filtrado.empty:
                 st.info(
@@ -7125,20 +7039,6 @@ if "organizador" in tab_map:
             if df_casos_org.empty:
                 st.info("No hay casos especiales registrados.")
                 st.stop()
-            if "Hora_Registro" not in df_casos_org.columns:
-                df_casos_org["Hora_Registro"] = pd.NaT
-            if not pd.api.types.is_datetime64_any_dtype(df_casos_org["Hora_Registro"]):
-                df_casos_org["Hora_Registro"] = pd.to_datetime(
-                    df_casos_org["Hora_Registro"], errors="coerce"
-                )
-            df_casos_org["__hora_registro_fecha"] = df_casos_org["Hora_Registro"].dt.date
-            cliente_col = df_casos_org.get("Cliente", pd.Series(index=df_casos_org.index, dtype="object"))
-            folio_fact_col = df_casos_org.get("Folio_Factura", pd.Series(index=df_casos_org.index, dtype="object"))
-            folio_err_col = df_casos_org.get("Folio_Factura_Error", pd.Series(index=df_casos_org.index, dtype="object"))
-            tipo_envio_col = df_casos_org.get("Tipo_Envio", pd.Series(index=df_casos_org.index, dtype="object"))
-            df_casos_org["__cliente_norm"] = cliente_col.astype(str).map(normalizar)
-            df_casos_org["__folio_norm"] = folio_fact_col.fillna(folio_err_col).astype(str).map(normalizar_folio)
-            df_casos_org["__tipo_envio_norm"] = tipo_envio_col.astype(str).map(normalizar)
 
             st.caption("Buscar por cliente o folio")
             termino_busqueda = st.text_input(
@@ -7146,97 +7046,21 @@ if "organizador" in tab_map:
                 key="organizador_casos_busqueda",
                 placeholder="Cliente o folio",
             )
-            filtro_tipo_envio = st.selectbox(
-                "Filtrar por tipo de envío",
-                options=["Todos", "Devolución", "Garantía"],
-                index=0,
-                key="organizador_casos_tipo_envio",
-            )
-            modo_fecha = st.selectbox(
-                "Filtro de fecha de registro",
-                options=["Todas", "Fecha específica", "Rango de fechas"],
-                key="organizador_casos_modo_fecha",
-            )
-
-            fecha_especifica = None
-            fecha_inicio = None
-            fecha_fin = None
-            rango_key_org = "organizador_casos_rango_aplicado"
-            if modo_fecha == "Fecha específica":
-                st.session_state.pop(rango_key_org, None)
-                fecha_especifica = st.date_input(
-                    "Fecha específica (Hora_Registro)",
-                    key="organizador_casos_fecha_unica",
-                )
-            elif modo_fecha == "Rango de fechas":
-                rango_actual = st.session_state.get(rango_key_org, (None, None))
-                with st.form("form_rango_casos_especiales_organizador"):
-                    col_fecha_ini, col_fecha_fin = st.columns(2)
-                    with col_fecha_ini:
-                        fecha_inicio_tmp = st.date_input(
-                            "Inicio (Hora_Registro)",
-                            value=rango_actual[0] or date.today(),
-                            key="organizador_casos_fecha_inicio",
-                        )
-                    with col_fecha_fin:
-                        fecha_fin_tmp = st.date_input(
-                            "Fin (Hora_Registro)",
-                            value=rango_actual[1] or date.today(),
-                            key="organizador_casos_fecha_fin",
-                        )
-                    aplicar_rango = st.form_submit_button("Aplicar rango de fechas")
-                if aplicar_rango:
-                    st.session_state[rango_key_org] = (fecha_inicio_tmp, fecha_fin_tmp)
-                fecha_inicio, fecha_fin = st.session_state.get(rango_key_org, (None, None))
-            else:
-                st.session_state.pop(rango_key_org, None)
 
             termino_normalizado = normalizar(termino_busqueda or "")
             termino_folio = normalizar_folio(termino_busqueda) if termino_busqueda else ""
-            df_casos_filtrado = df_casos_org.copy()
 
             if termino_normalizado:
-                mask_cliente = df_casos_filtrado["__cliente_norm"].str.contains(
-                    termino_normalizado, regex=False, na=False
-                )
-                mask_folio = (
-                    df_casos_filtrado["__folio_norm"].str.contains(
-                        termino_folio, regex=False, na=False
+                def coincide_caso(row):
+                    cliente = normalizar(str(row.get("Cliente", "")))
+                    folio = normalizar_folio(
+                        row.get("Folio_Factura") or row.get("Folio_Factura_Error") or ""
                     )
-                    if termino_folio
-                    else False
-                )
-                df_casos_filtrado = df_casos_filtrado[mask_cliente | mask_folio].copy()
+                    return termino_normalizado in cliente or (termino_folio and termino_folio in folio)
 
-            if filtro_tipo_envio == "Devolución":
-                df_casos_filtrado = df_casos_filtrado[
-                    df_casos_filtrado["__tipo_envio_norm"].str.contains("devol", na=False)
-                ]
-            elif filtro_tipo_envio == "Garantía":
-                df_casos_filtrado = df_casos_filtrado[
-                    df_casos_filtrado["__tipo_envio_norm"].str.contains("garantia", na=False)
-                ]
-
-            fechas_registro = df_casos_filtrado["__hora_registro_fecha"]
-            if modo_fecha == "Fecha específica" and fecha_especifica:
-                df_casos_filtrado = df_casos_filtrado[fechas_registro == fecha_especifica]
-            elif modo_fecha == "Rango de fechas" and fecha_inicio and fecha_fin:
-                inicio, fin = fecha_inicio, fecha_fin
-                if inicio > fin:
-                    inicio, fin = fin, inicio
-                df_casos_filtrado = df_casos_filtrado[
-                    (fechas_registro >= inicio) & (fechas_registro <= fin)
-                ]
-
-            df_casos_filtrado = df_casos_filtrado.drop(
-                columns=[
-                    "__hora_registro_fecha",
-                    "__cliente_norm",
-                    "__folio_norm",
-                    "__tipo_envio_norm",
-                ],
-                errors="ignore",
-            )
+                df_casos_filtrado = df_casos_org[df_casos_org.apply(coincide_caso, axis=1)].copy()
+            else:
+                df_casos_filtrado = df_casos_org.copy()
 
             if df_casos_filtrado.empty:
                 st.info("No se encontraron casos especiales con el criterio de búsqueda proporcionado.")
