@@ -7518,14 +7518,15 @@ if "organizador" in tab_map:
                             [
                                 "Nombre_Responsable",
                                 "Nombre_Responsable_norm",
-                                "Vendedor_Responsable_Caso",
-                                "Vendedor Responsable",
-                                "Vendedor",
                             ],
                         )
                         .astype(str)
                         .str.strip()
                         .replace("", pd.NA)
+                    )
+                    nombre_responsable = nombre_responsable.mask(
+                        nombre_responsable.str.lower().str.fullmatch(r"(no\s*aplica|n/?a)"),
+                        pd.NA,
                     )
                     vendedor_registro = (
                         df_vendedor_mes.get("Vendedor_Registro", df_vendedor_mes.get("Vendedor_Registro_norm", ""))
@@ -7599,14 +7600,15 @@ if "organizador" in tab_map:
                             [
                                 "Nombre_Responsable",
                                 "Nombre_Responsable_norm",
-                                "Vendedor_Responsable_Caso",
-                                "Vendedor Responsable",
-                                "Vendedor",
                             ],
                         )
                         .astype(str)
                         .str.strip()
                         .replace("", pd.NA)
+                    )
+                    nombre_responsable_mes = nombre_responsable_mes.mask(
+                        nombre_responsable_mes.str.lower().str.fullmatch(r"(no\s*aplica|n/?a)"),
+                        pd.NA,
                     )
                     vendedor_registro_mes = (
                         _serie_col(df_mes_sel, ["Vendedor_Registro", "Vendedor_Registro_norm"])
