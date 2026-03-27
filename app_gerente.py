@@ -7213,120 +7213,243 @@ if "organizador" in tab_map:
             else:
                 pedidos_por_vendedor = pd.Series(dtype="int64", name="Pedidos_Totales")
 
-            total_casos = len(df_metricas)
-            estados_cerrados = {"aprobada", "aprobado", "cerrado", "completado", "resuelto", "finalizado"}
-            casos_cerrados = estado_caso_norm.isin(estados_cerrados).sum()
-            casos_abiertos = max(total_casos - int(casos_cerrados), 0)
-            mes_actual = pd.Timestamp.now().month
-            anio_actual = pd.Timestamp.now().year
-            casos_mes = (
-                (df_metricas["Hora_Registro_dt"].dt.month == mes_actual)
-                & (df_metricas["Hora_Registro_dt"].dt.year == anio_actual)
-            ).sum()
-
-            k1, k2, k3, k4 = st.columns(4)
-            k1.metric("Total casos", int(total_casos))
-            k2.metric("Abiertos", int(casos_abiertos))
-            k3.metric("Cerrados/Completados", int(casos_cerrados))
-            k4.metric("Casos del mes", int(casos_mes))
-
-            total_devuelto = float(df_metricas["Monto_Devuelto_num"].sum())
-            total_devuelto_vendedor = float(df_metricas.loc[df_metricas["culpa_vendedor"], "Monto_Devuelto_num"].sum())
-            total_devuelto_otras_areas = max(total_devuelto - total_devuelto_vendedor, 0.0)
-            k5, k6, k7 = st.columns(3)
-            k5.metric("💸 Monto devuelto total", f"${total_devuelto:,.2f}")
-            k6.metric("🧑‍💼 Impacto atribuible a vendedor", f"${total_devuelto_vendedor:,.2f}")
-            k7.metric("🏢 Impacto por otras áreas", f"${total_devuelto_otras_areas:,.2f}")
-
-            col_ch1, col_ch2 = st.columns(2)
-            with col_ch1:
-                st.markdown("#### ⚖️ Vendedores con mayor tasa de incidencia")
-                incidencias_por_vendedor = df_metricas.groupby("Vendedor_Registro_norm").size().rename("Incidencias")
-                if not pedidos_por_vendedor.empty:
-                    base_vendedores = incidencias_por_vendedor.to_frame().join(
-                        pedidos_por_vendedor,
-                        how="left",
-                    )
-                    base_vendedores["Pedidos_Totales"] = base_vendedores["Pedidos_Totales"].fillna(base_vendedores["Incidencias"])
-                else:
-                    base_vendedores = incidencias_por_vendedor.to_frame()
-                    base_vendedores["Pedidos_Totales"] = base_vendedores["Incidencias"]
-
-                base_vendedores["Tasa_Incidencia_pct"] = (
-                    (base_vendedores["Incidencias"] / base_vendedores["Pedidos_Totales"].replace(0, pd.NA)) * 100
+            with st.expander("🧑‍💼 Incidencias por mes (solo área responsable: Vendedor)", expanded=False):
+                st.caption(
+                    "Filtrado estricto: solo se consideran registros donde `Area_Responsable = Vendedor`."
                 )
-                base_vendedores["Tasa_Incidencia_pct"] = base_vendedores["Tasa_Incidencia_pct"].fillna(0)
-                base_vendedores["Monto_Devuelto"] = df_metricas.groupby("Vendedor_Registro_norm")["Monto_Devuelto_num"].sum()
-                top_tasa = base_vendedores.sort_values(
-                    by=["Tasa_Incidencia_pct", "Incidencias"],
-                    ascending=False,
-                ).head(10)
-                st.bar_chart(top_tasa["Tasa_Incidencia_pct"])
-                st.caption("Prioriza vendedores con mayor proporción de incidencias vs su volumen de pedidos.")
-            with col_ch2:
-                st.markdown("#### 🏢 Áreas con más incidencias")
-                serie_areas = (
+
+                mask_area_vendedor = (
                     df_metricas["Area_Responsable_norm"]
-                    .value_counts()
-                    .head(10)
+                    .astype(str)
+                    .str.strip()
+                    .str.lower()
+                    .eq("vendedor")
                 )
-                st.bar_chart(serie_areas)
+                df_vendedor_mes = df_metricas[mask_area_vendedor].copy()
+                df_vendedor_mes = df_vendedor_mes[df_vendedor_mes["Hora_Registro_dt"].notna()].copy()
 
-            st.markdown("#### 🧠 Patrones detectados de riesgo")
-            patrones = base_vendedores.copy()
-            patrones["Riesgo"] = pd.cut(
-                patrones["Tasa_Incidencia_pct"],
-                bins=[-0.01, 2, 8, 1000],
-                labels=["Bajo", "Medio", "Alto"],
-            )
-            patrones = patrones.sort_values(["Riesgo", "Tasa_Incidencia_pct"], ascending=[False, False])
-            st.dataframe(
-                patrones.head(15).rename(
-                    columns={
-                        "Incidencias": "Incidencias reportadas",
-                        "Pedidos_Totales": "Pedidos totales",
-                        "Tasa_Incidencia_pct": "Tasa incidencia (%)",
-                        "Monto_Devuelto": "Monto devuelto",
-                    }
-                ),
-                use_container_width=True,
-            )
-
-            st.markdown("#### 💸 Monto devuelto por área y responsable")
-            col_montos_1, col_montos_2 = st.columns(2)
-            with col_montos_1:
-                monto_area = (
-                    df_metricas.groupby("Area_Responsable_norm")["Monto_Devuelto_num"]
-                    .sum()
-                    .sort_values(ascending=False)
-                    .head(10)
-                )
-                st.bar_chart(monto_area)
-            with col_montos_2:
-                monto_resp = (
-                    df_metricas[df_metricas["Nombre_Responsable_norm"] != "Sin responsable"]
-                    .groupby("Nombre_Responsable_norm")["Monto_Devuelto_num"]
-                    .sum()
-                    .sort_values(ascending=False)
-                    .head(10)
-                )
-                if monto_resp.empty:
-                    st.info("No hay responsables asignados para mostrar en esta gráfica.")
+                if df_vendedor_mes.empty:
+                    st.info("No hay incidencias con `Area_Responsable = Vendedor` para construir este análisis.")
                 else:
-                    st.bar_chart(monto_resp)
+                    df_vendedor_mes["Mes"] = df_vendedor_mes["Hora_Registro_dt"].dt.to_period("M").astype(str)
+                    df_vendedor_mes["Mes_Period"] = df_vendedor_mes["Hora_Registro_dt"].dt.to_period("M")
+                    df_vendedor_mes["Resultado_Esperado_txt"] = (
+                        df_vendedor_mes.get("Resultado_Esperado", "").astype(str).str.strip().replace("", "Sin resultado")
+                    )
+                    df_vendedor_mes["Responsable_Detalle"] = df_vendedor_mes["Nombre_Responsable_norm"].astype(str)
+                    df_vendedor_mes["Tipo_Caso_norm"] = df_vendedor_mes.get("Tipo_Caso", "").astype(str).apply(normalizar)
+                    df_vendedor_mes["ID_Vendedor_Caso"] = (
+                        df_vendedor_mes.get("id_vendedor", "")
+                        .astype(str)
+                        .str.strip()
+                        .replace("", pd.NA)
+                        .fillna(df_vendedor_mes.get("ID_Vendedor", "").astype(str).str.strip().replace("", pd.NA))
+                        .fillna(df_vendedor_mes.get("Id_Vendedor", "").astype(str).str.strip().replace("", pd.NA))
+                        .fillna(df_vendedor_mes.get("Vendedor_Registro", "").astype(str).str.strip().replace("", "Sin ID vendedor"))
+                    )
 
-            st.markdown("#### 📆 Tendencia mensual de errores")
-            serie_mensual = (
-                df_metricas[df_metricas["Hora_Registro_dt"].notna()]
-                .assign(Mes=df_metricas["Hora_Registro_dt"].dt.to_period("M").astype(str))
-                .groupby("Mes")
-                .size()
-                .sort_index()
-            )
-            if serie_mensual.empty:
-                st.info("Aún no hay suficientes fechas válidas para mostrar tendencia mensual.")
-            else:
-                st.line_chart(serie_mensual)
+                    meses_disponibles = sorted(df_vendedor_mes["Mes_Period"].dropna().unique())
+                    mes_actual_period = pd.Timestamp.now().to_period("M")
+                    mes_default = mes_actual_period if mes_actual_period in meses_disponibles else meses_disponibles[-1]
+                    idx_default = meses_disponibles.index(mes_default)
+                    mes_sel_period = st.selectbox(
+                        "Selecciona el mes a analizar",
+                        options=meses_disponibles,
+                        index=idx_default,
+                        format_func=lambda p: p.strftime("%B %Y").capitalize(),
+                        key="organizador_casos_vendedor_mes_select",
+                    )
+
+                    df_mes_sel = df_vendedor_mes[df_vendedor_mes["Mes_Period"] == mes_sel_period].copy()
+                    devoluciones_mes = df_mes_sel["Tipo_Caso_norm"].str.contains("devol", na=False).sum()
+                    garantias_mes = df_mes_sel["Tipo_Caso_norm"].str.contains("garantia", na=False).sum()
+                    monto_mes = float(df_mes_sel["Monto_Devuelto_num"].sum())
+
+                    m1, m2, m3, m4 = st.columns(4)
+                    m1.metric("Incidencias del mes", int(len(df_mes_sel)))
+                    m2.metric("Devoluciones", int(devoluciones_mes))
+                    m3.metric("Garantías", int(garantias_mes))
+                    m4.metric("Monto total devuelto", f"${monto_mes:,.2f}")
+
+                    st.markdown("#### 📈 Incidencias y monto por mes (histórico vendedor)")
+                    c_hist_1, c_hist_2 = st.columns(2)
+                    with c_hist_1:
+                        incidencias_mensuales = (
+                            df_vendedor_mes.groupby("Mes")
+                            .size()
+                            .rename("Incidencias")
+                            .sort_index()
+                        )
+                        st.line_chart(incidencias_mensuales)
+                    with c_hist_2:
+                        monto_mensual = (
+                            df_vendedor_mes.groupby("Mes")["Monto_Devuelto_num"]
+                            .sum()
+                            .rename("Monto_Devuelto")
+                            .sort_index()
+                        )
+                        st.bar_chart(monto_mensual)
+
+                    st.markdown("#### 📋 Lista del mes seleccionado")
+                    columnas_mes = [
+                        "ID_Pedido",
+                        "Hora_Registro_dt",
+                        "ID_Vendedor_Caso",
+                        "Vendedor_Registro_norm",
+                        "Responsable_Detalle",
+                        "Tipo_Caso",
+                        "Monto_Devuelto_num",
+                        "Resultado_Esperado_txt",
+                        "Cliente",
+                        "Folio_Factura",
+                    ]
+                    columnas_mes = [c for c in columnas_mes if c in df_mes_sel.columns]
+                    detalle_mes = df_mes_sel[columnas_mes].copy().sort_values("Hora_Registro_dt", ascending=False)
+                    if "Hora_Registro_dt" in detalle_mes.columns:
+                        detalle_mes["Hora_Registro_dt"] = detalle_mes["Hora_Registro_dt"].dt.strftime("%d/%m/%Y %H:%M")
+                    if "Monto_Devuelto_num" in detalle_mes.columns:
+                        detalle_mes["Monto_Devuelto_num"] = detalle_mes["Monto_Devuelto_num"].map(lambda x: f"${x:,.2f}")
+
+                    detalle_mes = detalle_mes.rename(
+                        columns={
+                            "ID_Pedido": "Pedido",
+                            "Hora_Registro_dt": "Fecha registro",
+                            "ID_Vendedor_Caso": "ID vendedor",
+                            "Vendedor_Registro_norm": "Vendedor (registro)",
+                            "Responsable_Detalle": "Nombre responsable",
+                            "Tipo_Caso": "Tipo caso",
+                            "Monto_Devuelto_num": "Monto devuelto",
+                            "Resultado_Esperado_txt": "Resultado esperado",
+                            "Cliente": "Cliente",
+                            "Folio_Factura": "Folio factura",
+                        }
+                    )
+                    st.dataframe(detalle_mes, use_container_width=True)
+
+                    csv_mes = detalle_mes.to_csv(index=False).encode("utf-8-sig")
+                    st.download_button(
+                        label="⬇️ Descargar lista del mes (Vendedor)",
+                        data=csv_mes,
+                        file_name=f"incidencias_vendedor_{mes_sel_period.strftime('%Y-%m')}.csv",
+                        mime="text/csv",
+                        key="organizador_casos_vendedor_descarga_mes",
+                    )
+
+            with st.expander("📊 Métricas generales de casos especiales", expanded=False):
+                total_casos = len(df_metricas)
+                estados_cerrados = {"aprobada", "aprobado", "cerrado", "completado", "resuelto", "finalizado"}
+                casos_cerrados = estado_caso_norm.isin(estados_cerrados).sum()
+                casos_abiertos = max(total_casos - int(casos_cerrados), 0)
+                mes_actual = pd.Timestamp.now().month
+                anio_actual = pd.Timestamp.now().year
+                casos_mes = (
+                    (df_metricas["Hora_Registro_dt"].dt.month == mes_actual)
+                    & (df_metricas["Hora_Registro_dt"].dt.year == anio_actual)
+                ).sum()
+
+                k1, k2, k3, k4 = st.columns(4)
+                k1.metric("Total casos", int(total_casos))
+                k2.metric("Abiertos", int(casos_abiertos))
+                k3.metric("Cerrados/Completados", int(casos_cerrados))
+                k4.metric("Casos del mes", int(casos_mes))
+
+                total_devuelto = float(df_metricas["Monto_Devuelto_num"].sum())
+                total_devuelto_vendedor = float(df_metricas.loc[df_metricas["culpa_vendedor"], "Monto_Devuelto_num"].sum())
+                total_devuelto_otras_areas = max(total_devuelto - total_devuelto_vendedor, 0.0)
+                k5, k6, k7 = st.columns(3)
+                k5.metric("💸 Monto devuelto total", f"${total_devuelto:,.2f}")
+                k6.metric("🧑‍💼 Impacto atribuible a vendedor", f"${total_devuelto_vendedor:,.2f}")
+                k7.metric("🏢 Impacto por otras áreas", f"${total_devuelto_otras_areas:,.2f}")
+
+                col_ch1, col_ch2 = st.columns(2)
+                with col_ch1:
+                    st.markdown("#### ⚖️ Vendedores con mayor tasa de incidencia")
+                    incidencias_por_vendedor = df_metricas.groupby("Vendedor_Registro_norm").size().rename("Incidencias")
+                    if not pedidos_por_vendedor.empty:
+                        base_vendedores = incidencias_por_vendedor.to_frame().join(
+                            pedidos_por_vendedor,
+                            how="left",
+                        )
+                        base_vendedores["Pedidos_Totales"] = base_vendedores["Pedidos_Totales"].fillna(base_vendedores["Incidencias"])
+                    else:
+                        base_vendedores = incidencias_por_vendedor.to_frame()
+                        base_vendedores["Pedidos_Totales"] = base_vendedores["Incidencias"]
+
+                    base_vendedores["Tasa_Incidencia_pct"] = (
+                        (base_vendedores["Incidencias"] / base_vendedores["Pedidos_Totales"].replace(0, pd.NA)) * 100
+                    )
+                    base_vendedores["Tasa_Incidencia_pct"] = base_vendedores["Tasa_Incidencia_pct"].fillna(0)
+                    base_vendedores["Monto_Devuelto"] = df_metricas.groupby("Vendedor_Registro_norm")["Monto_Devuelto_num"].sum()
+                    top_tasa = base_vendedores.sort_values(
+                        by=["Tasa_Incidencia_pct", "Incidencias"],
+                        ascending=False,
+                    ).head(10)
+                    st.bar_chart(top_tasa["Tasa_Incidencia_pct"])
+                    st.caption("Prioriza vendedores con mayor proporción de incidencias vs su volumen de pedidos.")
+                with col_ch2:
+                    st.markdown("#### 🏢 Áreas con más incidencias")
+                    serie_areas = (
+                        df_metricas["Area_Responsable_norm"]
+                        .value_counts()
+                        .head(10)
+                    )
+                    st.bar_chart(serie_areas)
+
+                st.markdown("#### 🧠 Patrones detectados de riesgo")
+                patrones = base_vendedores.copy()
+                patrones["Riesgo"] = pd.cut(
+                    patrones["Tasa_Incidencia_pct"],
+                    bins=[-0.01, 2, 8, 1000],
+                    labels=["Bajo", "Medio", "Alto"],
+                )
+                patrones = patrones.sort_values(["Riesgo", "Tasa_Incidencia_pct"], ascending=[False, False])
+                st.dataframe(
+                    patrones.head(15).rename(
+                        columns={
+                            "Incidencias": "Incidencias reportadas",
+                            "Pedidos_Totales": "Pedidos totales",
+                            "Tasa_Incidencia_pct": "Tasa incidencia (%)",
+                            "Monto_Devuelto": "Monto devuelto",
+                        }
+                    ),
+                    use_container_width=True,
+                )
+
+                st.markdown("#### 💸 Monto devuelto por área y responsable")
+                col_montos_1, col_montos_2 = st.columns(2)
+                with col_montos_1:
+                    monto_area = (
+                        df_metricas.groupby("Area_Responsable_norm")["Monto_Devuelto_num"]
+                        .sum()
+                        .sort_values(ascending=False)
+                        .head(10)
+                    )
+                    st.bar_chart(monto_area)
+                with col_montos_2:
+                    monto_resp = (
+                        df_metricas[df_metricas["Nombre_Responsable_norm"] != "Sin responsable"]
+                        .groupby("Nombre_Responsable_norm")["Monto_Devuelto_num"]
+                        .sum()
+                        .sort_values(ascending=False)
+                        .head(10)
+                    )
+                    if monto_resp.empty:
+                        st.info("No hay responsables asignados para mostrar en esta gráfica.")
+                    else:
+                        st.bar_chart(monto_resp)
+
+                st.markdown("#### 📆 Tendencia mensual de errores")
+                serie_mensual = (
+                    df_metricas[df_metricas["Hora_Registro_dt"].notna()]
+                    .assign(Mes=df_metricas["Hora_Registro_dt"].dt.to_period("M").astype(str))
+                    .groupby("Mes")
+                    .size()
+                    .sort_index()
+                )
+                if serie_mensual.empty:
+                    st.info("Aún no hay suficientes fechas válidas para mostrar tendencia mensual.")
+                else:
+                    st.line_chart(serie_mensual)
 
 
 if "cobranza" in tab_map:
