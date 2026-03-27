@@ -7388,6 +7388,233 @@ if "organizador" in tab_map:
                     )
                     st.dataframe(detalle_mes, use_container_width=True)
 
+                    # ================== NUEVA SECCIÓN: MOTIVOS DE ERROR DEL MES ==================
+                    st.markdown("#### 🧩 Motivos de error del mes")
+
+                    def _pick_col(columns: list[str], options: list[str]) -> str | None:
+                        norm_map = {str(c).strip().lower(): c for c in columns}
+                        for opt in options:
+                            key = str(opt).strip().lower()
+                            if key in norm_map:
+                                return norm_map[key]
+                        return None
+
+                    df_motivos = df_mes_sel.copy()
+
+                    # Regla explícita: solo casos con Area_Responsable == "Vendedor".
+                    col_area = _pick_col(df_motivos.columns.tolist(), ["Area_Responsable", "Area Responsable", "Área Responsable"])
+                    if col_area is not None:
+                        area_norm = (
+                            df_motivos[col_area]
+                            .astype(str)
+                            .str.strip()
+                            .str.lower()
+                            .str.normalize("NFKD")
+                            .str.encode("ascii", errors="ignore")
+                            .str.decode("utf-8")
+                        )
+                        df_motivos = df_motivos[area_norm == "vendedor"].copy()
+
+                    if df_motivos.empty:
+                        st.info("No hay registros de **Vendedor** para construir motivos de error en el mes seleccionado.")
+                    else:
+                        # Responsable con fallback: Nombre_Responsable -> Vendedor_Registro -> ID vendedor.
+                        col_nombre_resp = _pick_col(df_motivos.columns.tolist(), ["Nombre_Responsable", "Nombre Responsable"])
+                        col_vend_reg = _pick_col(df_motivos.columns.tolist(), ["Vendedor_Registro", "Vendedor (registro)", "Vendedor_Registro_norm"])
+                        col_id_vend = _pick_col(df_motivos.columns.tolist(), ["ID vendedor", "ID_Vendedor", "Id_Vendedor", "id_vendedor", "ID_Vendedor_Caso"])
+
+                        serie_nombre = (
+                            df_motivos[col_nombre_resp].astype(str).str.strip().replace("", pd.NA)
+                            if col_nombre_resp else pd.Series(pd.NA, index=df_motivos.index)
+                        )
+                        serie_vreg = (
+                            df_motivos[col_vend_reg].astype(str).str.strip().replace("", pd.NA)
+                            if col_vend_reg else pd.Series(pd.NA, index=df_motivos.index)
+                        )
+                        serie_id = (
+                            df_motivos[col_id_vend].astype(str).str.strip().replace("", pd.NA)
+                            if col_id_vend else pd.Series("Sin ID vendedor", index=df_motivos.index)
+                        )
+                        df_motivos["Responsable_Mostrar"] = serie_nombre.fillna(serie_vreg).fillna(serie_id).fillna("Sin ID vendedor")
+
+                        # Monto devuelto numérico robusto.
+                        col_monto = _pick_col(df_motivos.columns.tolist(), ["Monto devuelto", "Monto_Devuelto", "Monto_Devuelto_num", "Monto"])
+                        if col_monto is not None:
+                            monto_txt = (
+                                df_motivos[col_monto]
+                                .astype(str)
+                                .str.replace("$", "", regex=False)
+                                .str.replace(",", "", regex=False)
+                                .str.strip()
+                            )
+                            df_motivos["Monto_Devuelto_calc"] = pd.to_numeric(monto_txt, errors="coerce").fillna(0.0)
+                        else:
+                            df_motivos["Monto_Devuelto_calc"] = 0.0
+
+                        # Texto base combinando columnas descriptivas disponibles.
+                        posibles_texto = [
+                            "Motivo detallado", "Motivo_Detallado", "Comentarios", "Comentario",
+                            "Descripcion", "Descripción", "Descripcion del caso", "Descripción del caso",
+                            "Seguimiento", "Resultado esperado", "Resultado_Esperado_txt",
+                            "Problema", "Detalle", "Observaciones", "Notas"
+                        ]
+                        cols_texto = [c for c in df_motivos.columns if str(c).strip().lower() in {p.lower() for p in posibles_texto}]
+                        if not cols_texto:
+                            fallback_cols = [c for c in df_motivos.columns if pd.api.types.is_string_dtype(df_motivos[c])]
+                            cols_texto = fallback_cols[:4]
+
+                        if cols_texto:
+                            texto_base = (
+                                df_motivos[cols_texto]
+                                .fillna("")
+                                .astype(str)
+                                .agg(" | ".join, axis=1)
+                                .str.lower()
+                                .str.normalize("NFKD")
+                                .str.encode("ascii", errors="ignore")
+                                .str.decode("utf-8")
+                                .str.replace(r"\s+", " ", regex=True)
+                                .str.strip()
+                            )
+                        else:
+                            texto_base = pd.Series("", index=df_motivos.index)
+
+                        df_motivos["Texto_Error_Base"] = texto_base
+
+                        # Clasificación por reglas simples de palabras clave.
+                        reglas_categoria = [
+                            ("Error de cotización", ["clave", "cotizo mal", "cotizacion mal", "se pidio mal", "equivoco la clave", "cotizo", "precio mal"]),
+                            ("Error de producto", ["producto incorrecto", "medida incorrecta", "material incorrecto", "cambio de producto", "producto equivocado", "modelo incorrecto"]),
+                            ("Expectativa del cliente", ["cliente", "no era lo que esperaba", "requeria otro", "esperaba", "no le gusto", "cambio de opinion"]),
+                            ("Calidad / defecto", ["defecto", "mala calidad", "fallo", "no funciono", "danado", "dano", "quebrado"]),
+                            ("Logística / envío", ["guia", "envio", "paqueteria", "retorno", "foraneo", "flete", "entrega tardia"]),
+                            ("Error administrativo", ["factura", "folio", "captura", "administrativo", "administrativa", "documento", "nota de credito"]),
+                        ]
+
+                        def _categorizar_error(txt: str) -> str:
+                            txt = str(txt or "").strip().lower()
+                            if not txt:
+                                return "Otro"
+                            for categoria, keywords in reglas_categoria:
+                                if any(k in txt for k in keywords):
+                                    return categoria
+                            return "Otro"
+
+                        df_motivos["Categoria_Error"] = df_motivos["Texto_Error_Base"].apply(_categorizar_error)
+
+                        resumen_cat = (
+                            df_motivos.groupby("Categoria_Error", as_index=False)
+                            .agg(
+                                incidencias=("Categoria_Error", "size"),
+                                monto_total=("Monto_Devuelto_calc", "sum"),
+                            )
+                            .sort_values("incidencias", ascending=False)
+                        )
+                        total_incidencias = int(resumen_cat["incidencias"].sum())
+                        resumen_cat["porcentaje"] = np.where(
+                            total_incidencias > 0,
+                            (resumen_cat["incidencias"] / total_incidencias) * 100,
+                            0.0,
+                        )
+
+                        fig_motivos = px.bar(
+                            resumen_cat,
+                            x="incidencias",
+                            y="Categoria_Error",
+                            orientation="h",
+                            text="incidencias",
+                            custom_data=["Categoria_Error", "incidencias", "porcentaje", "monto_total"],
+                            title="Principales motivos de error del mes",
+                            color="incidencias",
+                            color_continuous_scale="Blues",
+                        )
+                        fig_motivos.update_traces(
+                            hovertemplate=(
+                                "Categoría: %{customdata[0]}<br>"
+                                "Incidencias: %{customdata[1]}<br>"
+                                "Porcentaje: %{customdata[2]:.1f}%<br>"
+                                "Monto total: $%{customdata[3]:,.2f}<extra></extra>"
+                            )
+                        )
+                        fig_motivos.update_layout(
+                            template="plotly_dark",
+                            xaxis_title="Número de incidencias",
+                            yaxis_title="Categoría de error",
+                            margin=dict(l=30, r=30, t=80, b=30),
+                            paper_bgcolor="rgba(0,0,0,0)",
+                            plot_bgcolor="rgba(0,0,0,0)",
+                            coloraxis_showscale=False,
+                            yaxis=dict(categoryorder="total ascending"),
+                        )
+                        st.plotly_chart(fig_motivos, use_container_width=True)
+
+                        # Resumen automático ejecutivo.
+                        top_freq = resumen_cat.iloc[0]
+                        top_monto = resumen_cat.sort_values("monto_total", ascending=False).iloc[0]
+                        st.info(
+                            (
+                                f"Durante el mes analizado, el principal motivo de error fue "
+                                f"**{top_freq['Categoria_Error']}**, con **{int(top_freq['incidencias'])} incidencias** "
+                                f"({top_freq['porcentaje']:.1f}% del total). En impacto económico, la categoría con mayor "
+                                f"monto fue **{top_monto['Categoria_Error']}** "
+                                f"(${float(top_monto['monto_total']):,.2f}). "
+                                f"Esto sugiere enfocar acciones correctivas en esa causa raíz y su validación operativa."
+                            )
+                        )
+
+                        st.markdown("##### 🧾 Ejemplos reales detectados")
+
+                        col_fecha = _pick_col(df_motivos.columns.tolist(), ["Fecha registro", "Hora_Registro_dt", "Hora_Registro"])
+                        col_cliente = _pick_col(df_motivos.columns.tolist(), ["Cliente", "Nombre_Cliente"])
+                        col_texto_original = None
+                        if cols_texto:
+                            col_texto_original = cols_texto[0]
+
+                        ejemplos = df_motivos.copy()
+                        if col_texto_original is not None:
+                            ejemplos["Motivo_Resumen"] = (
+                                ejemplos[col_texto_original]
+                                .fillna("")
+                                .astype(str)
+                                .str.replace(r"\s+", " ", regex=True)
+                                .str.strip()
+                                .str.slice(0, 140)
+                            )
+                        else:
+                            ejemplos["Motivo_Resumen"] = ejemplos["Texto_Error_Base"].str.slice(0, 140)
+
+                        freq_map = resumen_cat.set_index("Categoria_Error")["incidencias"].to_dict()
+                        ejemplos["Frecuencia_Categoria"] = ejemplos["Categoria_Error"].map(freq_map).fillna(0)
+                        ejemplos = ejemplos.sort_values(
+                            by=["Frecuencia_Categoria", "Monto_Devuelto_calc"],
+                            ascending=[False, False],
+                        ).head(5)
+
+                        col_ej_fecha = col_fecha if col_fecha in ejemplos.columns else None
+                        if col_ej_fecha and pd.api.types.is_datetime64_any_dtype(ejemplos[col_ej_fecha]):
+                            ejemplos[col_ej_fecha] = ejemplos[col_ej_fecha].dt.strftime("%d/%m/%Y %H:%M")
+
+                        ejemplo_cols = []
+                        if col_ej_fecha:
+                            ejemplo_cols.append(col_ej_fecha)
+                        ejemplo_cols.extend(["Responsable_Mostrar"])
+                        if col_cliente and col_cliente in ejemplos.columns:
+                            ejemplo_cols.append(col_cliente)
+                        ejemplo_cols.extend(["Categoria_Error", "Motivo_Resumen", "Monto_Devuelto_calc"])
+
+                        ejemplos_show = ejemplos[ejemplo_cols].rename(
+                            columns={
+                                col_ej_fecha: "Fecha registro" if col_ej_fecha else "Fecha registro",
+                                "Responsable_Mostrar": "Nombre_Responsable",
+                                col_cliente: "Cliente" if col_cliente else "Cliente",
+                                "Categoria_Error": "Categoria_Error",
+                                "Motivo_Resumen": "Motivo resumido",
+                                "Monto_Devuelto_calc": "Monto devuelto",
+                            }
+                        )
+                        ejemplos_show["Monto devuelto"] = ejemplos_show["Monto devuelto"].map(lambda x: f"${float(x):,.2f}")
+                        st.dataframe(ejemplos_show, use_container_width=True, hide_index=True)
+
                     csv_mes = detalle_mes.to_csv(index=False).encode("utf-8-sig")
                     st.download_button(
                         label="⬇️ Descargar lista del mes (Vendedor)",
