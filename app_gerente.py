@@ -7506,8 +7506,23 @@ if "organizador" in tab_map:
                     st.markdown("#### 📈 Incidencias y monto por mes (histórico vendedor)")
 
                     # Normalización robusta para atribuir correctamente el vendedor responsable del error.
+                    def _serie_col(df: pd.DataFrame, candidatos: list[str], default: str = "") -> pd.Series:
+                        for col in candidatos:
+                            if col in df.columns:
+                                return df[col]
+                        return pd.Series([default] * len(df), index=df.index)
+
                     nombre_responsable = (
-                        df_vendedor_mes.get("Nombre_Responsable", df_vendedor_mes.get("Nombre_Responsable_norm", ""))
+                        _serie_col(
+                            df_vendedor_mes,
+                            [
+                                "Nombre_Responsable",
+                                "Nombre_Responsable_norm",
+                                "Vendedor_Responsable_Caso",
+                                "Vendedor Responsable",
+                                "Vendedor",
+                            ],
+                        )
                         .astype(str)
                         .str.strip()
                         .replace("", pd.NA)
@@ -7578,16 +7593,29 @@ if "organizador" in tab_map:
 
                         return canon_key, etiquetas_canonicas
 
-                    nombre_responsable_mes = df_mes_sel.get(
-                        "Vendedor_Responsable",
-                        df_mes_sel.get("Vendedor Responsable", df_mes_sel.get("Vendedor", pd.Series(index=df_mes_sel.index))),
+                    nombre_responsable_mes = (
+                        _serie_col(
+                            df_mes_sel,
+                            [
+                                "Nombre_Responsable",
+                                "Nombre_Responsable_norm",
+                                "Vendedor_Responsable_Caso",
+                                "Vendedor Responsable",
+                                "Vendedor",
+                            ],
+                        )
+                        .astype(str)
+                        .str.strip()
+                        .replace("", pd.NA)
                     )
-                    vendedor_registro_mes = df_mes_sel.get(
-                        "Vendedor_Registro",
-                        df_mes_sel.get("Vendedor_Responsable_Caso", pd.Series(index=df_mes_sel.index)),
+                    vendedor_registro_mes = (
+                        _serie_col(df_mes_sel, ["Vendedor_Registro", "Vendedor_Registro_norm"])
+                        .astype(str)
+                        .str.strip()
+                        .replace("", pd.NA)
                     )
                     id_vendedor_mes_sel = (
-                        df_mes_sel.get("ID vendedor", df_mes_sel.get("ID_Vendedor_Caso", ""))
+                        _serie_col(df_mes_sel, ["ID vendedor", "ID_Vendedor_Caso"])
                         .astype(str)
                         .str.strip()
                         .replace("", pd.NA)
