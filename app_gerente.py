@@ -18,7 +18,6 @@ import urllib.parse
 import urllib.request
 import time
 import calendar
-from difflib import SequenceMatcher
 from zoneinfo import ZoneInfo
 
 # --- CONFIGURACIÓN DE STREAMLIT ---
@@ -7528,85 +7527,14 @@ if "organizador" in tab_map:
                         nombre_responsable.fillna(vendedor_registro).fillna(id_vendedor).fillna("Sin vendedor")
                     )
 
-                    def _nombre_responsable_key(valor: str) -> str:
-                        txt = str(valor or "").strip()
-                        if not txt:
-                            return "sin responsable"
-                        txt = normalizar(txt)
-                        txt = re.sub(r"[^a-z0-9\s]", " ", txt)
-                        txt = re.sub(r"\s+", " ", txt).strip()
-                        tokens = []
-                        for token in txt.split():
-                            token_limpio = re.sub(r"(.)\1+$", r"\1", token)
-                            tokens.append(token_limpio)
-                        return " ".join(tokens) if tokens else "sin responsable"
-
-                    def _agrupar_responsables_similares(serie: pd.Series, umbral_similitud: float = 0.92) -> tuple[pd.Series, dict]:
-                        base = serie.astype(str).str.strip().replace("", "Sin responsable")
-                        keys = base.apply(_nombre_responsable_key)
-                        canonicos: list[str] = []
-                        key_to_canon: dict[str, str] = {}
-
-                        for key in keys.value_counts().index.tolist():
-                            mejor_canon = None
-                            mejor_score = 0.0
-                            for canon in canonicos:
-                                score = SequenceMatcher(None, key, canon).ratio()
-                                if score > mejor_score:
-                                    mejor_score = score
-                                    mejor_canon = canon
-                            if mejor_canon and (
-                                mejor_score >= umbral_similitud
-                                or (key.startswith(mejor_canon) and len(key) - len(mejor_canon) <= 1)
-                                or (mejor_canon.startswith(key) and len(mejor_canon) - len(key) <= 1)
-                            ):
-                                key_to_canon[key] = mejor_canon
-                            else:
-                                canonicos.append(key)
-                                key_to_canon[key] = key
-
-                        canon_key = keys.map(key_to_canon)
-                        etiquetas_canonicas: dict[str, str] = {}
-                        for canon in canon_key.value_counts().index.tolist():
-                            keys_del_canon = [k for k, c in key_to_canon.items() if c == canon]
-                            candidatos = base[keys.isin(keys_del_canon)]
-                            if candidatos.empty:
-                                etiquetas_canonicas[canon] = "Sin responsable"
-                                continue
-                            etiqueta_mas_frecuente = candidatos.value_counts().index[0]
-                            etiquetas_canonicas[canon] = etiqueta_mas_frecuente
-
-                        return canon_key, etiquetas_canonicas
-
-                    canon_keys, etiquetas_canonicas = _agrupar_responsables_similares(df_vendedor_mes["Vendedor_Responsable"])
-                    df_vendedor_mes["Responsable_Canon_Key"] = canon_keys
-                    df_vendedor_mes["Responsable_Canon_Display"] = canon_keys.map(etiquetas_canonicas).fillna("Sin responsable")
-                    canon_mes_sel, _ = _agrupar_responsables_similares(df_mes_sel["Vendedor_Responsable"])
-                    df_mes_sel["Responsable_Canon_Key"] = canon_mes_sel
-                    df_mes_sel["Responsable_Canon_Display"] = canon_mes_sel.map(etiquetas_canonicas).fillna(
-                        canon_mes_sel.map(lambda k: etiquetas_canonicas.get(k, "Sin responsable"))
-                    )
-
-                    st.markdown("#### ⚖️ Vendedores con mayor tasa de incidencia")
-                    incidencias_por_responsable = (
-                        df_vendedor_mes.groupby("Responsable_Canon_Display")
-                        .size()
-                        .rename("Incidencias")
-                    )
-                    top_responsables = incidencias_por_responsable.sort_values(ascending=False).head(10)
-                    st.bar_chart(top_responsables)
-                    st.caption(
-                        "Se agrupan variaciones de nombre (mayúsculas, acentos o letras repetidas) para evitar duplicados del mismo responsable."
-                    )
-
                     # Se elimina la gráfica combinada superior por solicitud de UX.
                     # Conservamos únicamente la dispersión por vendedor.
 
                     # Gráfica 2: dispersión por vendedor (frecuencia vs impacto económico).
                     resumen_vendedor = (
-                        df_vendedor_mes.groupby("Responsable_Canon_Display", as_index=False)
+                        df_vendedor_mes.groupby("Vendedor_Responsable", as_index=False)
                         .agg(
-                            incidencias=("Responsable_Canon_Display", "size"),
+                            incidencias=("Vendedor_Responsable", "size"),
                             monto_total=("Monto_Devuelto_num", "sum"),
                         )
                     )
@@ -7623,8 +7551,8 @@ if "organizador" in tab_map:
                         size="ticket_promedio",
                         color="monto_total",
                         color_continuous_scale="Turbo",
-                        hover_name="Responsable_Canon_Display",
-                        custom_data=["Responsable_Canon_Display", "incidencias", "monto_total", "ticket_promedio"],
+                        hover_name="Vendedor_Responsable",
+                        custom_data=["Vendedor_Responsable", "incidencias", "monto_total", "ticket_promedio"],
                         labels={
                             "incidencias": "Incidencias",
                             "monto_total": "Monto total devuelto ($)",
