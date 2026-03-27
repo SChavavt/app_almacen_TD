@@ -7506,11 +7506,27 @@ if "organizador" in tab_map:
                     st.markdown("#### 📈 Incidencias y monto por mes (histórico vendedor)")
 
                     # Normalización robusta para atribuir correctamente el vendedor responsable del error.
+                    def _serie_col(df: pd.DataFrame, candidatos: list[str], default: str = "") -> pd.Series:
+                        for col in candidatos:
+                            if col in df.columns:
+                                return df[col]
+                        return pd.Series([default] * len(df), index=df.index)
+
                     nombre_responsable = (
-                        df_vendedor_mes.get("Nombre_Responsable", df_vendedor_mes.get("Nombre_Responsable_norm", ""))
+                        _serie_col(
+                            df_vendedor_mes,
+                            [
+                                "Nombre_Responsable",
+                                "Nombre_Responsable_norm",
+                            ],
+                        )
                         .astype(str)
                         .str.strip()
                         .replace("", pd.NA)
+                    )
+                    nombre_responsable = nombre_responsable.mask(
+                        nombre_responsable.str.lower().str.fullmatch(r"(no\s*aplica|n/?a)"),
+                        pd.NA,
                     )
                     vendedor_registro = (
                         df_vendedor_mes.get("Vendedor_Registro", df_vendedor_mes.get("Vendedor_Registro_norm", ""))
@@ -7577,6 +7593,40 @@ if "organizador" in tab_map:
                             etiquetas_canonicas[canon] = etiqueta_mas_frecuente
 
                         return canon_key, etiquetas_canonicas
+
+                    nombre_responsable_mes = (
+                        _serie_col(
+                            df_mes_sel,
+                            [
+                                "Nombre_Responsable",
+                                "Nombre_Responsable_norm",
+                            ],
+                        )
+                        .astype(str)
+                        .str.strip()
+                        .replace("", pd.NA)
+                    )
+                    nombre_responsable_mes = nombre_responsable_mes.mask(
+                        nombre_responsable_mes.str.lower().str.fullmatch(r"(no\s*aplica|n/?a)"),
+                        pd.NA,
+                    )
+                    vendedor_registro_mes = (
+                        _serie_col(df_mes_sel, ["Vendedor_Registro", "Vendedor_Registro_norm"])
+                        .astype(str)
+                        .str.strip()
+                        .replace("", pd.NA)
+                    )
+                    id_vendedor_mes_sel = (
+                        _serie_col(df_mes_sel, ["ID vendedor", "ID_Vendedor_Caso"])
+                        .astype(str)
+                        .str.strip()
+                        .replace("", pd.NA)
+                    )
+                    df_mes_sel["Vendedor_Responsable"] = (
+                        nombre_responsable_mes.fillna(vendedor_registro_mes)
+                        .fillna(id_vendedor_mes_sel)
+                        .fillna("Sin vendedor")
+                    )
 
                     canon_keys, etiquetas_canonicas = _agrupar_responsables_similares(df_vendedor_mes["Vendedor_Responsable"])
                     df_vendedor_mes["Responsable_Canon_Key"] = canon_keys
