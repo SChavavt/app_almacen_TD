@@ -1307,7 +1307,19 @@ def apply_surtidor_assignments(entries, assignments: dict) -> None:
     for entry in entries:
         key = build_surtidor_key(entry)
         if key:
-            entry["surtidor"] = assignments.get(key, "")
+            entry["surtidor"] = assignments.get(
+                key, sanitize_text(entry.get("surtidor", ""))
+            )
+
+
+def hydrate_surtidor_assignments_from_entries(entries, assignments: dict) -> None:
+    for entry in entries:
+        key = build_surtidor_key(entry)
+        if not key:
+            continue
+        surtidor_guardado = sanitize_text(entry.get("surtidor", ""))
+        if surtidor_guardado and not sanitize_text(assignments.get(key, "")):
+            assignments[key] = surtidor_guardado
 
 
 def assign_shared_numbers(entries_local, entries_foraneo):
@@ -1606,6 +1618,7 @@ def build_base_entry(row, categoria: str):
     entry = {
         "categoria": categoria,
         "estado": sanitize_text(row.get("Estado", "")),
+        "surtidor": sanitize_text(row.get("Surtidor", "")),
         "completados_limpiado": sanitize_text(row.get("Completados_Limpiado", "")),
         "cliente": format_cliente_line(row),
         "cliente_nombre": sanitize_text(row.get("Cliente", "")),
@@ -1621,6 +1634,9 @@ def build_base_entry(row, categoria: str):
         "tipo": sanitize_text(row.get("Tipo", "")),
         "numero_foraneo": sanitize_text(row.get("Numero_Foraneo", "")),
         "gsheet_row_index": row.get("gsheet_row_index", row.get("_gsheet_row_index", row.get("__sheet_row"))),
+        "sheet_source": sanitize_text(
+            row.get("sheet_source", row.get("_sheet_source", ""))
+        ),
         "badges": [],
         "details": [],
         "sort_key": compute_sort_key(row),
@@ -2832,6 +2848,95 @@ def _warn_and_get_dataframe_fallback(cache_key: str, label: str) -> pd.DataFrame
     return pd.DataFrame()
 
 
+def _worksheet_by_name(sheet_name: str):
+    if sheet_name == SHEET_CASOS:
+        return worksheet_casos
+    return worksheet_main
+
+
+def _get_column_index_cached(sheet_name: str, column_name: str) -> Optional[int]:
+    cache = st.session_state.setdefault("_sheet_col_index_cache", {})
+    cache_key = f"{sheet_name}::{column_name}"
+    cached = cache.get(cache_key)
+    if isinstance(cached, int) and cached > 0:
+        return cached
+
+    ws = _worksheet_by_name(sheet_name)
+    headers = ws.row_values(1)
+    if column_name not in headers:
+        return None
+
+    col_idx = headers.index(column_name) + 1
+    cache[cache_key] = col_idx
+    return col_idx
+
+
+def persist_surtidor_to_sheets(entries: list[dict], surtidor: str) -> tuple[int, int]:
+    """Persist assigned surtidor to Google Sheets by row index for pedidos/casos."""
+    updates_by_sheet: dict[str, list[tuple[int, str]]] = {}
+    seen_targets = set()
+
+    for entry in entries:
+        raw_row = entry.get("gsheet_row_index")
+        try:
+            row_idx = int(float(raw_row))
+        except Exception:
+            continue
+        if row_idx < 2:
+            continue
+
+        sheet_name = sanitize_text(entry.get("sheet_source", "")) or SHEET_PEDIDOS
+        target = (sheet_name, row_idx)
+        if target in seen_targets:
+            continue
+        seen_targets.add(target)
+        updates_by_sheet.setdefault(sheet_name, []).append((row_idx, surtidor))
+
+    success_count = 0
+    fail_count = 0
+    for sheet_name, updates in updates_by_sheet.items():
+        try:
+            col_idx = _get_column_index_cached(sheet_name, "Surtidor")
+        except Exception:
+            col_idx = None
+
+        if not col_idx:
+            fail_count += len(updates)
+            st.warning(
+                f"No se encontró la columna 'Surtidor' en la hoja '{sheet_name}'."
+            )
+            continue
+
+        ws = _worksheet_by_name(sheet_name)
+        payload = [
+            {
+                "range": gspread.utils.rowcol_to_a1(row_idx, col_idx),
+                "values": [[value]],
+            }
+            for row_idx, value in updates
+        ]
+        try:
+            ws.batch_update(payload, value_input_option="USER_ENTERED")
+            success_count += len(updates)
+        except gspread.exceptions.APIError:
+            fail_count += len(updates)
+            st.warning(
+                f"No se pudieron guardar {len(updates)} surtidores en '{sheet_name}' por un error temporal de Google Sheets."
+            )
+
+    if success_count:
+        try:
+            load_data_from_gsheets.clear()
+        except Exception:
+            pass
+        try:
+            load_casos_from_gsheets.clear()
+        except Exception:
+            pass
+
+    return success_count, fail_count
+
+
 @st.cache_data(ttl=60)
 def load_data_from_gsheets():
     try:
@@ -2859,6 +2964,7 @@ def load_data_from_gsheets():
     headers = data[0]
     df = pd.DataFrame(data[1:], columns=headers)
     df["gsheet_row_index"] = df.index + 2
+    df["sheet_source"] = SHEET_PEDIDOS
 
     # Tipos
     if "ID_Pedido" in df.columns:
@@ -2926,6 +3032,7 @@ def load_casos_from_gsheets():
         fixed.append(h)
     df = pd.DataFrame(data[1:], columns=fixed)
     df["gsheet_row_index"] = df.index + 2
+    df["sheet_source"] = SHEET_CASOS
 
     # Fechas típicas
     dt_cols = [
@@ -3884,6 +3991,12 @@ if selected_tab in (2, 3, 4):
         st.session_state.surtidor_assignments = {}
     apply_surtidor_assignments(auto_local_entries, st.session_state.surtidor_assignments)
     apply_surtidor_assignments(auto_foraneo_entries, st.session_state.surtidor_assignments)
+    hydrate_surtidor_assignments_from_entries(
+        auto_local_entries, st.session_state.surtidor_assignments
+    )
+    hydrate_surtidor_assignments_from_entries(
+        auto_foraneo_entries, st.session_state.surtidor_assignments
+    )
     assign_display_numbers(auto_local_entries, auto_foraneo_entries, datetime.now(TZ).date())
 
 # ---------------------------
@@ -4265,9 +4378,28 @@ if selected_tab == 4:
             if not selected_keys:
                 st.warning("Selecciona al menos un pedido.")
             else:
+                selected_entry_map = {
+                    build_surtidor_key(entry): entry
+                    for entry in (local_hoy + foraneo_hoy)
+                }
+                selected_entries = [
+                    selected_entry_map[key]
+                    for key in selected_keys
+                    if key in selected_entry_map
+                ]
                 for key in selected_keys:
                     st.session_state.surtidor_assignments[key] = nombre
-                st.success("Asignación guardada.")
+                ok_count, fail_count = persist_surtidor_to_sheets(selected_entries, nombre)
+                if ok_count and not fail_count:
+                    st.success("Asignación guardada y sincronizada con Google Sheets.")
+                elif ok_count and fail_count:
+                    st.warning(
+                        f"Se guardaron {ok_count} surtidores en Google Sheets; {fail_count} quedaron pendientes."
+                    )
+                else:
+                    st.warning(
+                        "La asignación quedó en caché local, pero no se pudo sincronizar en Google Sheets."
+                    )
                 st.rerun()
 
     st.markdown("---")
