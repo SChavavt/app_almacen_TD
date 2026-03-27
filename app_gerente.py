@@ -7516,6 +7516,22 @@ if "organizador" in tab_map:
                             (resumen_cat["incidencias"] / total_incidencias) * 100,
                             0.0,
                         )
+                        responsables_por_categoria = (
+                            df_motivos.groupby("Categoria_Error")["Responsable_Mostrar"]
+                            .apply(
+                                lambda serie: ", ".join(
+                                    [
+                                        f"{resp} ({int(cnt)})"
+                                        for resp, cnt in serie.value_counts().head(3).items()
+                                    ]
+                                )
+                                if not serie.dropna().empty else "Sin responsable identificado"
+                            )
+                            .to_dict()
+                        )
+                        resumen_cat["Responsables_Destacados"] = resumen_cat["Categoria_Error"].map(
+                            responsables_por_categoria
+                        ).fillna("Sin responsable identificado")
 
                         fig_motivos = px.bar(
                             resumen_cat,
@@ -7523,7 +7539,13 @@ if "organizador" in tab_map:
                             y="Categoria_Error",
                             orientation="h",
                             text="incidencias",
-                            custom_data=["Categoria_Error", "incidencias", "porcentaje", "monto_total"],
+                            custom_data=[
+                                "Categoria_Error",
+                                "incidencias",
+                                "porcentaje",
+                                "monto_total",
+                                "Responsables_Destacados",
+                            ],
                             title="Principales motivos de error del mes",
                             color="incidencias",
                             color_continuous_scale="Blues",
@@ -7533,7 +7555,8 @@ if "organizador" in tab_map:
                                 "Categoría: %{customdata[0]}<br>"
                                 "Incidencias: %{customdata[1]}<br>"
                                 "Porcentaje: %{customdata[2]:.1f}%<br>"
-                                "Monto total: $%{customdata[3]:,.2f}<extra></extra>"
+                                "Monto total: $%{customdata[3]:,.2f}<br>"
+                                "Responsables: %{customdata[4]}<extra></extra>"
                             )
                         )
                         fig_motivos.update_layout(
@@ -7551,69 +7574,21 @@ if "organizador" in tab_map:
                         # Resumen automático ejecutivo.
                         top_freq = resumen_cat.iloc[0]
                         top_monto = resumen_cat.sort_values("monto_total", ascending=False).iloc[0]
-                        st.info(
+                        min_freq = resumen_cat.sort_values(["incidencias", "monto_total"], ascending=[True, True]).iloc[0]
+                        st.markdown(
                             (
+                                "##### 🧾 Resumen de motivos de error\n\n"
                                 f"Durante el mes analizado, el principal motivo de error fue "
                                 f"**{top_freq['Categoria_Error']}**, con **{int(top_freq['incidencias'])} incidencias** "
                                 f"({top_freq['porcentaje']:.1f}% del total). En impacto económico, la categoría con mayor "
                                 f"monto fue **{top_monto['Categoria_Error']}** "
                                 f"(${float(top_monto['monto_total']):,.2f}). "
-                                f"Esto sugiere enfocar acciones correctivas en esa causa raíz y su validación operativa."
+                                f"El motivo con menor participación fue **{min_freq['Categoria_Error']}**, con "
+                                f"**{int(min_freq['incidencias'])} incidencias** ({min_freq['porcentaje']:.1f}% del total). "
+                                f"Esto sugiere enfocar acciones correctivas en la causa principal y dar seguimiento preventivo "
+                                f"a los motivos de menor frecuencia."
                             )
                         )
-
-                        st.markdown("##### 🧾 Ejemplos reales detectados")
-
-                        col_fecha = _pick_col(df_motivos.columns.tolist(), ["Fecha registro", "Hora_Registro_dt", "Hora_Registro"])
-                        col_cliente = _pick_col(df_motivos.columns.tolist(), ["Cliente", "Nombre_Cliente"])
-                        col_texto_original = None
-                        if cols_texto:
-                            col_texto_original = cols_texto[0]
-
-                        ejemplos = df_motivos.copy()
-                        if col_texto_original is not None:
-                            ejemplos["Motivo_Resumen"] = (
-                                ejemplos[col_texto_original]
-                                .fillna("")
-                                .astype(str)
-                                .str.replace(r"\s+", " ", regex=True)
-                                .str.strip()
-                                .str.slice(0, 140)
-                            )
-                        else:
-                            ejemplos["Motivo_Resumen"] = ejemplos["Texto_Error_Base"].str.slice(0, 140)
-
-                        freq_map = resumen_cat.set_index("Categoria_Error")["incidencias"].to_dict()
-                        ejemplos["Frecuencia_Categoria"] = ejemplos["Categoria_Error"].map(freq_map).fillna(0)
-                        ejemplos = ejemplos.sort_values(
-                            by=["Frecuencia_Categoria", "Monto_Devuelto_calc"],
-                            ascending=[False, False],
-                        ).head(5)
-
-                        col_ej_fecha = col_fecha if col_fecha in ejemplos.columns else None
-                        if col_ej_fecha and pd.api.types.is_datetime64_any_dtype(ejemplos[col_ej_fecha]):
-                            ejemplos[col_ej_fecha] = ejemplos[col_ej_fecha].dt.strftime("%d/%m/%Y %H:%M")
-
-                        ejemplo_cols = []
-                        if col_ej_fecha:
-                            ejemplo_cols.append(col_ej_fecha)
-                        ejemplo_cols.extend(["Responsable_Mostrar"])
-                        if col_cliente and col_cliente in ejemplos.columns:
-                            ejemplo_cols.append(col_cliente)
-                        ejemplo_cols.extend(["Categoria_Error", "Motivo_Resumen", "Monto_Devuelto_calc"])
-
-                        ejemplos_show = ejemplos[ejemplo_cols].rename(
-                            columns={
-                                col_ej_fecha: "Fecha registro" if col_ej_fecha else "Fecha registro",
-                                "Responsable_Mostrar": "Nombre_Responsable",
-                                col_cliente: "Cliente" if col_cliente else "Cliente",
-                                "Categoria_Error": "Categoria_Error",
-                                "Motivo_Resumen": "Motivo resumido",
-                                "Monto_Devuelto_calc": "Monto devuelto",
-                            }
-                        )
-                        ejemplos_show["Monto devuelto"] = ejemplos_show["Monto devuelto"].map(lambda x: f"${float(x):,.2f}")
-                        st.dataframe(ejemplos_show, use_container_width=True, hide_index=True)
 
                     csv_mes = detalle_mes.to_csv(index=False).encode("utf-8-sig")
                     st.download_button(
