@@ -1796,7 +1796,7 @@ def render_auto_list(
             f"<td class='board-n'>{number_label}</td>",
             f"<td class='board-client'>{cliente_html}</td>",
         ]
-        if mode == "foraneo":
+        if mode in {"foraneo", "local"}:
             cells_html.append(f"<td class='board-date'>{fecha}</td>")
         cells_html.append(f"<td class='board-state'>{estado_html}</td>")
         rows_html.append(
@@ -1859,13 +1859,13 @@ def render_auto_list(
     <div class="{scroll_class}">
         <table class="board-table">
             <colgroup>
-                {"<col style='width:5%'><col style='width:58%'><col style='width:13%'><col style='width:24%'>" if mode == "foraneo" else "<col style='width:4%'><col style='width:70%'><col style='width:26%'>"}
+                {"<col style='width:5%'><col style='width:50%'><col style='width:17%'><col style='width:28%'>" if mode in {'foraneo', 'local'} else "<col style='width:4%'><col style='width:70%'><col style='width:26%'>"}
             </colgroup>
             <thead class="board-head">
                 <tr>
                     <th>#</th>
                     <th>Cliente</th>
-                    {"<th>Fecha</th>" if mode == "foraneo" else ""}
+                    {"<th>Fecha</th>" if mode in {"foraneo", "local"} else ""}
                     <th>Estado</th>
                 </tr>
             </thead>
@@ -1984,9 +1984,10 @@ def filter_entries_on_date(entries, reference_date):
 def keep_local_entries_prioritizing_today_or_overdue(entries, reference_date):
     """
     Para cada turno local:
-    - Si existe al menos un pedido sin fecha o con Fecha_Entrega <= reference_date,
-      oculta los pedidos con Fecha_Entrega futura.
-    - Si no existe ninguno en esa condición, muestra los futuros.
+    - Si existe al menos un pedido ACTIVO (no completado/cancelado/viajó)
+      sin fecha o con Fecha_Entrega <= reference_date, oculta los futuros.
+    - Si no hay activos de hoy/atrasados (o ya quedaron completados),
+      muestra los futuros.
     """
     grouped: dict[str, list] = {}
     for entry in entries:
@@ -1995,45 +1996,37 @@ def keep_local_entries_prioritizing_today_or_overdue(entries, reference_date):
 
     filtered: list[dict] = []
     for _, turno_entries in grouped.items():
-        has_today_or_overdue = False
-        for entry in turno_entries:
-            dt = entry.get("fecha_entrega_dt")
-            if dt is None:
-                has_today_or_overdue = True
-                break
-            try:
-                if pd.isna(dt):
-                    has_today_or_overdue = True
-                    break
-            except Exception:
-                has_today_or_overdue = True
-                break
-
-            delivery_date = pd.to_datetime(dt).date()
-            if delivery_date <= reference_date:
-                has_today_or_overdue = True
-                break
-
-        if not has_today_or_overdue:
-            filtered.extend(turno_entries)
-            continue
+        due_entries: list[dict] = []
+        future_entries: list[dict] = []
 
         for entry in turno_entries:
             dt = entry.get("fecha_entrega_dt")
+            is_due_bucket = False
             if dt is None:
-                filtered.append(entry)
-                continue
-            try:
-                if pd.isna(dt):
-                    filtered.append(entry)
-                    continue
-            except Exception:
-                filtered.append(entry)
-                continue
+                is_due_bucket = True
+            else:
+                try:
+                    if pd.isna(dt):
+                        is_due_bucket = True
+                except Exception:
+                    is_due_bucket = True
 
-            delivery_date = pd.to_datetime(dt).date()
-            if delivery_date <= reference_date:
-                filtered.append(entry)
+            if not is_due_bucket:
+                delivery_date = pd.to_datetime(dt).date()
+                is_due_bucket = delivery_date <= reference_date
+
+            if is_due_bucket:
+                due_entries.append(entry)
+            else:
+                future_entries.append(entry)
+
+        has_active_due = any(not _is_done_estado(e.get("estado", "")) for e in due_entries)
+        if has_active_due:
+            filtered.extend(due_entries)
+        elif future_entries:
+            filtered.extend(future_entries)
+        else:
+            filtered.extend(due_entries)
 
     return filtered
 
@@ -2052,6 +2045,36 @@ def filter_entries_no_entrega_date(entries):
         except Exception:
             pass
     return out
+
+
+def local_title_date_label(entries: list[dict]) -> str:
+    """Etiqueta de fecha para título local basada en las fechas reales visibles."""
+    dates: list = []
+    has_missing = False
+    for e in entries:
+        dt = e.get("fecha_entrega_dt")
+        if dt is None:
+            has_missing = True
+            continue
+        try:
+            if pd.isna(dt):
+                has_missing = True
+                continue
+        except Exception:
+            has_missing = True
+            continue
+        dates.append(pd.to_datetime(dt).date())
+
+    if not dates:
+        return "Sin fecha" if has_missing else "—"
+
+    unique_dates = sorted(set(dates))
+    if len(unique_dates) == 1:
+        return unique_dates[0].strftime("%d/%m")
+
+    start = unique_dates[0].strftime("%d/%m")
+    end = unique_dates[-1].strftime("%d/%m")
+    return f"{start}-{end}"
 
 
 def sort_entries_by_delivery(entries):
@@ -4067,10 +4090,11 @@ if selected_tab == 2:
         for idx, label in enumerate(ordered_labels):
             target_col = columns[idx % 2]
             entries = sort_entries_by_flow_number_desc(grouped[label])
+            date_label = local_title_date_label(entries)
             with target_col:
                 next_number = render_auto_list(
                     entries,
-                    title=f"📍 LOCALES • {label} ({today_local.strftime('%d/%m')})",
+                    title=f"📍 LOCALES • {label} ({date_label})",
                     subtitle="Pedidos activos por turno",
                     max_rows=140,
                     start_number=next_number,
