@@ -7344,9 +7344,13 @@ if "organizador" in tab_map:
                 if not raw:
                     return "Sin responsable"
                 norm = normalizar(raw)
+                norm = re.sub(r"\s+", " ", norm).strip()
+                norm = re.sub(r"(.)\1+$", r"\1", norm)
                 if norm in {"no aplica", "n/a", "na", "sin responsable", "noaplica"}:
                     return "Sin responsable"
                 alias = {
+                    "juanito": "Juanito",
+                    "juanitoo": "Juanito",
                     "robert": "Roberto",
                     "robert51": "Roberto",
                     "roberto": "Roberto",
@@ -7354,10 +7358,16 @@ if "organizador" in tab_map:
                     "distribucion y universidades": "Roberto",
                     "distribucion": "Roberto",
                     "universidades": "Roberto",
+                    "jose": "José",
+                    "joze": "José",
                     "carolina": "Griselda Carolina",
                     "griselda carolina": "Griselda Carolina",
                     "gloria": "Gloria Michella",
+                    "gloria michelle": "Gloria Michella",
                     "gloria michella": "Gloria Michella",
+                    "michelle": "Gloria Michella",
+                    "michele": "Gloria Michella",
+                    "michella": "Gloria Michella",
                 }
                 return alias.get(norm, raw)
 
@@ -7478,6 +7488,29 @@ if "organizador" in tab_map:
                         .fillna(df_vendedor_mes.get("Id_Vendedor", "").astype(str).str.strip().replace("", pd.NA))
                         .fillna(df_vendedor_mes.get("Vendedor_Registro", "").astype(str).str.strip().replace("", "Sin ID vendedor"))
                     )
+                    nombre_responsable = (
+                        df_vendedor_mes.get("Nombre_Responsable", df_vendedor_mes.get("Nombre_Responsable_norm", ""))
+                        .astype(str)
+                        .str.strip()
+                        .replace("", pd.NA)
+                        .apply(normalizar_nombre_persona)
+                    )
+                    vendedor_registro = (
+                        df_vendedor_mes.get("Vendedor_Registro", df_vendedor_mes.get("Vendedor_Registro_norm", ""))
+                        .astype(str)
+                        .str.strip()
+                        .replace("", pd.NA)
+                        .apply(normalizar_vendedor_nombre)
+                    )
+                    id_vendedor = (
+                        df_vendedor_mes.get("ID vendedor", df_vendedor_mes.get("ID_Vendedor_Caso", ""))
+                        .astype(str)
+                        .str.strip()
+                        .replace("", pd.NA)
+                    )
+                    df_vendedor_mes["Responsable_Analisis"] = (
+                        nombre_responsable.fillna(vendedor_registro).fillna(id_vendedor).fillna("Sin responsable")
+                    )
 
                     meses_disponibles = sorted(df_vendedor_mes["Mes_Period"].dropna().unique())
                     mes_actual_period = pd.Timestamp.now().to_period("M")
@@ -7504,28 +7537,8 @@ if "organizador" in tab_map:
 
                     st.markdown("#### 📈 Incidencias y monto por mes (histórico vendedor)")
 
-                    # Normalización robusta para atribuir correctamente el vendedor responsable del error.
-                    nombre_responsable = (
-                        df_vendedor_mes.get("Nombre_Responsable", df_vendedor_mes.get("Nombre_Responsable_norm", ""))
-                        .astype(str)
-                        .str.strip()
-                        .replace("", pd.NA)
-                    )
-                    vendedor_registro = (
-                        df_vendedor_mes.get("Vendedor_Registro", df_vendedor_mes.get("Vendedor_Registro_norm", ""))
-                        .astype(str)
-                        .str.strip()
-                        .replace("", pd.NA)
-                    )
-                    id_vendedor = (
-                        df_vendedor_mes.get("ID vendedor", df_vendedor_mes.get("ID_Vendedor_Caso", ""))
-                        .astype(str)
-                        .str.strip()
-                        .replace("", pd.NA)
-                    )
-                    df_vendedor_mes["Vendedor_Responsable"] = (
-                        nombre_responsable.fillna(vendedor_registro).fillna(id_vendedor).fillna("Sin vendedor")
-                    )
+                    # Normalización robusta para atribuir correctamente al responsable (según área filtrada).
+                    df_vendedor_mes["Vendedor_Responsable"] = df_vendedor_mes["Responsable_Analisis"]
 
                     # Se elimina la gráfica combinada superior por solicitud de UX.
                     # Conservamos únicamente la dispersión por vendedor.
@@ -7578,6 +7591,32 @@ if "organizador" in tab_map:
                         plot_bgcolor="rgba(0,0,0,0)",
                     )
                     st.plotly_chart(fig_scatter, use_container_width=True)
+
+                    st.markdown("#### ⚖️ Responsables con mayor tasa de incidencia")
+                    resumen_tasa = (
+                        df_mes_sel.assign(Responsable_Analisis=df_vendedor_mes.loc[df_mes_sel.index, "Responsable_Analisis"])
+                        .groupby("Responsable_Analisis", as_index=False)
+                        .agg(incidencias=("Responsable_Analisis", "size"))
+                    )
+                    total_mes_area = int(resumen_tasa["incidencias"].sum())
+                    resumen_tasa["tasa_incidencia_pct"] = np.where(
+                        total_mes_area > 0,
+                        (resumen_tasa["incidencias"] / total_mes_area) * 100,
+                        0.0,
+                    )
+                    resumen_tasa = resumen_tasa.sort_values(
+                        by=["tasa_incidencia_pct", "incidencias"],
+                        ascending=False,
+                    ).head(10)
+                    if not resumen_tasa.empty:
+                        st.bar_chart(
+                            resumen_tasa.set_index("Responsable_Analisis")["tasa_incidencia_pct"]
+                        )
+                        st.caption(
+                            "La tasa se calcula con base en la participación de incidencias del mes y del área responsable filtrada."
+                        )
+                    else:
+                        st.info("No hay responsables para calcular la tasa de incidencia en el filtro actual.")
 
                     st.markdown("#### 📋 Lista del mes seleccionado")
                     columnas_mes = [
