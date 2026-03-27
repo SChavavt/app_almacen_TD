@@ -2407,11 +2407,12 @@ def completar_pedido(
     origen_tab: str,
     success_message: Optional[str] = None,
     trigger_rerun: bool = True,
+    allow_from_any_status: bool = False,
 ) -> bool:
     """Marca un pedido como completado y preserva el estado visual - OPTIMIZADO."""
 
     estado_actual = str(row.get("Estado", "") or "").strip()
-    if estado_actual != "🔵 En Proceso":
+    if not allow_from_any_status and estado_actual != "🔵 En Proceso":
         st.warning(
             "⚠️ Para completar el pedido primero debe estar en **🔵 En Proceso**. "
             "Cambia el estado a en proceso antes de marcarlo como completado."
@@ -2891,6 +2892,7 @@ def mostrar_confirmacion_completado_guia(
             gsheet_row_index,
             origen_tab,
             success_message or "✅ Pedido marcado como **🟢 Completado**.",
+            allow_from_any_status=es_tab_solicitudes_guia(origen_tab),
         )
         prompts.pop(row["ID_Pedido"], None)
 
@@ -4297,10 +4299,18 @@ def mostrar_pedido_solo_guia(df, idx, row, orden, origen_tab, current_main_tab_l
                             icon="📦",
                         )
                         if es_tab_solicitudes_guia(origen_tab):
-                            prompts = st.session_state.setdefault(
-                                "confirm_complete_after_guide", {}
+                            completar_pedido(
+                                df,
+                                idx,
+                                row,
+                                worksheet,
+                                headers,
+                                gsheet_row_index,
+                                origen_tab,
+                                "✅ Pedido marcado como **🟢 Completado** al subir la guía.",
+                                trigger_rerun=False,
+                                allow_from_any_status=True,
                             )
-                            prompts[row["ID_Pedido"]] = True
                         ensure_expanders_open(
                             row["ID_Pedido"],
                             "expanded_pedidos",
@@ -4370,6 +4380,7 @@ def mostrar_pedido_solo_guia(df, idx, row, orden, origen_tab, current_main_tab_l
                     gsheet_row_index,
                     origen_tab,
                     "✅ Pedido marcado como **🟢 Completado**.",
+                    allow_from_any_status=True,
                 )
             elif not requires:
                 completar_pedido(
