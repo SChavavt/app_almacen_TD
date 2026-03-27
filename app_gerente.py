@@ -7216,7 +7216,6 @@ if "organizador" in tab_map:
                 pedidos_por_vendedor = pd.Series(dtype="int64", name="Pedidos_Totales")
 
             with st.expander("🧩 Incidencias por mes (filtro configurable por áreas responsables)", expanded=False):
-                )
 
                 def _areas_responsables_desde_texto(valor) -> list[str]:
                     txt = str(valor or "").strip()
