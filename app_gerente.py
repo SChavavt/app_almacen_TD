@@ -7575,18 +7575,61 @@ if "organizador" in tab_map:
                         top_freq = resumen_cat.iloc[0]
                         top_monto = resumen_cat.sort_values("monto_total", ascending=False).iloc[0]
                         min_freq = resumen_cat.sort_values(["incidencias", "monto_total"], ascending=[True, True]).iloc[0]
+                        top_responsables = df_motivos["Responsable_Mostrar"].value_counts().head(3)
+                        vendedores_top_txt = "Sin responsable identificado"
+                        if not top_responsables.empty:
+                            vendedores_top_txt = " · ".join(
+                                [
+                                    f"{resp} ({int(cnt)})"
+                                    for resp, cnt in top_responsables.items()
+                                ]
+                            )
+
+                        total_vendedores = int(df_motivos["Responsable_Mostrar"].nunique())
+                        responsables_causa_principal = (
+                            df_motivos.loc[
+                                df_motivos["Categoria_Error"] == top_freq["Categoria_Error"],
+                                "Responsable_Mostrar",
+                            ]
+                            .dropna()
+                            .nunique()
+                        )
+
+                        tokens_series = (
+                            df_motivos["Texto_Error_Base"]
+                            .fillna("")
+                            .astype(str)
+                            .str.split()
+                            .explode()
+                        )
+                        stopwords_resumen = {
+                            "", "de", "la", "el", "los", "las", "y", "en", "por", "con", "para", "del",
+                            "al", "se", "que", "un", "una", "lo", "le", "es", "no", "mas", "muy", "sin",
+                            "su", "sus", "como", "ya", "fue", "era", "ser", "esta", "este", "porque", "pero",
+                            "cliente", "caso", "detalle", "comentario", "motivo", "error"
+                        }
+                        tokens_filtrados = tokens_series[
+                            tokens_series.str.len().fillna(0).ge(4) & ~tokens_series.isin(stopwords_resumen)
+                        ]
+                        top_tokens = tokens_filtrados.value_counts().head(5).index.tolist()
+                        top_tokens_txt = ", ".join(top_tokens) if top_tokens else "sin patrones claros en texto"
+
                         st.markdown(
                             (
                                 "##### 🧾 Resumen de motivos de error\n\n"
-                                f"Durante el mes analizado, el principal motivo de error fue "
-                                f"**{top_freq['Categoria_Error']}**, con **{int(top_freq['incidencias'])} incidencias** "
-                                f"({top_freq['porcentaje']:.1f}% del total). En impacto económico, la categoría con mayor "
-                                f"monto fue **{top_monto['Categoria_Error']}** "
-                                f"(${float(top_monto['monto_total']):,.2f}). "
-                                f"El motivo con menor participación fue **{min_freq['Categoria_Error']}**, con "
-                                f"**{int(min_freq['incidencias'])} incidencias** ({min_freq['porcentaje']:.1f}% del total). "
-                                f"Esto sugiere enfocar acciones correctivas en la causa principal y dar seguimiento preventivo "
-                                f"a los motivos de menor frecuencia."
+                                f"En resumen, la mayor parte de las fallas se concentró en "
+                                f"**{top_freq['Categoria_Error']}**, con **{int(top_freq['incidencias'])} casos** "
+                                f"({top_freq['porcentaje']:.1f}% del total).\n\n"
+                                f"📌 **Mayor impacto económico:** **{top_monto['Categoria_Error']}** "
+                                f"(${float(top_monto['monto_total']):,.2f}).\n"
+                                f"📌 **Menor participación:** **{min_freq['Categoria_Error']}** "
+                                f"({int(min_freq['incidencias'])} casos, {min_freq['porcentaje']:.1f}%).\n\n"
+                                f"👥 **Concentración por vendedores:** {int(responsables_causa_principal)} de "
+                                f"{total_vendedores} vendedores participaron en el error principal. "
+                                f"Más recurrentes: {vendedores_top_txt}.\n"
+                                f"🧠 **Patrones frecuentes en motivos detallados:** {top_tokens_txt}.\n\n"
+                                f"👉 Recomendación: priorizar acciones en la causa principal y mantener seguimiento "
+                                f"preventivo en los casos de menor frecuencia."
                             )
                         )
 
