@@ -7578,6 +7578,26 @@ if "organizador" in tab_map:
 
                         return canon_key, etiquetas_canonicas
 
+                    nombre_responsable_mes = df_mes_sel.get(
+                        "Vendedor_Responsable",
+                        df_mes_sel.get("Vendedor Responsable", df_mes_sel.get("Vendedor", pd.Series(index=df_mes_sel.index))),
+                    )
+                    vendedor_registro_mes = df_mes_sel.get(
+                        "Vendedor_Registro",
+                        df_mes_sel.get("Vendedor_Responsable_Caso", pd.Series(index=df_mes_sel.index)),
+                    )
+                    id_vendedor_mes_sel = (
+                        df_mes_sel.get("ID vendedor", df_mes_sel.get("ID_Vendedor_Caso", ""))
+                        .astype(str)
+                        .str.strip()
+                        .replace("", pd.NA)
+                    )
+                    df_mes_sel["Vendedor_Responsable"] = (
+                        nombre_responsable_mes.fillna(vendedor_registro_mes)
+                        .fillna(id_vendedor_mes_sel)
+                        .fillna("Sin vendedor")
+                    )
+
                     canon_keys, etiquetas_canonicas = _agrupar_responsables_similares(df_vendedor_mes["Vendedor_Responsable"])
                     df_vendedor_mes["Responsable_Canon_Key"] = canon_keys
                     df_vendedor_mes["Responsable_Canon_Display"] = canon_keys.map(etiquetas_canonicas).fillna("Sin responsable")
