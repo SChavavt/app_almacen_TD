@@ -7215,23 +7215,71 @@ if "organizador" in tab_map:
             else:
                 pedidos_por_vendedor = pd.Series(dtype="int64", name="Pedidos_Totales")
 
-            with st.expander("🧑‍💼 Incidencias por mes (solo área responsable: Vendedor)", expanded=False):
+            with st.expander("🧩 Incidencias por mes (filtro configurable por áreas responsables)", expanded=False):
                 st.caption(
-                    "Filtrado estricto: solo se consideran registros donde `Area_Responsable = Vendedor`."
+                    "Puedes filtrar por una o varias áreas responsables (ejemplo: `Vendedor`, `Almacén` o ambas)."
                 )
 
-                mask_area_vendedor = (
-                    df_metricas["Area_Responsable_norm"]
-                    .astype(str)
-                    .str.strip()
-                    .str.lower()
-                    .eq("vendedor")
+                def _areas_responsables_desde_texto(valor) -> list[str]:
+                    txt = str(valor or "").strip()
+                    if not txt:
+                        return ["Sin área"]
+                    txt_norm = normalizar(txt)
+                    partes = re.split(r"\s*(?:\+|/|,|;| y | e | & | \|)\s*", txt_norm)
+                    salida = []
+                    for parte in partes:
+                        parte = str(parte).strip()
+                        if not parte:
+                            continue
+                        if parte in {"almacen", "almacenaje", "bodega"}:
+                            parte = "almacen"
+                        elif parte in {"vendedor", "ventas", "comercial"}:
+                            parte = "vendedor"
+                        elif parte in {"logistica", "logistico"}:
+                            parte = "logistica"
+                        elif parte in {"administracion", "administrativo", "administrativa"}:
+                            parte = "administracion"
+                        elif parte in {"facturacion", "factura"}:
+                            parte = "facturacion"
+                        elif parte in {"credito y cobranza", "cobranza", "credito"}:
+                            parte = "cobranza"
+                        salida.append(parte)
+                    return sorted(set(salida)) if salida else ["Sin área"]
+
+                df_metricas["Areas_Responsables_List"] = df_metricas["Area_Responsable_norm"].apply(
+                    _areas_responsables_desde_texto
                 )
-                df_vendedor_mes = df_metricas[mask_area_vendedor].copy()
+                areas_disponibles = sorted(
+                    {
+                        area
+                        for lista_areas in df_metricas["Areas_Responsables_List"].tolist()
+                        for area in (lista_areas if isinstance(lista_areas, list) else ["Sin área"])
+                    }
+                )
+                opciones_area = ["Todas"] + areas_disponibles
+                area_default = "vendedor" if "vendedor" in areas_disponibles else (areas_disponibles[0] if areas_disponibles else "Todas")
+                idx_area_default = opciones_area.index(area_default) if area_default in opciones_area else 0
+                area_seleccionada = st.selectbox(
+                    "Área responsable a incluir",
+                    options=opciones_area,
+                    index=idx_area_default,
+                    key="organizador_casos_area_responsable_selectbox",
+                    help="Solo se puede elegir un área por vez. Si eliges 'Todas', no se aplica filtro por área.",
+                )
+
+                if area_seleccionada == "Todas":
+                    mask_areas = pd.Series(True, index=df_metricas.index)
+                else:
+                    area_norm_sel = normalizar(area_seleccionada)
+                    mask_areas = df_metricas["Areas_Responsables_List"].apply(
+                        lambda lista: area_norm_sel in set(lista if isinstance(lista, list) else [])
+                    )
+
+                df_vendedor_mes = df_metricas[mask_areas].copy()
                 df_vendedor_mes = df_vendedor_mes[df_vendedor_mes["Hora_Registro_dt"].notna()].copy()
 
                 if df_vendedor_mes.empty:
-                    st.info("No hay incidencias con `Area_Responsable = Vendedor` para construir este análisis.")
+                    st.info("No hay incidencias para el filtro de áreas responsables seleccionado.")
                 else:
                     df_vendedor_mes["Mes"] = df_vendedor_mes["Hora_Registro_dt"].dt.to_period("M").astype(str)
                     df_vendedor_mes["Mes_Period"] = df_vendedor_mes["Hora_Registro_dt"].dt.to_period("M")
@@ -7401,22 +7449,8 @@ if "organizador" in tab_map:
 
                     df_motivos = df_mes_sel.copy()
 
-                    # Regla explícita: solo casos con Area_Responsable == "Vendedor".
-                    col_area = _pick_col(df_motivos.columns.tolist(), ["Area_Responsable", "Area Responsable", "Área Responsable"])
-                    if col_area is not None:
-                        area_norm = (
-                            df_motivos[col_area]
-                            .astype(str)
-                            .str.strip()
-                            .str.lower()
-                            .str.normalize("NFKD")
-                            .str.encode("ascii", errors="ignore")
-                            .str.decode("utf-8")
-                        )
-                        df_motivos = df_motivos[area_norm == "vendedor"].copy()
-
                     if df_motivos.empty:
-                        st.info("No hay registros de **Vendedor** para construir motivos de error en el mes seleccionado.")
+                        st.info("No hay registros con las áreas responsables seleccionadas para construir motivos de error.")
                     else:
                         # Responsable con fallback: Nombre_Responsable -> Vendedor_Registro -> ID vendedor.
                         col_nombre_resp = _pick_col(df_motivos.columns.tolist(), ["Nombre_Responsable", "Nombre Responsable"])
@@ -7635,9 +7669,9 @@ if "organizador" in tab_map:
 
                     csv_mes = detalle_mes.to_csv(index=False).encode("utf-8-sig")
                     st.download_button(
-                        label="⬇️ Descargar lista del mes (Vendedor)",
+                        label="⬇️ Descargar lista del mes (áreas seleccionadas)",
                         data=csv_mes,
-                        file_name=f"incidencias_vendedor_{mes_sel_period.strftime('%Y-%m')}.csv",
+                        file_name=f"incidencias_areas_{mes_sel_period.strftime('%Y-%m')}.csv",
                         mime="text/csv",
                         key="organizador_casos_vendedor_descarga_mes",
                     )
