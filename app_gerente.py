@@ -7868,36 +7868,49 @@ if "organizador" in tab_map:
                 col_ch1, col_ch2 = st.columns(2)
                 with col_ch1:
                     st.markdown("#### ⚖️ Vendedores con mayor tasa de incidencia")
-                    df_metricas_con_responsable = df_metricas[
-                        df_metricas["Nombre_Responsable_norm"].fillna("Sin responsable") != "Sin responsable"
+                    df_metricas_con_vendedor = df_metricas[
+                        df_metricas["Vendedor_Registro_norm"].fillna("Sin vendedor") != "Sin vendedor"
                     ].copy()
-                    if df_metricas_con_responsable.empty:
-                        st.info("No hay responsables válidos para calcular la tasa de incidencia.")
+                    if df_metricas_con_vendedor.empty:
+                        st.info("No hay vendedores válidos para calcular la tasa de incidencia.")
                         base_vendedores = pd.DataFrame(
                             columns=["Incidencias", "Monto_Devuelto", "Pedidos_Totales", "Tasa_Incidencia_pct"]
                         )
                     else:
                         base_vendedores = (
-                            df_metricas_con_responsable.groupby("Responsable_Analisis", dropna=False)
+                            df_metricas_con_vendedor.groupby("Vendedor_Registro_norm", dropna=False)
                             .agg(
-                                Incidencias=("Responsable_Analisis", "size"),
+                                Incidencias=("Vendedor_Registro_norm", "size"),
                                 Monto_Devuelto=("Monto_Devuelto_num", "sum"),
                             )
                         )
                         total_incidencias_general = int(base_vendedores["Incidencias"].sum())
-                        base_vendedores["Pedidos_Totales"] = total_incidencias_general
-                        base_vendedores["Tasa_Incidencia_pct"] = np.where(
+                        base_vendedores["Tasa_Incidencia_pct_chart"] = np.where(
                             total_incidencias_general > 0,
                             (base_vendedores["Incidencias"] / total_incidencias_general) * 100,
                             0.0,
                         )
-                        base_vendedores["Tasa_Incidencia_pct"] = base_vendedores["Tasa_Incidencia_pct"].fillna(0)
-                        top_tasa = base_vendedores.sort_values(
-                            by=["Tasa_Incidencia_pct", "Incidencias"],
+                        top_tasa_chart = base_vendedores.sort_values(
+                            by=["Tasa_Incidencia_pct_chart", "Incidencias"],
                             ascending=False,
                         ).head(10)
-                        st.bar_chart(top_tasa["Tasa_Incidencia_pct"])
-                        st.caption("La tasa se calcula con base en la participación de incidencias por nombre responsable.")
+                        st.bar_chart(top_tasa_chart["Tasa_Incidencia_pct_chart"])
+                        st.caption("La barra muestra participación de incidencias por vendedor dentro del total registrado.")
+
+                        # Tabla de riesgo normalizada por volumen real de pedidos enviados.
+                        base_vendedores = base_vendedores.join(pedidos_por_vendedor, how="left")
+                        base_vendedores["Pedidos_Enviados"] = (
+                            pd.to_numeric(base_vendedores["Pedidos_Totales"], errors="coerce")
+                            .fillna(0)
+                            .astype(int)
+                        )
+                        base_vendedores["Tasa_Incidencia_pct"] = np.where(
+                            base_vendedores["Pedidos_Enviados"] > 0,
+                            (base_vendedores["Incidencias"] / base_vendedores["Pedidos_Enviados"]) * 100,
+                            0.0,
+                        )
+                        base_vendedores["Tasa_Incidencia_pct"] = base_vendedores["Tasa_Incidencia_pct"].fillna(0)
+                        base_vendedores = base_vendedores.drop(columns=["Pedidos_Totales"], errors="ignore")
                 with col_ch2:
                     st.markdown("#### 🏢 Áreas con más incidencias")
                     serie_areas = (
@@ -7908,22 +7921,24 @@ if "organizador" in tab_map:
                     st.bar_chart(serie_areas)
 
                 st.markdown("#### 🧠 Patrones detectados de riesgo")
-                patrones = base_vendedores.copy()
+                patrones = base_vendedores[
+                    ["Incidencias", "Monto_Devuelto", "Pedidos_Enviados", "Tasa_Incidencia_pct"]
+                ].copy() if not base_vendedores.empty else base_vendedores.copy()
                 if patrones.empty:
-                    st.info("No hay responsables válidos para mostrar patrones de riesgo.")
+                    st.info("No hay vendedores válidos para mostrar patrones de riesgo.")
                 else:
                     patrones["Riesgo"] = pd.cut(
                         patrones["Tasa_Incidencia_pct"],
                         bins=[-0.01, 2, 8, 1000],
                         labels=["Bajo", "Medio", "Alto"],
                     )
-                    patrones = patrones.sort_values(["Riesgo", "Tasa_Incidencia_pct"], ascending=[False, False])
+                    patrones = patrones.sort_values(["Tasa_Incidencia_pct", "Incidencias"], ascending=[False, False])
                     st.dataframe(
                         patrones.head(15).rename(
                             columns={
                                 "Incidencias": "Incidencias reportadas",
-                                "Pedidos_Totales": "Incidencias totales base",
-                                "Tasa_Incidencia_pct": "Tasa incidencia (%)",
+                                "Pedidos_Enviados": "Pedidos enviados",
+                                "Tasa_Incidencia_pct": "% error por pedido",
                                 "Monto_Devuelto": "Monto devuelto",
                             }
                         ),
