@@ -7867,84 +7867,37 @@ if "organizador" in tab_map:
 
                 col_ch1, col_ch2 = st.columns(2)
                 with col_ch1:
-                    st.markdown("#### ⚖️ Responsables con mayor tasa de incidencia")
+                    st.markdown("#### ⚖️ Vendedores con mayor tasa de incidencia")
                     df_metricas_con_responsable = df_metricas[
                         df_metricas["Nombre_Responsable_norm"].fillna("Sin responsable") != "Sin responsable"
                     ].copy()
-                    df_metricas_con_responsable = df_metricas_con_responsable[
-                        df_metricas_con_responsable["Responsable_Analisis"].fillna("Sin responsable") != "Sin responsable"
-                    ]
-                    etiquetas_area = {
-                        "almacen", "almacenaje", "bodega", "cliente", "proveedor", "vendedor",
-                        "ventas", "comercial", "facturacion", "logistica", "logistico",
-                        "administracion", "administrativo", "administrativa", "otro"
-                    }
-                    df_metricas_con_responsable = df_metricas_con_responsable[
-                        ~df_metricas_con_responsable["Nombre_Responsable_norm"].astype(str).apply(
-                            lambda x: normalizar(x) in etiquetas_area
-                        )
-                    ].copy()
                     if df_metricas_con_responsable.empty:
                         st.info("No hay responsables válidos para calcular la tasa de incidencia.")
-                        base_responsables = pd.DataFrame(
-                            columns=["Incidencias", "Monto_Devuelto", "Pedidos_Enviados", "Tasa_Incidencia_pct", "Confianza_Match"]
+                        base_vendedores = pd.DataFrame(
+                            columns=["Incidencias", "Monto_Devuelto", "Pedidos_Totales", "Tasa_Incidencia_pct"]
                         )
                     else:
-                        pedidos_por_vendedor_match = pedidos_por_vendedor.copy()
-                        if not pedidos_por_vendedor_match.empty:
-                            pedidos_por_vendedor_match.index = pedidos_por_vendedor_match.index.map(
-                                lambda x: normalizar(str(x))
-                            )
-
-                        alias_match_responsable_vendedor = {
-                            "gloria michella": "gloria michella",
-                            "roberto": "roberto",
-                            "jose": "jose",
-                            "jose cortes": "jose",
-                            "griselda carolina": "griselda carolina",
-                        }
-
-                        base_responsables = (
+                        base_vendedores = (
                             df_metricas_con_responsable.groupby("Responsable_Analisis", dropna=False)
                             .agg(
                                 Incidencias=("Responsable_Analisis", "size"),
                                 Monto_Devuelto=("Monto_Devuelto_num", "sum"),
                             )
                         )
-
-                        base_responsables["Responsable_key"] = base_responsables.index.to_series().apply(
-                            lambda x: normalizar(str(x))
-                        )
-                        base_responsables["Vendedor_key_match"] = base_responsables["Responsable_key"].apply(
-                            lambda key: alias_match_responsable_vendedor.get(key, key)
-                        )
-                        base_responsables["Pedidos_Enviados"] = base_responsables["Vendedor_key_match"].map(
-                            pedidos_por_vendedor_match
-                        )
-                        base_responsables["Pedidos_Enviados"] = (
-                            pd.to_numeric(base_responsables["Pedidos_Enviados"], errors="coerce")
-                            .fillna(0)
-                            .astype(int)
-                        )
-                        base_responsables["Confianza_Match"] = np.where(
-                            base_responsables["Pedidos_Enviados"] > 0,
-                            "Alta",
-                            "Sin match vendedor",
-                        )
-                        base_responsables["Tasa_Incidencia_pct"] = np.where(
-                            base_responsables["Pedidos_Enviados"] > 0,
-                            (base_responsables["Incidencias"] / base_responsables["Pedidos_Enviados"]) * 100,
+                        total_incidencias_general = int(base_vendedores["Incidencias"].sum())
+                        base_vendedores["Pedidos_Totales"] = total_incidencias_general
+                        base_vendedores["Tasa_Incidencia_pct"] = np.where(
+                            total_incidencias_general > 0,
+                            (base_vendedores["Incidencias"] / total_incidencias_general) * 100,
                             0.0,
                         )
-                        top_tasa_chart = base_responsables[base_responsables["Pedidos_Enviados"] > 0].sort_values(
+                        base_vendedores["Tasa_Incidencia_pct"] = base_vendedores["Tasa_Incidencia_pct"].fillna(0)
+                        top_tasa = base_vendedores.sort_values(
                             by=["Tasa_Incidencia_pct", "Incidencias"],
                             ascending=False,
                         ).head(10)
-                        if top_tasa_chart.empty:
-                            st.info("No hay match responsable-vendedor suficiente para calcular tasa por pedidos.")
-                        else:
-                            st.bar_chart(top_tasa_chart["Tasa_Incidencia_pct"])
-                        st.caption("La tasa usa TODAS las incidencias cargadas: incidencias / pedidos enviados por responsable (sin filtro mensual).")
+                        st.bar_chart(top_tasa["Tasa_Incidencia_pct"])
+                        st.caption("La tasa se calcula con base en la participación de incidencias por nombre responsable.")
                 with col_ch2:
                     st.markdown("#### 🏢 Áreas con más incidencias")
                     serie_areas = (
@@ -7955,7 +7908,7 @@ if "organizador" in tab_map:
                     st.bar_chart(serie_areas)
 
                 st.markdown("#### 🧠 Patrones detectados de riesgo")
-                patrones = base_responsables.copy() if not base_responsables.empty else base_responsables.copy()
+                patrones = base_vendedores.copy()
                 if patrones.empty:
                     st.info("No hay responsables válidos para mostrar patrones de riesgo.")
                 else:
@@ -7964,17 +7917,16 @@ if "organizador" in tab_map:
                         bins=[-0.01, 2, 8, 1000],
                         labels=["Bajo", "Medio", "Alto"],
                     )
-                    patrones = patrones.sort_values(["Tasa_Incidencia_pct", "Incidencias"], ascending=[False, False])
+                    patrones = patrones.sort_values(["Riesgo", "Tasa_Incidencia_pct"], ascending=[False, False])
                     st.dataframe(
                         patrones.head(15).rename(
                             columns={
                                 "Incidencias": "Incidencias reportadas",
-                                "Pedidos_Enviados": "Pedidos enviados",
-                                "Tasa_Incidencia_pct": "% error sobre pedidos",
+                                "Pedidos_Totales": "Incidencias totales base",
+                                "Tasa_Incidencia_pct": "Tasa incidencia (%)",
                                 "Monto_Devuelto": "Monto devuelto",
-                                "Confianza_Match": "Confianza match vendedor",
                             }
-                        )[["Incidencias reportadas", "Pedidos enviados", "% error sobre pedidos", "Monto devuelto", "Confianza match vendedor", "Riesgo"]],
+                        ),
                         use_container_width=True,
                     )
 
