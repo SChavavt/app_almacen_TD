@@ -7541,31 +7541,25 @@ if "organizador" in tab_map:
                     m3.metric("Garantías", int(garantias_mes))
                     m4.metric("Monto total devuelto", f"${monto_mes:,.2f}")
 
-                    st.markdown("#### ⚖️ Responsables con mayor tasa de incidencia")
-                    resumen_tasa = (
+                    st.markdown("#### 📊 Responsables con más incidencias (conteo)")
+                    resumen_responsables = (
                         df_mes_sel.assign(Responsable_Analisis=df_vendedor_mes.loc[df_mes_sel.index, "Responsable_Analisis"])
                         .groupby("Responsable_Analisis", as_index=False)
                         .agg(incidencias=("Responsable_Analisis", "size"))
                     )
-                    total_mes_area = int(resumen_tasa["incidencias"].sum())
-                    resumen_tasa["tasa_incidencia_pct"] = np.where(
-                        total_mes_area > 0,
-                        (resumen_tasa["incidencias"] / total_mes_area) * 100,
-                        0.0,
-                    )
-                    resumen_tasa = resumen_tasa.sort_values(
-                        by=["tasa_incidencia_pct", "incidencias"],
+                    resumen_responsables = resumen_responsables.sort_values(
+                        by=["incidencias", "Responsable_Analisis"],
                         ascending=False,
                     ).head(10)
-                    if not resumen_tasa.empty:
+                    if not resumen_responsables.empty:
                         st.bar_chart(
-                            resumen_tasa.set_index("Responsable_Analisis")["tasa_incidencia_pct"]
+                            resumen_responsables.set_index("Responsable_Analisis")["incidencias"]
                         )
                         st.caption(
-                            "La tasa se calcula con base en la participación de incidencias del mes y del área responsable filtrada."
+                            "La barra muestra cuántas incidencias tuvo cada responsable en el mes y área filtrados."
                         )
                     else:
-                        st.info("No hay responsables para calcular la tasa de incidencia en el filtro actual.")
+                        st.info("No hay responsables con incidencias en el filtro actual.")
 
                     st.markdown("#### 📋 Lista del mes seleccionado")
                     columnas_mes = [
