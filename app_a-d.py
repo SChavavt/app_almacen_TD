@@ -3599,6 +3599,28 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
                         if updates and batch_update_gsheet_cells(
                             worksheet, updates, headers=headers
                         ):
+                            # Salvaguarda: en algunos casos Google Sheets puede terminar
+                            # mostrando un valor inesperado (p. ej. fecha) en Estado_Pago.
+                            # Verificamos y forzamos "✅ Pagado" si no quedó confirmado.
+                            if "Estado_Pago" in headers:
+                                estado_guardado = ""
+                                try:
+                                    col_estado = headers.index("Estado_Pago") + 1
+                                    estado_guardado = str(
+                                        worksheet.cell(gsheet_row_index, col_estado).value or ""
+                                    ).strip()
+                                except Exception:
+                                    estado_guardado = ""
+
+                                if not _estado_pago_es_pagado(estado_guardado):
+                                    update_gsheet_cell(
+                                        worksheet,
+                                        headers,
+                                        gsheet_row_index,
+                                        "Estado_Pago",
+                                        "✅ Pagado",
+                                    )
+
                             for col_name, col_value in campos_valores.items():
                                 if col_name in df.columns:
                                     df.at[idx, col_name] = col_value
