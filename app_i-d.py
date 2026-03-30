@@ -1807,14 +1807,12 @@ def render_auto_list(
         )
         cliente_base = sanitize_text(e.get("cliente_nombre", "")) or "—"
         cliente_html = f"{cliente_base}{surtidor_html}"
-        surtidor_col_html = surtidor_html or "—"
         fecha = sanitize_text(e.get("fecha", "")) or "—"
         cells_html = [
             f"<td class='board-n'>{number_label}</td>",
             f"<td class='board-client'>{cliente_html}</td>",
         ]
         if mode in {"foraneo", "local"}:
-            cells_html.append(f"<td class='board-surtidor'>{surtidor_col_html}</td>")
             cells_html.append(f"<td class='board-date'>{fecha}</td>")
         cells_html.append(f"<td class='board-state'>{estado_html}</td>")
         rows_html.append(
@@ -1866,7 +1864,6 @@ def render_auto_list(
     .board-row td + td{{border-left:1px solid rgba(255,255,255,0.08);}}
     .board-n{{width:1.25rem;font-size:0.77rem;font-weight:700;white-space:nowrap;color:#fff;padding-left:0.08rem;padding-right:0.08rem;}}
     .board-client{{width:auto;font-weight:600;min-width:0;word-break:break-word;white-space:normal;}}
-    .board-surtidor{{width:4.9rem;white-space:nowrap;text-align:left;}}
     .board-date{{width:4.4rem;white-space:nowrap;}}
     .board-state{{width:6.8rem;text-align:left;}}
     .board-status{{font-size:0.68rem;font-weight:700;white-space:nowrap;opacity:0.97;padding:0.05rem 0.36rem;border-radius:0.56rem;background:rgba(255,255,255,0.12);}}
@@ -1878,13 +1875,12 @@ def render_auto_list(
     <div class="{scroll_class}">
         <table class="board-table">
             <colgroup>
-                {"<col style='width:5%'><col style='width:39%'><col style='width:16%'><col style='width:14%'><col style='width:26%'>" if mode in {'foraneo', 'local'} else "<col style='width:4%'><col style='width:70%'><col style='width:26%'>"}
+                {"<col style='width:5%'><col style='width:50%'><col style='width:17%'><col style='width:28%'>" if mode in {'foraneo', 'local'} else "<col style='width:4%'><col style='width:70%'><col style='width:26%'>"}
             </colgroup>
             <thead class="board-head">
                 <tr>
                     <th>#</th>
                     <th>Cliente</th>
-                    {"<th>Surtidor</th>" if mode in {"foraneo", "local"} else ""}
                     {"<th>Fecha</th>" if mode in {"foraneo", "local"} else ""}
                     <th>Estado</th>
                 </tr>
