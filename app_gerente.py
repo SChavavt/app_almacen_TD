@@ -7868,36 +7868,40 @@ if "organizador" in tab_map:
                 col_ch1, col_ch2 = st.columns(2)
                 with col_ch1:
                     st.markdown("#### ⚖️ Vendedores con mayor tasa de incidencia")
-                    df_metricas_con_responsable = df_metricas[
-                        df_metricas["Nombre_Responsable_norm"].fillna("Sin responsable") != "Sin responsable"
+                    df_metricas_con_vendedor = df_metricas[
+                        df_metricas["Vendedor_Registro_norm"].fillna("Sin vendedor") != "Sin vendedor"
                     ].copy()
-                    if df_metricas_con_responsable.empty:
-                        st.info("No hay responsables válidos para calcular la tasa de incidencia.")
+                    if df_metricas_con_vendedor.empty:
+                        st.info("No hay vendedores válidos para calcular la tasa de incidencia.")
                         base_vendedores = pd.DataFrame(
                             columns=["Incidencias", "Monto_Devuelto", "Pedidos_Totales", "Tasa_Incidencia_pct"]
                         )
                     else:
                         base_vendedores = (
-                            df_metricas_con_responsable.groupby("Responsable_Analisis", dropna=False)
+                            df_metricas_con_vendedor.groupby("Vendedor_Registro_norm", dropna=False)
                             .agg(
-                                Incidencias=("Responsable_Analisis", "size"),
+                                Incidencias=("Vendedor_Registro_norm", "size"),
                                 Monto_Devuelto=("Monto_Devuelto_num", "sum"),
                             )
                         )
-                        total_incidencias_general = int(base_vendedores["Incidencias"].sum())
-                        base_vendedores["Pedidos_Totales"] = total_incidencias_general
+                        base_vendedores = base_vendedores.join(pedidos_por_vendedor, how="left")
+                        base_vendedores["Pedidos_Totales"] = (
+                            pd.to_numeric(base_vendedores["Pedidos_Totales"], errors="coerce")
+                            .fillna(0)
+                            .astype(int)
+                        )
                         base_vendedores["Tasa_Incidencia_pct"] = np.where(
-                            total_incidencias_general > 0,
-                            (base_vendedores["Incidencias"] / total_incidencias_general) * 100,
+                            base_vendedores["Pedidos_Totales"] > 0,
+                            (base_vendedores["Incidencias"] / base_vendedores["Pedidos_Totales"]) * 100,
                             0.0,
                         )
                         base_vendedores["Tasa_Incidencia_pct"] = base_vendedores["Tasa_Incidencia_pct"].fillna(0)
                         top_tasa = base_vendedores.sort_values(
-                            by=["Tasa_Incidencia_pct", "Incidencias"],
+                            by=["Tasa_Incidencia_pct", "Incidencias", "Pedidos_Totales"],
                             ascending=False,
                         ).head(10)
                         st.bar_chart(top_tasa["Tasa_Incidencia_pct"])
-                        st.caption("La tasa se calcula con base en la participación de incidencias por nombre responsable.")
+                        st.caption("La tasa se calcula como incidencias / pedidos totales por vendedor.")
                 with col_ch2:
                     st.markdown("#### 🏢 Áreas con más incidencias")
                     serie_areas = (
@@ -7910,7 +7914,7 @@ if "organizador" in tab_map:
                 st.markdown("#### 🧠 Patrones detectados de riesgo")
                 patrones = base_vendedores.copy()
                 if patrones.empty:
-                    st.info("No hay responsables válidos para mostrar patrones de riesgo.")
+                    st.info("No hay vendedores válidos para mostrar patrones de riesgo.")
                 else:
                     patrones["Riesgo"] = pd.cut(
                         patrones["Tasa_Incidencia_pct"],
