@@ -7874,27 +7874,36 @@ if "organizador" in tab_map:
                 col_ch1, col_ch2 = st.columns(2)
                 with col_ch1:
                     st.markdown("#### ⚖️ Vendedores con mayor tasa de incidencia")
-                    base_vendedores = (
-                        df_metricas.groupby("Responsable_Analisis", dropna=False)
-                        .agg(
-                            Incidencias=("Responsable_Analisis", "size"),
-                            Monto_Devuelto=("Monto_Devuelto_num", "sum"),
+                    df_metricas_con_responsable = df_metricas[
+                        df_metricas["Nombre_Responsable_norm"].fillna("Sin responsable") != "Sin responsable"
+                    ].copy()
+                    if df_metricas_con_responsable.empty:
+                        st.info("No hay responsables válidos para calcular la tasa de incidencia.")
+                        base_vendedores = pd.DataFrame(
+                            columns=["Incidencias", "Monto_Devuelto", "Pedidos_Totales", "Tasa_Incidencia_pct"]
                         )
-                    )
-                    total_incidencias_general = int(base_vendedores["Incidencias"].sum())
-                    base_vendedores["Pedidos_Totales"] = total_incidencias_general
-                    base_vendedores["Tasa_Incidencia_pct"] = np.where(
-                        total_incidencias_general > 0,
-                        (base_vendedores["Incidencias"] / total_incidencias_general) * 100,
-                        0.0,
-                    )
-                    base_vendedores["Tasa_Incidencia_pct"] = base_vendedores["Tasa_Incidencia_pct"].fillna(0)
-                    top_tasa = base_vendedores.sort_values(
-                        by=["Tasa_Incidencia_pct", "Incidencias"],
-                        ascending=False,
-                    ).head(10)
-                    st.bar_chart(top_tasa["Tasa_Incidencia_pct"])
-                    st.caption("La tasa se calcula con base en la participación de incidencias por nombre responsable.")
+                    else:
+                        base_vendedores = (
+                            df_metricas_con_responsable.groupby("Responsable_Analisis", dropna=False)
+                            .agg(
+                                Incidencias=("Responsable_Analisis", "size"),
+                                Monto_Devuelto=("Monto_Devuelto_num", "sum"),
+                            )
+                        )
+                        total_incidencias_general = int(base_vendedores["Incidencias"].sum())
+                        base_vendedores["Pedidos_Totales"] = total_incidencias_general
+                        base_vendedores["Tasa_Incidencia_pct"] = np.where(
+                            total_incidencias_general > 0,
+                            (base_vendedores["Incidencias"] / total_incidencias_general) * 100,
+                            0.0,
+                        )
+                        base_vendedores["Tasa_Incidencia_pct"] = base_vendedores["Tasa_Incidencia_pct"].fillna(0)
+                        top_tasa = base_vendedores.sort_values(
+                            by=["Tasa_Incidencia_pct", "Incidencias"],
+                            ascending=False,
+                        ).head(10)
+                        st.bar_chart(top_tasa["Tasa_Incidencia_pct"])
+                        st.caption("La tasa se calcula con base en la participación de incidencias por nombre responsable.")
                 with col_ch2:
                     st.markdown("#### 🏢 Áreas con más incidencias")
                     serie_areas = (
@@ -7906,23 +7915,26 @@ if "organizador" in tab_map:
 
                 st.markdown("#### 🧠 Patrones detectados de riesgo")
                 patrones = base_vendedores.copy()
-                patrones["Riesgo"] = pd.cut(
-                    patrones["Tasa_Incidencia_pct"],
-                    bins=[-0.01, 2, 8, 1000],
-                    labels=["Bajo", "Medio", "Alto"],
-                )
-                patrones = patrones.sort_values(["Riesgo", "Tasa_Incidencia_pct"], ascending=[False, False])
-                st.dataframe(
-                    patrones.head(15).rename(
-                        columns={
-                            "Incidencias": "Incidencias reportadas",
-                            "Pedidos_Totales": "Incidencias totales base",
-                            "Tasa_Incidencia_pct": "Tasa incidencia (%)",
-                            "Monto_Devuelto": "Monto devuelto",
-                        }
-                    ),
-                    use_container_width=True,
-                )
+                if patrones.empty:
+                    st.info("No hay responsables válidos para mostrar patrones de riesgo.")
+                else:
+                    patrones["Riesgo"] = pd.cut(
+                        patrones["Tasa_Incidencia_pct"],
+                        bins=[-0.01, 2, 8, 1000],
+                        labels=["Bajo", "Medio", "Alto"],
+                    )
+                    patrones = patrones.sort_values(["Riesgo", "Tasa_Incidencia_pct"], ascending=[False, False])
+                    st.dataframe(
+                        patrones.head(15).rename(
+                            columns={
+                                "Incidencias": "Incidencias reportadas",
+                                "Pedidos_Totales": "Incidencias totales base",
+                                "Tasa_Incidencia_pct": "Tasa incidencia (%)",
+                                "Monto_Devuelto": "Monto devuelto",
+                            }
+                        ),
+                        use_container_width=True,
+                    )
 
                 st.markdown("#### 💸 Monto devuelto por área y responsable")
                 col_montos_1, col_montos_2 = st.columns(2)
