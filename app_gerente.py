@@ -7349,12 +7349,6 @@ if "organizador" in tab_map:
                 if norm in {"no aplica", "n/a", "na", "sin responsable", "noaplica"}:
                     return "Sin responsable"
                 alias = {
-                    "almacen": "ALMACEN",
-                    "almacenaje": "ALMACEN",
-                    "bodega": "ALMACEN",
-                    "alejandro": "Alejandro",
-                    "alejandro rodriguez": "Alejandro",
-                    "alejandro rodriguez g": "Alejandro",
                     "juanito": "Juanito",
                     "juanitoo": "Juanito",
                     "robert": "Roberto",
@@ -7873,28 +7867,28 @@ if "organizador" in tab_map:
 
                 col_ch1, col_ch2 = st.columns(2)
                 with col_ch1:
-                    st.markdown("#### ⚖️ Responsables con mayor tasa de incidencia")
+                    st.markdown("#### ⚖️ Vendedores con mayor tasa de incidencia")
                     df_metricas_con_responsable = df_metricas[
                         df_metricas["Nombre_Responsable_norm"].fillna("Sin responsable") != "Sin responsable"
                     ].copy()
                     if df_metricas_con_responsable.empty:
                         st.info("No hay responsables válidos para calcular la tasa de incidencia.")
                         base_vendedores = pd.DataFrame(
-                            columns=["Incidencias", "Monto_Devuelto", "Tasa_Incidencia_pct"]
+                            columns=["Incidencias", "Monto_Devuelto", "Pedidos_Totales", "Tasa_Incidencia_pct"]
                         )
-                        total_incidencias_responsables = 0
                     else:
                         base_vendedores = (
-                            df_metricas_con_responsable.groupby("Nombre_Responsable_norm", dropna=False)
+                            df_metricas_con_responsable.groupby("Responsable_Analisis", dropna=False)
                             .agg(
-                                Incidencias=("Nombre_Responsable_norm", "size"),
+                                Incidencias=("Responsable_Analisis", "size"),
                                 Monto_Devuelto=("Monto_Devuelto_num", "sum"),
                             )
                         )
-                        total_incidencias_responsables = int(base_vendedores["Incidencias"].sum())
+                        total_incidencias_general = int(base_vendedores["Incidencias"].sum())
+                        base_vendedores["Pedidos_Totales"] = total_incidencias_general
                         base_vendedores["Tasa_Incidencia_pct"] = np.where(
-                            total_incidencias_responsables > 0,
-                            (base_vendedores["Incidencias"] / total_incidencias_responsables) * 100,
+                            total_incidencias_general > 0,
+                            (base_vendedores["Incidencias"] / total_incidencias_general) * 100,
                             0.0,
                         )
                         base_vendedores["Tasa_Incidencia_pct"] = base_vendedores["Tasa_Incidencia_pct"].fillna(0)
@@ -7903,9 +7897,7 @@ if "organizador" in tab_map:
                             ascending=False,
                         ).head(10)
                         st.bar_chart(top_tasa["Tasa_Incidencia_pct"])
-                        st.caption(
-                            f"La tasa se calcula sobre {total_incidencias_responsables} incidencias con nombre responsable válido."
-                        )
+                        st.caption("La tasa se calcula con base en la participación de incidencias por nombre responsable.")
                 with col_ch2:
                     st.markdown("#### 🏢 Áreas con más incidencias")
                     serie_areas = (
@@ -7926,15 +7918,15 @@ if "organizador" in tab_map:
                         labels=["Bajo", "Medio", "Alto"],
                     )
                     patrones = patrones.sort_values(["Riesgo", "Tasa_Incidencia_pct"], ascending=[False, False])
-                    patrones.index.name = "Nombre responsable"
                     st.dataframe(
-                            patrones.head(15).rename(
-                                columns={
-                                    "Incidencias": "Incidencias reportadas",
-                                    "Tasa_Incidencia_pct": "Tasa incidencia (%)",
-                                    "Monto_Devuelto": "Monto devuelto",
-                                }
-                            ),
+                        patrones.head(15).rename(
+                            columns={
+                                "Incidencias": "Incidencias reportadas",
+                                "Pedidos_Totales": "Incidencias totales base",
+                                "Tasa_Incidencia_pct": "Tasa incidencia (%)",
+                                "Monto_Devuelto": "Monto devuelto",
+                            }
+                        ),
                         use_container_width=True,
                     )
 
