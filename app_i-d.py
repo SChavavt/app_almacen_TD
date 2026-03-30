@@ -4452,8 +4452,6 @@ if selected_tab == 0:
 
     st_autorefresh(interval=60000, key="auto_refresh_dashboard")
 
-    st.caption("📦 pedidos_confirmados usa caché local y, si no existe, se intenta cargar automáticamente.")
-
     df_conf = get_cached_confirmados_df(SHEET_CONFIRMADOS)
     if df_conf.empty:
         with st.spinner("Cargando pedidos_confirmados para completar métricas y vendedores..."):
