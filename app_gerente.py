@@ -7884,20 +7884,38 @@ if "organizador" in tab_map:
                                 Monto_Devuelto=("Monto_Devuelto_num", "sum"),
                             )
                         )
-                        total_incidencias_general = int(base_vendedores["Incidencias"].sum())
-                        base_vendedores["Pedidos_Totales"] = total_incidencias_general
+                        base_vendedores = base_vendedores.join(pedidos_por_vendedor, how="left")
+                        base_vendedores["Pedidos_Totales"] = (
+                            pd.to_numeric(base_vendedores["Pedidos_Totales"], errors="coerce")
+                            .fillna(0)
+                            .astype(int)
+                        )
+                        base_vendedores["Base_Calculo"] = np.where(
+                            base_vendedores["Pedidos_Totales"] > 0,
+                            "Pedidos enviados",
+                            "Incidencias (sin pedidos)",
+                        )
+                        base_vendedores["Base_Denominador"] = np.where(
+                            base_vendedores["Pedidos_Totales"] > 0,
+                            base_vendedores["Pedidos_Totales"],
+                            base_vendedores["Incidencias"],
+                        )
                         base_vendedores["Tasa_Incidencia_pct"] = np.where(
-                            total_incidencias_general > 0,
-                            (base_vendedores["Incidencias"] / total_incidencias_general) * 100,
+                            base_vendedores["Base_Denominador"] > 0,
+                            (base_vendedores["Incidencias"] / base_vendedores["Base_Denominador"]) * 100,
                             0.0,
                         )
                         base_vendedores["Tasa_Incidencia_pct"] = base_vendedores["Tasa_Incidencia_pct"].fillna(0)
+                        base_vendedores["Incidencias_x_100_pedidos"] = base_vendedores["Tasa_Incidencia_pct"]
                         top_tasa = base_vendedores.sort_values(
                             by=["Tasa_Incidencia_pct", "Incidencias"],
                             ascending=False,
                         ).head(10)
                         st.bar_chart(top_tasa["Tasa_Incidencia_pct"])
-                        st.caption("La tasa se calcula con base en la participación de incidencias por nombre responsable.")
+                        st.caption(
+                            "La tasa ahora usa como base los pedidos enviados por vendedor. "
+                            "Si no hay pedidos para un responsable, se muestra tasa sobre incidencias."
+                        )
                 with col_ch2:
                     st.markdown("#### 🏢 Áreas con más incidencias")
                     serie_areas = (
@@ -7912,18 +7930,35 @@ if "organizador" in tab_map:
                 if patrones.empty:
                     st.info("No hay responsables válidos para mostrar patrones de riesgo.")
                 else:
+                    tasa_global = (
+                        (patrones["Incidencias"].sum() / max(patrones["Pedidos_Totales"].sum(), 1)) * 100
+                        if int(patrones["Pedidos_Totales"].sum()) > 0
+                        else float(patrones["Tasa_Incidencia_pct"].mean())
+                    )
+                    patrones["Indice_vs_Promedio"] = np.where(
+                        tasa_global > 0,
+                        patrones["Tasa_Incidencia_pct"] / tasa_global,
+                        0.0,
+                    )
                     patrones["Riesgo"] = pd.cut(
-                        patrones["Tasa_Incidencia_pct"],
-                        bins=[-0.01, 2, 8, 1000],
+                        patrones["Indice_vs_Promedio"],
+                        bins=[-0.01, 0.8, 1.2, 1000],
                         labels=["Bajo", "Medio", "Alto"],
                     )
                     patrones = patrones.sort_values(["Riesgo", "Tasa_Incidencia_pct"], ascending=[False, False])
+                    st.caption(
+                        f"Promedio global de incidencias: {tasa_global:.2f}% "
+                        "(incidencias por cada 100 pedidos enviados)."
+                    )
                     st.dataframe(
                         patrones.head(15).rename(
                             columns={
                                 "Incidencias": "Incidencias reportadas",
-                                "Pedidos_Totales": "Incidencias totales base",
+                                "Pedidos_Totales": "Pedidos enviados",
+                                "Base_Calculo": "Base de cálculo",
                                 "Tasa_Incidencia_pct": "Tasa incidencia (%)",
+                                "Incidencias_x_100_pedidos": "Incidencias por 100 pedidos",
+                                "Indice_vs_Promedio": "Índice vs promedio",
                                 "Monto_Devuelto": "Monto devuelto",
                             }
                         ),
