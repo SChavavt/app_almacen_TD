@@ -7213,6 +7213,12 @@ if "organizador" in tab_map:
                     "Seguimiento", pd.Series("", index=df_casos_filtrado.index, dtype="object")
                 )
                 df_casos_filtrado = df_casos_filtrado[seguimiento_series.astype(str).str.strip() == ""].copy()
+                comentario_gerente_series = df_casos_filtrado.get(
+                    "Comentario_Gerente", pd.Series("", index=df_casos_filtrado.index, dtype="object")
+                )
+                df_casos_filtrado = df_casos_filtrado[
+                    comentario_gerente_series.astype(str).str.strip() == ""
+                ].copy()
 
             if termino_normalizado:
                 mask_cliente = df_casos_filtrado["__cliente_norm"].str.contains(
@@ -7276,7 +7282,6 @@ if "organizador" in tab_map:
                 "Motivo_Detallado",
                 "Area_Responsable",
                 "Nombre_Responsable",
-                "Comentario_Gerente",
             ]
             columnas_tabla = {
                 "ID_Pedido": "Pedido",
@@ -7359,7 +7364,6 @@ if "organizador" in tab_map:
                         ("📝 Motivo detallado", row_caso.get("Motivo_Detallado", "")),
                         ("🏢 Área responsable", row_caso.get("Area_Responsable", "")),
                         ("🙋 Responsable", row_caso.get("Nombre_Responsable", "")),
-                        ("💬 Comentario gerente", row_caso.get("Comentario_Gerente", "")),
                     ]
 
                     for i in range(0, len(detalle_items), 3):
