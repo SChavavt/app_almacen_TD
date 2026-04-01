@@ -7154,22 +7154,26 @@ if "organizador" in tab_map:
             df_casos_org["__is_garantia"] = df_casos_org["__tipo_envio_norm"].str.contains("garantia", na=False)
 
             st.caption("Buscar por cliente o folio")
-            termino_busqueda = st.text_input(
-                "Cliente o folio",
-                key="organizador_casos_busqueda",
-                placeholder="Cliente o folio",
-            )
-            filtro_tipo_envio = st.selectbox(
-                "Filtrar por tipo de envío",
-                options=["📦 Todos", "🔁 Devolución", "🛠 Garantía"],
-                index=0,
-                key="organizador_casos_tipo_envio",
-            )
-            modo_fecha = st.selectbox(
-                "Filtro de fecha de registro",
-                options=["Todas", "Fecha específica", "Rango de fechas"],
-                key="organizador_casos_modo_fecha",
-            )
+            col_filtros_izq, col_filtros_der = st.columns(2)
+            with col_filtros_izq:
+                termino_busqueda = st.text_input(
+                    "Cliente o folio",
+                    key="organizador_casos_busqueda",
+                    placeholder="Cliente o folio",
+                )
+            with col_filtros_der:
+                filtro_tipo_envio = st.selectbox(
+                    "Filtrar por tipo de envío",
+                    options=["📦 Todos", "🔁 Devolución", "🛠 Garantía"],
+                    index=0,
+                    key="organizador_casos_tipo_envio",
+                )
+            with col_filtros_izq:
+                modo_fecha = st.selectbox(
+                    "Filtro de fecha de registro",
+                    options=["Todas", "Fecha específica", "Rango de fechas"],
+                    key="organizador_casos_modo_fecha",
+                )
 
             fecha_especifica = None
             fecha_inicio = None
@@ -7204,8 +7208,6 @@ if "organizador" in tab_map:
             else:
                 st.session_state.pop(rango_key_org, None)
 
-            termino_normalizado = normalizar(termino_busqueda or "")
-            termino_folio = normalizar_folio(termino_busqueda) if termino_busqueda else ""
             df_casos_filtrado = df_casos_org.copy()
 
             if usar_nuevo_sistema:
@@ -7213,7 +7215,50 @@ if "organizador" in tab_map:
                     "Seguimiento", pd.Series("", index=df_casos_filtrado.index, dtype="object")
                 )
                 df_casos_filtrado = df_casos_filtrado[seguimiento_series.astype(str).str.strip() == ""].copy()
+                comentario_gerente_series = df_casos_filtrado.get(
+                    "Comentario_Gerente", pd.Series("", index=df_casos_filtrado.index, dtype="object")
+                )
+                df_casos_filtrado = df_casos_filtrado[
+                    comentario_gerente_series.astype(str).str.strip() == ""
+                ].copy()
 
+            if filtro_tipo_envio == "🔁 Devolución":
+                df_casos_filtrado = df_casos_filtrado[
+                    df_casos_filtrado["__is_devolucion"]
+                ]
+            elif filtro_tipo_envio == "🛠 Garantía":
+                df_casos_filtrado = df_casos_filtrado[
+                    df_casos_filtrado["__is_garantia"]
+                ]
+
+            vendedores_disponibles = sorted(
+                {
+                    str(v).strip()
+                    for v in df_casos_filtrado.get(
+                        "Vendedor_Registro", pd.Series("", index=df_casos_filtrado.index, dtype="object")
+                    )
+                    if str(v).strip()
+                }
+            )
+            opciones_vendedor = ["👥 Todos"] + vendedores_disponibles
+            with col_filtros_der:
+                filtro_vendedor = st.selectbox(
+                    "Filtrar por vendedor de registro",
+                    options=opciones_vendedor,
+                    index=0,
+                    key="organizador_casos_vendedor_registro",
+                )
+
+            if filtro_vendedor != "👥 Todos":
+                vendedor_series = df_casos_filtrado.get(
+                    "Vendedor_Registro", pd.Series("", index=df_casos_filtrado.index, dtype="object")
+                )
+                df_casos_filtrado = df_casos_filtrado[
+                    vendedor_series.astype(str).str.strip() == filtro_vendedor
+                ]
+
+            termino_normalizado = normalizar(termino_busqueda or "")
+            termino_folio = normalizar_folio(termino_busqueda) if termino_busqueda else ""
             if termino_normalizado:
                 mask_cliente = df_casos_filtrado["__cliente_norm"].str.contains(
                     termino_normalizado, regex=False, na=False
@@ -7226,15 +7271,6 @@ if "organizador" in tab_map:
                     else False
                 )
                 df_casos_filtrado = df_casos_filtrado[mask_cliente | mask_folio].copy()
-
-            if filtro_tipo_envio == "🔁 Devolución":
-                df_casos_filtrado = df_casos_filtrado[
-                    df_casos_filtrado["__is_devolucion"]
-                ]
-            elif filtro_tipo_envio == "🛠 Garantía":
-                df_casos_filtrado = df_casos_filtrado[
-                    df_casos_filtrado["__is_garantia"]
-                ]
 
             fechas_registro = df_casos_filtrado["__hora_registro_fecha"]
             if modo_fecha == "Fecha específica" and fecha_especifica:
@@ -7276,7 +7312,6 @@ if "organizador" in tab_map:
                 "Motivo_Detallado",
                 "Area_Responsable",
                 "Nombre_Responsable",
-                "Comentario_Gerente",
             ]
             columnas_tabla = {
                 "ID_Pedido": "Pedido",
@@ -7359,7 +7394,6 @@ if "organizador" in tab_map:
                         ("📝 Motivo detallado", row_caso.get("Motivo_Detallado", "")),
                         ("🏢 Área responsable", row_caso.get("Area_Responsable", "")),
                         ("🙋 Responsable", row_caso.get("Nombre_Responsable", "")),
-                        ("💬 Comentario gerente", row_caso.get("Comentario_Gerente", "")),
                     ]
 
                     for i in range(0, len(detalle_items), 3):
@@ -7399,24 +7433,6 @@ if "organizador" in tab_map:
                             st.rerun()
                         except Exception as e:
                             st.error(f"❌ No se pudo guardar Comentario_Gerente: {e}")
-
-            # Descarga Excel (sobre el filtrado visible para facilitar análisis puntual).
-            buffer_casos = BytesIO()
-            with pd.ExcelWriter(
-                buffer_casos,
-                engine="xlsxwriter",
-                engine_kwargs={"options": {"strings_to_urls": False}},
-            ) as writer:
-                df_casos_filtrado.to_excel(writer, index=False, sheet_name="Casos_especiales")
-            buffer_casos.seek(0)
-
-            st.download_button(
-                label="⬇️ Descargar Excel de casos especiales",
-                data=buffer_casos.getvalue(),
-                file_name=f"casos_especiales_{datetime.now().strftime('%d-%m-%Y')}.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                key="organizador_casos_descarga_excel",
-            )
 
             # Métricas y gráficas de operación.
             df_metricas = df_casos_org.copy()
