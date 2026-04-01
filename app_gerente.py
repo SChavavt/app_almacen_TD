@@ -7409,84 +7409,30 @@ if "organizador" in tab_map:
 
                 if usar_nuevo_sistema:
                     comentario_actual = str(row_caso.get("Comentario_Gerente", "") or "").strip()
-                    frases_base = [
-                        "Caso resuelto",
-                        "Caso cerrado",
-                        "Material enviado",
-                        "Devolución realizada",
-                        "Material retornado",
-                        "Cliente devolvió material",
-                        "Material reubicado en bodega",
-                        "Diferencia pagada",
-                        "Pendiente de recolección",
-                        "Material en tránsito",
-                        "Pendiente de retorno de guía",
-                    ]
-                    base_key = f"organizador_comentario_gerente_base_{idx_caso}"
-                    detalle_key = f"organizador_comentario_gerente_detalle_{idx_caso}"
-                    if base_key not in st.session_state or detalle_key not in st.session_state:
-                        base_prefill = ""
-                        detalle_prefill = comentario_actual
-                        for frase in frases_base:
-                            if comentario_actual == frase:
-                                base_prefill = frase
-                                detalle_prefill = ""
-                                break
-                            prefijo = f"{frase}. "
-                            if comentario_actual.startswith(prefijo):
-                                base_prefill = frase
-                                detalle_prefill = comentario_actual[len(prefijo):].strip()
-                                break
-                        st.session_state[base_key] = base_prefill
-                        st.session_state[detalle_key] = detalle_prefill
-
-                    st.markdown("**🧩 Frase base**")
-                    cols_frases = st.columns(2)
-                    for i, frase in enumerate(frases_base):
-                        if cols_frases[i % 2].button(
-                            frase,
-                            key=f"organizador_comentario_gerente_btn_{idx_caso}_{i}",
-                            use_container_width=True,
-                        ):
-                            st.session_state[base_key] = frase
-
-                    frase_base_sel = str(st.session_state.get(base_key, "")).strip()
-                    col_sel, col_clear = st.columns([5, 1])
-                    col_sel.caption(f"Seleccionada: {frase_base_sel or '—'}")
-                    if col_clear.button("Limpiar", key=f"organizador_comentario_gerente_btn_clear_{idx_caso}"):
-                        st.session_state[base_key] = ""
-                        frase_base_sel = ""
-                    detalle_manual = st.text_input(
-                        "✍️ Detalle manual (opcional)",
-                        key=detalle_key,
-                        placeholder="Ej. Se envió el calibrador nuevo",
+                    comentario_key = f"organizador_comentario_gerente_{idx_caso}"
+                    if comentario_key not in st.session_state:
+                        st.session_state[comentario_key] = comentario_actual
+                    comentario_gerente = st.text_area(
+                        "📝 Comentario gerente",
+                        key=comentario_key,
+                        height=110,
+                        placeholder="Escribe aquí el comentario del gerente...",
                     )
-                    comentario_gerente = frase_base_sel.strip()
-                    detalle_limpio = detalle_manual.strip()
-                    if comentario_gerente and detalle_limpio:
-                        comentario_gerente = f"{comentario_gerente}. {detalle_limpio}"
-                    elif not comentario_gerente and detalle_limpio:
-                        comentario_gerente = detalle_limpio
-
-                    st.caption(f"Comentario final: {comentario_gerente or '—'}")
                     if st.button("💾 Guardar comentario gerente", key=f"guardar_comentario_gerente_{idx_caso}"):
-                        if not comentario_gerente.strip():
-                            st.warning("⚠️ Selecciona una frase base o escribe un detalle antes de guardar.")
-                        else:
-                            try:
-                                fila_sheet = int(row_caso.get("__sheet_row"))
-                                hoja_casos = get_main_worksheet("casos_especiales")
-                                headers_casos = [h.strip() for h in hoja_casos.row_values(1)]
-                                if "Comentario_Gerente" not in headers_casos:
-                                    headers_casos.append("Comentario_Gerente")
-                                    hoja_casos.update_cell(1, len(headers_casos), "Comentario_Gerente")
-                                col_comentario = headers_casos.index("Comentario_Gerente") + 1
-                                hoja_casos.update_cell(fila_sheet, col_comentario, comentario_gerente.strip())
-                                cargar_casos_especiales.clear()
-                                st.success("✅ Comentario_Gerente guardado correctamente.")
-                                st.rerun()
-                            except Exception as e:
-                                st.error(f"❌ No se pudo guardar Comentario_Gerente: {e}")
+                        try:
+                            fila_sheet = int(row_caso.get("__sheet_row"))
+                            hoja_casos = get_main_worksheet("casos_especiales")
+                            headers_casos = [h.strip() for h in hoja_casos.row_values(1)]
+                            if "Comentario_Gerente" not in headers_casos:
+                                headers_casos.append("Comentario_Gerente")
+                                hoja_casos.update_cell(1, len(headers_casos), "Comentario_Gerente")
+                            col_comentario = headers_casos.index("Comentario_Gerente") + 1
+                            hoja_casos.update_cell(fila_sheet, col_comentario, comentario_gerente.strip())
+                            cargar_casos_especiales.clear()
+                            st.success("✅ Comentario_Gerente guardado correctamente.")
+                            st.rerun()
+                        except Exception as e:
+                            st.error(f"❌ No se pudo guardar Comentario_Gerente: {e}")
 
             # Métricas y gráficas de operación.
             df_metricas = df_casos_org.copy()
