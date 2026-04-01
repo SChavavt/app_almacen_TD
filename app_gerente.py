@@ -7139,6 +7139,12 @@ if "organizador" in tab_map:
                 if feedback_comment:
                     st.caption(f"Comentario final guardado: {feedback_comment}")
 
+            restore_filters = st.session_state.pop("organizador_casos_restore_filters", False)
+            if restore_filters:
+                filtros_guardados = st.session_state.get("organizador_casos_filtros_guardados", {})
+                for k, v in filtros_guardados.items():
+                    st.session_state[k] = v
+
             df_casos_org = cargar_casos_especiales().copy()
             if df_casos_org.empty:
                 st.info("No hay casos especiales registrados.")
@@ -7491,6 +7497,21 @@ if "organizador" in tab_map:
                                 col_comentario = headers_casos.index("Comentario_Gerente") + 1
                                 hoja_casos.update_cell(fila_sheet, col_comentario, comentario_gerente.strip())
                                 cargar_casos_especiales.clear()
+                                filtros_keys = [
+                                    "organizador_casos_busqueda",
+                                    "organizador_casos_tipo_envio",
+                                    "organizador_casos_modo_fecha",
+                                    "organizador_casos_vendedor_registro",
+                                    "organizador_casos_fecha_unica",
+                                    "organizador_casos_fecha_inicio",
+                                    "organizador_casos_fecha_fin",
+                                    "organizador_casos_rango_aplicado",
+                                    "organizador_select_caso_especial",
+                                ]
+                                st.session_state["organizador_casos_filtros_guardados"] = {
+                                    k: st.session_state.get(k) for k in filtros_keys if k in st.session_state
+                                }
+                                st.session_state["organizador_casos_restore_filters"] = True
                                 st.session_state["organizador_casos_feedback_ok"] = "✅ Comentario_Gerente guardado correctamente."
                                 st.session_state["organizador_casos_feedback_comment"] = comentario_gerente.strip()
                                 st.success("✅ Comentario_Gerente guardado correctamente.")
