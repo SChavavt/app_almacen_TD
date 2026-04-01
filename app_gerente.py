@@ -7354,20 +7354,23 @@ if "organizador" in tab_map:
             st.dataframe(tabla_casos, use_container_width=True)
 
             opciones_select = [None] + df_casos_filtrado.index.tolist()
-            labels_casos = {None: "Selecciona un caso especial"}
-            for idx_sel, row_sel in df_casos_filtrado.iterrows():
-                hora_sel = formatear_fecha_caso(row_sel.get("Hora_Registro"), "%d/%m/%Y %H:%M")
-                estado_sel = row_sel.get("Estado_Caso") or row_sel.get("Estado") or ""
-                labels_casos[idx_sel] = (
-                    f"🧾 {row_sel.get('Folio_Factura', '')} | "
-                    f"👤 {row_sel.get('Cliente', '')} | 🚚 {row_sel.get('Tipo_Envio', '')} | "
-                    f"🔍 {estado_sel} | 🕒 {hora_sel}"
+
+            def format_caso(idx):
+                if idx is None:
+                    return "Selecciona un caso especial"
+                row = df_casos_filtrado.loc[idx]
+                hora = formatear_fecha_caso(row.get("Hora_Registro"), "%d/%m/%Y %H:%M")
+                estado = row.get("Estado_Caso") or row.get("Estado") or ""
+                return (
+                    f"🧾 {row.get('Folio_Factura', '')} | "
+                    f"👤 {row.get('Cliente', '')} | 🚚 {row.get('Tipo_Envio', '')} | "
+                    f"🔍 {estado} | 🕒 {hora}"
                 )
 
             idx_caso = st.selectbox(
                 "Selecciona un caso especial para ver detalles o modificarlo:",
                 opciones_select,
-                format_func=lambda idx: labels_casos.get(idx, "Selecciona un caso especial"),
+                format_func=format_caso,
                 key="organizador_select_caso_especial",
             )
 
@@ -7437,31 +7440,26 @@ if "organizador" in tab_map:
                         st.session_state[detalle_key] = detalle_prefill
 
                     st.markdown("**🧩 Frase base**")
-                    opciones_frases = ["— Sin frase base —"] + frases_base
-                    frase_guardada = str(st.session_state.get(base_key, "")).strip()
-                    frase_inicial = (
-                        opciones_frases.index(frase_guardada)
-                        if frase_guardada in opciones_frases
-                        else 0
+                    cols_frases = st.columns(2)
+                    for i, frase in enumerate(frases_base):
+                        if cols_frases[i % 2].button(
+                            frase,
+                            key=f"organizador_comentario_gerente_btn_{idx_caso}_{i}",
+                            use_container_width=True,
+                        ):
+                            st.session_state[base_key] = frase
+
+                    frase_base_sel = str(st.session_state.get(base_key, "")).strip()
+                    col_sel, col_clear = st.columns([5, 1])
+                    col_sel.caption(f"Seleccionada: {frase_base_sel or '—'}")
+                    if col_clear.button("Limpiar", key=f"organizador_comentario_gerente_btn_clear_{idx_caso}"):
+                        st.session_state[base_key] = ""
+                        frase_base_sel = ""
+                    detalle_manual = st.text_input(
+                        "✍️ Detalle manual (opcional)",
+                        key=detalle_key,
+                        placeholder="Ej. Se envió el calibrador nuevo",
                     )
-
-                    with st.form(f"form_comentario_gerente_{idx_caso}", clear_on_submit=False):
-                        frase_base_sel = st.selectbox(
-                            "Frase base",
-                            options=opciones_frases,
-                            index=frase_inicial,
-                            key=f"{base_key}_select",
-                        )
-                        detalle_manual = st.text_input(
-                            "✍️ Detalle manual (opcional)",
-                            key=detalle_key,
-                            placeholder="Ej. Se envió el calibrador nuevo",
-                        )
-                        guardar_comentario = st.form_submit_button("💾 Guardar comentario gerente")
-
-                    frase_base_sel = "" if frase_base_sel == "— Sin frase base —" else frase_base_sel
-                    st.session_state[base_key] = frase_base_sel
-
                     comentario_gerente = frase_base_sel.strip()
                     detalle_limpio = detalle_manual.strip()
                     if comentario_gerente and detalle_limpio:
@@ -7470,7 +7468,7 @@ if "organizador" in tab_map:
                         comentario_gerente = detalle_limpio
 
                     st.caption(f"Comentario final: {comentario_gerente or '—'}")
-                    if guardar_comentario:
+                    if st.button("💾 Guardar comentario gerente", key=f"guardar_comentario_gerente_{idx_caso}"):
                         if not comentario_gerente.strip():
                             st.warning("⚠️ Selecciona una frase base o escribe un detalle antes de guardar.")
                         else:
