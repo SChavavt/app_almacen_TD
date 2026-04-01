@@ -7132,6 +7132,13 @@ if "organizador" in tab_map:
                 help="Muestra solo los casos con Seguimiento vacío y permite guardar Comentario_Gerente.",
             )
 
+            feedback_ok = st.session_state.get("organizador_casos_feedback_ok", "")
+            feedback_comment = st.session_state.get("organizador_casos_feedback_comment", "")
+            if feedback_ok:
+                st.success(feedback_ok)
+                if feedback_comment:
+                    st.caption(f"Comentario final guardado: {feedback_comment}")
+
             df_casos_org = cargar_casos_especiales().copy()
             if df_casos_org.empty:
                 st.info("No hay casos especiales registrados.")
@@ -7484,8 +7491,9 @@ if "organizador" in tab_map:
                                 col_comentario = headers_casos.index("Comentario_Gerente") + 1
                                 hoja_casos.update_cell(fila_sheet, col_comentario, comentario_gerente.strip())
                                 cargar_casos_especiales.clear()
+                                st.session_state["organizador_casos_feedback_ok"] = "✅ Comentario_Gerente guardado correctamente."
+                                st.session_state["organizador_casos_feedback_comment"] = comentario_gerente.strip()
                                 st.success("✅ Comentario_Gerente guardado correctamente.")
-                                st.rerun()
                             except Exception as e:
                                 st.error(f"❌ No se pudo guardar Comentario_Gerente: {e}")
 
@@ -7581,558 +7589,560 @@ if "organizador" in tab_map:
             else:
                 pedidos_por_vendedor = pd.Series(dtype="int64", name="Pedidos_Totales")
 
-            with st.expander("🧩 Incidencias por mes (filtro configurable por áreas responsables)", expanded=False):
+            if not usar_nuevo_sistema:
+                with st.expander("🧩 Incidencias por mes (filtro configurable por áreas responsables)", expanded=False):
 
-                def _areas_responsables_desde_texto(valor) -> list[str]:
-                    txt = str(valor or "").strip()
-                    if not txt:
-                        return ["Sin área"]
-                    txt_norm = normalizar(txt)
-                    partes = re.split(r"\s*(?:\+|/|,|;| y | e | & | \|)\s*", txt_norm)
-                    salida = []
-                    for parte in partes:
-                        parte = str(parte).strip()
-                        if not parte:
-                            continue
-                        if parte in {"almacen", "almacenaje", "bodega"}:
-                            parte = "almacen"
-                        elif parte in {"vendedor", "ventas", "comercial"}:
-                            parte = "vendedor"
-                        elif parte in {"logistica", "logistico"}:
-                            parte = "logistica"
-                        elif parte in {"administracion", "administrativo", "administrativa"}:
-                            parte = "administracion"
-                        elif parte in {"facturacion", "factura"}:
-                            parte = "facturacion"
-                        elif parte in {"credito y cobranza", "cobranza", "credito"}:
-                            parte = "cobranza"
-                        salida.append(parte)
-                    return sorted(set(salida)) if salida else ["Sin área"]
+                    def _areas_responsables_desde_texto(valor) -> list[str]:
+                        txt = str(valor or "").strip()
+                        if not txt:
+                            return ["Sin área"]
+                        txt_norm = normalizar(txt)
+                        partes = re.split(r"\s*(?:\+|/|,|;| y | e | & | \|)\s*", txt_norm)
+                        salida = []
+                        for parte in partes:
+                            parte = str(parte).strip()
+                            if not parte:
+                                continue
+                            if parte in {"almacen", "almacenaje", "bodega"}:
+                                parte = "almacen"
+                            elif parte in {"vendedor", "ventas", "comercial"}:
+                                parte = "vendedor"
+                            elif parte in {"logistica", "logistico"}:
+                                parte = "logistica"
+                            elif parte in {"administracion", "administrativo", "administrativa"}:
+                                parte = "administracion"
+                            elif parte in {"facturacion", "factura"}:
+                                parte = "facturacion"
+                            elif parte in {"credito y cobranza", "cobranza", "credito"}:
+                                parte = "cobranza"
+                            salida.append(parte)
+                        return sorted(set(salida)) if salida else ["Sin área"]
 
-                df_metricas["Areas_Responsables_List"] = df_metricas["Area_Responsable_norm"].apply(
-                    _areas_responsables_desde_texto
-                )
-                areas_disponibles = sorted(
-                    {
-                        area
-                        for lista_areas in df_metricas["Areas_Responsables_List"].tolist()
-                        for area in (lista_areas if isinstance(lista_areas, list) else ["Sin área"])
-                    }
-                )
-                opciones_area = ["Todas"] + areas_disponibles
-                area_default = "vendedor" if "vendedor" in areas_disponibles else (areas_disponibles[0] if areas_disponibles else "Todas")
-                idx_area_default = opciones_area.index(area_default) if area_default in opciones_area else 0
-                area_seleccionada = st.selectbox(
-                    "Área responsable a incluir",
-                    options=opciones_area,
-                    index=idx_area_default,
-                    key="organizador_casos_area_responsable_selectbox",
-                    help="Solo se puede elegir un área por vez. Si eliges 'Todas', no se aplica filtro por área.",
-                )
-
-                if area_seleccionada == "Todas":
-                    mask_areas = pd.Series(True, index=df_metricas.index)
-                else:
-                    area_norm_sel = normalizar(area_seleccionada)
-                    mask_areas = df_metricas["Areas_Responsables_List"].apply(
-                        lambda lista: area_norm_sel in set(lista if isinstance(lista, list) else [])
+                    df_metricas["Areas_Responsables_List"] = df_metricas["Area_Responsable_norm"].apply(
+                        _areas_responsables_desde_texto
                     )
-
-                df_vendedor_mes = df_metricas[mask_areas].copy()
-                df_vendedor_mes = df_vendedor_mes[df_vendedor_mes["Hora_Registro_dt"].notna()].copy()
-
-                if df_vendedor_mes.empty:
-                    st.info("No hay incidencias para el filtro de áreas responsables seleccionado.")
-                else:
-                    df_vendedor_mes["Mes"] = df_vendedor_mes["Hora_Registro_dt"].dt.to_period("M").astype(str)
-                    df_vendedor_mes["Mes_Period"] = df_vendedor_mes["Hora_Registro_dt"].dt.to_period("M")
-                    df_vendedor_mes["Resultado_Esperado_txt"] = (
-                        df_vendedor_mes.get("Resultado_Esperado", "").astype(str).str.strip().replace("", "Sin resultado")
-                    )
-                    df_vendedor_mes["Responsable_Detalle"] = df_vendedor_mes["Nombre_Responsable_norm"].astype(str)
-                    df_vendedor_mes["Tipo_Envio_norm"] = df_vendedor_mes.get("Tipo_Envio", "").astype(str).apply(normalizar)
-                    df_vendedor_mes["ID_Vendedor_Caso"] = (
-                        df_vendedor_mes.get("id_vendedor", "")
-                        .astype(str)
-                        .str.strip()
-                        .replace("", pd.NA)
-                        .fillna(df_vendedor_mes.get("ID_Vendedor", "").astype(str).str.strip().replace("", pd.NA))
-                        .fillna(df_vendedor_mes.get("Id_Vendedor", "").astype(str).str.strip().replace("", pd.NA))
-                        .fillna(df_vendedor_mes.get("Vendedor_Registro", "").astype(str).str.strip().replace("", "Sin ID vendedor"))
-                    )
-                    nombre_responsable = (
-                        df_vendedor_mes.get("Nombre_Responsable", df_vendedor_mes.get("Nombre_Responsable_norm", ""))
-                        .astype(str)
-                        .str.strip()
-                        .replace("", pd.NA)
-                        .apply(normalizar_nombre_persona)
-                    )
-                    vendedor_registro = (
-                        df_vendedor_mes.get("Vendedor_Registro", df_vendedor_mes.get("Vendedor_Registro_norm", ""))
-                        .astype(str)
-                        .str.strip()
-                        .replace("", pd.NA)
-                        .apply(normalizar_vendedor_nombre)
-                    )
-                    id_vendedor = (
-                        df_vendedor_mes.get("ID vendedor", df_vendedor_mes.get("ID_Vendedor_Caso", ""))
-                        .astype(str)
-                        .str.strip()
-                        .replace("", pd.NA)
-                    )
-                    df_vendedor_mes["Responsable_Analisis"] = (
-                        nombre_responsable.fillna(vendedor_registro).fillna(id_vendedor).fillna("Sin responsable")
-                    )
-
-                    meses_disponibles = sorted(df_vendedor_mes["Mes_Period"].dropna().unique())
-                    mes_actual_period = pd.Timestamp.now().to_period("M")
-                    mes_default = mes_actual_period if mes_actual_period in meses_disponibles else meses_disponibles[-1]
-                    idx_default = meses_disponibles.index(mes_default)
-                    mes_sel_period = st.selectbox(
-                        "Selecciona el mes a analizar",
-                        options=meses_disponibles,
-                        index=idx_default,
-                        format_func=lambda p: p.strftime("%B %Y").capitalize(),
-                        key="organizador_casos_vendedor_mes_select",
-                    )
-
-                    df_mes_sel = df_vendedor_mes[df_vendedor_mes["Mes_Period"] == mes_sel_period].copy()
-                    devoluciones_mes = df_mes_sel["Tipo_Envio_norm"].str.contains("devol", na=False).sum()
-                    garantias_mes = df_mes_sel["Tipo_Envio_norm"].str.contains("garantia", na=False).sum()
-                    monto_mes = float(df_mes_sel["Monto_Devuelto_num"].sum())
-
-                    m1, m2, m3, m4 = st.columns(4)
-                    m1.metric("Incidencias del mes", int(len(df_mes_sel)))
-                    m2.metric("Devoluciones", int(devoluciones_mes))
-                    m3.metric("Garantías", int(garantias_mes))
-                    m4.metric("Monto total devuelto", f"${monto_mes:,.2f}")
-
-                    st.markdown("#### 📊 Responsables con más incidencias (conteo)")
-                    resumen_responsables = (
-                        df_mes_sel.assign(Responsable_Analisis=df_vendedor_mes.loc[df_mes_sel.index, "Responsable_Analisis"])
-                        .groupby("Responsable_Analisis", as_index=False)
-                        .agg(incidencias=("Responsable_Analisis", "size"))
-                    )
-                    resumen_responsables = resumen_responsables.sort_values(
-                        by=["incidencias", "Responsable_Analisis"],
-                        ascending=False,
-                    ).head(10)
-                    if not resumen_responsables.empty:
-                        st.bar_chart(
-                            resumen_responsables.set_index("Responsable_Analisis")["incidencias"]
-                        )
-                        st.caption(
-                            "La barra muestra cuántas incidencias tuvo cada responsable en el mes y área filtrados."
-                        )
-                    else:
-                        st.info("No hay responsables con incidencias en el filtro actual.")
-
-                    st.markdown("#### 📋 Lista del mes seleccionado")
-                    columnas_mes = [
-                        "Hora_Registro_dt",
-                        "ID_Vendedor_Caso",
-                        "Vendedor_Registro_norm",
-                        "Responsable_Detalle",
-                        "Estado_Caso",
-                        "Tipo_Envio",
-                        "Tipo_Envio_Original",
-                        "Monto_Devuelto_num",
-                        "Resultado_Esperado_txt",
-                        "Cliente",
-                        "Folio_Factura",
-                    ]
-                    columnas_mes = [c for c in columnas_mes if c in df_mes_sel.columns]
-                    detalle_mes = df_mes_sel[columnas_mes].copy().sort_values("Hora_Registro_dt", ascending=False)
-                    if "Hora_Registro_dt" in detalle_mes.columns:
-                        detalle_mes["Hora_Registro_dt"] = detalle_mes["Hora_Registro_dt"].dt.strftime("%d/%m/%Y %H:%M")
-                    if "Monto_Devuelto_num" in detalle_mes.columns:
-                        detalle_mes["Monto_Devuelto_num"] = detalle_mes["Monto_Devuelto_num"].map(lambda x: f"${x:,.2f}")
-
-                    detalle_mes = detalle_mes.rename(
-                        columns={
-                            "Hora_Registro_dt": "Fecha registro",
-                            "ID_Vendedor_Caso": "ID vendedor",
-                            "Vendedor_Registro_norm": "Vendedor (registro)",
-                            "Responsable_Detalle": "Nombre responsable",
-                            "Estado_Caso": "Estado caso",
-                            "Tipo_Envio": "Tipo envío",
-                            "Tipo_Envio_Original": "Tipo envío original",
-                            "Monto_Devuelto_num": "Monto devuelto",
-                            "Resultado_Esperado_txt": "Resultado esperado",
-                            "Cliente": "Cliente",
-                            "Folio_Factura": "Folio factura",
+                    areas_disponibles = sorted(
+                        {
+                            area
+                            for lista_areas in df_metricas["Areas_Responsables_List"].tolist()
+                            for area in (lista_areas if isinstance(lista_areas, list) else ["Sin área"])
                         }
                     )
-                    st.dataframe(detalle_mes, use_container_width=True)
+                    opciones_area = ["Todas"] + areas_disponibles
+                    area_default = "vendedor" if "vendedor" in areas_disponibles else (areas_disponibles[0] if areas_disponibles else "Todas")
+                    idx_area_default = opciones_area.index(area_default) if area_default in opciones_area else 0
+                    area_seleccionada = st.selectbox(
+                        "Área responsable a incluir",
+                        options=opciones_area,
+                        index=idx_area_default,
+                        key="organizador_casos_area_responsable_selectbox",
+                        help="Solo se puede elegir un área por vez. Si eliges 'Todas', no se aplica filtro por área.",
+                    )
 
-                    # ================== NUEVA SECCIÓN: MOTIVOS DE ERROR DEL MES ==================
-                    st.markdown("#### 🧩 Motivos de error del mes")
-
-                    def _pick_col(columns: list[str], options: list[str]) -> str | None:
-                        norm_map = {str(c).strip().lower(): c for c in columns}
-                        for opt in options:
-                            key = str(opt).strip().lower()
-                            if key in norm_map:
-                                return norm_map[key]
-                        return None
-
-                    df_motivos = df_mes_sel.copy()
-
-                    if df_motivos.empty:
-                        st.info("No hay registros con las áreas responsables seleccionadas para construir motivos de error.")
+                    if area_seleccionada == "Todas":
+                        mask_areas = pd.Series(True, index=df_metricas.index)
                     else:
-                        # Responsable con fallback: Nombre_Responsable -> Vendedor_Registro -> ID vendedor.
-                        col_nombre_resp = _pick_col(df_motivos.columns.tolist(), ["Nombre_Responsable", "Nombre Responsable"])
-                        col_vend_reg = _pick_col(df_motivos.columns.tolist(), ["Vendedor_Registro", "Vendedor (registro)", "Vendedor_Registro_norm"])
-                        col_id_vend = _pick_col(df_motivos.columns.tolist(), ["ID vendedor", "ID_Vendedor", "Id_Vendedor", "id_vendedor", "ID_Vendedor_Caso"])
-
-                        serie_nombre = (
-                            df_motivos[col_nombre_resp].astype(str).str.strip().replace("", pd.NA)
-                            if col_nombre_resp else pd.Series(pd.NA, index=df_motivos.index)
-                        )
-                        serie_vreg = (
-                            df_motivos[col_vend_reg].astype(str).str.strip().replace("", pd.NA)
-                            if col_vend_reg else pd.Series(pd.NA, index=df_motivos.index)
-                        )
-                        serie_id = (
-                            df_motivos[col_id_vend].astype(str).str.strip().replace("", pd.NA)
-                            if col_id_vend else pd.Series("Sin ID vendedor", index=df_motivos.index)
-                        )
-                        df_motivos["Responsable_Mostrar"] = serie_nombre.fillna(serie_vreg).fillna(serie_id).fillna("Sin ID vendedor")
-
-                        # Monto devuelto numérico robusto.
-                        col_monto = _pick_col(df_motivos.columns.tolist(), ["Monto devuelto", "Monto_Devuelto", "Monto_Devuelto_num", "Monto"])
-                        if col_monto is not None:
-                            monto_txt = (
-                                df_motivos[col_monto]
-                                .astype(str)
-                                .str.replace("$", "", regex=False)
-                                .str.replace(",", "", regex=False)
-                                .str.strip()
-                            )
-                            df_motivos["Monto_Devuelto_calc"] = pd.to_numeric(monto_txt, errors="coerce").fillna(0.0)
-                        else:
-                            df_motivos["Monto_Devuelto_calc"] = 0.0
-
-                        # Texto base combinando columnas descriptivas disponibles.
-                        posibles_texto = [
-                            "Motivo detallado", "Motivo_Detallado", "Comentarios", "Comentario",
-                            "Descripcion", "Descripción", "Descripcion del caso", "Descripción del caso",
-                            "Seguimiento", "Resultado esperado", "Resultado_Esperado_txt",
-                            "Problema", "Detalle", "Observaciones", "Notas"
-                        ]
-                        cols_texto = [c for c in df_motivos.columns if str(c).strip().lower() in {p.lower() for p in posibles_texto}]
-                        if not cols_texto:
-                            fallback_cols = [c for c in df_motivos.columns if pd.api.types.is_string_dtype(df_motivos[c])]
-                            cols_texto = fallback_cols[:4]
-
-                        if cols_texto:
-                            texto_base = (
-                                df_motivos[cols_texto]
-                                .fillna("")
-                                .astype(str)
-                                .agg(" | ".join, axis=1)
-                                .str.lower()
-                                .str.normalize("NFKD")
-                                .str.encode("ascii", errors="ignore")
-                                .str.decode("utf-8")
-                                .str.replace(r"\s+", " ", regex=True)
-                                .str.strip()
-                            )
-                        else:
-                            texto_base = pd.Series("", index=df_motivos.index)
-
-                        df_motivos["Texto_Error_Base"] = texto_base
-
-                        # Clasificación por reglas simples de palabras clave.
-                        reglas_categoria = [
-                            ("Error de cotización", ["clave", "cotizo mal", "cotizacion mal", "se pidio mal", "equivoco la clave", "cotizo", "precio mal"]),
-                            ("Error de producto", ["producto incorrecto", "medida incorrecta", "material incorrecto", "cambio de producto", "producto equivocado", "modelo incorrecto"]),
-                            ("Expectativa del cliente", ["cliente", "no era lo que esperaba", "requeria otro", "esperaba", "no le gusto", "cambio de opinion"]),
-                            ("Calidad / defecto", ["defecto", "mala calidad", "fallo", "no funciono", "danado", "dano", "quebrado"]),
-                            ("Logística / envío", ["guia", "envio", "paqueteria", "retorno", "foraneo", "flete", "entrega tardia"]),
-                            ("Error administrativo", ["factura", "folio", "captura", "administrativo", "administrativa", "documento", "nota de credito"]),
-                        ]
-
-                        def _categorizar_error(txt: str) -> str:
-                            txt = str(txt or "").strip().lower()
-                            if not txt:
-                                return "Otro"
-                            for categoria, keywords in reglas_categoria:
-                                if any(k in txt for k in keywords):
-                                    return categoria
-                            return "Otro"
-
-                        df_motivos["Categoria_Error"] = df_motivos["Texto_Error_Base"].apply(_categorizar_error)
-
-                        resumen_cat = (
-                            df_motivos.groupby("Categoria_Error", as_index=False)
-                            .agg(
-                                incidencias=("Categoria_Error", "size"),
-                                monto_total=("Monto_Devuelto_calc", "sum"),
-                            )
-                            .sort_values("incidencias", ascending=False)
-                        )
-                        total_incidencias = int(resumen_cat["incidencias"].sum())
-                        resumen_cat["porcentaje"] = np.where(
-                            total_incidencias > 0,
-                            (resumen_cat["incidencias"] / total_incidencias) * 100,
-                            0.0,
-                        )
-                        responsables_por_categoria = (
-                            df_motivos.groupby("Categoria_Error")["Responsable_Mostrar"]
-                            .apply(
-                                lambda serie: ", ".join(
-                                    [
-                                        f"{resp} ({int(cnt)})"
-                                        for resp, cnt in serie.value_counts().head(3).items()
-                                    ]
-                                )
-                                if not serie.dropna().empty else "Sin responsable identificado"
-                            )
-                            .to_dict()
-                        )
-                        resumen_cat["Responsables_Destacados"] = resumen_cat["Categoria_Error"].map(
-                            responsables_por_categoria
-                        ).fillna("Sin responsable identificado")
-
-                        fig_motivos = px.bar(
-                            resumen_cat,
-                            x="incidencias",
-                            y="Categoria_Error",
-                            orientation="h",
-                            text="incidencias",
-                            custom_data=[
-                                "Categoria_Error",
-                                "incidencias",
-                                "porcentaje",
-                                "monto_total",
-                                "Responsables_Destacados",
-                            ],
-                            title="Principales motivos de error del mes",
-                            color="incidencias",
-                            color_continuous_scale="Blues",
-                        )
-                        fig_motivos.update_traces(
-                            hovertemplate=(
-                                "Categoría: %{customdata[0]}<br>"
-                                "Incidencias: %{customdata[1]}<br>"
-                                "Porcentaje: %{customdata[2]:.1f}%<br>"
-                                "Monto total: $%{customdata[3]:,.2f}<br>"
-                                "Responsables: %{customdata[4]}<extra></extra>"
-                            )
-                        )
-                        fig_motivos.update_layout(
-                            template="plotly_dark",
-                            xaxis_title="Número de incidencias",
-                            yaxis_title="Categoría de error",
-                            margin=dict(l=30, r=30, t=80, b=30),
-                            paper_bgcolor="rgba(0,0,0,0)",
-                            plot_bgcolor="rgba(0,0,0,0)",
-                            coloraxis_showscale=False,
-                            yaxis=dict(categoryorder="total ascending"),
-                        )
-                        st.plotly_chart(fig_motivos, use_container_width=True)
-
-                        # Resumen automático ejecutivo.
-                        top_freq = resumen_cat.iloc[0]
-                        top_monto = resumen_cat.sort_values("monto_total", ascending=False).iloc[0]
-                        min_freq = resumen_cat.sort_values(["incidencias", "monto_total"], ascending=[True, True]).iloc[0]
-                        top_responsables = df_motivos["Responsable_Mostrar"].value_counts().head(3)
-                        vendedores_top_txt = "Sin responsable identificado"
-                        if not top_responsables.empty:
-                            vendedores_top_txt = " · ".join(
-                                [
-                                    f"{resp} ({int(cnt)})"
-                                    for resp, cnt in top_responsables.items()
-                                ]
-                            )
-
-                        total_vendedores = int(df_motivos["Responsable_Mostrar"].nunique())
-                        responsables_causa_principal = (
-                            df_motivos.loc[
-                                df_motivos["Categoria_Error"] == top_freq["Categoria_Error"],
-                                "Responsable_Mostrar",
-                            ]
-                            .dropna()
-                            .nunique()
+                        area_norm_sel = normalizar(area_seleccionada)
+                        mask_areas = df_metricas["Areas_Responsables_List"].apply(
+                            lambda lista: area_norm_sel in set(lista if isinstance(lista, list) else [])
                         )
 
-                        tokens_series = (
-                            df_motivos["Texto_Error_Base"]
-                            .fillna("")
+                    df_vendedor_mes = df_metricas[mask_areas].copy()
+                    df_vendedor_mes = df_vendedor_mes[df_vendedor_mes["Hora_Registro_dt"].notna()].copy()
+
+                    if df_vendedor_mes.empty:
+                        st.info("No hay incidencias para el filtro de áreas responsables seleccionado.")
+                    else:
+                        df_vendedor_mes["Mes"] = df_vendedor_mes["Hora_Registro_dt"].dt.to_period("M").astype(str)
+                        df_vendedor_mes["Mes_Period"] = df_vendedor_mes["Hora_Registro_dt"].dt.to_period("M")
+                        df_vendedor_mes["Resultado_Esperado_txt"] = (
+                            df_vendedor_mes.get("Resultado_Esperado", "").astype(str).str.strip().replace("", "Sin resultado")
+                        )
+                        df_vendedor_mes["Responsable_Detalle"] = df_vendedor_mes["Nombre_Responsable_norm"].astype(str)
+                        df_vendedor_mes["Tipo_Envio_norm"] = df_vendedor_mes.get("Tipo_Envio", "").astype(str).apply(normalizar)
+                        df_vendedor_mes["ID_Vendedor_Caso"] = (
+                            df_vendedor_mes.get("id_vendedor", "")
                             .astype(str)
-                            .str.split()
-                            .explode()
+                            .str.strip()
+                            .replace("", pd.NA)
+                            .fillna(df_vendedor_mes.get("ID_Vendedor", "").astype(str).str.strip().replace("", pd.NA))
+                            .fillna(df_vendedor_mes.get("Id_Vendedor", "").astype(str).str.strip().replace("", pd.NA))
+                            .fillna(df_vendedor_mes.get("Vendedor_Registro", "").astype(str).str.strip().replace("", "Sin ID vendedor"))
                         )
-                        stopwords_resumen = {
-                            "", "de", "la", "el", "los", "las", "y", "en", "por", "con", "para", "del",
-                            "al", "se", "que", "un", "una", "lo", "le", "es", "no", "mas", "muy", "sin",
-                            "su", "sus", "como", "ya", "fue", "era", "ser", "esta", "este", "porque", "pero",
-                            "cliente", "caso", "detalle", "comentario", "motivo", "error"
-                        }
-                        tokens_filtrados = tokens_series[
-                            tokens_series.str.len().fillna(0).ge(4) & ~tokens_series.isin(stopwords_resumen)
-                        ]
-                        top_tokens = tokens_filtrados.value_counts().head(5).index.tolist()
-                        top_tokens_txt = ", ".join(top_tokens) if top_tokens else "sin patrones claros en texto"
-
-                        st.markdown(
-                            (
-                                "##### 🧾 Resumen de motivos de error\n\n"
-                                f"En resumen, la mayor parte de las fallas se concentró en "
-                                f"**{top_freq['Categoria_Error']}**, con **{int(top_freq['incidencias'])} casos** "
-                                f"({top_freq['porcentaje']:.1f}% del total).\n\n"
-                                f"📌 **Mayor impacto económico:** **{top_monto['Categoria_Error']}** "
-                                f"(${float(top_monto['monto_total']):,.2f}).\n"
-                                f"📌 **Menor participación:** **{min_freq['Categoria_Error']}** "
-                                f"({int(min_freq['incidencias'])} casos, {min_freq['porcentaje']:.1f}%).\n\n"
-                                f"👥 **Concentración por vendedores:** {int(responsables_causa_principal)} de "
-                                f"{total_vendedores} vendedores participaron en el error principal. "
-                                f"Más recurrentes: {vendedores_top_txt}.\n"
-                                f"🧠 **Patrones frecuentes en motivos detallados:** {top_tokens_txt}.\n\n"
-                                f"👉 Recomendación: priorizar acciones en la causa principal y mantener seguimiento "
-                                f"preventivo en los casos de menor frecuencia."
-                            )
+                        nombre_responsable = (
+                            df_vendedor_mes.get("Nombre_Responsable", df_vendedor_mes.get("Nombre_Responsable_norm", ""))
+                            .astype(str)
+                            .str.strip()
+                            .replace("", pd.NA)
+                            .apply(normalizar_nombre_persona)
+                        )
+                        vendedor_registro = (
+                            df_vendedor_mes.get("Vendedor_Registro", df_vendedor_mes.get("Vendedor_Registro_norm", ""))
+                            .astype(str)
+                            .str.strip()
+                            .replace("", pd.NA)
+                            .apply(normalizar_vendedor_nombre)
+                        )
+                        id_vendedor = (
+                            df_vendedor_mes.get("ID vendedor", df_vendedor_mes.get("ID_Vendedor_Caso", ""))
+                            .astype(str)
+                            .str.strip()
+                            .replace("", pd.NA)
+                        )
+                        df_vendedor_mes["Responsable_Analisis"] = (
+                            nombre_responsable.fillna(vendedor_registro).fillna(id_vendedor).fillna("Sin responsable")
                         )
 
-                    csv_mes = detalle_mes.to_csv(index=False).encode("utf-8-sig")
-                    st.download_button(
-                        label="⬇️ Descargar lista del mes (áreas seleccionadas)",
-                        data=csv_mes,
-                        file_name=f"incidencias_areas_{mes_sel_period.strftime('%Y-%m')}.csv",
-                        mime="text/csv",
-                        key="organizador_casos_vendedor_descarga_mes",
-                    )
-
-            with st.expander("📊 Métricas generales de casos especiales", expanded=False):
-                total_casos = len(df_metricas)
-                estados_cerrados = {"aprobada", "aprobado", "cerrado", "completado", "resuelto", "finalizado"}
-                casos_cerrados = estado_caso_norm.isin(estados_cerrados).sum()
-                casos_abiertos = max(total_casos - int(casos_cerrados), 0)
-                mes_actual = pd.Timestamp.now().month
-                anio_actual = pd.Timestamp.now().year
-                casos_mes = (
-                    (df_metricas["Hora_Registro_dt"].dt.month == mes_actual)
-                    & (df_metricas["Hora_Registro_dt"].dt.year == anio_actual)
-                ).sum()
-
-                k1, k2, k3, k4 = st.columns(4)
-                k1.metric("Total casos", int(total_casos))
-                k2.metric("Abiertos", int(casos_abiertos))
-                k3.metric("Cerrados/Completados", int(casos_cerrados))
-                k4.metric("Casos del mes", int(casos_mes))
-
-                total_devuelto = float(df_metricas["Monto_Devuelto_num"].sum())
-                total_devuelto_vendedor = float(df_metricas.loc[df_metricas["culpa_vendedor"], "Monto_Devuelto_num"].sum())
-                total_devuelto_otras_areas = max(total_devuelto - total_devuelto_vendedor, 0.0)
-                k5, k6, k7 = st.columns(3)
-                k5.metric("💸 Monto devuelto total", f"${total_devuelto:,.2f}")
-                k6.metric("🧑‍💼 Impacto atribuible a vendedor", f"${total_devuelto_vendedor:,.2f}")
-                k7.metric("🏢 Impacto por otras áreas", f"${total_devuelto_otras_areas:,.2f}")
-
-                col_ch1, col_ch2 = st.columns(2)
-                with col_ch1:
-                    st.markdown("#### ⚖️ Responsables con mayor tasa de incidencia")
-                    df_metricas_con_responsable = df_metricas[
-                        df_metricas["Nombre_Responsable_norm"].fillna("Sin responsable") != "Sin responsable"
-                    ].copy()
-                    if df_metricas_con_responsable.empty:
-                        st.info("No hay responsables válidos para calcular la tasa de incidencia.")
-                        base_vendedores = pd.DataFrame(
-                            columns=["Incidencias", "Monto_Devuelto", "Tasa_Incidencia_pct"]
+                        meses_disponibles = sorted(df_vendedor_mes["Mes_Period"].dropna().unique())
+                        mes_actual_period = pd.Timestamp.now().to_period("M")
+                        mes_default = mes_actual_period if mes_actual_period in meses_disponibles else meses_disponibles[-1]
+                        idx_default = meses_disponibles.index(mes_default)
+                        mes_sel_period = st.selectbox(
+                            "Selecciona el mes a analizar",
+                            options=meses_disponibles,
+                            index=idx_default,
+                            format_func=lambda p: p.strftime("%B %Y").capitalize(),
+                            key="organizador_casos_vendedor_mes_select",
                         )
-                        total_incidencias_responsables = 0
-                    else:
-                        base_vendedores = (
-                            df_metricas_con_responsable.groupby("Nombre_Responsable_norm", dropna=False)
-                            .agg(
-                                Incidencias=("Nombre_Responsable_norm", "size"),
-                                Monto_Devuelto=("Monto_Devuelto_num", "sum"),
-                            )
+
+                        df_mes_sel = df_vendedor_mes[df_vendedor_mes["Mes_Period"] == mes_sel_period].copy()
+                        devoluciones_mes = df_mes_sel["Tipo_Envio_norm"].str.contains("devol", na=False).sum()
+                        garantias_mes = df_mes_sel["Tipo_Envio_norm"].str.contains("garantia", na=False).sum()
+                        monto_mes = float(df_mes_sel["Monto_Devuelto_num"].sum())
+
+                        m1, m2, m3, m4 = st.columns(4)
+                        m1.metric("Incidencias del mes", int(len(df_mes_sel)))
+                        m2.metric("Devoluciones", int(devoluciones_mes))
+                        m3.metric("Garantías", int(garantias_mes))
+                        m4.metric("Monto total devuelto", f"${monto_mes:,.2f}")
+
+                        st.markdown("#### 📊 Responsables con más incidencias (conteo)")
+                        resumen_responsables = (
+                            df_mes_sel.assign(Responsable_Analisis=df_vendedor_mes.loc[df_mes_sel.index, "Responsable_Analisis"])
+                            .groupby("Responsable_Analisis", as_index=False)
+                            .agg(incidencias=("Responsable_Analisis", "size"))
                         )
-                        total_incidencias_responsables = int(base_vendedores["Incidencias"].sum())
-                        base_vendedores["Tasa_Incidencia_pct"] = np.where(
-                            total_incidencias_responsables > 0,
-                            (base_vendedores["Incidencias"] / total_incidencias_responsables) * 100,
-                            0.0,
-                        )
-                        base_vendedores["Tasa_Incidencia_pct"] = base_vendedores["Tasa_Incidencia_pct"].fillna(0)
-                        top_tasa = base_vendedores.sort_values(
-                            by=["Tasa_Incidencia_pct", "Incidencias"],
+                        resumen_responsables = resumen_responsables.sort_values(
+                            by=["incidencias", "Responsable_Analisis"],
                             ascending=False,
                         ).head(10)
-                        st.bar_chart(top_tasa["Tasa_Incidencia_pct"])
-                        st.caption(
-                            f"La tasa se calcula sobre {total_incidencias_responsables} incidencias con nombre responsable válido."
+                        if not resumen_responsables.empty:
+                            st.bar_chart(
+                                resumen_responsables.set_index("Responsable_Analisis")["incidencias"]
+                            )
+                            st.caption(
+                                "La barra muestra cuántas incidencias tuvo cada responsable en el mes y área filtrados."
+                            )
+                        else:
+                            st.info("No hay responsables con incidencias en el filtro actual.")
+
+                        st.markdown("#### 📋 Lista del mes seleccionado")
+                        columnas_mes = [
+                            "Hora_Registro_dt",
+                            "ID_Vendedor_Caso",
+                            "Vendedor_Registro_norm",
+                            "Responsable_Detalle",
+                            "Estado_Caso",
+                            "Tipo_Envio",
+                            "Tipo_Envio_Original",
+                            "Monto_Devuelto_num",
+                            "Resultado_Esperado_txt",
+                            "Cliente",
+                            "Folio_Factura",
+                        ]
+                        columnas_mes = [c for c in columnas_mes if c in df_mes_sel.columns]
+                        detalle_mes = df_mes_sel[columnas_mes].copy().sort_values("Hora_Registro_dt", ascending=False)
+                        if "Hora_Registro_dt" in detalle_mes.columns:
+                            detalle_mes["Hora_Registro_dt"] = detalle_mes["Hora_Registro_dt"].dt.strftime("%d/%m/%Y %H:%M")
+                        if "Monto_Devuelto_num" in detalle_mes.columns:
+                            detalle_mes["Monto_Devuelto_num"] = detalle_mes["Monto_Devuelto_num"].map(lambda x: f"${x:,.2f}")
+
+                        detalle_mes = detalle_mes.rename(
+                            columns={
+                                "Hora_Registro_dt": "Fecha registro",
+                                "ID_Vendedor_Caso": "ID vendedor",
+                                "Vendedor_Registro_norm": "Vendedor (registro)",
+                                "Responsable_Detalle": "Nombre responsable",
+                                "Estado_Caso": "Estado caso",
+                                "Tipo_Envio": "Tipo envío",
+                                "Tipo_Envio_Original": "Tipo envío original",
+                                "Monto_Devuelto_num": "Monto devuelto",
+                                "Resultado_Esperado_txt": "Resultado esperado",
+                                "Cliente": "Cliente",
+                                "Folio_Factura": "Folio factura",
+                            }
                         )
-                with col_ch2:
-                    st.markdown("#### 🏢 Áreas con más incidencias")
-                    serie_areas = (
-                        df_metricas["Area_Responsable_norm"]
-                        .value_counts()
-                        .head(10)
-                    )
-                    st.bar_chart(serie_areas)
+                        st.dataframe(detalle_mes, use_container_width=True)
 
-                st.markdown("#### 🧠 Patrones detectados de riesgo")
-                patrones = base_vendedores.copy()
-                if patrones.empty:
-                    st.info("No hay responsables válidos para mostrar patrones de riesgo.")
-                else:
-                    patrones["Riesgo"] = pd.cut(
-                        patrones["Tasa_Incidencia_pct"],
-                        bins=[-0.01, 2, 8, 1000],
-                        labels=["Bajo", "Medio", "Alto"],
-                    )
-                    patrones = patrones.sort_values(["Riesgo", "Tasa_Incidencia_pct"], ascending=[False, False])
-                    patrones.index.name = "Nombre responsable"
-                    st.dataframe(
-                            patrones.head(15).rename(
-                                columns={
-                                    "Incidencias": "Incidencias reportadas",
-                                    "Tasa_Incidencia_pct": "Tasa incidencia (%)",
-                                    "Monto_Devuelto": "Monto devuelto",
-                                }
-                            ),
-                        use_container_width=True,
-                    )
+                        # ================== NUEVA SECCIÓN: MOTIVOS DE ERROR DEL MES ==================
+                        st.markdown("#### 🧩 Motivos de error del mes")
 
-                st.markdown("#### 💸 Monto devuelto por área y responsable")
-                col_montos_1, col_montos_2 = st.columns(2)
-                with col_montos_1:
-                    monto_area = (
-                        df_metricas.groupby("Area_Responsable_norm")["Monto_Devuelto_num"]
-                        .sum()
-                        .sort_values(ascending=False)
-                        .head(10)
-                    )
-                    st.bar_chart(monto_area)
-                with col_montos_2:
-                    monto_resp = (
-                        df_metricas[df_metricas["Nombre_Responsable_norm"] != "Sin responsable"]
-                        .groupby("Nombre_Responsable_norm")["Monto_Devuelto_num"]
-                        .sum()
-                        .sort_values(ascending=False)
-                        .head(10)
-                    )
-                    if monto_resp.empty:
-                        st.info("No hay responsables asignados para mostrar en esta gráfica.")
+                        def _pick_col(columns: list[str], options: list[str]) -> str | None:
+                            norm_map = {str(c).strip().lower(): c for c in columns}
+                            for opt in options:
+                                key = str(opt).strip().lower()
+                                if key in norm_map:
+                                    return norm_map[key]
+                            return None
+
+                        df_motivos = df_mes_sel.copy()
+
+                        if df_motivos.empty:
+                            st.info("No hay registros con las áreas responsables seleccionadas para construir motivos de error.")
+                        else:
+                            # Responsable con fallback: Nombre_Responsable -> Vendedor_Registro -> ID vendedor.
+                            col_nombre_resp = _pick_col(df_motivos.columns.tolist(), ["Nombre_Responsable", "Nombre Responsable"])
+                            col_vend_reg = _pick_col(df_motivos.columns.tolist(), ["Vendedor_Registro", "Vendedor (registro)", "Vendedor_Registro_norm"])
+                            col_id_vend = _pick_col(df_motivos.columns.tolist(), ["ID vendedor", "ID_Vendedor", "Id_Vendedor", "id_vendedor", "ID_Vendedor_Caso"])
+
+                            serie_nombre = (
+                                df_motivos[col_nombre_resp].astype(str).str.strip().replace("", pd.NA)
+                                if col_nombre_resp else pd.Series(pd.NA, index=df_motivos.index)
+                            )
+                            serie_vreg = (
+                                df_motivos[col_vend_reg].astype(str).str.strip().replace("", pd.NA)
+                                if col_vend_reg else pd.Series(pd.NA, index=df_motivos.index)
+                            )
+                            serie_id = (
+                                df_motivos[col_id_vend].astype(str).str.strip().replace("", pd.NA)
+                                if col_id_vend else pd.Series("Sin ID vendedor", index=df_motivos.index)
+                            )
+                            df_motivos["Responsable_Mostrar"] = serie_nombre.fillna(serie_vreg).fillna(serie_id).fillna("Sin ID vendedor")
+
+                            # Monto devuelto numérico robusto.
+                            col_monto = _pick_col(df_motivos.columns.tolist(), ["Monto devuelto", "Monto_Devuelto", "Monto_Devuelto_num", "Monto"])
+                            if col_monto is not None:
+                                monto_txt = (
+                                    df_motivos[col_monto]
+                                    .astype(str)
+                                    .str.replace("$", "", regex=False)
+                                    .str.replace(",", "", regex=False)
+                                    .str.strip()
+                                )
+                                df_motivos["Monto_Devuelto_calc"] = pd.to_numeric(monto_txt, errors="coerce").fillna(0.0)
+                            else:
+                                df_motivos["Monto_Devuelto_calc"] = 0.0
+
+                            # Texto base combinando columnas descriptivas disponibles.
+                            posibles_texto = [
+                                "Motivo detallado", "Motivo_Detallado", "Comentarios", "Comentario",
+                                "Descripcion", "Descripción", "Descripcion del caso", "Descripción del caso",
+                                "Seguimiento", "Resultado esperado", "Resultado_Esperado_txt",
+                                "Problema", "Detalle", "Observaciones", "Notas"
+                            ]
+                            cols_texto = [c for c in df_motivos.columns if str(c).strip().lower() in {p.lower() for p in posibles_texto}]
+                            if not cols_texto:
+                                fallback_cols = [c for c in df_motivos.columns if pd.api.types.is_string_dtype(df_motivos[c])]
+                                cols_texto = fallback_cols[:4]
+
+                            if cols_texto:
+                                texto_base = (
+                                    df_motivos[cols_texto]
+                                    .fillna("")
+                                    .astype(str)
+                                    .agg(" | ".join, axis=1)
+                                    .str.lower()
+                                    .str.normalize("NFKD")
+                                    .str.encode("ascii", errors="ignore")
+                                    .str.decode("utf-8")
+                                    .str.replace(r"\s+", " ", regex=True)
+                                    .str.strip()
+                                )
+                            else:
+                                texto_base = pd.Series("", index=df_motivos.index)
+
+                            df_motivos["Texto_Error_Base"] = texto_base
+
+                            # Clasificación por reglas simples de palabras clave.
+                            reglas_categoria = [
+                                ("Error de cotización", ["clave", "cotizo mal", "cotizacion mal", "se pidio mal", "equivoco la clave", "cotizo", "precio mal"]),
+                                ("Error de producto", ["producto incorrecto", "medida incorrecta", "material incorrecto", "cambio de producto", "producto equivocado", "modelo incorrecto"]),
+                                ("Expectativa del cliente", ["cliente", "no era lo que esperaba", "requeria otro", "esperaba", "no le gusto", "cambio de opinion"]),
+                                ("Calidad / defecto", ["defecto", "mala calidad", "fallo", "no funciono", "danado", "dano", "quebrado"]),
+                                ("Logística / envío", ["guia", "envio", "paqueteria", "retorno", "foraneo", "flete", "entrega tardia"]),
+                                ("Error administrativo", ["factura", "folio", "captura", "administrativo", "administrativa", "documento", "nota de credito"]),
+                            ]
+
+                            def _categorizar_error(txt: str) -> str:
+                                txt = str(txt or "").strip().lower()
+                                if not txt:
+                                    return "Otro"
+                                for categoria, keywords in reglas_categoria:
+                                    if any(k in txt for k in keywords):
+                                        return categoria
+                                return "Otro"
+
+                            df_motivos["Categoria_Error"] = df_motivos["Texto_Error_Base"].apply(_categorizar_error)
+
+                            resumen_cat = (
+                                df_motivos.groupby("Categoria_Error", as_index=False)
+                                .agg(
+                                    incidencias=("Categoria_Error", "size"),
+                                    monto_total=("Monto_Devuelto_calc", "sum"),
+                                )
+                                .sort_values("incidencias", ascending=False)
+                            )
+                            total_incidencias = int(resumen_cat["incidencias"].sum())
+                            resumen_cat["porcentaje"] = np.where(
+                                total_incidencias > 0,
+                                (resumen_cat["incidencias"] / total_incidencias) * 100,
+                                0.0,
+                            )
+                            responsables_por_categoria = (
+                                df_motivos.groupby("Categoria_Error")["Responsable_Mostrar"]
+                                .apply(
+                                    lambda serie: ", ".join(
+                                        [
+                                            f"{resp} ({int(cnt)})"
+                                            for resp, cnt in serie.value_counts().head(3).items()
+                                        ]
+                                    )
+                                    if not serie.dropna().empty else "Sin responsable identificado"
+                                )
+                                .to_dict()
+                            )
+                            resumen_cat["Responsables_Destacados"] = resumen_cat["Categoria_Error"].map(
+                                responsables_por_categoria
+                            ).fillna("Sin responsable identificado")
+
+                            fig_motivos = px.bar(
+                                resumen_cat,
+                                x="incidencias",
+                                y="Categoria_Error",
+                                orientation="h",
+                                text="incidencias",
+                                custom_data=[
+                                    "Categoria_Error",
+                                    "incidencias",
+                                    "porcentaje",
+                                    "monto_total",
+                                    "Responsables_Destacados",
+                                ],
+                                title="Principales motivos de error del mes",
+                                color="incidencias",
+                                color_continuous_scale="Blues",
+                            )
+                            fig_motivos.update_traces(
+                                hovertemplate=(
+                                    "Categoría: %{customdata[0]}<br>"
+                                    "Incidencias: %{customdata[1]}<br>"
+                                    "Porcentaje: %{customdata[2]:.1f}%<br>"
+                                    "Monto total: $%{customdata[3]:,.2f}<br>"
+                                    "Responsables: %{customdata[4]}<extra></extra>"
+                                )
+                            )
+                            fig_motivos.update_layout(
+                                template="plotly_dark",
+                                xaxis_title="Número de incidencias",
+                                yaxis_title="Categoría de error",
+                                margin=dict(l=30, r=30, t=80, b=30),
+                                paper_bgcolor="rgba(0,0,0,0)",
+                                plot_bgcolor="rgba(0,0,0,0)",
+                                coloraxis_showscale=False,
+                                yaxis=dict(categoryorder="total ascending"),
+                            )
+                            st.plotly_chart(fig_motivos, use_container_width=True)
+
+                            # Resumen automático ejecutivo.
+                            top_freq = resumen_cat.iloc[0]
+                            top_monto = resumen_cat.sort_values("monto_total", ascending=False).iloc[0]
+                            min_freq = resumen_cat.sort_values(["incidencias", "monto_total"], ascending=[True, True]).iloc[0]
+                            top_responsables = df_motivos["Responsable_Mostrar"].value_counts().head(3)
+                            vendedores_top_txt = "Sin responsable identificado"
+                            if not top_responsables.empty:
+                                vendedores_top_txt = " · ".join(
+                                    [
+                                        f"{resp} ({int(cnt)})"
+                                        for resp, cnt in top_responsables.items()
+                                    ]
+                                )
+
+                            total_vendedores = int(df_motivos["Responsable_Mostrar"].nunique())
+                            responsables_causa_principal = (
+                                df_motivos.loc[
+                                    df_motivos["Categoria_Error"] == top_freq["Categoria_Error"],
+                                    "Responsable_Mostrar",
+                                ]
+                                .dropna()
+                                .nunique()
+                            )
+
+                            tokens_series = (
+                                df_motivos["Texto_Error_Base"]
+                                .fillna("")
+                                .astype(str)
+                                .str.split()
+                                .explode()
+                            )
+                            stopwords_resumen = {
+                                "", "de", "la", "el", "los", "las", "y", "en", "por", "con", "para", "del",
+                                "al", "se", "que", "un", "una", "lo", "le", "es", "no", "mas", "muy", "sin",
+                                "su", "sus", "como", "ya", "fue", "era", "ser", "esta", "este", "porque", "pero",
+                                "cliente", "caso", "detalle", "comentario", "motivo", "error"
+                            }
+                            tokens_filtrados = tokens_series[
+                                tokens_series.str.len().fillna(0).ge(4) & ~tokens_series.isin(stopwords_resumen)
+                            ]
+                            top_tokens = tokens_filtrados.value_counts().head(5).index.tolist()
+                            top_tokens_txt = ", ".join(top_tokens) if top_tokens else "sin patrones claros en texto"
+
+                            st.markdown(
+                                (
+                                    "##### 🧾 Resumen de motivos de error\n\n"
+                                    f"En resumen, la mayor parte de las fallas se concentró en "
+                                    f"**{top_freq['Categoria_Error']}**, con **{int(top_freq['incidencias'])} casos** "
+                                    f"({top_freq['porcentaje']:.1f}% del total).\n\n"
+                                    f"📌 **Mayor impacto económico:** **{top_monto['Categoria_Error']}** "
+                                    f"(${float(top_monto['monto_total']):,.2f}).\n"
+                                    f"📌 **Menor participación:** **{min_freq['Categoria_Error']}** "
+                                    f"({int(min_freq['incidencias'])} casos, {min_freq['porcentaje']:.1f}%).\n\n"
+                                    f"👥 **Concentración por vendedores:** {int(responsables_causa_principal)} de "
+                                    f"{total_vendedores} vendedores participaron en el error principal. "
+                                    f"Más recurrentes: {vendedores_top_txt}.\n"
+                                    f"🧠 **Patrones frecuentes en motivos detallados:** {top_tokens_txt}.\n\n"
+                                    f"👉 Recomendación: priorizar acciones en la causa principal y mantener seguimiento "
+                                    f"preventivo en los casos de menor frecuencia."
+                                )
+                            )
+
+                        csv_mes = detalle_mes.to_csv(index=False).encode("utf-8-sig")
+                        st.download_button(
+                            label="⬇️ Descargar lista del mes (áreas seleccionadas)",
+                            data=csv_mes,
+                            file_name=f"incidencias_areas_{mes_sel_period.strftime('%Y-%m')}.csv",
+                            mime="text/csv",
+                            key="organizador_casos_vendedor_descarga_mes",
+                        )
+
+            if not usar_nuevo_sistema:
+                with st.expander("📊 Métricas generales de casos especiales", expanded=False):
+                    total_casos = len(df_metricas)
+                    estados_cerrados = {"aprobada", "aprobado", "cerrado", "completado", "resuelto", "finalizado"}
+                    casos_cerrados = estado_caso_norm.isin(estados_cerrados).sum()
+                    casos_abiertos = max(total_casos - int(casos_cerrados), 0)
+                    mes_actual = pd.Timestamp.now().month
+                    anio_actual = pd.Timestamp.now().year
+                    casos_mes = (
+                        (df_metricas["Hora_Registro_dt"].dt.month == mes_actual)
+                        & (df_metricas["Hora_Registro_dt"].dt.year == anio_actual)
+                    ).sum()
+
+                    k1, k2, k3, k4 = st.columns(4)
+                    k1.metric("Total casos", int(total_casos))
+                    k2.metric("Abiertos", int(casos_abiertos))
+                    k3.metric("Cerrados/Completados", int(casos_cerrados))
+                    k4.metric("Casos del mes", int(casos_mes))
+
+                    total_devuelto = float(df_metricas["Monto_Devuelto_num"].sum())
+                    total_devuelto_vendedor = float(df_metricas.loc[df_metricas["culpa_vendedor"], "Monto_Devuelto_num"].sum())
+                    total_devuelto_otras_areas = max(total_devuelto - total_devuelto_vendedor, 0.0)
+                    k5, k6, k7 = st.columns(3)
+                    k5.metric("💸 Monto devuelto total", f"${total_devuelto:,.2f}")
+                    k6.metric("🧑‍💼 Impacto atribuible a vendedor", f"${total_devuelto_vendedor:,.2f}")
+                    k7.metric("🏢 Impacto por otras áreas", f"${total_devuelto_otras_areas:,.2f}")
+
+                    col_ch1, col_ch2 = st.columns(2)
+                    with col_ch1:
+                        st.markdown("#### ⚖️ Responsables con mayor tasa de incidencia")
+                        df_metricas_con_responsable = df_metricas[
+                            df_metricas["Nombre_Responsable_norm"].fillna("Sin responsable") != "Sin responsable"
+                        ].copy()
+                        if df_metricas_con_responsable.empty:
+                            st.info("No hay responsables válidos para calcular la tasa de incidencia.")
+                            base_vendedores = pd.DataFrame(
+                                columns=["Incidencias", "Monto_Devuelto", "Tasa_Incidencia_pct"]
+                            )
+                            total_incidencias_responsables = 0
+                        else:
+                            base_vendedores = (
+                                df_metricas_con_responsable.groupby("Nombre_Responsable_norm", dropna=False)
+                                .agg(
+                                    Incidencias=("Nombre_Responsable_norm", "size"),
+                                    Monto_Devuelto=("Monto_Devuelto_num", "sum"),
+                                )
+                            )
+                            total_incidencias_responsables = int(base_vendedores["Incidencias"].sum())
+                            base_vendedores["Tasa_Incidencia_pct"] = np.where(
+                                total_incidencias_responsables > 0,
+                                (base_vendedores["Incidencias"] / total_incidencias_responsables) * 100,
+                                0.0,
+                            )
+                            base_vendedores["Tasa_Incidencia_pct"] = base_vendedores["Tasa_Incidencia_pct"].fillna(0)
+                            top_tasa = base_vendedores.sort_values(
+                                by=["Tasa_Incidencia_pct", "Incidencias"],
+                                ascending=False,
+                            ).head(10)
+                            st.bar_chart(top_tasa["Tasa_Incidencia_pct"])
+                            st.caption(
+                                f"La tasa se calcula sobre {total_incidencias_responsables} incidencias con nombre responsable válido."
+                            )
+                    with col_ch2:
+                        st.markdown("#### 🏢 Áreas con más incidencias")
+                        serie_areas = (
+                            df_metricas["Area_Responsable_norm"]
+                            .value_counts()
+                            .head(10)
+                        )
+                        st.bar_chart(serie_areas)
+
+                    st.markdown("#### 🧠 Patrones detectados de riesgo")
+                    patrones = base_vendedores.copy()
+                    if patrones.empty:
+                        st.info("No hay responsables válidos para mostrar patrones de riesgo.")
                     else:
-                        st.bar_chart(monto_resp)
+                        patrones["Riesgo"] = pd.cut(
+                            patrones["Tasa_Incidencia_pct"],
+                            bins=[-0.01, 2, 8, 1000],
+                            labels=["Bajo", "Medio", "Alto"],
+                        )
+                        patrones = patrones.sort_values(["Riesgo", "Tasa_Incidencia_pct"], ascending=[False, False])
+                        patrones.index.name = "Nombre responsable"
+                        st.dataframe(
+                                patrones.head(15).rename(
+                                    columns={
+                                        "Incidencias": "Incidencias reportadas",
+                                        "Tasa_Incidencia_pct": "Tasa incidencia (%)",
+                                        "Monto_Devuelto": "Monto devuelto",
+                                    }
+                                ),
+                            use_container_width=True,
+                        )
 
-                st.markdown("#### 📆 Tendencia mensual de errores")
-                serie_mensual = (
-                    df_metricas[df_metricas["Hora_Registro_dt"].notna()]
-                    .assign(Mes=df_metricas["Hora_Registro_dt"].dt.to_period("M").astype(str))
-                    .groupby("Mes")
-                    .size()
-                    .sort_index()
-                )
-                if serie_mensual.empty:
-                    st.info("Aún no hay suficientes fechas válidas para mostrar tendencia mensual.")
-                else:
-                    st.line_chart(serie_mensual)
+                    st.markdown("#### 💸 Monto devuelto por área y responsable")
+                    col_montos_1, col_montos_2 = st.columns(2)
+                    with col_montos_1:
+                        monto_area = (
+                            df_metricas.groupby("Area_Responsable_norm")["Monto_Devuelto_num"]
+                            .sum()
+                            .sort_values(ascending=False)
+                            .head(10)
+                        )
+                        st.bar_chart(monto_area)
+                    with col_montos_2:
+                        monto_resp = (
+                            df_metricas[df_metricas["Nombre_Responsable_norm"] != "Sin responsable"]
+                            .groupby("Nombre_Responsable_norm")["Monto_Devuelto_num"]
+                            .sum()
+                            .sort_values(ascending=False)
+                            .head(10)
+                        )
+                        if monto_resp.empty:
+                            st.info("No hay responsables asignados para mostrar en esta gráfica.")
+                        else:
+                            st.bar_chart(monto_resp)
+
+                    st.markdown("#### 📆 Tendencia mensual de errores")
+                    serie_mensual = (
+                        df_metricas[df_metricas["Hora_Registro_dt"].notna()]
+                        .assign(Mes=df_metricas["Hora_Registro_dt"].dt.to_period("M").astype(str))
+                        .groupby("Mes")
+                        .size()
+                        .sort_index()
+                    )
+                    if serie_mensual.empty:
+                        st.info("Aún no hay suficientes fechas válidas para mostrar tendencia mensual.")
+                    else:
+                        st.line_chart(serie_mensual)
 
 
 if "cobranza" in tab_map:
