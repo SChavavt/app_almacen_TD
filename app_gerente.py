@@ -719,8 +719,7 @@ def cargar_casos_especiales():
         # Campos específicos de garantías
         "Numero_Serie","Fecha_Compra",
         "Comentario","Comentarios","Direccion_Guia_Retorno","Nota_Venta",
-        "Tiene_Nota_Venta","Motivo_NotaVenta", "id_vendedor", "ID_Vendedor", "Id_Vendedor",
-        "Comentario_Gerente"
+        "Tiene_Nota_Venta","Motivo_NotaVenta", "id_vendedor", "ID_Vendedor", "Id_Vendedor"
     ]
     for c in columnas_ejemplo:
         if c not in df.columns:
@@ -7125,12 +7124,6 @@ if "organizador" in tab_map:
 
         with sub[5]:
             st.subheader("🛡️ Casos especiales registrados")
-            usar_nuevo_sistema = st.toggle(
-                "🧭 Usar nuevo sistema de casos especiales",
-                value=True,
-                key="organizador_casos_nuevo_sistema",
-                help="Muestra solo los casos con Seguimiento vacío y permite guardar Comentario_Gerente.",
-            )
 
             df_casos_org = cargar_casos_especiales().copy()
             if df_casos_org.empty:
@@ -7159,21 +7152,17 @@ if "organizador" in tab_map:
                 key="organizador_casos_busqueda",
                 placeholder="Cliente o folio",
             )
-            if usar_nuevo_sistema:
-                filtro_tipo_envio = "📦 Todos"
-                modo_fecha = "Todas"
-            else:
-                filtro_tipo_envio = st.selectbox(
-                    "Filtrar por tipo de envío",
-                    options=["📦 Todos", "🔁 Devolución", "🛠 Garantía"],
-                    index=0,
-                    key="organizador_casos_tipo_envio",
-                )
-                modo_fecha = st.selectbox(
-                    "Filtro de fecha de registro",
-                    options=["Todas", "Fecha específica", "Rango de fechas"],
-                    key="organizador_casos_modo_fecha",
-                )
+            filtro_tipo_envio = st.selectbox(
+                "Filtrar por tipo de envío",
+                options=["📦 Todos", "🔁 Devolución", "🛠 Garantía"],
+                index=0,
+                key="organizador_casos_tipo_envio",
+            )
+            modo_fecha = st.selectbox(
+                "Filtro de fecha de registro",
+                options=["Todas", "Fecha específica", "Rango de fechas"],
+                key="organizador_casos_modo_fecha",
+            )
 
             fecha_especifica = None
             fecha_inicio = None
@@ -7211,12 +7200,6 @@ if "organizador" in tab_map:
             termino_normalizado = normalizar(termino_busqueda or "")
             termino_folio = normalizar_folio(termino_busqueda) if termino_busqueda else ""
             df_casos_filtrado = df_casos_org.copy()
-
-            if usar_nuevo_sistema:
-                seguimiento_series = df_casos_filtrado.get(
-                    "Seguimiento", pd.Series("", index=df_casos_filtrado.index, dtype="object")
-                )
-                df_casos_filtrado = df_casos_filtrado[seguimiento_series.astype(str).str.strip() == ""].copy()
 
             if termino_normalizado:
                 mask_cliente = df_casos_filtrado["__cliente_norm"].str.contains(
@@ -7267,21 +7250,6 @@ if "organizador" in tab_map:
                 st.info("No se encontraron casos especiales con el criterio de búsqueda proporcionado.")
                 st.stop()
 
-            columnas_nuevo_sistema = [
-                "Hora_Registro",
-                "Vendedor_Registro",
-                "Cliente",
-                "Folio_Factura",
-                "Tipo_Envio",
-                "Seguimiento",
-                "Tipo_Envio_Original",
-                "Resultado_Esperado",
-                "Material_Devuelto",
-                "Motivo_Detallado",
-                "Area_Responsable",
-                "Nombre_Responsable",
-                "Comentario_Gerente",
-            ]
             columnas_tabla = {
                 "ID_Pedido": "Pedido",
                 "Hora_Registro": "Hora Registro",
@@ -7295,8 +7263,6 @@ if "organizador" in tab_map:
                 "Estado_Caso": "Estado Caso",
                 "Seguimiento": "Seguimiento",
             }
-            if usar_nuevo_sistema:
-                columnas_tabla = {col: col.replace("_", " ") for col in columnas_nuevo_sistema}
 
             def formatear_fecha_caso(valor, formato):
                 if pd.isna(valor):
@@ -7315,10 +7281,9 @@ if "organizador" in tab_map:
             tabla_casos["Hora_Registro"] = tabla_casos["Hora_Registro"].apply(
                 lambda v: formatear_fecha_caso(v, "%d/%m/%Y %H:%M")
             )
-            if "Fecha_Compra" in tabla_casos.columns:
-                tabla_casos["Fecha_Compra"] = tabla_casos["Fecha_Compra"].apply(
-                    lambda v: formatear_fecha_caso(v, "%d/%m/%Y") if str(v).strip() else ""
-                )
+            tabla_casos["Fecha_Compra"] = tabla_casos["Fecha_Compra"].apply(
+                lambda v: formatear_fecha_caso(v, "%d/%m/%Y") if str(v).strip() else ""
+            )
             tabla_casos = tabla_casos.rename(columns=columnas_tabla)
             st.dataframe(tabla_casos, use_container_width=True)
 
@@ -7347,42 +7312,8 @@ if "organizador" in tab_map:
                 st.info("Selecciona un caso especial para ver detalles o modificarlo.")
             else:
                 row_caso = df_casos_filtrado.loc[idx_caso]
-                with st.expander("📘 Detalles del caso especial seleccionado", expanded=True):
-                    if usar_nuevo_sistema:
-                        for columna_detalle in columnas_nuevo_sistema:
-                            valor = row_caso.get(columna_detalle, "")
-                            if columna_detalle == "Hora_Registro":
-                                valor = formatear_fecha_caso(valor, "%d/%m/%Y %H:%M")
-                            st.markdown(f"**{columna_detalle}:** {valor}")
-                    else:
-                        render_caso_especial(preparar_resultado_caso(row_caso))
-
-                if usar_nuevo_sistema:
-                    comentario_actual = str(row_caso.get("Comentario_Gerente", "") or "").strip()
-                    comentario_key = f"organizador_comentario_gerente_{idx_caso}"
-                    if comentario_key not in st.session_state:
-                        st.session_state[comentario_key] = comentario_actual
-                    comentario_gerente = st.text_area(
-                        "📝 Comentario gerente",
-                        key=comentario_key,
-                        height=110,
-                        placeholder="Escribe aquí el comentario del gerente...",
-                    )
-                    if st.button("💾 Guardar comentario gerente", key=f"guardar_comentario_gerente_{idx_caso}"):
-                        try:
-                            fila_sheet = int(row_caso.get("__sheet_row"))
-                            hoja_casos = get_main_worksheet("casos_especiales")
-                            headers_casos = [h.strip() for h in hoja_casos.row_values(1)]
-                            if "Comentario_Gerente" not in headers_casos:
-                                headers_casos.append("Comentario_Gerente")
-                                hoja_casos.update_cell(1, len(headers_casos), "Comentario_Gerente")
-                            col_comentario = headers_casos.index("Comentario_Gerente") + 1
-                            hoja_casos.update_cell(fila_sheet, col_comentario, comentario_gerente.strip())
-                            cargar_casos_especiales.clear()
-                            st.success("✅ Comentario_Gerente guardado correctamente.")
-                            st.rerun()
-                        except Exception as e:
-                            st.error(f"❌ No se pudo guardar Comentario_Gerente: {e}")
+                with st.expander("📘 Detalles del caso especial seleccionado", expanded=False):
+                    render_caso_especial(preparar_resultado_caso(row_caso))
 
             # Descarga Excel (sobre el filtrado visible para facilitar análisis puntual).
             buffer_casos = BytesIO()
