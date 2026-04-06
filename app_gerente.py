@@ -7237,15 +7237,42 @@ if "organizador" in tab_map:
             df_casos_filtrado = df_casos_org.copy()
 
             if usar_nuevo_sistema:
+                frases_base_nuevo_sistema = [
+                    "Caso cerrado",
+                    "Material enviado",
+                    "Devolución realizada",
+                    "Material retornado",
+                    "Cliente devolvió material",
+                    "Material reubicado en bodega",
+                    "Diferencia pagada",
+                    "Material en tránsito",
+                ]
+
+                def _comentario_tiene_frase_base(comentario_val: str) -> bool:
+                    comentario_txt = str(comentario_val or "").strip()
+                    if not comentario_txt:
+                        return False
+                    comentario_norm = normalizar(comentario_txt)
+                    for frase in frases_base_nuevo_sistema:
+                        frase_norm = normalizar(frase)
+                        if comentario_norm == frase_norm:
+                            return True
+                        prefijo_norm = f"{frase_norm}. "
+                        if comentario_norm.startswith(prefijo_norm):
+                            return True
+                    return False
+
                 seguimiento_series = df_casos_filtrado.get(
                     "Seguimiento", pd.Series("", index=df_casos_filtrado.index, dtype="object")
                 )
-                df_casos_filtrado = df_casos_filtrado[seguimiento_series.astype(str).str.strip() == ""].copy()
                 comentario_gerente_series = df_casos_filtrado.get(
                     "Comentario_Gerente", pd.Series("", index=df_casos_filtrado.index, dtype="object")
                 )
+                mask_seguimiento_vacio = seguimiento_series.astype(str).str.strip() == ""
+                mask_comentario_base = comentario_gerente_series.apply(_comentario_tiene_frase_base)
+                mask_mostrar_caso = mask_seguimiento_vacio & ~mask_comentario_base
                 df_casos_filtrado = df_casos_filtrado[
-                    comentario_gerente_series.astype(str).str.strip() == ""
+                    mask_mostrar_caso
                 ].copy()
 
             if filtro_tipo_envio == "🔁 Devolución":
@@ -7451,9 +7478,7 @@ if "organizador" in tab_map:
                         "Cliente devolvió material",
                         "Material reubicado en bodega",
                         "Diferencia pagada",
-                        "Pendiente de recolección",
                         "Material en tránsito",
-                        "Pendiente de retorno de guía",
                     ]
                     base_key = f"organizador_comentario_gerente_base_{idx_caso}"
                     detalle_key = f"organizador_comentario_gerente_detalle_{idx_caso}"
