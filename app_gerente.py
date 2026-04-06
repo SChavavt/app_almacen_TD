@@ -7520,6 +7520,11 @@ if "organizador" in tab_map:
                                     hoja_casos.update_cell(1, len(headers_casos), "Comentario_Gerente")
                                 col_comentario = headers_casos.index("Comentario_Gerente") + 1
                                 hoja_casos.update_cell(fila_sheet, col_comentario, comentario_gerente.strip())
+                                if "Seguimiento" not in headers_casos:
+                                    headers_casos.append("Seguimiento")
+                                    hoja_casos.update_cell(1, len(headers_casos), "Seguimiento")
+                                col_seguimiento = headers_casos.index("Seguimiento") + 1
+                                hoja_casos.update_cell(fila_sheet, col_seguimiento, "Comentado")
                                 cargar_casos_especiales.clear()
                                 st.session_state["organizador_casos_filtros_guardados"] = {
                                     k: st.session_state.get(k) for k in filtros_keys if k in st.session_state
