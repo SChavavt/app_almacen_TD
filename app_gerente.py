@@ -7136,8 +7136,6 @@ if "organizador" in tab_map:
             feedback_comment = st.session_state.get("organizador_casos_feedback_comment", "")
             if feedback_ok:
                 st.success(feedback_ok)
-                if feedback_comment:
-                    st.caption(f"Comentario final guardado: {feedback_comment}")
                 if st.button("🧹 Limpiar mensaje y actualizar vista", key="organizador_casos_limpiar_y_refrescar"):
                     filtros_keys = [
                         "organizador_casos_busqueda",
@@ -7157,6 +7155,8 @@ if "organizador" in tab_map:
                     st.session_state.pop("organizador_casos_feedback_ok", None)
                     st.session_state.pop("organizador_casos_feedback_comment", None)
                     st.rerun()
+                if feedback_comment:
+                    st.caption(f"Comentario final guardado: {feedback_comment}")
 
             restore_filters = st.session_state.pop("organizador_casos_restore_filters", False)
             if restore_filters:
