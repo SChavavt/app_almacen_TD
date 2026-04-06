@@ -4565,179 +4565,78 @@ if selected_tab == 0:
         row2_col4.metric("🎟️ Ticket prom (global)", f"${ticket_prom:,.0f}")
 
         st.markdown("### 🔀 Vista temporal de ventas")
-        temporal_enabled = st.toggle(
-            "Activar análisis por periodo (día / semana / mes)",
-            key="dashboard_temporal_toggle",
-            value=False,
-        )
-        if temporal_enabled:
-            temporal_base = build_temporal_sales_dataset(df_conf, vendedor_sel)
-            if temporal_base.empty:
-                st.info("No hay fechas válidas para construir la vista temporal.")
-            else:
-                ctrl1, ctrl2, ctrl3 = st.columns([0.24, 0.46, 0.3])
-                with ctrl1:
-                    gran_sel = st.selectbox("Granularidad", ["Día", "Semana", "Mes"], key="dashboard_temporal_gran")
-                with ctrl2:
-                    fecha_min = temporal_base["Fecha"].min().date()
-                    fecha_max = temporal_base["Fecha"].max().date()
-                    rango = st.date_input(
-                        "Periodo a analizar",
-                        value=(max(fecha_min, fecha_max - timedelta(days=60)), fecha_max),
-                        min_value=fecha_min,
-                        max_value=fecha_max,
-                        key="dashboard_temporal_rango",
-                    )
-                with ctrl3:
-                    metrica_sel = st.radio(
-                        "Métrica",
-                        options=["Ventas", "Pedidos"],
-                        horizontal=True,
-                        key="dashboard_temporal_metrica",
-                    )
+        st.caption("Resumen esencial de ingresos para seguimiento rápido.")
 
-                fechas_validas = False
-                fecha_inicio = None
-                fecha_fin = None
-                if isinstance(rango, tuple):
-                    rango = tuple(r for r in rango if r is not None)
-                if isinstance(rango, tuple) and len(rango) == 2:
-                    fecha_inicio = pd.Timestamp(rango[0])
-                    fecha_fin = pd.Timestamp(rango[1])
-                    if fecha_fin >= fecha_inicio:
-                        fechas_validas = True
-                    else:
-                        st.warning("La fecha final no puede ser menor que la fecha inicial.")
-                else:
-                    st.warning("Selecciona fecha inicial y final para analizar el periodo.")
+        temporal_base = build_temporal_sales_dataset(df_conf, vendedor_sel)
+        if temporal_base.empty:
+            st.info("No hay fechas válidas para construir la vista temporal.")
+        else:
+            hoy_ts = pd.Timestamp.now(tz=TZ).normalize().tz_localize(None)
+            temporal_base["Mes"] = temporal_base["Fecha"].dt.to_period("M")
 
-                if fechas_validas:
-                    actual_df, prev_df = aggregate_temporal_view(temporal_base, gran_sel, fecha_inicio, fecha_fin)
-                else:
-                    actual_df, prev_df = pd.DataFrame(), pd.DataFrame()
+            ingresos_hoy = float(temporal_base.loc[temporal_base["Fecha"] == hoy_ts, "Monto"].sum())
+            ingresos_mes_actual = float(
+                temporal_base.loc[temporal_base["Mes"] == hoy_ts.to_period("M"), "Monto"].sum()
+            )
 
-                if actual_df.empty:
-                    st.warning("No hay datos en el periodo seleccionado.")
-                else:
-                    metric_col = "Monto" if metrica_sel == "Ventas" else "Pedidos"
-                    metric_label = "$" if metrica_sel == "Ventas" else ""
-                    total_actual = float(actual_df[metric_col].sum())
-                    total_prev = float(prev_df[metric_col].sum()) if not prev_df.empty else 0.0
-                    delta = ((total_actual / total_prev) - 1) if total_prev > 0 else np.nan
+            ventas_por_dia = (
+                temporal_base.groupby("Fecha", as_index=False)[["Monto", "Pedidos"]]
+                .sum()
+                .sort_values("Fecha")
+            )
+            ventas_por_mes = (
+                temporal_base.groupby("Mes", as_index=False)[["Monto", "Pedidos"]]
+                .sum()
+                .sort_values("Mes")
+            )
 
-                    periodo_label = {
-                        "Día": "día",
-                        "Semana": "semana",
-                        "Mes": "mes",
-                    }.get(gran_sel, "periodo")
-                    punto_idx = actual_df[metric_col].idxmax()
-                    mejor_fecha = actual_df.loc[punto_idx, "Fecha"]
+            mejor_dia_row = ventas_por_dia.loc[ventas_por_dia["Monto"].idxmax()]
+            mejor_mes_row = ventas_por_mes.loc[ventas_por_mes["Monto"].idxmax()]
 
-                    m1, m2, m3, m4 = st.columns(4)
-                    m1.metric(
-                        f"{metrica_sel} del periodo",
-                        f"{metric_label}{total_actual:,.0f}",
-                        f"{delta * 100:.1f}%" if pd.notna(delta) else "Sin comparativo",
-                    )
-                    m2.metric("Puntos analizados", f"{len(actual_df):,}")
-                    m3.metric("Rango seleccionado", f"{(fecha_fin - fecha_inicio).days + 1} días")
-                    m4.metric(
-                        f"Mejor {periodo_label}",
-                        f"{mejor_fecha.strftime('%d/%m/%Y')} ({metric_label}{actual_df.loc[punto_idx, metric_col]:,.0f})",
-                    )
+            m1, m2, m3, m4 = st.columns(4)
+            m1.metric("💵 Ingresos de hoy", f"${ingresos_hoy:,.0f}")
+            m2.metric("🗓️ Ingresos del mes", f"${ingresos_mes_actual:,.0f}")
+            m3.metric(
+                "🏆 Día con más ingresos",
+                f"{mejor_dia_row['Fecha'].strftime('%d/%m/%Y')} · ${float(mejor_dia_row['Monto']):,.0f}",
+            )
+            m4.metric(
+                "🥇 Mes con más ingresos",
+                f"{mejor_mes_row['Mes'].strftime('%m/%Y')} · ${float(mejor_mes_row['Monto']):,.0f}",
+            )
 
-                    resumen = actual_df[["Fecha", "Monto", "Pedidos"]].copy()
-                    resumen["Ticket_Promedio"] = np.where(
-                        resumen["Pedidos"] > 0,
-                        resumen["Monto"] / resumen["Pedidos"],
-                        0.0,
-                    )
-                    resumen["Periodo"] = resumen["Fecha"].dt.strftime(
-                        "%d/%m/%Y" if gran_sel == "Día" else ("Semana %V - %Y" if gran_sel == "Semana" else "%m/%Y")
-                    )
-                    st.caption("Detalle del comportamiento de ventas en el rango seleccionado")
-                    st.dataframe(
-                        resumen[["Periodo", "Monto", "Pedidos", "Ticket_Promedio"]].rename(
-                            columns={
-                                "Monto": "Ventas",
-                                "Pedidos": "Pedidos",
-                                "Ticket_Promedio": "Ticket promedio",
-                            }
-                        ),
-                        use_container_width=True,
-                        hide_index=True,
-                        height=220,
-                    )
+            chart_tab, detail_tab = st.tabs(["📊 Visual", "📋 Resumen"])
+            with chart_tab:
+                chart_day = ventas_por_dia.copy()
+                chart_day["Día"] = chart_day["Fecha"].dt.strftime("%d/%m")
+                chart_day = chart_day.rename(columns={"Monto": "Ingresos"})
+                st.area_chart(
+                    chart_day.set_index("Día")[["Ingresos"]],
+                    color=["#7B61FF"],
+                    height=280,
+                )
 
-                    venta_por_vendedor = (
-                        temporal_base[(temporal_base["Fecha"] >= fecha_inicio) & (temporal_base["Fecha"] <= fecha_fin)]
-                        .groupby("Vendedor", as_index=False)[["Monto", "Pedidos"]]
-                        .sum()
-                        .sort_values("Monto", ascending=False)
-                    )
-                    if not venta_por_vendedor.empty:
-                        venta_por_vendedor["Ticket_Promedio"] = np.where(
-                            venta_por_vendedor["Pedidos"] > 0,
-                            venta_por_vendedor["Monto"] / venta_por_vendedor["Pedidos"],
-                            0.0,
-                        )
-                        st.caption("Ranking de vendedores por ventas en el periodo")
-                        st.dataframe(
-                            venta_por_vendedor.rename(
-                                columns={
-                                    "Vendedor": "Vendedor",
-                                    "Monto": "Ventas",
-                                    "Pedidos": "Pedidos",
-                                    "Ticket_Promedio": "Ticket promedio",
-                                }
-                            ),
-                            use_container_width=True,
-                            hide_index=True,
-                            height=220,
-                        )
+                chart_month = ventas_por_mes.copy()
+                chart_month["MesLabel"] = chart_month["Mes"].dt.strftime("%m/%Y")
+                chart_month = chart_month.rename(columns={"Monto": "Ingresos"})
+                st.bar_chart(
+                    chart_month.set_index("MesLabel")[["Ingresos"]],
+                    color="#00BFA6",
+                    height=240,
+                )
 
-                    serie = actual_df[["Fecha", metric_col]].copy()
-                    if not prev_df.empty:
-                        serie = serie.merge(
-                            prev_df[["Fecha", metric_col]].rename(columns={metric_col: f"{metric_col}_Prev"}),
-                            on="Fecha",
-                            how="left",
-                        )
-                    st.caption("Comparativa del periodo actual vs periodo anterior equivalente")
-                    st.line_chart(serie.set_index("Fecha"), height=220)
+            with detail_tab:
+                vista_dia = ventas_por_dia.tail(15).copy()
+                vista_dia["Fecha"] = vista_dia["Fecha"].dt.strftime("%d/%m/%Y")
+                vista_dia = vista_dia.rename(
+                    columns={
+                        "Fecha": "Día",
+                        "Monto": "Ingresos",
+                        "Pedidos": "Pedidos",
+                    }
+                )
+                st.dataframe(vista_dia, use_container_width=True, hide_index=True, height=260)
 
-                    bars = actual_df[["Fecha", metric_col]].copy()
-                    bars["Etiqueta"] = bars["Fecha"].dt.strftime("%d/%m")
-                    st.bar_chart(bars.set_index("Etiqueta")[[metric_col]], height=220)
-
-                    st.caption("Ranking histórico por periodo (top 5)")
-                    rank_cols = st.columns(3)
-                    rank_specs = [
-                        ("Día", "D", "%d/%m/%Y"),
-                        ("Semana", "W-MON", "Semana %V - %Y"),
-                        ("Mes", "MS", "%m/%Y"),
-                    ]
-                    for rank_col, (rank_label, rank_freq, rank_fmt) in zip(rank_cols, rank_specs):
-                        rank_df = (
-                            temporal_base.groupby(pd.Grouper(key="Fecha", freq=rank_freq))[["Monto", "Pedidos"]]
-                            .sum()
-                            .reset_index()
-                            .sort_values("Monto", ascending=False)
-                            .head(5)
-                        )
-                        if rank_df.empty:
-                            rank_col.info(f"Sin datos para ranking de {rank_label.lower()}.")
-                            continue
-                        rank_df["Periodo"] = rank_df["Fecha"].dt.strftime(rank_fmt)
-                        rank_col.markdown(f"**Top {rank_label.lower()}s**")
-                        rank_col.dataframe(
-                            rank_df[["Periodo", "Monto", "Pedidos"]].rename(
-                                columns={"Monto": "Ventas", "Pedidos": "Pedidos"}
-                            ),
-                            use_container_width=True,
-                            hide_index=True,
-                            height=210,
-                        )
 
         st.markdown("---")
 
