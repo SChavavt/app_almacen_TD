@@ -7245,12 +7245,10 @@ if "organizador" in tab_map:
                     "Cliente devolvió material",
                     "Material reubicado en bodega",
                     "Diferencia pagada",
-                    "Pendiente de recolección",
                     "Material en tránsito",
-                    "Pendiente de retorno de guía",
                 ]
 
-                def _comentario_tiene_frase_base(comentario_val: str) -> bool:
+                def _comentario_tiene_frase_base_exacta(comentario_val: str) -> bool:
                     comentario_txt = str(comentario_val or "").strip()
                     if not comentario_txt:
                         return False
@@ -7258,9 +7256,6 @@ if "organizador" in tab_map:
                     for frase in frases_base_nuevo_sistema:
                         frase_norm = normalizar(frase)
                         if comentario_norm == frase_norm:
-                            return True
-                        prefijo_norm = f"{frase_norm}. "
-                        if comentario_norm.startswith(prefijo_norm):
                             return True
                     return False
 
@@ -7270,9 +7265,12 @@ if "organizador" in tab_map:
                 comentario_gerente_series = df_casos_filtrado.get(
                     "Comentario_Gerente", pd.Series("", index=df_casos_filtrado.index, dtype="object")
                 )
+                comentario_limpio = comentario_gerente_series.astype(str).str.strip()
                 mask_seguimiento_vacio = seguimiento_series.astype(str).str.strip() == ""
-                mask_comentario_base = comentario_gerente_series.apply(_comentario_tiene_frase_base)
-                mask_mostrar_caso = mask_seguimiento_vacio & ~mask_comentario_base
+                mask_comentario_vacio = comentario_limpio == ""
+                mask_comentario_base_exacto = comentario_gerente_series.apply(_comentario_tiene_frase_base_exacta)
+                mask_comentario_libre = comentario_limpio.ne("") & ~mask_comentario_base_exacto
+                mask_mostrar_caso = mask_comentario_libre | (mask_comentario_vacio & mask_seguimiento_vacio)
                 df_casos_filtrado = df_casos_filtrado[
                     mask_mostrar_caso
                 ].copy()
