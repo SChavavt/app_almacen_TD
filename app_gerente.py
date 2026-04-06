@@ -7131,35 +7131,32 @@ if "organizador" in tab_map:
                 key="organizador_casos_nuevo_sistema",
                 help="Muestra solo los casos con Seguimiento vacío y permite guardar Comentario_Gerente.",
             )
-            filtros_keys = [
-                "organizador_casos_busqueda",
-                "organizador_casos_tipo_envio",
-                "organizador_casos_modo_fecha",
-                "organizador_casos_vendedor_registro",
-                "organizador_casos_fecha_unica",
-                "organizador_casos_fecha_inicio",
-                "organizador_casos_fecha_fin",
-                "organizador_casos_rango_aplicado",
-                "organizador_select_caso_especial",
-            ]
-
-            def _organizador_limpiar_mensaje_y_refrescar():
-                st.session_state["organizador_casos_filtros_guardados"] = {
-                    k: st.session_state.get(k) for k in filtros_keys if k in st.session_state
-                }
-                st.session_state["organizador_casos_restore_filters"] = True
-                st.session_state.pop("organizador_casos_feedback_ok", None)
-                st.session_state.pop("organizador_casos_feedback_comment", None)
-                st.rerun()
 
             feedback_ok = st.session_state.get("organizador_casos_feedback_ok", "")
             feedback_comment = st.session_state.get("organizador_casos_feedback_comment", "")
             if feedback_ok:
                 st.success(feedback_ok)
-                if st.button("🧹 Limpiar mensaje y actualizar vista", key="organizador_casos_limpiar_y_refrescar"):
-                    _organizador_limpiar_mensaje_y_refrescar()
                 if feedback_comment:
                     st.caption(f"Comentario final guardado: {feedback_comment}")
+                if st.button("🧹 Limpiar mensaje y actualizar vista", key="organizador_casos_limpiar_y_refrescar"):
+                    filtros_keys = [
+                        "organizador_casos_busqueda",
+                        "organizador_casos_tipo_envio",
+                        "organizador_casos_modo_fecha",
+                        "organizador_casos_vendedor_registro",
+                        "organizador_casos_fecha_unica",
+                        "organizador_casos_fecha_inicio",
+                        "organizador_casos_fecha_fin",
+                        "organizador_casos_rango_aplicado",
+                        "organizador_select_caso_especial",
+                    ]
+                    st.session_state["organizador_casos_filtros_guardados"] = {
+                        k: st.session_state.get(k) for k in filtros_keys if k in st.session_state
+                    }
+                    st.session_state["organizador_casos_restore_filters"] = True
+                    st.session_state.pop("organizador_casos_feedback_ok", None)
+                    st.session_state.pop("organizador_casos_feedback_comment", None)
+                    st.rerun()
 
             restore_filters = st.session_state.pop("organizador_casos_restore_filters", False)
             if restore_filters:
@@ -7388,34 +7385,23 @@ if "organizador" in tab_map:
             tabla_casos = tabla_casos.rename(columns=columnas_tabla)
             st.dataframe(tabla_casos, use_container_width=True)
 
-            opciones_select = ["__none__"] + [str(idx) for idx in df_casos_filtrado.index.tolist()]
-            labels_casos = {"__none__": "Selecciona un caso especial"}
-            idx_map = {}
+            opciones_select = [None] + df_casos_filtrado.index.tolist()
+            labels_casos = {None: "Selecciona un caso especial"}
             for idx_sel, row_sel in df_casos_filtrado.iterrows():
-                idx_key = str(idx_sel)
-                idx_map[idx_key] = idx_sel
                 hora_sel = formatear_fecha_caso(row_sel.get("Hora_Registro"), "%d/%m/%Y %H:%M")
                 estado_sel = row_sel.get("Estado_Caso") or row_sel.get("Estado") or ""
-                labels_casos[idx_key] = (
+                labels_casos[idx_sel] = (
                     f"🧾 {row_sel.get('Folio_Factura', '')} | "
                     f"👤 {row_sel.get('Cliente', '')} | 🚚 {row_sel.get('Tipo_Envio', '')} | "
                     f"🔍 {estado_sel} | 🕒 {hora_sel}"
                 )
 
-            select_key = "organizador_select_caso_especial"
-            selected_raw = st.session_state.get(select_key, "__none__")
-            selected_norm = "__none__" if selected_raw in (None, "") else str(selected_raw)
-            if selected_norm not in opciones_select:
-                selected_norm = "__none__"
-            st.session_state[select_key] = selected_norm
-
-            idx_caso_key = st.selectbox(
+            idx_caso = st.selectbox(
                 "Selecciona un caso especial para ver detalles o modificarlo:",
                 opciones_select,
                 format_func=lambda idx: labels_casos.get(idx, "Selecciona un caso especial"),
-                key=select_key,
+                key="organizador_select_caso_especial",
             )
-            idx_caso = idx_map.get(idx_caso_key)
 
             if idx_caso is None or idx_caso not in df_casos_filtrado.index:
                 st.info("Selecciona un caso especial para ver detalles o modificarlo.")
@@ -7530,6 +7516,17 @@ if "organizador" in tab_map:
                                 col_comentario = headers_casos.index("Comentario_Gerente") + 1
                                 hoja_casos.update_cell(fila_sheet, col_comentario, comentario_gerente.strip())
                                 cargar_casos_especiales.clear()
+                                filtros_keys = [
+                                    "organizador_casos_busqueda",
+                                    "organizador_casos_tipo_envio",
+                                    "organizador_casos_modo_fecha",
+                                    "organizador_casos_vendedor_registro",
+                                    "organizador_casos_fecha_unica",
+                                    "organizador_casos_fecha_inicio",
+                                    "organizador_casos_fecha_fin",
+                                    "organizador_casos_rango_aplicado",
+                                    "organizador_select_caso_especial",
+                                ]
                                 st.session_state["organizador_casos_filtros_guardados"] = {
                                     k: st.session_state.get(k) for k in filtros_keys if k in st.session_state
                                 }
@@ -7537,8 +7534,6 @@ if "organizador" in tab_map:
                                 st.session_state["organizador_casos_feedback_ok"] = "✅ Comentario_Gerente guardado correctamente."
                                 st.session_state["organizador_casos_feedback_comment"] = comentario_gerente.strip()
                                 st.success("✅ Comentario_Gerente guardado correctamente.")
-                                if st.button("🧹 Limpiar mensaje y actualizar vista", key=f"organizador_casos_limpiar_inline_{idx_caso}"):
-                                    _organizador_limpiar_mensaje_y_refrescar()
                             except Exception as e:
                                 st.error(f"❌ No se pudo guardar Comentario_Gerente: {e}")
 
