@@ -7245,7 +7245,9 @@ if "organizador" in tab_map:
                     "Cliente devolvió material",
                     "Material reubicado en bodega",
                     "Diferencia pagada",
+                    "Pendiente de recolección",
                     "Material en tránsito",
+                    "Pendiente de retorno de guía",
                 ]
 
                 def _comentario_tiene_frase_base(comentario_val: str) -> bool:
@@ -7478,7 +7480,9 @@ if "organizador" in tab_map:
                         "Cliente devolvió material",
                         "Material reubicado en bodega",
                         "Diferencia pagada",
+                        "Pendiente de recolección",
                         "Material en tránsito",
+                        "Pendiente de retorno de guía",
                     ]
                     base_key = f"organizador_comentario_gerente_base_{idx_caso}"
                     detalle_key = f"organizador_comentario_gerente_detalle_{idx_caso}"
