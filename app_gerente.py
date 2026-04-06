@@ -7415,13 +7415,17 @@ if "organizador" in tab_map:
                 if usar_nuevo_sistema:
                     st.markdown("### 🧩 Resumen visual del caso")
 
+                    id_vendedor_caso = obtener_id_vendedor(row_caso)
+                    seguimiento_caso = str(row_caso.get("Seguimiento", "") or "").strip()
+                    comentario_gerente_caso = str(row_caso.get("Comentario_Gerente", "") or "").strip()
+
                     detalle_items = [
                         ("🕒 Hora registro", formatear_fecha_caso(row_caso.get("Hora_Registro", ""), "%d/%m/%Y %H:%M")),
+                        ("🆔 ID vendedor", id_vendedor_caso),
                         ("👤 Vendedor", row_caso.get("Vendedor_Registro", "")),
                         ("🏷️ Cliente", row_caso.get("Cliente", "")),
                         ("🧾 Folio factura", row_caso.get("Folio_Factura", "")),
                         ("🚚 Tipo envío", row_caso.get("Tipo_Envio", "")),
-                        ("🔎 Seguimiento", row_caso.get("Seguimiento", "")),
                         ("↩️ Tipo envío original", row_caso.get("Tipo_Envio_Original", "")),
                         ("🎯 Resultado esperado", row_caso.get("Resultado_Esperado", "")),
                         ("📦 Material devuelto", row_caso.get("Material_Devuelto", "")),
@@ -7429,6 +7433,10 @@ if "organizador" in tab_map:
                         ("🏢 Área responsable", row_caso.get("Area_Responsable", "")),
                         ("🙋 Responsable", row_caso.get("Nombre_Responsable", "")),
                     ]
+                    if seguimiento_caso:
+                        detalle_items.append(("🔎 Seguimiento", seguimiento_caso))
+                    if comentario_gerente_caso:
+                        detalle_items.append(("💬 Comentario gerente", comentario_gerente_caso))
 
                     for i in range(0, len(detalle_items), 3):
                         cols_det = st.columns(3)
