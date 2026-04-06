@@ -7136,8 +7136,6 @@ if "organizador" in tab_map:
             feedback_comment = st.session_state.get("organizador_casos_feedback_comment", "")
             if feedback_ok:
                 st.success(feedback_ok)
-                if feedback_comment:
-                    st.caption(f"Comentario final guardado: {feedback_comment}")
                 if st.button("🧹 Limpiar mensaje y actualizar vista", key="organizador_casos_limpiar_y_refrescar"):
                     filtros_keys = [
                         "organizador_casos_busqueda",
@@ -7157,6 +7155,8 @@ if "organizador" in tab_map:
                     st.session_state.pop("organizador_casos_feedback_ok", None)
                     st.session_state.pop("organizador_casos_feedback_comment", None)
                     st.rerun()
+                if feedback_comment:
+                    st.caption(f"Comentario final guardado: {feedback_comment}")
 
             restore_filters = st.session_state.pop("organizador_casos_restore_filters", False)
             if restore_filters:
@@ -7385,23 +7385,34 @@ if "organizador" in tab_map:
             tabla_casos = tabla_casos.rename(columns=columnas_tabla)
             st.dataframe(tabla_casos, use_container_width=True)
 
-            opciones_select = [None] + df_casos_filtrado.index.tolist()
-            labels_casos = {None: "Selecciona un caso especial"}
+            opciones_select = ["__none__"] + [str(idx) for idx in df_casos_filtrado.index.tolist()]
+            labels_casos = {"__none__": "Selecciona un caso especial"}
+            idx_map = {}
             for idx_sel, row_sel in df_casos_filtrado.iterrows():
+                idx_key = str(idx_sel)
+                idx_map[idx_key] = idx_sel
                 hora_sel = formatear_fecha_caso(row_sel.get("Hora_Registro"), "%d/%m/%Y %H:%M")
                 estado_sel = row_sel.get("Estado_Caso") or row_sel.get("Estado") or ""
-                labels_casos[idx_sel] = (
+                labels_casos[idx_key] = (
                     f"🧾 {row_sel.get('Folio_Factura', '')} | "
                     f"👤 {row_sel.get('Cliente', '')} | 🚚 {row_sel.get('Tipo_Envio', '')} | "
                     f"🔍 {estado_sel} | 🕒 {hora_sel}"
                 )
 
-            idx_caso = st.selectbox(
+            select_key = "organizador_select_caso_especial"
+            selected_raw = st.session_state.get(select_key, "__none__")
+            selected_norm = "__none__" if selected_raw in (None, "") else str(selected_raw)
+            if selected_norm not in opciones_select:
+                selected_norm = "__none__"
+            st.session_state[select_key] = selected_norm
+
+            idx_caso_key = st.selectbox(
                 "Selecciona un caso especial para ver detalles o modificarlo:",
                 opciones_select,
                 format_func=lambda idx: labels_casos.get(idx, "Selecciona un caso especial"),
-                key="organizador_select_caso_especial",
+                key=select_key,
             )
+            idx_caso = idx_map.get(idx_caso_key)
 
             if idx_caso is None or idx_caso not in df_casos_filtrado.index:
                 st.info("Selecciona un caso especial para ver detalles o modificarlo.")
