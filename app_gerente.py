@@ -4778,9 +4778,11 @@ if "modificar" in tab_map:
 
         df_pedidos["__source"] = "pedidos"
         df_casos["__source"] = "casos"
-        df = pd.concat([df_pedidos, df_casos], ignore_index=True, sort=False)
-        df = df[df["ID_Pedido"].notna()]
-        df = df.sort_values(by="Hora_Registro", ascending=False)
+        df_pedidos = df_pedidos[df_pedidos["ID_Pedido"].notna()].copy()
+        df_pedidos = df_pedidos.sort_values(by="Hora_Registro", ascending=False)
+        df_lista_modificar = pd.concat([df_pedidos, df_casos], ignore_index=True, sort=False)
+        df_lista_modificar = df_lista_modificar[df_lista_modificar["ID_Pedido"].notna()].copy()
+        df_lista_modificar = df_lista_modificar.sort_values(by="Hora_Registro", ascending=False)
 
         pedido_sel = None
         source_sel = None
@@ -4788,13 +4790,9 @@ if "modificar" in tab_map:
 
         # Mostrar todos los pedidos de la hoja casos_especiales en esta sección.
         df_garantias = df_casos_garantias.copy()
+        sub_tabs_modificar = st.tabs(["🧾 Modificar pedido", "🛡️ Casos especiales"])
 
-        mostrar_garantias = st.checkbox(
-            "🔘 Mostrar sección de casos especiales",
-            help="Activa esta opción para consultar únicamente la información de la hoja casos_especiales.",
-        )
-
-        if mostrar_garantias:
+        with sub_tabs_modificar[1]:
             st.markdown("### 🛡️ Casos especiales registrados")
             if "Hora_Registro" not in df_garantias.columns:
                 df_garantias["Hora_Registro"] = pd.NaT
@@ -4812,17 +4810,32 @@ if "modificar" in tab_map:
             df_garantias["__tipo_envio_norm"] = tipo_envio_col.astype(str).map(normalizar)
             df_garantias["__is_devolucion"] = df_garantias["__tipo_envio_norm"].str.contains("devol", na=False)
             df_garantias["__is_garantia"] = df_garantias["__tipo_envio_norm"].str.contains("garantia", na=False)
+            seguimiento_col = df_garantias.get("Seguimiento", pd.Series(index=df_garantias.index, dtype="object"))
+            df_garantias["__seguimiento_vacio"] = seguimiento_col.astype(str).str.strip() == ""
+
+            pendientes_garantia = df_garantias[df_garantias["__is_garantia"] & df_garantias["__seguimiento_vacio"]]
+            st.metric("🔔 Garantías pendientes de seguimiento", len(pendientes_garantia))
+
+            switch_garantias_pendientes = st.toggle(
+                "Mostrar solo garantías pendientes de seguimiento",
+                value=True,
+                key="switch_garantias_pendientes",
+                help="Cuando está activo, se muestran únicamente garantías con Seguimiento vacío.",
+            )
+
             termino_busqueda_garantia = st.text_input(
                 "Buscar por cliente o folio",
                 key="busqueda_casos_especiales",
                 placeholder="Cliente o folio",
             )
-            filtro_tipo_envio_garantia = st.selectbox(
-                "Filtrar por tipo de envío",
-                options=["📦 Todos", "🔁 Devolución", "🛠 Garantía"],
-                index=0,
-                key="filtro_tipo_envio_casos_especiales",
-            )
+            filtro_tipo_envio_garantia = "📦 Todos"
+            if not switch_garantias_pendientes:
+                filtro_tipo_envio_garantia = st.selectbox(
+                    "Filtrar por tipo de envío",
+                    options=["📦 Todos", "🔁 Devolución", "🛠 Garantía"],
+                    index=0,
+                    key="filtro_tipo_envio_casos_especiales",
+                )
             modo_fecha_garantia = st.selectbox(
                 "Filtro de fecha de registro",
                 options=["Todas", "Fecha específica", "Rango de fechas"],
@@ -4884,14 +4897,19 @@ if "modificar" in tab_map:
                 )
                 df_garantias_filtrado = df_garantias_filtrado[mask_cliente | mask_folio]
 
-            if filtro_tipo_envio_garantia == "🔁 Devolución":
+            if switch_garantias_pendientes:
                 df_garantias_filtrado = df_garantias_filtrado[
-                    df_garantias_filtrado["__is_devolucion"]
+                    df_garantias_filtrado["__is_garantia"] & df_garantias_filtrado["__seguimiento_vacio"]
                 ]
-            elif filtro_tipo_envio_garantia == "🛠 Garantía":
-                df_garantias_filtrado = df_garantias_filtrado[
-                    df_garantias_filtrado["__is_garantia"]
-                ]
+            else:
+                if filtro_tipo_envio_garantia == "🔁 Devolución":
+                    df_garantias_filtrado = df_garantias_filtrado[
+                        df_garantias_filtrado["__is_devolucion"]
+                    ]
+                elif filtro_tipo_envio_garantia == "🛠 Garantía":
+                    df_garantias_filtrado = df_garantias_filtrado[
+                        df_garantias_filtrado["__is_garantia"]
+                    ]
 
             fechas_registro = df_garantias_filtrado["__hora_registro_fecha"]
             if modo_fecha_garantia == "Fecha específica" and fecha_especifica_garantia:
@@ -4912,6 +4930,7 @@ if "modificar" in tab_map:
                     "__tipo_envio_norm",
                     "__is_devolucion",
                     "__is_garantia",
+                    "__seguimiento_vacio",
                 ],
                 errors="ignore",
             )
@@ -4920,7 +4939,6 @@ if "modificar" in tab_map:
                 st.info(
                     "No se encontraron casos especiales con el criterio de búsqueda proporcionado."
                 )
-                st.stop()
             else:
 
                 def formatear_fecha(valor, formato):
@@ -4937,11 +4955,10 @@ if "modificar" in tab_map:
                         return str(valor)
 
                 columnas_tabla = {
-                    "ID_Pedido": "Pedido",
+                    "Folio_Factura": "Folio / Factura",
                     "Hora_Registro": "Hora Registro",
                     "Vendedor_Registro": "Vendedor Registro",
                     "Cliente": "Cliente",
-                    "Folio_Factura": "Folio / Factura",
                     "Numero_Serie": "Número Serie",
                     "Fecha_Compra": "Fecha Compra",
                     "Tipo_Envio": "Tipo Envío",
@@ -4970,7 +4987,7 @@ if "modificar" in tab_map:
                     hora = formatear_fecha(row.get("Hora_Registro"), "%d/%m/%Y %H:%M")
                     estado = row.get("Estado_Caso") or row.get("Estado") or ""
                     return (
-                        f"📦 {row.get('ID_Pedido', '')} | 🧾 {row.get('Folio_Factura', '')} | "
+                        f"🧾 {row.get('Folio_Factura', row.get('Folio', ''))} | "
                         f"👤 {row.get('Cliente', '')} | 🚚 {row.get('Tipo_Envio', '')} | "
                         f"🔍 {estado} | 🕒 {hora}"
                     )
@@ -5105,11 +5122,7 @@ if "modificar" in tab_map:
                                     unsafe_allow_html=True,
                                 )
                 else:
-                    pedido_sel = None
-                    source_sel = None
-                    sheet_row_sel = None
                     st.info("Selecciona un caso especial para ver detalles.")
-                    st.stop()
 
 
         if "pedido_modificado" in st.session_state:
@@ -5125,41 +5138,42 @@ if "modificar" in tab_map:
                 del st.session_state["pedido_modificado_sheet_row"]
 
 
-        if pedido_sel is None:
-            st.markdown("### 📋 Lista completa de pedidos y casos disponibles")
+        with sub_tabs_modificar[0]:
+            if pedido_sel is None:
+                st.markdown("### 📋 Lista completa de pedidos y casos disponibles")
 
-            if df.empty:
-                st.warning("⚠️ No hay pedidos disponibles para modificar.")
-                st.stop()
+                if df_lista_modificar.empty:
+                    st.warning("⚠️ No hay pedidos disponibles para modificar.")
+                    st.stop()
 
-            def _fmt_hora_mod(valor):
-                if pd.isna(valor):
-                    return "Sin fecha"
-                if isinstance(valor, pd.Timestamp):
-                    return valor.strftime('%d/%m %H:%M')
-                try:
-                    return pd.to_datetime(valor).strftime('%d/%m %H:%M')
-                except Exception:
-                    return str(valor)
+                def _fmt_hora_mod(valor):
+                    if pd.isna(valor):
+                        return "Sin fecha"
+                    if isinstance(valor, pd.Timestamp):
+                        return valor.strftime('%d/%m %H:%M')
+                    try:
+                        return pd.to_datetime(valor).strftime('%d/%m %H:%M')
+                    except Exception:
+                        return str(valor)
 
-            df_lista = df.copy()
-            df_lista["display"] = df_lista.apply(
-                lambda row: (
-                    f"🧾 {row.get('Folio_Factura', row.get('Folio',''))} – {row.get('Tipo_Envio','')} "
-                    f"– 👤 {row.get('Cliente','')} – 🔍 {row.get('Estado', row.get('Estado_Caso',''))} "
-                    f"– 🧑‍💼 {row.get('Vendedor_Registro','')} – 🕒 {_fmt_hora_mod(row.get('Hora_Registro'))}"
-                ),
-                axis=1,
-            )
+                df_lista = df_lista_modificar.copy()
+                df_lista["display"] = df_lista.apply(
+                    lambda row: (
+                        f"🧾 {row.get('Folio_Factura', row.get('Folio',''))} – {row.get('Tipo_Envio','')} "
+                        f"– 👤 {row.get('Cliente','')} – 🔍 {row.get('Estado', row.get('Estado_Caso',''))} "
+                        f"– 🧑‍💼 {row.get('Vendedor_Registro','')} – 🕒 {_fmt_hora_mod(row.get('Hora_Registro'))}"
+                    ),
+                    axis=1,
+                )
 
-            idx_seleccion = st.selectbox(
-                "⬇️ Selecciona el pedido a modificar:",
-                df_lista.index.tolist(),
-                format_func=lambda i: df_lista.loc[i, "display"],
-            )
-            pedido_sel = df_lista.loc[idx_seleccion, "ID_Pedido"]
-            source_sel = df_lista.loc[idx_seleccion, "__source"]
-            sheet_row_sel = df_lista.loc[idx_seleccion, "__sheet_row"]
+                idx_seleccion = st.selectbox(
+                    "⬇️ Selecciona el pedido a modificar:",
+                    df_lista.index.tolist(),
+                    format_func=lambda i: df_lista.loc[i, "display"],
+                )
+                pedido_sel = df_lista.loc[idx_seleccion, "ID_Pedido"]
+                source_sel = df_lista.loc[idx_seleccion, "__source"]
+                sheet_row_sel = df_lista.loc[idx_seleccion, "__sheet_row"]
 
 
         # --- Cargar datos del pedido seleccionado ---
