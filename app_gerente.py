@@ -4788,9 +4788,13 @@ if "modificar" in tab_map:
 
         # Mostrar todos los pedidos de la hoja casos_especiales en esta sección.
         df_garantias = df_casos_garantias.copy()
-        sub_tabs_modificar = st.tabs(["🧾 Modificar pedido", "🛡️ Casos especiales"])
 
-        with sub_tabs_modificar[1]:
+        mostrar_garantias = st.checkbox(
+            "🔘 Mostrar sección de casos especiales",
+            help="Activa esta opción para consultar únicamente la información de la hoja casos_especiales.",
+        )
+
+        if mostrar_garantias:
             st.markdown("### 🛡️ Casos especiales registrados")
             if "Hora_Registro" not in df_garantias.columns:
                 df_garantias["Hora_Registro"] = pd.NaT
@@ -4808,23 +4812,16 @@ if "modificar" in tab_map:
             df_garantias["__tipo_envio_norm"] = tipo_envio_col.astype(str).map(normalizar)
             df_garantias["__is_devolucion"] = df_garantias["__tipo_envio_norm"].str.contains("devol", na=False)
             df_garantias["__is_garantia"] = df_garantias["__tipo_envio_norm"].str.contains("garantia", na=False)
-            seguimiento_col = df_garantias.get("Seguimiento", pd.Series(index=df_garantias.index, dtype="object"))
-            df_garantias["__seguimiento_vacio"] = seguimiento_col.astype(str).str.strip() == ""
-
-            pendientes_garantia = df_garantias[df_garantias["__is_garantia"] & df_garantias["__seguimiento_vacio"]]
-            st.metric("🔔 Garantías pendientes de seguimiento", len(pendientes_garantia))
-
-            switch_garantias_pendientes = st.toggle(
-                "Mostrar solo garantías pendientes de seguimiento",
-                value=True,
-                key="switch_garantias_pendientes",
-                help="Cuando está activo, se muestran únicamente garantías con Seguimiento vacío.",
-            )
-
             termino_busqueda_garantia = st.text_input(
                 "Buscar por cliente o folio",
                 key="busqueda_casos_especiales",
                 placeholder="Cliente o folio",
+            )
+            filtro_tipo_envio_garantia = st.selectbox(
+                "Filtrar por tipo de envío",
+                options=["📦 Todos", "🔁 Devolución", "🛠 Garantía"],
+                index=0,
+                key="filtro_tipo_envio_casos_especiales",
             )
             modo_fecha_garantia = st.selectbox(
                 "Filtro de fecha de registro",
@@ -4887,9 +4884,13 @@ if "modificar" in tab_map:
                 )
                 df_garantias_filtrado = df_garantias_filtrado[mask_cliente | mask_folio]
 
-            if switch_garantias_pendientes:
+            if filtro_tipo_envio_garantia == "🔁 Devolución":
                 df_garantias_filtrado = df_garantias_filtrado[
-                    df_garantias_filtrado["__is_garantia"] & df_garantias_filtrado["__seguimiento_vacio"]
+                    df_garantias_filtrado["__is_devolucion"]
+                ]
+            elif filtro_tipo_envio_garantia == "🛠 Garantía":
+                df_garantias_filtrado = df_garantias_filtrado[
+                    df_garantias_filtrado["__is_garantia"]
                 ]
 
             fechas_registro = df_garantias_filtrado["__hora_registro_fecha"]
@@ -4911,7 +4912,6 @@ if "modificar" in tab_map:
                     "__tipo_envio_norm",
                     "__is_devolucion",
                     "__is_garantia",
-                    "__seguimiento_vacio",
                 ],
                 errors="ignore",
             )
@@ -4920,6 +4920,7 @@ if "modificar" in tab_map:
                 st.info(
                     "No se encontraron casos especiales con el criterio de búsqueda proporcionado."
                 )
+                st.stop()
             else:
 
                 def formatear_fecha(valor, formato):
@@ -4936,10 +4937,11 @@ if "modificar" in tab_map:
                         return str(valor)
 
                 columnas_tabla = {
-                    "Folio_Factura": "Folio / Factura",
+                    "ID_Pedido": "Pedido",
                     "Hora_Registro": "Hora Registro",
                     "Vendedor_Registro": "Vendedor Registro",
                     "Cliente": "Cliente",
+                    "Folio_Factura": "Folio / Factura",
                     "Numero_Serie": "Número Serie",
                     "Fecha_Compra": "Fecha Compra",
                     "Tipo_Envio": "Tipo Envío",
@@ -4968,7 +4970,7 @@ if "modificar" in tab_map:
                     hora = formatear_fecha(row.get("Hora_Registro"), "%d/%m/%Y %H:%M")
                     estado = row.get("Estado_Caso") or row.get("Estado") or ""
                     return (
-                        f"🧾 {row.get('Folio_Factura', row.get('Folio', ''))} | "
+                        f"📦 {row.get('ID_Pedido', '')} | 🧾 {row.get('Folio_Factura', '')} | "
                         f"👤 {row.get('Cliente', '')} | 🚚 {row.get('Tipo_Envio', '')} | "
                         f"🔍 {estado} | 🕒 {hora}"
                     )
@@ -5107,6 +5109,7 @@ if "modificar" in tab_map:
                     source_sel = None
                     sheet_row_sel = None
                     st.info("Selecciona un caso especial para ver detalles.")
+                    st.stop()
 
 
         if "pedido_modificado" in st.session_state:
