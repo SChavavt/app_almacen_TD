@@ -5166,14 +5166,78 @@ if "modificar" in tab_map:
                     axis=1,
                 )
 
+                st.caption("🔎 Busca por cliente o folio para filtrar la lista.")
+                filtro_busqueda = st.text_input(
+                    "Buscar cliente o folio",
+                    value="",
+                    placeholder="Ej. CLARISA o F200750",
+                    key="modificar_busqueda_cliente_folio",
+                ).strip().lower()
+
+                df_lista_filtrada = df_lista.copy()
+                if filtro_busqueda:
+                    col_cliente = (
+                        df_lista_filtrada["Cliente"]
+                        if "Cliente" in df_lista_filtrada.columns
+                        else pd.Series("", index=df_lista_filtrada.index)
+                    )
+                    col_folio_factura = (
+                        df_lista_filtrada["Folio_Factura"]
+                        if "Folio_Factura" in df_lista_filtrada.columns
+                        else pd.Series("", index=df_lista_filtrada.index)
+                    )
+                    col_folio = (
+                        df_lista_filtrada["Folio"]
+                        if "Folio" in df_lista_filtrada.columns
+                        else pd.Series("", index=df_lista_filtrada.index)
+                    )
+                    serie_busqueda = (
+                        col_cliente.astype(str).str.lower()
+                        + " "
+                        + col_folio_factura.astype(str).str.lower()
+                        + " "
+                        + col_folio.astype(str).str.lower()
+                    )
+                    df_lista_filtrada = df_lista_filtrada[serie_busqueda.str.contains(filtro_busqueda, na=False)]
+
+                if df_lista_filtrada.empty:
+                    st.info("No se encontraron pedidos con ese cliente o folio.")
+                    st.stop()
+
+                st.dataframe(
+                    df_lista_filtrada[
+                        [
+                            "Folio_Factura",
+                            "Cliente",
+                            "Estado",
+                            "Tipo_Envio",
+                            "Vendedor_Registro",
+                            "Hora_Registro",
+                            "__source",
+                        ]
+                    ].rename(
+                        columns={
+                            "Folio_Factura": "Folio",
+                            "Cliente": "Cliente",
+                            "Estado": "Estado",
+                            "Tipo_Envio": "Tipo envío",
+                            "Vendedor_Registro": "Vendedor",
+                            "Hora_Registro": "Hora registro",
+                            "__source": "Origen",
+                        }
+                    ),
+                    use_container_width=True,
+                    hide_index=True,
+                )
+
                 idx_seleccion = st.selectbox(
                     "⬇️ Selecciona el pedido a modificar:",
-                    df_lista.index.tolist(),
+                    df_lista_filtrada.index.tolist(),
                     format_func=lambda i: df_lista.loc[i, "display"],
                 )
-                pedido_sel = df_lista.loc[idx_seleccion, "ID_Pedido"]
-                source_sel = df_lista.loc[idx_seleccion, "__source"]
-                sheet_row_sel = df_lista.loc[idx_seleccion, "__sheet_row"]
+                pedido_sel = df_lista_filtrada.loc[idx_seleccion, "ID_Pedido"]
+                source_sel = df_lista_filtrada.loc[idx_seleccion, "__source"]
+                sheet_row_sel = df_lista_filtrada.loc[idx_seleccion, "__sheet_row"]
 
 
         # --- Cargar datos del pedido seleccionado ---
