@@ -7432,18 +7432,17 @@ if "organizador" in tab_map:
 
             columnas_nuevo_sistema = [
                 "Hora_Registro",
+                "Vendedor_Registro",
                 "Cliente",
                 "Folio_Factura",
                 "Tipo_Envio",
-                "Comentario_Gerente",
+                "Seguimiento",
                 "Tipo_Envio_Original",
                 "Resultado_Esperado",
                 "Material_Devuelto",
                 "Motivo_Detallado",
-                "Seguimiento",
                 "Area_Responsable",
                 "Nombre_Responsable",
-                "Vendedor_Registro",
             ]
             columnas_tabla = {
                 "ID_Pedido": "Pedido",
@@ -7460,9 +7459,6 @@ if "organizador" in tab_map:
             }
             if usar_nuevo_sistema:
                 columnas_tabla = {col: col.replace("_", " ") for col in columnas_nuevo_sistema}
-                for col in columnas_nuevo_sistema:
-                    if col not in df_casos_filtrado.columns:
-                        df_casos_filtrado[col] = ""
 
             def formatear_fecha_caso(valor, formato):
                 if pd.isna(valor):
