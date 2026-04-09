@@ -3464,6 +3464,107 @@ def compute_proyeccion_30(tabla_clientes: pd.DataFrame, hoy: pd.Timestamp):
     return total, n, prox
 
 
+def _is_minor_name_variation(base_name: str, candidate_name: str) -> bool:
+    """Detecta variaciones leves del mismo cliente (espacios/case/typo corto)."""
+    a = _clean_cliente_name(base_name)
+    b = _clean_cliente_name(candidate_name)
+    if not a or not b:
+        return False
+    if a == b:
+        return True
+
+    tokens_a = a.split()
+    tokens_b = b.split()
+    if not tokens_a or not tokens_b:
+        return False
+
+    first_a = tokens_a[0]
+    first_b = tokens_b[0]
+    if len(first_a) >= 4 and len(first_b) >= 4:
+        first_ratio = SequenceMatcher(None, first_a, first_b).ratio()
+        if first_ratio < 0.86:
+            return False
+
+    ratio = SequenceMatcher(None, a, b).ratio()
+    if ratio >= 0.96:
+        return True
+    if ratio >= 0.93 and abs(len(a) - len(b)) <= 2:
+        return True
+    return False
+
+
+@st.cache_data(ttl=600)
+def build_compra_unica_resumen(
+    df_conf: pd.DataFrame, vendedor_sel: str = "(Todos)"
+) -> tuple[pd.DataFrame, int, int, int]:
+    """
+    Consolida clientes por nombre limpio + typo leve.
+    Devuelve: (tabla_compra_unica, total_unicos, total_compra_unica, total_con_historial)
+    """
+    if df_conf.empty or "Hora_Registro" not in df_conf.columns:
+        return pd.DataFrame(), 0, 0, 0
+
+    work = df_conf.copy()
+    work["Hora_Registro"] = pd.to_datetime(work["Hora_Registro"], errors="coerce")
+    work = work[pd.notna(work["Hora_Registro"])].copy()
+    if work.empty:
+        return pd.DataFrame(), 0, 0, 0
+
+    if vendedor_sel != "(Todos)" and "Vendedor_Registro" in work.columns:
+        vendedor_norm = _normalize_vendedor_name(vendedor_sel)
+        work = work[
+            work["Vendedor_Registro"].map(_normalize_vendedor_name) == vendedor_norm
+        ].copy()
+        if work.empty:
+            return pd.DataFrame(), 0, 0, 0
+
+    work["Cliente_Original"] = work.get("Cliente", "").astype(str).map(sanitize_text)
+    work["Cliente_Base"] = work["Cliente_Original"].map(_clean_cliente_name)
+    work = work[work["Cliente_Base"] != ""].copy()
+    if work.empty:
+        return pd.DataFrame(), 0, 0, 0
+
+    base_counts = work["Cliente_Base"].value_counts().sort_values(ascending=False)
+    canonical_names: list[str] = []
+    name_map: dict[str, str] = {}
+    for base_name in base_counts.index.tolist():
+        assigned = None
+        for canonical in canonical_names:
+            if _is_minor_name_variation(base_name, canonical):
+                assigned = canonical
+                break
+        if assigned is None:
+            canonical_names.append(base_name)
+            assigned = base_name
+        name_map[base_name] = assigned
+
+    work["Cliente_Grupo"] = work["Cliente_Base"].map(name_map)
+
+    grouped = (
+        work.sort_values("Hora_Registro")
+        .groupby("Cliente_Grupo", as_index=False)
+        .agg(
+            Num_Compras=("Hora_Registro", "size"),
+            Primera_Compra=("Hora_Registro", "min"),
+            Ultima_Compra=("Hora_Registro", "max"),
+            Cliente_Mostrado=("Cliente_Original", "last"),
+        )
+    )
+
+    total_unicos = int(len(grouped))
+    total_compra_unica = int((grouped["Num_Compras"] == 1).sum())
+    total_con_historial = int((grouped["Num_Compras"] > 1).sum())
+
+    compra_unica = grouped[grouped["Num_Compras"] == 1].copy()
+    compra_unica = compra_unica.sort_values("Ultima_Compra", ascending=False)
+
+    if not compra_unica.empty:
+        fecha_ref = work["Hora_Registro"].max()
+        compra_unica["Dias_Desde_Ultima"] = (fecha_ref - compra_unica["Ultima_Compra"]).dt.days
+
+    return compra_unica, total_unicos, total_compra_unica, total_con_historial
+
+
 @st.cache_data(ttl=600)
 def compute_dashboard_base(df_conf: pd.DataFrame):
     if df_conf.empty:
@@ -5494,6 +5595,55 @@ if selected_tab == 0:
             ).dt.strftime("%d/%m/%Y")
             st.dataframe(
                 inactivos_display[vis_cols_inactivos],
+                use_container_width=True,
+                height=420,
+                hide_index=True,
+            )
+
+    with st.expander("🧾 Métricas de compra única vs historial (consolidado por cliente)", expanded=False):
+        compra_unica_df, total_unicos, total_compra_unica, total_con_historial = build_compra_unica_resumen(
+            df_conf, vendedor_sel
+        )
+
+        su1, su2, su3 = st.columns(3)
+        su1.metric("👥 Clientes únicos consolidados", f"{total_unicos:,}")
+        su2.metric("📚 Con historial (>1 compra)", f"{total_con_historial:,}")
+        su3.metric("1️⃣ Solo 1 compra", f"{total_compra_unica:,}")
+
+        st.caption(
+            "Consolidación de nombre cliente con limpieza (mayúsculas/minúsculas, espacios, acentos) "
+            "y tolerancia a errores leves de captura. Lista ordenada por compra más reciente → más antigua."
+        )
+
+        if compra_unica_df.empty:
+            st.info("No hay clientes de compra única para el filtro actual.")
+        else:
+            list_cols = [
+                "Cliente_Mostrado",
+                "Ultima_Compra",
+                "Primera_Compra",
+                "Num_Compras",
+                "Dias_Desde_Ultima",
+            ]
+            compra_unica_view = ensure_columns(compra_unica_df, list_cols).copy()
+            compra_unica_view["Ultima_Compra"] = pd.to_datetime(
+                compra_unica_view["Ultima_Compra"], errors="coerce"
+            ).dt.strftime("%d/%m/%Y")
+            compra_unica_view["Primera_Compra"] = pd.to_datetime(
+                compra_unica_view["Primera_Compra"], errors="coerce"
+            ).dt.strftime("%d/%m/%Y")
+
+            compra_unica_view = compra_unica_view.rename(
+                columns={
+                    "Cliente_Mostrado": "Cliente",
+                    "Ultima_Compra": "Compra más reciente",
+                    "Primera_Compra": "Compra inicial",
+                    "Num_Compras": "Compras",
+                    "Dias_Desde_Ultima": "Días desde última",
+                }
+            )
+            st.dataframe(
+                compra_unica_view,
                 use_container_width=True,
                 height=420,
                 hide_index=True,
