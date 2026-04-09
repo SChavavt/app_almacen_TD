@@ -331,8 +331,9 @@ _TAB_LABELS_BY_TIPO = {
     "📍 Pedidos Locales": "📍 Pedidos Locales",
     "🚚 Pedido Foráneo": "🚚 Pedidos Foráneos",
     "🚚 Pedidos Foráneos": "🚚 Pedidos Foráneos",
-    "🏙️ Pedido CDMX": "🏙️ Pedidos CDMX",
     "🏙️ Pedidos CDMX": "🏙️ Pedidos CDMX",
+    "🚚 Foráneo CDMX": "🏙️ Pedidos CDMX",
+    "📍 Local CDMX": "🏙️ Pedidos CDMX",
     "📋 Solicitudes de Guía": "📋 Solicitudes de Guía",
     "📋 Solicitud de Guía": "📋 Solicitudes de Guía",
     "📋 Solicitudes de Guia": "📋 Solicitudes de Guía",
@@ -5862,25 +5863,64 @@ if df_main is not None:
 
     with main_tabs[2]:  # 🏙️ Pedidos CDMX
         pedidos_cdmx_display = df_pendientes_proceso_demorado[
-            (df_pendientes_proceso_demorado["Tipo_Envio"] == "🏙️ Pedido CDMX")
+            df_pendientes_proceso_demorado["Tipo_Envio"].isin(
+                ["🚚 Foráneo CDMX", "📍 Local CDMX"]
+            )
         ].copy()
 
         if not pedidos_cdmx_display.empty:
             pedidos_cdmx_display = ordenar_pedidos_custom(pedidos_cdmx_display)
             st.markdown("### 🏙️ Pedidos CDMX")
-            for orden, (idx, row) in _render_paginated_iterrows(pedidos_cdmx_display, "cdmx"):
-                # Reutiliza el mismo render que Foráneo (con tus botones de imprimir/completar, etc.)
-                mostrar_pedido(
-                    df_main,
-                    idx,
-                    row,
-                    orden,
-                    "CDMX",
-                    "🏙️ Pedidos CDMX",
-                    worksheet_main,
-                    headers_main,
-                    s3_client,
-                )
+            subtabs_cdmx = st.tabs(["🚚 Foráneo CDMX", "📍 Local CDMX"])
+
+            with subtabs_cdmx[0]:
+                pedidos_cdmx_foraneo = pedidos_cdmx_display[
+                    pedidos_cdmx_display["Tipo_Envio"].isin(
+                        ["🚚 Foráneo CDMX"]
+                    )
+                ].copy()
+                if not pedidos_cdmx_foraneo.empty:
+                    for orden, (idx, row) in _render_paginated_iterrows(
+                        pedidos_cdmx_foraneo, "cdmx_foraneo"
+                    ):
+                        mostrar_pedido(
+                            df_main,
+                            idx,
+                            row,
+                            orden,
+                            "CDMX",
+                            "🏙️ Pedidos CDMX",
+                            worksheet_main,
+                            headers_main,
+                            s3_client,
+                        )
+                else:
+                    st.info("No hay pedidos de tipo 🚚 Foráneo CDMX.")
+
+            with subtabs_cdmx[1]:
+                pedidos_cdmx_local = pedidos_cdmx_display[
+                    (pedidos_cdmx_display["Tipo_Envio"] == "📍 Local CDMX")
+                    & (pedidos_cdmx_display["Turno"] == "🏙️ Local Mty")
+                ].copy()
+                if not pedidos_cdmx_local.empty:
+                    for orden, (idx, row) in _render_paginated_iterrows(
+                        pedidos_cdmx_local, "cdmx_local"
+                    ):
+                        mostrar_pedido(
+                            df_main,
+                            idx,
+                            row,
+                            orden,
+                            "CDMX",
+                            "🏙️ Pedidos CDMX",
+                            worksheet_main,
+                            headers_main,
+                            s3_client,
+                        )
+                else:
+                    st.info(
+                        "No hay pedidos de tipo 📍 Local CDMX con turno 🏙️ Local Mty."
+                    )
         else:
             st.info("No hay pedidos CDMX.")
 
