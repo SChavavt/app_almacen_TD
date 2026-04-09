@@ -3464,6 +3464,110 @@ def compute_proyeccion_30(tabla_clientes: pd.DataFrame, hoy: pd.Timestamp):
     return total, n, prox
 
 
+def _is_minor_name_variation(base_name: str, candidate_name: str) -> bool:
+    """Detecta variaciones leves del mismo cliente (espacios/case/typo corto)."""
+    a = _clean_cliente_name(base_name)
+    b = _clean_cliente_name(candidate_name)
+    if not a or not b:
+        return False
+    if a == b:
+        return True
+
+    tokens_a = a.split()
+    tokens_b = b.split()
+    if not tokens_a or not tokens_b:
+        return False
+
+    first_a = tokens_a[0]
+    first_b = tokens_b[0]
+    if len(first_a) >= 4 and len(first_b) >= 4:
+        first_ratio = SequenceMatcher(None, first_a, first_b).ratio()
+        if first_ratio < 0.86:
+            return False
+
+    ratio = SequenceMatcher(None, a, b).ratio()
+    if ratio >= 0.96:
+        return True
+    if ratio >= 0.93 and abs(len(a) - len(b)) <= 2:
+        return True
+    return False
+
+
+@st.cache_data(ttl=600)
+def build_compra_unica_resumen(
+    df_conf: pd.DataFrame, vendedor_sel: str = "(Todos)"
+) -> pd.DataFrame:
+    """
+    Consolida clientes por nombre limpio + typo leve.
+    Devuelve una tabla por cliente consolidado con:
+    Num_Compras, Primera_Compra, Ultima_Compra y Dias_Desde_Ultima.
+    """
+    if df_conf.empty or "Hora_Registro" not in df_conf.columns:
+        return pd.DataFrame()
+
+    work = df_conf.copy()
+    work["Hora_Registro"] = pd.to_datetime(work["Hora_Registro"], errors="coerce")
+    work = work[pd.notna(work["Hora_Registro"])].copy()
+    if work.empty:
+        return pd.DataFrame()
+
+    if vendedor_sel != "(Todos)" and "Vendedor_Registro" in work.columns:
+        vendedor_norm = _normalize_vendedor_name(vendedor_sel)
+        work = work[
+            work["Vendedor_Registro"].map(_normalize_vendedor_name) == vendedor_norm
+        ].copy()
+        if work.empty:
+            return pd.DataFrame()
+
+    work["Cliente_Original"] = work.get("Cliente", "").astype(str).map(sanitize_text)
+    work["Cliente_Base"] = work["Cliente_Original"].map(_clean_cliente_name)
+    work = work[work["Cliente_Base"] != ""].copy()
+    if work.empty:
+        return pd.DataFrame()
+
+    base_counts = work["Cliente_Base"].value_counts().sort_values(ascending=False)
+    canonical_names: list[str] = []
+    buckets: dict[str, list[str]] = {}
+    name_map: dict[str, str] = {}
+    for base_name in base_counts.index.tolist():
+        parts = base_name.split()
+        first = parts[0] if parts else ""
+        bucket_key = f"{first[:4]}|{len(parts)}|{len(base_name)//3}"
+        candidates = buckets.get(bucket_key, [])
+        assigned = None
+        for canonical in candidates:
+            if _is_minor_name_variation(base_name, canonical):
+                assigned = canonical
+                break
+        if assigned is None:
+            canonical_names.append(base_name)
+            assigned = base_name
+            buckets.setdefault(bucket_key, []).append(base_name)
+        name_map[base_name] = assigned
+
+    work["Cliente_Grupo"] = work["Cliente_Base"].map(name_map)
+
+    grouped = (
+        work.sort_values("Hora_Registro")
+        .groupby("Cliente_Grupo", as_index=False)
+        .agg(
+            Num_Compras=("Hora_Registro", "size"),
+            Primera_Compra=("Hora_Registro", "min"),
+            Ultima_Compra=("Hora_Registro", "max"),
+            Cliente_Mostrado=("Cliente_Original", "last"),
+        )
+    )
+
+    if not grouped.empty:
+        fecha_ref = work["Hora_Registro"].max()
+        grouped["Dias_Desde_Ultima"] = (fecha_ref - grouped["Ultima_Compra"]).dt.days
+    else:
+        grouped["Dias_Desde_Ultima"] = pd.Series(dtype="float64")
+
+    grouped = grouped.sort_values("Ultima_Compra", ascending=False)
+    return grouped
+
+
 @st.cache_data(ttl=600)
 def compute_dashboard_base(df_conf: pd.DataFrame):
     if df_conf.empty:
@@ -5498,3 +5602,109 @@ if selected_tab == 0:
                 height=420,
                 hide_index=True,
             )
+
+    with st.expander("🧾 Métricas de compra única vs historial (consolidado por cliente)", expanded=False):
+        st.caption(
+            "Este análisis puede tardar si hay muchos pedidos históricos. "
+            "Para no frenar la carga inicial, se calcula bajo demanda."
+        )
+        run_compra_unica = st.toggle(
+            "Calcular análisis de compra única",
+            value=False,
+            key=f"toggle_compra_unica_{_normalize_vendedor_name(vendedor_sel) or 'todos'}",
+        )
+
+        if not run_compra_unica:
+            st.info("Activa el toggle para calcular métricas y listado.")
+        else:
+            compact_cols = [c for c in ["Hora_Registro", "Cliente", "Vendedor_Registro"] if c in df_conf.columns]
+            df_compact = df_conf[compact_cols].copy() if compact_cols else pd.DataFrame()
+
+            resumen_clientes = build_compra_unica_resumen(df_compact, vendedor_sel)
+            if resumen_clientes.empty:
+                st.info("No hay datos de clientes para el filtro actual.")
+            else:
+                years = (
+                    resumen_clientes["Ultima_Compra"]
+                    .dropna()
+                    .dt.year.astype(int)
+                    .sort_values(ascending=False)
+                    .unique()
+                    .tolist()
+                )
+                year_options = ["(Todos)"] + [str(y) for y in years]
+                year_sel = st.selectbox(
+                    "Filtrar por año (compra más reciente)",
+                    options=year_options,
+                    index=0,
+                    key=f"compra_unica_year_{_normalize_vendedor_name(vendedor_sel) or 'todos'}",
+                )
+                resumen_filtrado = resumen_clientes.copy()
+                if year_sel != "(Todos)":
+                    resumen_filtrado = resumen_filtrado[
+                        resumen_filtrado["Ultima_Compra"].dt.year == int(year_sel)
+                    ].copy()
+
+                total_unicos = int(len(resumen_filtrado))
+                total_compra_unica = int((resumen_filtrado["Num_Compras"] == 1).sum())
+                total_con_historial = int((resumen_filtrado["Num_Compras"] > 1).sum())
+
+                su1, su2, su3 = st.columns(3)
+                su1.metric("👥 Clientes únicos consolidados", f"{total_unicos:,}")
+                su2.metric("📚 Con historial (>1 compra)", f"{total_con_historial:,}")
+                su3.metric("1️⃣ Solo 1 compra", f"{total_compra_unica:,}")
+
+                st.caption(
+                    "Consolidación de nombre cliente con limpieza (mayúsculas/minúsculas, espacios, acentos) "
+                    "y tolerancia a errores leves de captura. Lista ordenada por compra más reciente → más antigua."
+                )
+
+                compra_unica_view = resumen_filtrado[resumen_filtrado["Num_Compras"] == 1].copy()
+                if compra_unica_view.empty:
+                    st.info("No hay clientes de compra única para el año/filtro seleccionado.")
+                else:
+                    list_cols = [
+                        "Cliente_Mostrado",
+                        "Ultima_Compra",
+                        "Primera_Compra",
+                        "Num_Compras",
+                        "Dias_Desde_Ultima",
+                    ]
+                    compra_unica_view = ensure_columns(compra_unica_view, list_cols).copy()
+
+                    compra_unica_view = compra_unica_view.rename(
+                        columns={
+                            "Cliente_Mostrado": "Cliente",
+                            "Ultima_Compra": "Compra más reciente",
+                            "Primera_Compra": "Compra inicial",
+                            "Num_Compras": "Compras",
+                            "Dias_Desde_Ultima": "Días desde última",
+                        }
+                    )
+                    compra_unica_view["Compra más reciente"] = pd.to_datetime(
+                        compra_unica_view["Compra más reciente"], errors="coerce"
+                    ).dt.strftime("%d/%m/%Y")
+                    compra_unica_view["Compra inicial"] = pd.to_datetime(
+                        compra_unica_view["Compra inicial"], errors="coerce"
+                    ).dt.strftime("%d/%m/%Y")
+
+                    excel_buffer = BytesIO()
+                    with pd.ExcelWriter(excel_buffer, engine="xlsxwriter", datetime_format="dd/mm/yyyy") as writer:
+                        compra_unica_view.to_excel(writer, index=False, sheet_name="Compra_Unica")
+                    excel_buffer.seek(0)
+                    suffix_year = "todos" if year_sel == "(Todos)" else year_sel
+                    st.download_button(
+                        "⬇️ Descargar Excel (compra única)",
+                        data=excel_buffer.getvalue(),
+                        file_name=f"clientes_compra_unica_{suffix_year}.xlsx",
+                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                        use_container_width=True,
+                        key=f"download_compra_unica_{_normalize_vendedor_name(vendedor_sel) or 'todos'}_{suffix_year}",
+                    )
+
+                    st.dataframe(
+                        compra_unica_view,
+                        use_container_width=True,
+                        height=420,
+                        hide_index=True,
+                    )
