@@ -3329,6 +3329,10 @@ def build_clientes_inactivos(tabla_clientes: pd.DataFrame, vendedor: str = "(Tod
     if inactivos.empty:
         return inactivos
 
+    inactivos["Fecha_Inactividad_Estimada"] = (
+        pd.to_datetime(inactivos["Ultima_Compra"], errors="coerce")
+        + pd.to_timedelta(inactivos["Umbral_Inactividad_Dias"], unit="D")
+    )
     inactivos["Dias_Atraso"] = (
         inactivos["Dias_Desde_Ultima"] - inactivos["Promedio_Ciclo"]
     ).clip(lower=0)
@@ -3337,8 +3341,11 @@ def build_clientes_inactivos(tabla_clientes: pd.DataFrame, vendedor: str = "(Tod
         ((inactivos["Dias_Desde_Ultima"] / inactivos["Promedio_Ciclo"]) - 1.0) * 100.0
     ).replace([np.inf, -np.inf], np.nan).fillna(0.0)
 
+    # Orden: primero los que más recientemente entraron en inactividad
+    # (clientes que "acaban" de dejar de comprar), luego mayor potencial comercial.
     inactivos = inactivos.sort_values(
-        ["%SobreCiclo", "Ventas_Total"], ascending=[False, False]
+        ["Fecha_Inactividad_Estimada", "Ventas_Total", "%SobreCiclo"],
+        ascending=[False, False, False],
     )
     return inactivos
 
@@ -5390,7 +5397,9 @@ if selected_tab == 0:
 
         st.caption(
             "Se marca como inactivo cuando supera ~1.8x su ciclo promedio histórico "
-            "(ejemplo: semanal ≈ 13 días, mensual ≈ 54 días)."
+            "(ejemplo: semanal ≈ 13 días, mensual ≈ 54 días; "
+            "si compraba cada semana y pasan 2-3 semanas, entra; "
+            "si compraba mensual y pasan 2 semanas, todavía no entra)."
         )
 
         if inactivos_df.empty:
@@ -5402,6 +5411,7 @@ if selected_tab == 0:
                 "Dias_Desde_Ultima",
                 "Promedio_Ciclo",
                 "Umbral_Inactividad_Dias",
+                "Fecha_Inactividad_Estimada",
                 "Dias_Atraso",
                 "Semanas_Atraso",
                 "%SobreCiclo",
@@ -5413,6 +5423,9 @@ if selected_tab == 0:
             inactivos_display = ensure_columns(inactivos_df, vis_cols_inactivos).copy()
             inactivos_display["Ultima_Compra"] = pd.to_datetime(
                 inactivos_display["Ultima_Compra"], errors="coerce"
+            ).dt.strftime("%d/%m/%Y")
+            inactivos_display["Fecha_Inactividad_Estimada"] = pd.to_datetime(
+                inactivos_display["Fecha_Inactividad_Estimada"], errors="coerce"
             ).dt.strftime("%d/%m/%Y")
             st.dataframe(
                 inactivos_display[vis_cols_inactivos],
