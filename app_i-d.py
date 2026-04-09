@@ -3226,7 +3226,9 @@ def build_cliente_risk_table(df_conf: pd.DataFrame):
     df = df.sort_values("Hora_Registro")
     df["Dias_Entre_Compras"] = df.groupby("Cliente_Limpio")["Hora_Registro"].diff().dt.days
 
-    df_valid = df[(df["Dias_Entre_Compras"].notna()) & (df["Dias_Entre_Compras"] > 7)].copy()
+    # Incluye patrones semanales/quincenales y descarta solo repeticiones de 0-1 días
+    # (normalmente corresponden a capturas del mismo ciclo).
+    df_valid = df[(df["Dias_Entre_Compras"].notna()) & (df["Dias_Entre_Compras"] >= 2)].copy()
 
     promedio_ciclo = df_valid.groupby("Cliente_Limpio")["Dias_Entre_Compras"].mean()
     ciclo_min = df_valid.groupby("Cliente_Limpio")["Dias_Entre_Compras"].min()
@@ -3289,6 +3291,56 @@ def build_cliente_risk_table(df_conf: pd.DataFrame):
 
     tabla = tabla.reset_index().rename(columns={"Cliente_Limpio": "Cliente"})
     return tabla, hoy
+
+
+@st.cache_data(ttl=600)
+def build_clientes_inactivos(tabla_clientes: pd.DataFrame, vendedor: str = "(Todos)") -> pd.DataFrame:
+    """Detecta clientes inactivos considerando la frecuencia histórica de cada cliente."""
+    if tabla_clientes.empty:
+        return pd.DataFrame()
+
+    work = tabla_clientes.copy()
+    if vendedor != "(Todos)" and "Vendedor" in work.columns:
+        work = work[
+            work["Vendedor"].map(_normalize_vendedor_name)
+            == _normalize_vendedor_name(vendedor)
+        ].copy()
+
+    if work.empty:
+        return pd.DataFrame()
+
+    work["Promedio_Ciclo"] = pd.to_numeric(work.get("Promedio_Ciclo"), errors="coerce")
+    work["Dias_Desde_Ultima"] = pd.to_numeric(work.get("Dias_Desde_Ultima"), errors="coerce")
+    work["Num_Pedidos"] = pd.to_numeric(work.get("Num_Pedidos"), errors="coerce").fillna(0)
+    work["Ticket_Promedio"] = pd.to_numeric(work.get("Ticket_Promedio"), errors="coerce").fillna(0.0)
+    work["Ventas_Total"] = pd.to_numeric(work.get("Ventas_Total"), errors="coerce").fillna(0.0)
+
+    # Regla: se considera inactivo cuando supera ~1.8x su ciclo promedio.
+    # Ejemplo: cliente semanal ~13 días; mensual ~54 días.
+    work["Umbral_Inactividad_Dias"] = np.ceil(work["Promedio_Ciclo"] * 1.8)
+    work["Umbral_Inactividad_Dias"] = work["Umbral_Inactividad_Dias"].clip(lower=7)
+
+    inactivos = work[
+        (work["Promedio_Ciclo"] > 0)
+        & (work["Num_Pedidos"] >= 3)
+        & (work["Dias_Desde_Ultima"] >= work["Umbral_Inactividad_Dias"])
+    ].copy()
+
+    if inactivos.empty:
+        return inactivos
+
+    inactivos["Dias_Atraso"] = (
+        inactivos["Dias_Desde_Ultima"] - inactivos["Promedio_Ciclo"]
+    ).clip(lower=0)
+    inactivos["Semanas_Atraso"] = (inactivos["Dias_Atraso"] / 7).round(1)
+    inactivos["%SobreCiclo"] = (
+        ((inactivos["Dias_Desde_Ultima"] / inactivos["Promedio_Ciclo"]) - 1.0) * 100.0
+    ).replace([np.inf, -np.inf], np.nan).fillna(0.0)
+
+    inactivos = inactivos.sort_values(
+        ["%SobreCiclo", "Ventas_Total"], ascending=[False, False]
+    )
+    return inactivos
 
 
 @st.cache_data(ttl=600)
@@ -4564,88 +4616,16 @@ if selected_tab == 0:
         row2_col3.metric("👥 Clientes totales actuales", f"{total_clientes_actuales:,}")
         row2_col4.metric("🎟️ Ticket prom (global)", f"${ticket_prom:,.0f}")
 
-        st.markdown("### 🔀 Vista temporal de ventas")
-        st.caption("Resumen esencial de ingresos para seguimiento rápido.")
-
-        temporal_base = build_temporal_sales_dataset(df_conf, vendedor_sel)
-        if temporal_base.empty:
-            st.info("No hay fechas válidas para construir la vista temporal.")
-        else:
-            hoy_ts = pd.Timestamp.now(tz=TZ).normalize().tz_localize(None)
-            temporal_base["Mes"] = temporal_base["Fecha"].dt.to_period("M")
-
-            ingresos_hoy = float(temporal_base.loc[temporal_base["Fecha"] == hoy_ts, "Monto"].sum())
-            ingresos_mes_actual = float(
-                temporal_base.loc[temporal_base["Mes"] == hoy_ts.to_period("M"), "Monto"].sum()
-            )
-
-            ventas_por_dia = (
-                temporal_base.groupby("Fecha", as_index=False)[["Monto", "Pedidos"]]
-                .sum()
-                .sort_values("Fecha")
-            )
-            ventas_por_mes = (
-                temporal_base.groupby("Mes", as_index=False)[["Monto", "Pedidos"]]
-                .sum()
-                .sort_values("Mes")
-            )
-
-            mejor_dia_row = ventas_por_dia.loc[ventas_por_dia["Monto"].idxmax()]
-            mejor_mes_row = ventas_por_mes.loc[ventas_por_mes["Monto"].idxmax()]
-
-            m1, m2, m3, m4 = st.columns(4)
-            m1.metric("💵 Ingresos de hoy", f"${ingresos_hoy:,.0f}")
-            m2.metric("🗓️ Ingresos del mes", f"${ingresos_mes_actual:,.0f}")
-            m3.metric(
-                "🏆 Día con más ingresos",
-                f"{mejor_dia_row['Fecha'].strftime('%d/%m/%Y')} · ${float(mejor_dia_row['Monto']):,.0f}",
-            )
-            m4.metric(
-                "🥇 Mes con más ingresos",
-                f"{mejor_mes_row['Mes'].strftime('%m/%Y')} · ${float(mejor_mes_row['Monto']):,.0f}",
-            )
-
-            chart_tab, detail_tab = st.tabs(["📊 Visual", "📋 Resumen"])
-            with chart_tab:
-                chart_day = ventas_por_dia.copy()
-                chart_day["Día"] = chart_day["Fecha"].dt.strftime("%d/%m")
-                chart_day = chart_day.rename(columns={"Monto": "Ingresos"})
-                st.area_chart(
-                    chart_day.set_index("Día")[["Ingresos"]],
-                    color=["#7B61FF"],
-                    height=280,
-                )
-
-                chart_month = ventas_por_mes.copy()
-                chart_month["MesLabel"] = chart_month["Mes"].dt.strftime("%m/%Y")
-                chart_month = chart_month.rename(columns={"Monto": "Ingresos"})
-                st.bar_chart(
-                    chart_month.set_index("MesLabel")[["Ingresos"]],
-                    color="#00BFA6",
-                    height=240,
-                )
-
-            with detail_tab:
-                vista_dia = ventas_por_dia.tail(15).copy()
-                vista_dia["Fecha"] = vista_dia["Fecha"].dt.strftime("%d/%m/%Y")
-                vista_dia = vista_dia.rename(
-                    columns={
-                        "Fecha": "Día",
-                        "Monto": "Ingresos",
-                        "Pedidos": "Pedidos",
-                    }
-                )
-                st.dataframe(vista_dia, use_container_width=True, hide_index=True, height=260)
-
-
         st.markdown("---")
 
-    tc = tabla_clientes.copy()
+    tc_vendedor_base = tabla_clientes.copy()
     if vendedor_sel != "(Todos)":
-        tc = tc[
-            tc["Vendedor"].map(_normalize_vendedor_name)
+        tc_vendedor_base = tc_vendedor_base[
+            tc_vendedor_base["Vendedor"].map(_normalize_vendedor_name)
             == _normalize_vendedor_name(vendedor_sel)
         ]
+
+    tc = tc_vendedor_base.copy()
     if estado_sel:
         tc = tc[tc["Estado"].isin(estado_sel)]
 
@@ -5393,3 +5373,50 @@ if selected_tab == 0:
             height=420,
             hide_index=True,
         )
+
+    with st.expander("📉 Cartera no activa (clientes que dejaron de comprar)", expanded=False):
+        inactivos_df = build_clientes_inactivos(tc_vendedor_base, vendedor_sel)
+        total_eval_inactivo = int(
+            pd.to_numeric(tc_vendedor_base.get("Promedio_Ciclo"), errors="coerce").fillna(0).gt(0).sum()
+        )
+        total_inactivos = int(len(inactivos_df))
+        pct_inactivos = (total_inactivos / total_eval_inactivo) if total_eval_inactivo else 0.0
+        monto_reactivable = float(pd.to_numeric(inactivos_df.get("Ticket_Promedio"), errors="coerce").fillna(0).sum())
+
+        ic1, ic2, ic3 = st.columns(3)
+        ic1.metric("👥 Clientes inactivos", f"{total_inactivos:,}")
+        ic2.metric("% cartera no activa", f"{pct_inactivos * 100:.1f}%")
+        ic3.metric("💰 Potencial reactivable", f"${monto_reactivable:,.0f}")
+
+        st.caption(
+            "Se marca como inactivo cuando supera ~1.8x su ciclo promedio histórico "
+            "(ejemplo: semanal ≈ 13 días, mensual ≈ 54 días)."
+        )
+
+        if inactivos_df.empty:
+            st.success("No hay clientes inactivos para el filtro actual.")
+        else:
+            vis_cols_inactivos = [
+                "Cliente",
+                "Vendedor",
+                "Dias_Desde_Ultima",
+                "Promedio_Ciclo",
+                "Umbral_Inactividad_Dias",
+                "Dias_Atraso",
+                "Semanas_Atraso",
+                "%SobreCiclo",
+                "Ticket_Promedio",
+                "Ventas_Total",
+                "Num_Pedidos",
+                "Ultima_Compra",
+            ]
+            inactivos_display = ensure_columns(inactivos_df, vis_cols_inactivos).copy()
+            inactivos_display["Ultima_Compra"] = pd.to_datetime(
+                inactivos_display["Ultima_Compra"], errors="coerce"
+            ).dt.strftime("%d/%m/%Y")
+            st.dataframe(
+                inactivos_display[vis_cols_inactivos],
+                use_container_width=True,
+                height=420,
+                hide_index=True,
+            )
