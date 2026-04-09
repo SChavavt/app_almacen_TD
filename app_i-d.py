@@ -1,6 +1,7 @@
 import streamlit as st
 from openai import OpenAI
 import base64
+from io import BytesIO
 import pandas as pd
 import numpy as np
 from datetime import datetime, timedelta
@@ -22,6 +23,62 @@ from difflib import SequenceMatcher
 from urllib.parse import urlsplit, urlunsplit, quote
 
 TZ = ZoneInfo("America/Mexico_City")
+
+
+def build_inactivos_excel_export(df: pd.DataFrame) -> bytes:
+    """Genera un Excel con formato básico para la cartera no activa."""
+    export_df = df.copy()
+    date_cols = ["Ultima_Compra", "Fecha_Inactividad_Estimada"]
+    num_cols = [
+        "Dias_Desde_Ultima",
+        "Promedio_Ciclo",
+        "Dias_Atraso",
+        "Semanas_Atraso",
+        "Ticket_Promedio",
+        "Ventas_Total",
+        "Num_Pedidos",
+    ]
+
+    for col in date_cols:
+        if col in export_df.columns:
+            export_df[col] = pd.to_datetime(export_df[col], errors="coerce")
+    for col in num_cols:
+        if col in export_df.columns:
+            export_df[col] = pd.to_numeric(export_df[col], errors="coerce")
+
+    buffer = BytesIO()
+    with pd.ExcelWriter(buffer, engine="xlsxwriter", datetime_format="dd/mm/yyyy") as writer:
+        export_df.to_excel(writer, index=False, sheet_name="Cartera_No_Activa")
+        workbook = writer.book
+        worksheet = writer.sheets["Cartera_No_Activa"]
+
+        header_fmt = workbook.add_format(
+            {"bold": True, "bg_color": "#1F4E78", "font_color": "white", "align": "center", "valign": "vcenter"}
+        )
+        money_fmt = workbook.add_format({"num_format": "$#,##0"})
+        int_fmt = workbook.add_format({"num_format": "#,##0"})
+        dec_fmt = workbook.add_format({"num_format": "0.0"})
+        date_fmt = workbook.add_format({"num_format": "dd/mm/yyyy"})
+
+        worksheet.freeze_panes(1, 0)
+        worksheet.autofilter(0, 0, 0, max(len(export_df.columns) - 1, 0))
+        worksheet.set_row(0, 22, header_fmt)
+
+        for col_idx, col_name in enumerate(export_df.columns):
+            col_width = min(max(len(str(col_name)) + 4, 14), 34)
+            worksheet.set_column(col_idx, col_idx, col_width)
+
+            if col_name in ("Ticket_Promedio", "Ventas_Total"):
+                worksheet.set_column(col_idx, col_idx, col_width, money_fmt)
+            elif col_name in ("Dias_Desde_Ultima", "Promedio_Ciclo", "Dias_Atraso", "Num_Pedidos"):
+                worksheet.set_column(col_idx, col_idx, col_width, int_fmt)
+            elif col_name == "Semanas_Atraso":
+                worksheet.set_column(col_idx, col_idx, col_width, dec_fmt)
+            elif col_name in date_cols:
+                worksheet.set_column(col_idx, col_idx, col_width, date_fmt)
+
+    buffer.seek(0)
+    return buffer.getvalue()
 
 TD_ASSISTANT_SYSTEM_PROMPT = dedent(
     """
@@ -5419,6 +5476,16 @@ if selected_tab == 0:
                 "Ultima_Compra",
             ]
             inactivos_display = ensure_columns(inactivos_df, vis_cols_inactivos).copy()
+            excel_bytes = build_inactivos_excel_export(inactivos_display[vis_cols_inactivos])
+            fecha_export = datetime.now(TZ).strftime("%Y%m%d")
+            st.download_button(
+                "⬇️ Descargar Excel de cartera no activa",
+                data=excel_bytes,
+                file_name=f"cartera_no_activa_{fecha_export}.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                use_container_width=True,
+                key="download_cartera_no_activa_excel",
+            )
             inactivos_display["Ultima_Compra"] = pd.to_datetime(
                 inactivos_display["Ultima_Compra"], errors="coerce"
             ).dt.strftime("%d/%m/%Y")
