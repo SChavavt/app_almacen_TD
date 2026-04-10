@@ -687,6 +687,11 @@ def _normalize_text_for_matching(text: str) -> str:
     return without_accents.lower()
 
 
+def _is_exact_pedido_foraneo(tipo_envio: Any) -> bool:
+    """True solo para el literal de negocio '🚚 Pedido Foráneo' (normalizado)."""
+    return _normalize_text_for_matching(str(tipo_envio)) == "🚚 pedido foraneo"
+
+
 def _flow_key(value: Any) -> str:
     return normalize_sheet_text(value).lower()
 
@@ -806,9 +811,9 @@ def build_flow_number_maps(
         if col not in work.columns:
             work[col] = ""
 
-    tipo_norm = work["Tipo_Envio"].astype(str).map(_normalize_text_for_matching)
-    tipo_original_norm = work["Tipo_Envio_Original"].astype(str).map(_normalize_text_for_matching)
-    mask_foraneo = tipo_norm.str.contains("foraneo", na=False) | tipo_original_norm.str.contains("foraneo", na=False)
+    tipo_norm = work["Tipo_Envio"].astype(str)
+    tipo_original_norm = work["Tipo_Envio_Original"].astype(str)
+    mask_foraneo = tipo_norm.map(_is_exact_pedido_foraneo) | tipo_original_norm.map(_is_exact_pedido_foraneo)
 
     df_foraneo = work[mask_foraneo].reset_index(drop=True)
     df_local = work[~mask_foraneo].reset_index(drop=True)
@@ -834,12 +839,10 @@ def build_flow_number_maps(
             if col not in casos_work.columns:
                 casos_work[col] = ""
 
-        envio_norm = (
-            casos_work["Tipo_Envio_Original"].astype(str).map(_normalize_text_for_matching)
-            + " "
-            + casos_work["Tipo_Envio"].astype(str).map(_normalize_text_for_matching)
-        )
-        casos_foraneo = casos_work[envio_norm.str.contains("foraneo", na=False)].copy()
+        casos_foraneo = casos_work[
+            casos_work["Tipo_Envio_Original"].astype(str).map(_is_exact_pedido_foraneo)
+            | casos_work["Tipo_Envio"].astype(str).map(_is_exact_pedido_foraneo)
+        ].copy()
 
     # Flujo foráneo combinado:
     # - Pedidos mantienen numeración automática por orden.
@@ -933,8 +936,8 @@ def build_flow_number_maps(
 
 def resolve_flow_display_number(row: pd.Series, fallback_order: Any) -> str:
     """Aplica numeración de flujo solo a foráneos; lo demás conserva su orden de vista."""
-    tipo = _normalize_text_for_matching(str(row.get("Tipo_Envio", "")))
-    is_foraneo = "foraneo" in tipo
+    tipo = row.get("Tipo_Envio", "")
+    is_foraneo = _is_exact_pedido_foraneo(tipo)
     if not is_foraneo:
         return str(fallback_order)
 
