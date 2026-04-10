@@ -772,8 +772,7 @@ def construir_descarga_completados_sin_limpieza():
     local_count = 1
     ids_data = []
     for _, row in df_data.iterrows():
-        tipo_envio = normalizar(str(row.get("Tipo_Envio", "") or ""))
-        if "foraneo" in tipo_envio:
+        if es_pedido_foraneo_exacto(row.get("Tipo_Envio", "")):
             ids_data.append(f"{foraneo_count:02d}")
             foraneo_count += 1
         else:
@@ -816,8 +815,7 @@ def construir_descarga_flujo_por_categoria():
         if col not in df_casos.columns:
             df_casos[col] = ""
 
-    tipos_normalizados = df_data["Tipo_Envio"].astype(str).map(normalizar)
-    mask_foraneos = tipos_normalizados.str.contains("foraneo", na=False)
+    mask_foraneos = df_data["Tipo_Envio"].astype(str).map(es_pedido_foraneo_exacto)
 
     df_foraneos = df_data[mask_foraneos].copy().reset_index(drop=True)
     df_locales = df_data[~mask_foraneos].copy().reset_index(drop=True)
@@ -903,10 +901,16 @@ def _es_limpiado(row):
     return normalizar(str(row.get("Completados_Limpiado", ""))) == "si"
 
 
+def es_pedido_foraneo_exacto(tipo_envio):
+    """True solo para el literal de negocio 'Pedido Foráneo' (normalizado)."""
+    return normalizar(str(tipo_envio or "")) == "pedido foraneo"
+
+
 def _es_row_foraneo(row):
-    tipo_envio = normalizar(str(row.get("Tipo_Envio", "") or ""))
-    tipo_envio_original = normalizar(str(row.get("Tipo_Envio_Original", "") or ""))
-    return "foraneo" in f"{tipo_envio} {tipo_envio_original}"
+    return (
+        es_pedido_foraneo_exacto(row.get("Tipo_Envio", ""))
+        or es_pedido_foraneo_exacto(row.get("Tipo_Envio_Original", ""))
+    )
 
 
 def resolver_numero_foraneo_flujo(row, flow_map_foraneos):
@@ -930,8 +934,8 @@ def construir_mapa_numeracion_foraneos(df_data, df_casos):
         if col not in work_data.columns:
             work_data[col] = ""
 
-    tipo_norm = work_data["Tipo_Envio"].astype(str).map(normalizar)
-    df_foraneo = work_data[tipo_norm.str.contains("foraneo", na=False)].copy()
+    tipo_exacto = work_data["Tipo_Envio"].astype(str).map(es_pedido_foraneo_exacto)
+    df_foraneo = work_data[tipo_exacto].copy()
 
     work_cases = pd.DataFrame() if df_casos is None else df_casos.copy()
     if not work_cases.empty:
@@ -946,12 +950,11 @@ def construir_mapa_numeracion_foraneos(df_data, df_casos):
         ):
             if col not in work_cases.columns:
                 work_cases[col] = ""
-        envio_norm = (
-            work_cases["Tipo_Envio_Original"].astype(str).map(normalizar)
-            + " "
-            + work_cases["Tipo_Envio"].astype(str).map(normalizar)
+        mask_foraneo_case = (
+            work_cases["Tipo_Envio_Original"].astype(str).map(es_pedido_foraneo_exacto)
+            | work_cases["Tipo_Envio"].astype(str).map(es_pedido_foraneo_exacto)
         )
-        work_cases = work_cases[envio_norm.str.contains("foraneo", na=False)].copy()
+        work_cases = work_cases[mask_foraneo_case].copy()
 
     combined_rows = []
     if not df_foraneo.empty:
