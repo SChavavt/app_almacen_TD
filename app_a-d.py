@@ -5268,7 +5268,6 @@ if df_main is not None:
     tab_options = [
         "📍 Pedidos Locales",
         "🚚 Pedidos Foráneos",
-        "🏙️ Pedidos CDMX",
         "📋 Solicitudes de Guía",
         "🎓 Cursos y Eventos",
         "🔁 Devoluciones",
@@ -5715,70 +5714,7 @@ if df_main is not None:
         else:
             st.info("No hay pedidos foráneos.")
 
-    with main_tabs[2]:  # 🏙️ Pedidos CDMX
-        pedidos_cdmx_display = df_pendientes_proceso_demorado[
-            df_pendientes_proceso_demorado["Tipo_Envio"].isin(
-                ["🚚 Foráneo CDMX", "📍 Local CDMX"]
-            )
-        ].copy()
-
-        if not pedidos_cdmx_display.empty:
-            pedidos_cdmx_display = ordenar_pedidos_custom(pedidos_cdmx_display)
-            st.markdown("### 🏙️ Pedidos CDMX")
-            subtabs_cdmx = st.tabs(["🚚 Foráneo CDMX", "📍 Local CDMX"])
-
-            with subtabs_cdmx[0]:
-                pedidos_cdmx_foraneo = pedidos_cdmx_display[
-                    pedidos_cdmx_display["Tipo_Envio"].isin(
-                        ["🚚 Foráneo CDMX"]
-                    )
-                ].copy()
-                if not pedidos_cdmx_foraneo.empty:
-                    for orden, (idx, row) in _render_paginated_iterrows(
-                        pedidos_cdmx_foraneo, "cdmx_foraneo"
-                    ):
-                        mostrar_pedido(
-                            df_main,
-                            idx,
-                            row,
-                            orden,
-                            "CDMX",
-                            "🏙️ Pedidos CDMX",
-                            worksheet_main,
-                            headers_main,
-                            s3_client,
-                        )
-                else:
-                    st.info("No hay pedidos de tipo 🚚 Foráneo CDMX.")
-
-            with subtabs_cdmx[1]:
-                pedidos_cdmx_local = pedidos_cdmx_display[
-                    (pedidos_cdmx_display["Tipo_Envio"] == "📍 Local CDMX")
-                    & (pedidos_cdmx_display["Turno"] == "🏙️ Local Mty")
-                ].copy()
-                if not pedidos_cdmx_local.empty:
-                    for orden, (idx, row) in _render_paginated_iterrows(
-                        pedidos_cdmx_local, "cdmx_local"
-                    ):
-                        mostrar_pedido(
-                            df_main,
-                            idx,
-                            row,
-                            orden,
-                            "CDMX",
-                            "🏙️ Pedidos CDMX",
-                            worksheet_main,
-                            headers_main,
-                            s3_client,
-                        )
-                else:
-                    st.info(
-                        "No hay pedidos de tipo 📍 Local CDMX con turno 🏙️ Local Mty."
-                    )
-        else:
-            st.info("No hay pedidos CDMX.")
-
-    with main_tabs[3]:  # 📋 Solicitudes de Guía
+    with main_tabs[2]:  # 📋 Solicitudes de Guía
         solicitudes_display = df_pendientes_proceso_demorado[
             (df_pendientes_proceso_demorado["Tipo_Envio"] == "📋 Solicitudes de Guía")
         ].copy()
@@ -5794,7 +5730,7 @@ if df_main is not None:
             st.info("No hay solicitudes de guía.")
 
 
-    with main_tabs[4]:  # 🎓 Cursos y Eventos
+    with main_tabs[3]:  # 🎓 Cursos y Eventos
         pedidos_cursos_display = df_pendientes_proceso_demorado[
             df_pendientes_proceso_demorado["Tipo_Envio"] == "🎓 Cursos y Eventos"
         ].copy()
@@ -5815,8 +5751,8 @@ if df_main is not None:
         else:
             st.info("No hay pedidos de Cursos y Eventos.")
 
-    # --- TAB 5: 🔁 Devoluciones (casos_especiales) ---
-    with main_tabs[5]:
+    # --- TAB 4: 🔁 Devoluciones (casos_especiales) ---
+    with main_tabs[4]:
         st.markdown("### 🔁 Devoluciones")
     
         # 1) Validaciones mínimas
@@ -6284,7 +6220,7 @@ if df_main is not None:
                 if colA.button("⚙️ Procesar", key=f"procesar_caso_{idp or folio or cliente}"):
                     try:
                         # Mantener la pestaña de Devoluciones
-                        set_active_main_tab(5)
+                        set_active_main_tab(4)
     
                         # Localiza la fila en 'casos_especiales'
                         gsheet_row_idx = None
@@ -6331,7 +6267,7 @@ if df_main is not None:
                     if colB.button("🔧 Procesar Modificación", key=f"proc_mod_caso_{idp or folio or cliente}"):
                         try:
                             # Mantener la pestaña de Devoluciones
-                            set_active_main_tab(5)
+                            set_active_main_tab(4)
     
                             # Localiza la fila en 'casos_especiales'
                             gsheet_row_idx = None
@@ -6540,7 +6476,7 @@ if df_main is not None:
                                                 row_key,
                                                 "expanded_devoluciones",
                                             )
-                                            set_active_main_tab(5)
+                                            set_active_main_tab(4)
                                             guia_success_map = st.session_state.setdefault(
                                                 "guia_upload_success", {}
                                             )
@@ -6663,7 +6599,7 @@ if df_main is not None:
                                     st.session_state[
                                         "flash_msg"
                                     ] = "✅ Devolución completada correctamente."
-                                    set_active_main_tab(5)
+                                    set_active_main_tab(4)
                                     st.cache_data.clear()
                                     del st.session_state[flag_key]
                                     st.rerun()
@@ -6688,7 +6624,7 @@ if df_main is not None:
     
         st.markdown("---")
     
-    with main_tabs[6]:  # 🛠 Garantías
+    with main_tabs[5]:  # 🛠 Garantías
         st.markdown("### 🛠 Garantías")
     
         import os, json, math, re
@@ -7270,7 +7206,7 @@ if df_main is not None:
                                             row_key,
                                             "expanded_garantias",
                                         )
-                                        set_active_main_tab(6)
+                                        set_active_main_tab(5)
                                         guia_success_map = st.session_state.setdefault(
                                             "guia_upload_success", {}
                                         )
@@ -7393,7 +7329,7 @@ if df_main is not None:
                                     st.session_state[
                                         "flash_msg"
                                     ] = "✅ Garantía completada correctamente."
-                                    set_active_main_tab(6)
+                                    set_active_main_tab(5)
                                     st.cache_data.clear()
                                     del st.session_state[flag_key]
                                     st.rerun()
@@ -7416,7 +7352,7 @@ if df_main is not None:
                                 del st.session_state[flag_key]
                                 
     
-    with main_tabs[7]:  # ✅ Historial Completados/Cancelados
+    with main_tabs[6]:  # ✅ Historial Completados/Cancelados
         df_completados_historial = df_main[
             (df_main["Estado"].isin(["🟢 Completado", "🟣 Cancelado"])) &
             (df_main.get("Completados_Limpiado", "").astype(str).str.lower() != "sí")
@@ -7447,7 +7383,7 @@ if df_main is not None:
                     st.success(f"📊 Total de pedidos archivados: {total_archivados}")
                     get_raw_sheet_data.clear()
                     get_filtered_sheet_dataframe.clear()
-                    set_active_main_tab(7)
+                    set_active_main_tab(6)
                     st.rerun()
                 else:
                     st.error("❌ Error durante la limpieza. No se eliminaron pedidos.")
@@ -7520,7 +7456,7 @@ if df_main is not None:
                             st.success(f"📊 Total de pedidos archivados: {total_archivados}")
                             get_raw_sheet_data.clear()
                             get_filtered_sheet_dataframe.clear()
-                            set_active_main_tab(7)
+                            set_active_main_tab(6)
                             st.rerun()
                         else:
                             st.error("❌ Error durante la limpieza. No se eliminaron pedidos.")
@@ -7562,7 +7498,7 @@ if df_main is not None:
                         st.success(f"📊 Total de pedidos archivados: {total_archivados}")
                         get_raw_sheet_data.clear()
                         get_filtered_sheet_dataframe.clear()
-                        set_active_main_tab(7)
+                        set_active_main_tab(6)
                         st.rerun()
                     else:
                         st.error("❌ Error durante la limpieza. No se eliminaron pedidos.")
@@ -7679,7 +7615,7 @@ if df_main is not None:
                             st.success(f"✅ {len(updates)} devoluciones marcadas como limpiadas.")
                             get_raw_sheet_data.clear()
                             get_filtered_sheet_dataframe.clear()
-                            set_active_main_tab(7)
+                            set_active_main_tab(6)
                             st.rerun()
                     comp_dev = comp_dev.sort_values(by="Fecha_Completado", ascending=False)
                     for orden_dev_comp, (_, row) in enumerate(comp_dev.iterrows(), start=1):
@@ -7716,7 +7652,7 @@ if df_main is not None:
                             st.success(f"✅ {len(updates)} garantías marcadas como limpiadas.")
                             get_raw_sheet_data.clear()
                             get_filtered_sheet_dataframe.clear()
-                            set_active_main_tab(7)
+                            set_active_main_tab(6)
                             st.rerun()
                     comp_gar = comp_gar.sort_values(by="Fecha_Completado", ascending=False)
                     for _, row in comp_gar.iterrows():
