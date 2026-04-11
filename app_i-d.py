@@ -4396,8 +4396,7 @@ if selected_tab == 2:
     )
 
     turno_priority = [
-        "☀️ Local Mañana",
-        "🌙 Local Tarde",
+        "🌤️ Local Día",
         "🌵 Saltillo",
         "📦 Pasa a Bodega",
         "📍 Local (sin turno)",
@@ -4405,6 +4404,8 @@ if selected_tab == 2:
     grouped: dict[str, list] = {label: [] for label in turno_priority}
     for entry in combined_entries:
         turno = normalize_turno_label(entry.get("turno", ""))
+        if turno in {"☀️ Local Mañana", "🌙 Local Tarde"}:
+            turno = "🌤️ Local Día"
         if not turno:
             turno = "📍 Local (sin turno)"
         if turno not in grouped:
