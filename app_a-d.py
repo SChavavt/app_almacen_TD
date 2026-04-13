@@ -5812,6 +5812,19 @@ if df_main is not None:
     # --- TAB 4: 🔁 Devoluciones (casos_especiales) ---
     with main_tabs[4]:
         st.markdown("### 🔁 Devoluciones")
+        st.markdown(
+            """
+            <style>
+            div[data-testid="stExpander"] {
+                margin-bottom: 0.35rem;
+            }
+            div[data-testid="stMarkdownContainer"] hr {
+                margin: 0.45rem 0 !important;
+            }
+            </style>
+            """,
+            unsafe_allow_html=True,
+        )
     
         # 1) Validaciones mínimas
         if 'df_casos' not in locals() and 'df_casos' not in globals():
@@ -6272,7 +6285,8 @@ if df_main is not None:
     
                 # --- 🔧 Acciones rápidas (sin imprimir, sin cambiar pestaña) ---
                 st.markdown("---")
-                colA, colB = st.columns(2)
+                flag_key = f"confirm_complete_id_{row['ID_Pedido']}"
+                colA, colComplete, colMod = st.columns([1, 1, 1])
     
                 # ⚙️ Procesar → 🔵 En Proceso + Hora_Proceso (si estaba Pendiente/Demorado/Modificación)
                 if colA.button("⚙️ Procesar", key=f"procesar_caso_{idp or folio or cliente}"):
@@ -6317,12 +6331,19 @@ if df_main is not None:
                                 st.info("ℹ️ Este caso ya no está en Pendiente/Demorado/Modificación.")
                     except Exception as e:
                         st.error(f"❌ Error al actualizar: {e}")
-    
-    
-    
+
+                if colComplete.button(
+                    "🟢 Completar",
+                    key=f"btn_completar_{row_key}",
+                    on_click=preserve_tab_state,
+                ):
+                    ensure_expanders_open(row_key, "expanded_devoluciones")
+                    st.session_state[flag_key] = row["ID_Pedido"]
+
+
                 # 🔧 Procesar Modificación → pasa a 🔵 En Proceso si está en 🛠 Modificación (sin recargar)
                 if estado == "🛠 Modificación":
-                    if colB.button("🔧 Procesar Modificación", key=f"proc_mod_caso_{idp or folio or cliente}"):
+                    if colMod.button("🔧 Procesar Modificación", key=f"proc_mod_caso_{idp or folio or cliente}"):
                         try:
                             # Mantener la pestaña de Devoluciones
                             set_active_main_tab(4)
@@ -6559,15 +6580,6 @@ if df_main is not None:
                                     st.warning("⚠️ No se subió ningún archivo válido.")
                         except Exception as e:
                             st.error(f"❌ Error al subir la guía: {e}")
-    
-                flag_key = f"confirm_complete_id_{row['ID_Pedido']}"
-                if st.button(
-                    "🟢 Completar",
-                    key=f"btn_completar_{row_key}",
-                    on_click=preserve_tab_state,
-                ):
-                    ensure_expanders_open(row_key, "expanded_devoluciones")
-                    st.session_state[flag_key] = row["ID_Pedido"]
     
                 if st.session_state.get(flag_key) == row["ID_Pedido"]:
                     st.warning("¿Estás seguro de completar este pedido?")
