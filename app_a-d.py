@@ -357,6 +357,28 @@ _LOCAL_SUBTAB_OPTIONS = ["🌤️ Local Día", "⛰️ Saltillo", "📦 En Bodeg
 _LOCAL_NO_ENTREGADOS_TAB_LABEL = "🚫 No entregados"
 
 
+_EXCLUDED_TURNOS_STATUS_VIEW = {
+    "🌆 Local CDMX",
+    "🎓 Recoge en Aula",
+    "Local CDMX",
+    "Recoge en Aula",
+}
+
+
+def _exclude_turnos_from_status_view(df: pd.DataFrame) -> pd.DataFrame:
+    """Exclude specific turnos from status views and metrics."""
+
+    if df is None or df.empty or "Turno" not in df.columns:
+        return df
+
+    turno_series = df["Turno"].astype(str).str.strip()
+    mask_excluded_turno = turno_series.isin(_EXCLUDED_TURNOS_STATUS_VIEW)
+    if not mask_excluded_turno.any():
+        return df
+
+    return df.loc[~mask_excluded_turno].copy()
+
+
 def _clamp_tab_index(index: Any, options: Sequence[Any]) -> int:
     """Return a safe tab index within the bounds of ``options``."""
 
@@ -4898,7 +4920,8 @@ if df_main is not None:
         & (df_main["Tipo_Envio"] == "📍 Pedido Local")
         & (estado_entrega_normalizado == "⏳ No Entregado")
     )
-    df_pendientes_proceso_demorado = df_main[mask_estados_activos | mask_local_no_entregado].copy()
+    df_main_status_view = _exclude_turnos_from_status_view(df_main)
+    df_pendientes_proceso_demorado = df_main_status_view[mask_estados_activos.loc[df_main_status_view.index] | mask_local_no_entregado.loc[df_main_status_view.index]].copy()
 
     st.session_state["pedidos_en_pantalla"] = set(
         df_pendientes_proceso_demorado.get("ID_Pedido", pd.Series(dtype=str))
@@ -5148,8 +5171,8 @@ if df_main is not None:
             '🟢 Completado': len(completados_visible),
         }
 
-    counts_main = _count_states(df_main)
-    counts_casos = _count_states(df_casos)
+    counts_main = _count_states(_exclude_turnos_from_status_view(df_main))
+    counts_casos = _count_states(_exclude_turnos_from_status_view(df_casos))
     estado_counts = {k: counts_main.get(k, 0) + counts_casos.get(k, 0)
                      for k in ['🟡 Pendiente', '🔵 En Proceso', '🔴 Demorado', '🛠 Modificación', '✏️ Modificación', '🟣 Cancelado', '🟢 Completado']}
 
