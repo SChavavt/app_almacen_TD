@@ -243,6 +243,58 @@ def _ensure_visual_state_defaults():
     state.setdefault("bulk_search_query", "")
 
 
+def _parse_material_devuelto_table(material_text: str) -> Optional[pd.DataFrame]:
+    """
+    Interpreta `Material_Devuelto` en formato canónico de columnas separadas por `|`.
+    Si no detecta estructura tabular válida, devuelve None.
+    """
+    raw = str(material_text or "").strip()
+    if not raw:
+        return None
+
+    lines = [line.strip() for line in raw.splitlines() if line.strip()]
+    if len(lines) < 2:
+        return None
+
+    if "|" not in lines[0]:
+        return None
+
+    headers = [h.strip() for h in lines[0].split("|")]
+    headers = [h for h in headers if h]
+    if len(headers) < 2:
+        return None
+
+    rows: list[list[str]] = []
+    for line in lines[1:]:
+        if "|" not in line:
+            continue
+        parts = [p.strip() for p in line.split("|")]
+        if len(parts) < len(headers):
+            parts.extend([""] * (len(headers) - len(parts)))
+        elif len(parts) > len(headers):
+            parts = parts[: len(headers)]
+        rows.append(parts)
+
+    if not rows:
+        return None
+
+    return pd.DataFrame(rows, columns=headers)
+
+
+def _render_material_devuelto(material_text: str, empty_text: str = "N/A") -> None:
+    material = str(material_text or "").strip()
+    if not material:
+        st.info(empty_text)
+        return
+
+    material_df = _parse_material_devuelto_table(material)
+    if material_df is not None:
+        st.dataframe(material_df, use_container_width=True, hide_index=True)
+        return
+
+    st.info(material)
+
+
 def _get_bulk_selected_ids() -> set[str]:
     selected = st.session_state.get("bulk_selected_pedidos", set())
     if isinstance(selected, set):
@@ -5955,7 +6007,7 @@ if df_main is not None:
             material = str(row.get("Material_Devuelto", "")).strip()
             if material:
                 st.markdown("📦 Piezas / Material:")
-                st.info(material)
+                _render_material_devuelto(material)
     
             direccion_retorno = str(row.get("Direccion_Guia_Retorno", "")).strip()
             st.markdown("📍 Dirección para guía de retorno:")
@@ -6870,7 +6922,10 @@ if df_main is not None:
                 st.info(str(row.get("Motivo_Detallado", "")).strip() or "N/A")
     
                 st.markdown("**🧰 Piezas afectadas:**")
-                st.info(str(row.get("Material_Devuelto", "")).strip() or "N/A")
+                _render_material_devuelto(
+                    str(row.get("Material_Devuelto", "")).strip(),
+                    empty_text="N/A",
+                )
     
                 st.markdown("**📍 Dirección para guía de retorno:**")
                 st.info(str(row.get("Direccion_Guia_Retorno", "")).strip() or "Sin dirección registrada.")
@@ -7635,7 +7690,7 @@ if df_main is not None:
                     piezas = str(row.get("Material_Devuelto", "")).strip()
                     if piezas:
                         st.markdown("📦 Piezas afectadas:")
-                        st.info(piezas)
+                        _render_material_devuelto(piezas)
                     direccion_retorno = str(row.get("Direccion_Guia_Retorno", "")).strip()
                     st.markdown("📍 Dirección para guía de retorno:")
                     st.info(direccion_retorno or "Sin dirección registrada.")
