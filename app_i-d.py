@@ -1647,10 +1647,10 @@ def normalize_turno_label(value: str) -> str:
     return _TURNOS_CANONICAL.get(key, base.strip())
 
 
-def _is_local_cdmx_entry(entry: dict) -> bool:
-    """True solo cuando el turno llega exactamente como `🌆 Local CDMX`."""
+def _is_excluded_auto_local_entry(entry: dict) -> bool:
+    """Excluye turnos que no deben mostrarse en Auto Local."""
     turno = sanitize_text(entry.get("turno", ""))
-    return turno == "🌆 Local CDMX"
+    return turno in {"🌆 Local CDMX", "🎓 Recoge en Aula", "Recoge en Aula"}
 
 
 def format_cliente_line(row) -> str:
@@ -4211,7 +4211,7 @@ if selected_tab in (2, 3, 4):
         auto_local_entries.extend(build_entries_casos(casos_local_auto))
 
     auto_local_entries = [
-        entry for entry in auto_local_entries if not _is_local_cdmx_entry(entry)
+        entry for entry in auto_local_entries if not _is_excluded_auto_local_entry(entry)
     ]
 
     df_for_auto = get_foraneo_orders(df_all)
@@ -4416,7 +4416,7 @@ if selected_tab == 2:
         turno = normalize_turno_label(entry.get("turno", ""))
         if turno in {"☀️ Local Mañana", "🌙 Local Tarde"}:
             turno = "🌤️ Local Día"
-        if turno == "🌆 Local CDMX":
+        if turno in {"🌆 Local CDMX", "🎓 Recoge en Aula", "Recoge en Aula"}:
             continue
         if not turno:
             turno = "📍 Local (sin turno)"
