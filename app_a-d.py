@@ -6338,64 +6338,11 @@ if df_main is not None:
                 # --- 🔧 Acciones rápidas (sin imprimir, sin cambiar pestaña) ---
                 st.markdown("---")
                 flag_key = f"confirm_complete_id_{row['ID_Pedido']}"
-                colA, colComplete, colMod = st.columns([1, 1, 1])
-    
-                # ⚙️ Procesar → 🔵 En Proceso + Hora_Proceso (si estaba Pendiente/Demorado/Modificación)
-                if colA.button("⚙️ Procesar", key=f"procesar_caso_{idp or folio or cliente}"):
-                    try:
-                        # Mantener la pestaña de Devoluciones
-                        set_active_main_tab(4)
-    
-                        # Localiza la fila en 'casos_especiales'
-                        gsheet_row_idx = None
-                        if "ID_Pedido" in df_casos.columns and idp:
-                            matches = df_casos.index[df_casos["ID_Pedido"].astype(str).str.strip() == idp]
-                            if len(matches) > 0:
-                                gsheet_row_idx = int(matches[0]) + 2
-                        if gsheet_row_idx is None:
-                            filt = (
-                                df_casos.get("Folio_Factura", pd.Series(dtype=str)).astype(str).str.strip().eq(folio) &
-                                df_casos.get("Cliente", pd.Series(dtype=str)).astype(str).str.strip().eq(cliente)
-                            )
-                            matches = df_casos.index[filt] if hasattr(filt, "any") else []
-                            if len(matches) > 0:
-                                gsheet_row_idx = int(matches[0]) + 2
-    
-                        if gsheet_row_idx is None:
-                            st.error("❌ No se encontró el caso en 'casos_especiales' para actualizar.")
-                        else:
-                            if estado in ["🟡 Pendiente", "🔴 Demorado", "🛠 Modificación"]:
-                                now_str = mx_now_str()
-                                ok = True
-                                if "Estado" in headers_casos:
-                                    ok &= update_gsheet_cell(worksheet_casos, headers_casos, gsheet_row_idx, "Estado", "🔵 En Proceso")
-                                if "Hora_Proceso" in headers_casos:
-                                    ok &= update_gsheet_cell(worksheet_casos, headers_casos, gsheet_row_idx, "Hora_Proceso", now_str)
-    
-                                if ok:
-                                    # Reflejo inmediato local sin recargar
-                                    row["Estado"] = "🔵 En Proceso"
-                                    row["Hora_Proceso"] = now_str
-                                    st.toast("✅ Caso marcado como '🔵 En Proceso'.", icon="✅")
-                                else:
-                                    st.error("❌ No se pudo actualizar a 'En Proceso'.")
-                            else:
-                                st.info("ℹ️ Este caso ya no está en Pendiente/Demorado/Modificación.")
-                    except Exception as e:
-                        st.error(f"❌ Error al actualizar: {e}")
-
-                if colComplete.button(
-                    "🟢 Completar",
-                    key=f"btn_completar_{row_key}",
-                    on_click=preserve_tab_state,
-                ):
-                    ensure_expanders_open(row_key, "expanded_devoluciones")
-                    st.session_state[flag_key] = row["ID_Pedido"]
 
 
                 # 🔧 Procesar Modificación → pasa a 🔵 En Proceso si está en 🛠 Modificación (sin recargar)
                 if estado == "🛠 Modificación":
-                    if colMod.button("🔧 Procesar Modificación", key=f"proc_mod_caso_{idp or folio or cliente}"):
+                    if st.button("🔧 Procesar Modificación", key=f"proc_mod_caso_{idp or folio or cliente}"):
                         try:
                             # Mantener la pestaña de Devoluciones
                             set_active_main_tab(4)
@@ -6632,7 +6579,62 @@ if df_main is not None:
                                     st.warning("⚠️ No se subió ningún archivo válido.")
                         except Exception as e:
                             st.error(f"❌ Error al subir la guía: {e}")
-    
+
+                st.markdown("---")
+                colA, colComplete = st.columns(2)
+
+                # ⚙️ Procesar → 🔵 En Proceso + Hora_Proceso (si estaba Pendiente/Demorado/Modificación)
+                if colA.button("⚙️ Procesar", key=f"procesar_caso_{idp or folio or cliente}"):
+                    try:
+                        # Mantener la pestaña de Devoluciones
+                        set_active_main_tab(4)
+
+                        # Localiza la fila en 'casos_especiales'
+                        gsheet_row_idx = None
+                        if "ID_Pedido" in df_casos.columns and idp:
+                            matches = df_casos.index[df_casos["ID_Pedido"].astype(str).str.strip() == idp]
+                            if len(matches) > 0:
+                                gsheet_row_idx = int(matches[0]) + 2
+                        if gsheet_row_idx is None:
+                            filt = (
+                                df_casos.get("Folio_Factura", pd.Series(dtype=str)).astype(str).str.strip().eq(folio) &
+                                df_casos.get("Cliente", pd.Series(dtype=str)).astype(str).str.strip().eq(cliente)
+                            )
+                            matches = df_casos.index[filt] if hasattr(filt, "any") else []
+                            if len(matches) > 0:
+                                gsheet_row_idx = int(matches[0]) + 2
+
+                        if gsheet_row_idx is None:
+                            st.error("❌ No se encontró el caso en 'casos_especiales' para actualizar.")
+                        else:
+                            if estado in ["🟡 Pendiente", "🔴 Demorado", "🛠 Modificación"]:
+                                now_str = mx_now_str()
+                                ok = True
+                                if "Estado" in headers_casos:
+                                    ok &= update_gsheet_cell(worksheet_casos, headers_casos, gsheet_row_idx, "Estado", "🔵 En Proceso")
+                                if "Hora_Proceso" in headers_casos:
+                                    ok &= update_gsheet_cell(worksheet_casos, headers_casos, gsheet_row_idx, "Hora_Proceso", now_str)
+
+                                if ok:
+                                    # Reflejo inmediato local sin recargar
+                                    row["Estado"] = "🔵 En Proceso"
+                                    row["Hora_Proceso"] = now_str
+                                    st.toast("✅ Caso marcado como '🔵 En Proceso'.", icon="✅")
+                                else:
+                                    st.error("❌ No se pudo actualizar a 'En Proceso'.")
+                            else:
+                                st.info("ℹ️ Este caso ya no está en Pendiente/Demorado/Modificación.")
+                    except Exception as e:
+                        st.error(f"❌ Error al actualizar: {e}")
+
+                if colComplete.button(
+                    "🟢 Completar",
+                    key=f"btn_completar_{row_key}",
+                    on_click=preserve_tab_state,
+                ):
+                    ensure_expanders_open(row_key, "expanded_devoluciones")
+                    st.session_state[flag_key] = row["ID_Pedido"]
+
                 if st.session_state.get(flag_key) == row["ID_Pedido"]:
                     st.warning("¿Estás seguro de completar este pedido?")
                     confirm_col, cancel_col = st.columns(2)
