@@ -4875,18 +4875,22 @@ skip_demorado_check_once = st.session_state.pop("skip_demorado_check_once", Fals
 if st.session_state.pop("bulk_checkbox_interaction", False):
     skip_demorado_check_once = True
 
+
+def _handle_demorado_sync_rerun():
+    """Mantiene la navegación actual y relanza la app tras auto-sincronizar estados."""
+    st.cache_data.clear()
+    set_active_main_tab(st.session_state.get("active_main_tab_index", 0))
+    st.session_state["active_subtab_local_index"] = st.session_state.get("active_subtab_local_index", 0)
+    st.session_state["active_date_tab_m_index"] = st.session_state.get("active_date_tab_m_index", 0)
+    st.session_state["active_date_tab_t_index"] = st.session_state.get("active_date_tab_t_index", 0)
+    st.rerun()
+
+
 if df_main is not None:
     if (not skip_demorado_check_once) and (not df_main.empty):
         df_main, changes_made_by_demorado_check = check_and_update_demorados(df_main, worksheet_main, headers_main)
         if changes_made_by_demorado_check:
-            st.cache_data.clear()
-
-            set_active_main_tab(st.session_state.get("active_main_tab_index", 0))
-            st.session_state["active_subtab_local_index"] = st.session_state.get("active_subtab_local_index", 0)
-            st.session_state["active_date_tab_m_index"] = st.session_state.get("active_date_tab_m_index", 0)
-            st.session_state["active_date_tab_t_index"] = st.session_state.get("active_date_tab_t_index", 0)
-
-            st.rerun()
+            _handle_demorado_sync_rerun()
 
     flow_map_local, flow_map_foraneo, pending_case_number_updates = build_flow_number_maps(df_main, df_casos)
     st.session_state["flow_number_map_local"] = flow_map_local
@@ -5130,6 +5134,13 @@ if df_main is not None:
         else:
             df_casos[c] = df_casos[c].fillna("")
 
+    if (not skip_demorado_check_once) and (df_casos is not None) and (not df_casos.empty):
+        df_casos, changes_made_by_demorado_check_casos = check_and_update_demorados(
+            df_casos, worksheet_casos, headers_casos
+        )
+        if changes_made_by_demorado_check_casos:
+            _handle_demorado_sync_rerun()
+
     if pending_case_number_updates and "Numero_Foraneo" in headers_casos:
         col_num_foraneo = headers_casos.index("Numero_Foraneo") + 1
         updates_num_foraneo = [
@@ -5196,37 +5207,61 @@ if df_main is not None:
         "Tipo_Envio" if "Tipo_Envio" in df_casos.columns else None
     )
 
-    devoluciones_activas = pd.DataFrame(columns=df_casos.columns)
-    garantias_activas = pd.DataFrame(columns=df_casos.columns)
+    devoluciones_pendientes = pd.DataFrame(columns=df_casos.columns)
+    garantias_pendientes = pd.DataFrame(columns=df_casos.columns)
+    devoluciones_demoradas = pd.DataFrame(columns=df_casos.columns)
+    garantias_demoradas = pd.DataFrame(columns=df_casos.columns)
 
     if tipo_casos_col and "Estado" in df_casos.columns:
-        estados_activos = ["🟡 Pendiente"]
         estados_series = df_casos["Estado"].astype(str).str.strip()
         tipo_series = df_casos[tipo_casos_col].astype(str)
-        base_mask = estados_series.isin(estados_activos)
-        devoluciones_activas = df_casos[
-            base_mask & tipo_series.str.contains("Devoluci", case=False, na=False)
+        devoluciones_mask = tipo_series.str.contains("Devoluci", case=False, na=False)
+        garantias_mask = tipo_series.str.contains("Garant", case=False, na=False)
+
+        devoluciones_pendientes = df_casos[
+            (estados_series == "🟡 Pendiente") & devoluciones_mask
         ]
-        garantias_activas = df_casos[
-            base_mask & tipo_series.str.contains("Garant", case=False, na=False)
+        garantias_pendientes = df_casos[
+            (estados_series == "🟡 Pendiente") & garantias_mask
+        ]
+        devoluciones_demoradas = df_casos[
+            (estados_series == "🔴 Demorado") & devoluciones_mask
+        ]
+        garantias_demoradas = df_casos[
+            (estados_series == "🔴 Demorado") & garantias_mask
         ]
 
-    devoluciones_count = len(devoluciones_activas)
-    garantias_count = len(garantias_activas)
+    pendientes_count = len(devoluciones_pendientes) + len(garantias_pendientes)
+    demorados_count = len(devoluciones_demoradas) + len(garantias_demoradas)
 
-    if devoluciones_count or garantias_count:
+    if pendientes_count:
         partes_mensaje = []
-        if devoluciones_count:
+        if len(devoluciones_pendientes):
             partes_mensaje.append(
-                f"{devoluciones_count} devolución{'es' if devoluciones_count != 1 else ''}"
+                f"{len(devoluciones_pendientes)} devolución{'es' if len(devoluciones_pendientes) != 1 else ''}"
             )
-        if garantias_count:
+        if len(garantias_pendientes):
             partes_mensaje.append(
-                f"{garantias_count} garantía{'s' if garantias_count != 1 else ''}"
+                f"{len(garantias_pendientes)} garantía{'s' if len(garantias_pendientes) != 1 else ''}"
             )
         lista_casos = " y ".join(partes_mensaje)
         st.warning(
             f"⚠️ Hay {lista_casos} en estado pendiente en Casos Especiales."
+        )
+
+    if demorados_count:
+        partes_demorados = []
+        if len(devoluciones_demoradas):
+            partes_demorados.append(
+                f"{len(devoluciones_demoradas)} devolución{'es' if len(devoluciones_demoradas) != 1 else ''}"
+            )
+        if len(garantias_demoradas):
+            partes_demorados.append(
+                f"{len(garantias_demoradas)} garantía{'s' if len(garantias_demoradas) != 1 else ''}"
+            )
+        lista_demorados = " y ".join(partes_demorados)
+        st.error(
+            f"🚨 Hay {lista_demorados} en estado 🔴 Demorado en Casos Especiales."
         )
 
     # 🚨 Aviso prioritario: pedidos locales en bodega en proceso > 3 días hábiles (base: Hora_Proceso)
