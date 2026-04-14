@@ -4950,8 +4950,12 @@ if df_main is not None:
 
 
     # --- 🔔 Alerta de Modificación de Surtido ---
-    mod_surtido_main_df = _pending_modificaciones(df_main)
-    mod_surtido_casos_df = _pending_modificaciones(df_casos)
+    mod_surtido_main_df = _pending_modificaciones(
+        _exclude_turnos_from_status_view(df_main)
+    )
+    mod_surtido_casos_df = _pending_modificaciones(
+        _exclude_turnos_from_status_view(df_casos)
+    )
 
     mod_surtido_count = len(mod_surtido_main_df) + len(mod_surtido_casos_df)
 
