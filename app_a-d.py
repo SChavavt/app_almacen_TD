@@ -3636,8 +3636,8 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
                     terminal_pago = st.session_state.get(terminal_pago_key, terminal_default)
                     usa_terminal = forma_pago in ["Tarjeta de Débito", "Tarjeta de Crédito"]
 
-                    if monto_pago <= 0:
-                        st.warning("⚠️ Captura un monto mayor a 0 para guardar el comprobante.")
+                    if not archivos_comprobante:
+                        st.warning("⚠️ Debes subir al menos un comprobante para guardar.")
                     else:
                         updates = []
                         campos_valores = {
