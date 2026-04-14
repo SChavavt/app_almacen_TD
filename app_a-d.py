@@ -6448,32 +6448,6 @@ if df_main is not None:
     
                 st.markdown("---")
     
-                with st.expander("📎 Archivos del Caso", expanded=False):
-                    adjuntos_urls = _normalize_urls(row.get("Adjuntos", ""))
-                    nota_credito_url = str(row.get("Nota_Credito_URL", "")).strip()
-                    documento_adic_url = str(row.get("Documento_Adicional_URL", "")).strip()
-    
-                    items = []
-                    for u in adjuntos_urls:
-                        file_name = os.path.basename(u)
-                        items.append((file_name, resolve_storage_url(s3_client, u)))
-    
-                    if nota_credito_url and nota_credito_url.lower() not in ("nan", "none", "n/a"):
-                        items.append(("Nota de Crédito", resolve_storage_url(s3_client, nota_credito_url)))
-                    if documento_adic_url and documento_adic_url.lower() not in ("nan", "none", "n/a"):
-                        items.append(("Documento Adicional", resolve_storage_url(s3_client, documento_adic_url)))
-    
-                    if items:
-                        for label, url in items:
-                            st.markdown(
-                                f'- <a href="{url}" target="_blank">{label}</a>',
-                                unsafe_allow_html=True,
-                            )
-                    else:
-                        st.info("No hay archivos registrados para esta devolución.")
-    
-                st.markdown("---")
-    
                 with st.expander("📋 Documentación", expanded=False):
                     st.caption("La guía es opcional; puedes completar la devolución sin subirla.")
                     success_placeholder = st.empty()
