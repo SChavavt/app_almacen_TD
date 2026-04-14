@@ -3635,9 +3635,16 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
                     banco_destino = st.session_state.get(banco_destino_key, banco_default)
                     terminal_pago = st.session_state.get(terminal_pago_key, terminal_default)
                     usa_terminal = forma_pago in ["Tarjeta de Débito", "Tarjeta de Crédito"]
+                    archivos_comprobante_actuales = archivos_comprobante
+                    if not archivos_comprobante_actuales:
+                        archivos_comprobante_actuales = st.session_state.get(upload_comp_key, [])
+                    if archivos_comprobante_actuales is None:
+                        archivos_comprobante_actuales = []
+                    if not isinstance(archivos_comprobante_actuales, (list, tuple)):
+                        archivos_comprobante_actuales = [archivos_comprobante_actuales]
 
-                    if monto_pago <= 0:
-                        st.warning("⚠️ Captura un monto mayor a 0 para guardar el comprobante.")
+                    if not archivos_comprobante_actuales:
+                        st.warning("⚠️ Debes subir al menos un comprobante para guardar.")
                     else:
                         updates = []
                         campos_valores = {
@@ -3661,8 +3668,8 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
                                 )
 
                         uploaded_comp_keys = []
-                        if archivos_comprobante:
-                            for archivo in archivos_comprobante:
+                        if archivos_comprobante_actuales:
+                            for archivo in archivos_comprobante_actuales:
                                 ext = os.path.splitext(archivo.name)[1].lower()
                                 timestamp = mx_now().strftime("%Y%m%d%H%M%S")
                                 s3_key = (
