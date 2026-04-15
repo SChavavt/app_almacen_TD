@@ -1,5 +1,6 @@
 
 import time
+import base64
 import streamlit as st
 import pandas as pd
 from datetime import datetime, timedelta
@@ -18,6 +19,7 @@ import streamlit.components.v1 as components
 from typing import Any, Optional, Sequence
 import unicodedata
 import numpy as np
+from pathlib import Path
 
 _MX_TZ = timezone("America/Mexico_City")
 
@@ -34,6 +36,10 @@ REPORTE_GUIAS_SHEET_NAME = "REPORTE GUÍAS"
 REPORTE_GUIAS_ROW_START = 13000
 REPORTE_GUIAS_GROWTH_ROWS = 1000
 REPORTE_GUIAS_LOOKBACK_WINDOW = 1000
+TD_LOGO_PATH = Path("assets/td_logo.png")
+TD_LOGO_ALLOWED_TYPES = ["png", "jpg", "jpeg", "webp"]
+TD_LOGO_ALLOWED_EXTENSIONS = tuple(f".{ext}" for ext in TD_LOGO_ALLOWED_TYPES)
+TD_LOGO_EDITOR_USER = "SCHAVA"
 
 
 def _is_recoverable_auth_error(exc: Exception) -> bool:
@@ -1205,6 +1211,91 @@ def es_pedido_local_no_entregado(row: Any) -> bool:
     )
 
 
+def _get_query_param_value(param_name: str) -> str:
+    query_params = st.query_params
+    raw_value = query_params.get(param_name, "")
+    if isinstance(raw_value, list):
+        return str(raw_value[0]).strip() if raw_value else ""
+    return str(raw_value).strip()
+
+
+def can_edit_brand_logo(allowed_user: str = TD_LOGO_EDITOR_USER) -> bool:
+    """Valida si el usuario actual puede editar el logo del branding."""
+    user_candidates = [
+        st.session_state.get("id_vendedor", ""),
+        _get_query_param_value("usuario"),
+    ]
+    normalized_allowed = str(allowed_user or "").strip().upper()
+    return any(str(candidate or "").strip().upper() == normalized_allowed for candidate in user_candidates)
+
+
+def render_brand_title(
+    title_prefix: str = "📬 Bandeja de Pedidos",
+    fallback_text: str = "TD",
+    logo_path: Path = TD_LOGO_PATH,
+) -> None:
+    """Renderiza el título principal usando logo si existe o texto como fallback."""
+    if not logo_path.exists():
+        st.title(f"{title_prefix} {fallback_text}")
+        return
+
+    try:
+        image_bytes = logo_path.read_bytes()
+        encoded_logo = base64.b64encode(image_bytes).decode("utf-8")
+        st.markdown(
+            f"""
+            <h1 style="margin: 0;">
+                {title_prefix}
+                <img src="data:image/png;base64,{encoded_logo}" alt="Logo TD"
+                     style="height: 1.1em; vertical-align: -0.15em; margin-left: 0.25em;" />
+            </h1>
+            """,
+            unsafe_allow_html=True,
+        )
+    except Exception:
+        st.title(f"{title_prefix} {fallback_text}")
+
+
+def render_logo_uploader(
+    logo_path: Path = TD_LOGO_PATH,
+    allowed_types: Sequence[str] = TD_LOGO_ALLOWED_TYPES,
+) -> None:
+    """Muestra controles para subir, guardar o quitar el logo TD."""
+    with st.expander("🎨 Personalizar logo TD"):
+        if logo_path.exists():
+            st.image(str(logo_path), caption="Logo TD actual", width=240)
+        else:
+            st.caption("Tip: agrega tu logo en assets/td_logo.png para reemplazar “TD” en el título.")
+
+        uploaded_logo = st.file_uploader(
+            "Selecciona un logo",
+            type=list(allowed_types),
+            key="td_logo_uploader",
+        )
+
+        col_save, col_remove = st.columns(2)
+        if col_save.button("💾 Guardar logo", key="save_td_logo"):
+            if uploaded_logo is None:
+                st.warning("Selecciona un archivo antes de guardar.")
+            else:
+                extension = Path(uploaded_logo.name).suffix.lower()
+                if extension not in TD_LOGO_ALLOWED_EXTENSIONS:
+                    st.error("Formato no permitido. Usa png, jpg, jpeg o webp.")
+                else:
+                    logo_path.parent.mkdir(parents=True, exist_ok=True)
+                    logo_path.write_bytes(uploaded_logo.getvalue())
+                    st.success("Logo guardado correctamente.")
+                    st.rerun()
+
+        if col_remove.button("🗑️ Quitar logo", key="remove_td_logo"):
+            if logo_path.exists():
+                logo_path.unlink()
+                st.success("Logo eliminado. Se restauró el título con texto.")
+                st.rerun()
+            else:
+                st.info("No hay logo guardado para quitar.")
+
+
 
 st.set_page_config(page_title="Recepción de Pedidos TD", layout="wide")
 
@@ -1249,7 +1340,9 @@ st.query_params["local_tab"] = str(
     st.session_state.get("active_subtab_local_index", 0)
 )
 
-st.title("📬 Bandeja de Pedidos TD")
+render_brand_title()
+if can_edit_brand_logo():
+    render_logo_uploader()
 
 # Flash message tras refresh
 if "flash_msg" in st.session_state and st.session_state["flash_msg"]:
