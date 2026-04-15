@@ -4190,12 +4190,7 @@ tabs = st.tabs([titulo for _, titulo in tab_specs])
 tab_map = {clave: tab for (clave, _), tab in zip(tab_specs, tabs)}
 
 with tab_map["buscar"]:
-    modo_busqueda = st.radio(
-        "Selecciona el modo de búsqueda:",
-        ["🔢 Por número de guía", "🧑 Por cliente/factura"],
-        index=1,
-        key="modo_busqueda_radio",
-    )
+    modo_busqueda = st.radio("Selecciona el modo de búsqueda:", ["🔢 Por número de guía", "🧑 Por cliente/factura"], key="modo_busqueda_radio")
 
     orden_seleccionado = "Más recientes primero"
     recientes_primero = True
@@ -5614,16 +5609,7 @@ if "organizador" in tab_map:
             st.rerun()
 
         # --- Subpestañas internas del organizador ---
-        organizer_tab_specs = [
-            ("casos_especiales", "🛡️ Casos especiales"),
-            ("hoy", "📌 Hoy"),
-            ("agenda", "🗓️ Agenda"),
-            ("pendientes", "✅ Pendientes"),
-            ("cotizaciones", "💼 Cotizaciones"),
-            ("checklist", "📋 Checklist"),
-        ]
-        sub = st.tabs([titulo for _, titulo in organizer_tab_specs])
-        sub_map = {clave: tab for (clave, _), tab in zip(organizer_tab_specs, sub)}
+        sub = st.tabs(["📌 Hoy", "🗓️ Agenda", "✅ Pendientes", "💼 Cotizaciones", "📋 Checklist", "🛡️ Casos especiales"])
 
         errores_alejandro = []
 
@@ -5666,7 +5652,7 @@ if "organizador" in tab_map:
         if errores_alejandro:
             st.warning("⚠️ Hay errores leyendo alejandro_data. Revisa los logs o ejecuta diagnóstico en modo mantenimiento.")
 
-        with sub_map["hoy"]:
+        with sub[0]:
             st.subheader("📌 Hoy")
             st.markdown(
                 """
@@ -6247,7 +6233,7 @@ if "organizador" in tab_map:
                 else:
                     st.info(f"ℹ️ {msg}")
 
-        with sub_map["agenda"]:
+        with sub[1]:
             st.subheader("📅 Agenda")
 
             with st.form("form_nueva_cita", clear_on_submit=True):
@@ -6439,7 +6425,7 @@ if "organizador" in tab_map:
             with tab_agenda_todo:
                 st.dataframe(df_citas, use_container_width=True)
 
-        with sub_map["pendientes"]:
+        with sub[2]:
             st.subheader("✅ Pendientes")
 
             # ===== Alta rápida =====
@@ -6614,7 +6600,7 @@ if "organizador" in tab_map:
             with tab_t_todo:
                 st.dataframe(df_tareas, use_container_width=True)
 
-        with sub_map["cotizaciones"]:
+        with sub[3]:
             st.subheader("💰 Cotizaciones")
 
             with st.form("form_nueva_cot", clear_on_submit=True):
@@ -7043,7 +7029,7 @@ if "organizador" in tab_map:
             with tab_c_todo:
                 st.dataframe(df_cot, use_container_width=True)
 
-        with sub_map["checklist"]:
+        with sub[4]:
             st.subheader("🧾 Checklist")
             hoy = date.today()
 
@@ -7222,7 +7208,7 @@ if "organizador" in tab_map:
                 st.info("No hay ítems en plantilla para eliminar.")
 
 
-        with sub_map["casos_especiales"]:
+        with sub[5]:
             st.subheader("🛡️ Casos especiales registrados")
             usar_nuevo_sistema = st.toggle(
                 "🧭 Usar nuevo sistema de casos especiales",
