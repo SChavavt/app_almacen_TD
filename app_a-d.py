@@ -407,6 +407,13 @@ _LOCAL_TURNO_TO_SUBTAB = {
 
 _LOCAL_SUBTAB_OPTIONS = ["🌤️ Local Día", "⛰️ Saltillo", "📦 En Bodega"]
 _LOCAL_NO_ENTREGADOS_TAB_LABEL = "🚫 No entregados"
+_LOCAL_TURNOS_CAMBIO_POR_SUBTAB = {
+    "Mañana": ["🌵 Saltillo", "📦 Pasa a Bodega"],
+    "Tarde": ["🌵 Saltillo", "📦 Pasa a Bodega"],
+    "Local Día": ["🌵 Saltillo", "📦 Pasa a Bodega"],
+    "Saltillo": ["🌤️ Local Día", "📦 Pasa a Bodega"],
+    "Pasa a Bodega": ["🌤️ Local Día", "🌵 Saltillo"],
+}
 
 
 _EXCLUDED_TURNOS_STATUS_VIEW = {
@@ -429,6 +436,13 @@ def _exclude_turnos_from_status_view(df: pd.DataFrame) -> pd.DataFrame:
         return df
 
     return df.loc[~mask_excluded_turno].copy()
+
+
+def _build_turno_options_for_local_change(origen_tab: str) -> list[str]:
+    """Opciones de reclasificación de turno por subtab local (incluye opción vacía)."""
+
+    opciones = _LOCAL_TURNOS_CAMBIO_POR_SUBTAB.get(str(origen_tab).strip(), [])
+    return ["", *opciones]
 
 
 def _clamp_tab_index(index: Any, options: Sequence[Any]) -> int:
@@ -3140,13 +3154,29 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
         es_local_no_entregado = es_pedido_local_no_entregado(row)
         tipo_envio_actual = row.get("Tipo_Envio")
 
-        # --- Cambiar Fecha y Turno ---
+        # --- Cambiar Fecha (y turno solo para locales) ---
         puede_cambiar_fecha = (
             tipo_envio_actual in ["📍 Pedido Local", "🚚 Pedido Foráneo"]
             and (
                 row['Estado'] not in ["🟢 Completado", "✅ Viajó"]
                 or es_local_no_entregado
             )
+        )
+        permite_cambiar_turno_local = tipo_envio_actual == "📍 Pedido Local"
+        texto_checkbox_cambio = (
+            "📅 Cambiar Fecha y Turno"
+            if permite_cambiar_turno_local
+            else "📅 Cambiar Fecha"
+        )
+        texto_caption_cambio = (
+            "Los cambios de fecha/turno se guardan juntos al presionar Aplicar."
+            if permite_cambiar_turno_local
+            else "El cambio de fecha se guarda al presionar Aplicar."
+        )
+        texto_boton_cambio = (
+            "✅ Aplicar Cambios de Fecha/Turno"
+            if permite_cambiar_turno_local
+            else "✅ Aplicar Cambios de Fecha"
         )
 
         if puede_cambiar_fecha:
@@ -3157,7 +3187,7 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
                 mostrar_cambio = True
             else:
                 mostrar_cambio = st.checkbox(
-                    "📅 Cambiar Fecha y Turno",
+                    texto_checkbox_cambio,
                     key=f"chk_fecha_{row['ID_Pedido']}_{origen_tab}",
                     on_change=ensure_expanders_open,
                     args=(row['ID_Pedido'], "expanded_pedidos"),
@@ -3219,9 +3249,7 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
                     st.session_state[turno_key] = current_turno
 
                 with st.container(border=True):
-                    st.caption(
-                        "Los cambios de fecha/turno se guardan juntos al presionar Aplicar."
-                    )
+                    st.caption(texto_caption_cambio)
                     with st.form(key=f"form_fecha_turno_{widget_suffix}"):
                         st.date_input(
                             "Nueva fecha:",
@@ -3232,8 +3260,8 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
                             key=fecha_key,
                         )
 
-                        if tipo_envio_actual == "📍 Pedido Local" and origen_tab in ["Mañana", "Tarde", "Local Día"]:
-                            turno_options = ["", "🌤️ Local Día"]
+                        turno_options = _build_turno_options_for_local_change(origen_tab)
+                        if tipo_envio_actual == "📍 Pedido Local" and len(turno_options) > 1:
                             if st.session_state[turno_key] not in turno_options:
                                 st.session_state[turno_key] = turno_options[0]
 
@@ -3244,7 +3272,7 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
                             )
 
                         aplicar_cambios = st.form_submit_button(
-                            "✅ Aplicar Cambios de Fecha/Turno",
+                            texto_boton_cambio,
                             use_container_width=True,
                         )
 
@@ -3265,7 +3293,9 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
                             }
                         )
 
-                    if tipo_envio_actual == "📍 Pedido Local" and origen_tab in ["Mañana", "Tarde", "Local Día"]:
+                    if tipo_envio_actual == "📍 Pedido Local" and len(
+                        _build_turno_options_for_local_change(origen_tab)
+                    ) > 1:
                         nuevo_turno = st.session_state[turno_key]
                         if nuevo_turno != current_turno:
                             col_idx = headers.index("Turno") + 1
