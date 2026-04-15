@@ -5516,7 +5516,7 @@ if "modificar" in tab_map:
                 tipo_envio = st.selectbox("➡️ Cambiar a:", [opcion_contraria])
 
                 if tipo_envio == "📍 Pedido Local":
-                    nuevo_turno = st.selectbox("⏰ Turno", ["☀️ Local Mañana", "🌙 Local Tarde", "🌵 Saltillo", "📦 Pasa a Bodega"])
+                    nuevo_turno = st.selectbox("⏰ Turno", ["🌤️ Local Día", "🌵 Saltillo", "📦 Pasa a Bodega"])
                     fecha_entrega_actual_raw = str(row.get("Fecha_Entrega", "") or "").strip()
                     fecha_entrega_actual_dt = pd.to_datetime(fecha_entrega_actual_raw, errors="coerce")
                     fecha_entrega_actual_mostrar = (
