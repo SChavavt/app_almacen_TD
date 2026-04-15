@@ -1638,7 +1638,12 @@ def get_checklist_daily_row_lookup(fecha_iso: str) -> dict:
     """Devuelve lookup para ubicar fila por (fecha+item) sin relecturas por cada guardado."""
     sheet = get_alejandro_worksheet("CHECKLIST_DAILY")
     ensure_headers(sheet, "CHECKLIST_DAILY")
-    data = _get_all_records_with_retry(sheet)
+    try:
+        data = _get_all_records_with_retry(sheet)
+    except Exception:
+        # Fallback defensivo: si Google API responde redacted/transitorio,
+        # devolvemos lookup vacío para no tumbar la app completa.
+        return {}
 
     lookup = {}
     for idx, rec in enumerate(data, start=2):
@@ -4190,7 +4195,12 @@ tabs = st.tabs([titulo for _, titulo in tab_specs])
 tab_map = {clave: tab for (clave, _), tab in zip(tab_specs, tabs)}
 
 with tab_map["buscar"]:
-    modo_busqueda = st.radio("Selecciona el modo de búsqueda:", ["🔢 Por número de guía", "🧑 Por cliente/factura"], key="modo_busqueda_radio")
+    modo_busqueda = st.radio(
+        "Selecciona el modo de búsqueda:",
+        ["🔢 Por número de guía", "🧑 Por cliente/factura"],
+        index=1,
+        key="modo_busqueda_radio",
+    )
 
     orden_seleccionado = "Más recientes primero"
     recientes_primero = True
@@ -5609,7 +5619,16 @@ if "organizador" in tab_map:
             st.rerun()
 
         # --- Subpestañas internas del organizador ---
-        sub = st.tabs(["📌 Hoy", "🗓️ Agenda", "✅ Pendientes", "💼 Cotizaciones", "📋 Checklist", "🛡️ Casos especiales"])
+        organizer_tab_specs = [
+            ("casos_especiales", "🛡️ Casos especiales"),
+            ("hoy", "📌 Hoy"),
+            ("agenda", "🗓️ Agenda"),
+            ("pendientes", "✅ Pendientes"),
+            ("cotizaciones", "💼 Cotizaciones"),
+            ("checklist", "📋 Checklist"),
+        ]
+        sub = st.tabs([titulo for _, titulo in organizer_tab_specs])
+        sub_map = {clave: tab for (clave, _), tab in zip(organizer_tab_specs, sub)}
 
         errores_alejandro = []
 
@@ -5652,7 +5671,7 @@ if "organizador" in tab_map:
         if errores_alejandro:
             st.warning("⚠️ Hay errores leyendo alejandro_data. Revisa los logs o ejecuta diagnóstico en modo mantenimiento.")
 
-        with sub[0]:
+        with sub_map["hoy"]:
             st.subheader("📌 Hoy")
             st.markdown(
                 """
@@ -6233,7 +6252,7 @@ if "organizador" in tab_map:
                 else:
                     st.info(f"ℹ️ {msg}")
 
-        with sub[1]:
+        with sub_map["agenda"]:
             st.subheader("📅 Agenda")
 
             with st.form("form_nueva_cita", clear_on_submit=True):
@@ -6425,7 +6444,7 @@ if "organizador" in tab_map:
             with tab_agenda_todo:
                 st.dataframe(df_citas, use_container_width=True)
 
-        with sub[2]:
+        with sub_map["pendientes"]:
             st.subheader("✅ Pendientes")
 
             # ===== Alta rápida =====
@@ -6600,7 +6619,7 @@ if "organizador" in tab_map:
             with tab_t_todo:
                 st.dataframe(df_tareas, use_container_width=True)
 
-        with sub[3]:
+        with sub_map["cotizaciones"]:
             st.subheader("💰 Cotizaciones")
 
             with st.form("form_nueva_cot", clear_on_submit=True):
@@ -7029,7 +7048,7 @@ if "organizador" in tab_map:
             with tab_c_todo:
                 st.dataframe(df_cot, use_container_width=True)
 
-        with sub[4]:
+        with sub_map["checklist"]:
             st.subheader("🧾 Checklist")
             hoy = date.today()
 
@@ -7092,13 +7111,25 @@ if "organizador" in tab_map:
                 today_iso = hoy.strftime("%Y-%m-%d")
                 lk_key = f"chk_row_lookup_{today_iso}"
                 if lk_key not in st.session_state:
-                    st.session_state[lk_key] = get_checklist_daily_row_lookup(today_iso)
+                    try:
+                        st.session_state[lk_key] = get_checklist_daily_row_lookup(today_iso)
+                    except Exception as e:
+                        st.session_state[lk_key] = {}
+                        st.warning(f"⚠️ No se pudo cargar el índice del checklist diario: {e}")
                 row_lookup = st.session_state[lk_key]
 
                 hdr_key = "chk_headers_CHECKLIST_DAILY"
                 if hdr_key not in st.session_state:
-                    sheet_daily = get_alejandro_worksheet("CHECKLIST_DAILY")
-                    st.session_state[hdr_key] = [h.strip() for h in sheet_daily.row_values(1)]
+                    try:
+                        sheet_daily = get_alejandro_worksheet("CHECKLIST_DAILY")
+                        st.session_state[hdr_key] = _retry_gspread_api_call(
+                            lambda: [h.strip() for h in sheet_daily.row_values(1)],
+                            retries=4,
+                            base_delay=0.8,
+                        )
+                    except Exception as e:
+                        st.session_state[hdr_key] = []
+                        st.warning(f"⚠️ No se pudieron leer los encabezados de CHECKLIST_DAILY: {e}")
                 checklist_headers = st.session_state[hdr_key]
                 if "Orden" in df_checklist_template.columns and "Item_ID" in chk_hoy_edit.columns:
                     order_map = {
@@ -7208,7 +7239,7 @@ if "organizador" in tab_map:
                 st.info("No hay ítems en plantilla para eliminar.")
 
 
-        with sub[5]:
+        with sub_map["casos_especiales"]:
             st.subheader("🛡️ Casos especiales registrados")
             usar_nuevo_sistema = st.toggle(
                 "🧭 Usar nuevo sistema de casos especiales",
