@@ -2506,6 +2506,43 @@ def _merge_uploaded_urls(existing_value, new_urls: Sequence[str]) -> str:
     return ", ".join(unique_urls)
 
 
+def _filter_out_original_route_when_modified(files: Sequence[str]) -> list[str]:
+    """Hide original route files when a modified route version is also present.
+
+    Example:
+    - ``ADRIAN_MARCELO.xlsx``
+    - ``hoja_ruta_mod_ADRIAN_MARCELO.xlsx``
+
+    In that case, only the ``hoja_ruta_mod_...`` file should be displayed.
+    """
+    if not files:
+        return []
+
+    mod_prefix = "hoja_ruta_mod_"
+    originals_hidden: set[str] = set()
+    normalized_by_raw: dict[str, str] = {}
+
+    for raw in files:
+        name = os.path.basename(urlparse(str(raw)).path) or str(raw)
+        name = unquote(name).strip()
+        normalized_name = name.lower()
+        normalized_by_raw[str(raw)] = normalized_name
+
+        if normalized_name.startswith(mod_prefix):
+            original_name = normalized_name[len(mod_prefix):]
+            if original_name:
+                originals_hidden.add(original_name)
+
+    filtered_files: list[str] = []
+    for raw in files:
+        normalized_name = normalized_by_raw.get(str(raw), "")
+        if normalized_name and normalized_name in originals_hidden:
+            continue
+        filtered_files.append(raw)
+
+    return filtered_files
+
+
 def _is_row_empty(row: Any) -> bool:
     """Return True if ``row`` should be treated as empty."""
 
@@ -3565,6 +3602,7 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
         ):
             contenido_attachments = False
             sheet_attachments = _normalize_urls(row.get("Adjuntos", ""))
+            sheet_attachments = _filter_out_original_route_when_modified(sheet_attachments)
             sheet_attachment_keys = {
                 extract_s3_key(att) for att in sheet_attachments if att
             }
@@ -3596,6 +3634,14 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
                     filtered_files_to_display = [
                         f for f in files_in_folder
                         if "comprobante" not in f['title'].lower() and "surtido" not in f['title'].lower()
+                    ]
+                    folder_titles = [f.get("title", "") for f in filtered_files_to_display]
+                    visible_titles = set(
+                        _filter_out_original_route_when_modified(folder_titles)
+                    )
+                    filtered_files_to_display = [
+                        f for f in filtered_files_to_display
+                        if f.get("title", "") in visible_titles
                     ]
                     filtered_files_to_display = [
                         f for f in filtered_files_to_display
