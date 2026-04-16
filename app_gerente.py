@@ -2087,11 +2087,18 @@ def _cobranza_get_all_values_cached(ws, max_age_seconds: float = 20.0, use_cache
     return values
 
 
+def _cobranza_headers_from_values(values: list[list]) -> list[str]:
+    """Normaliza encabezados desde una matriz get_all_values."""
+    if not values:
+        return []
+    return [str(h).strip() for h in values[0]]
+
+
 def cobranza_load_records_with_rows(ws, use_cache: bool = True) -> list[dict]:
     values = _cobranza_get_all_values_cached(ws, use_cache=use_cache)
     if not values:
         return []
-    headers = values[0]
+    headers = _cobranza_headers_from_values(values)
     out = []
     for i, row in enumerate(values[1:], start=2):
         row = row + [""] * (len(headers) - len(row))
@@ -2104,11 +2111,31 @@ def cobranza_load_records_with_rows(ws, use_cache: bool = True) -> list[dict]:
     return out
 
 
-def cobranza_upsert_rows_by_key(ws, df: pd.DataFrame, key_cols: list[str], update_cols: list[str]):
+def cobranza_upsert_rows_by_key(
+    ws,
+    df: pd.DataFrame,
+    key_cols: list[str],
+    update_cols: list[str],
+    existing_records: list[dict] | None = None,
+):
     if df.empty:
         return
-    headers = [str(h).strip() for h in _retry_gspread_api_call(lambda: ws.row_values(1), retries=4, base_delay=0.9)]
-    recs = cobranza_load_records_with_rows(ws)
+    if existing_records is not None:
+        # Reutiliza datos ya cargados en memoria para evitar una lectura extra de Google Sheets.
+        recs = [{k: v for k, v in rec.items() if not str(k).startswith("__")} for rec in existing_records]
+        headers = list(df.columns)
+        for rec in recs:
+            for h in headers:
+                rec.setdefault(h, "")
+    else:
+        values = _cobranza_get_all_values_cached(ws, use_cache=True)
+        headers = _cobranza_headers_from_values(values)
+        if not headers:
+            return
+        recs = []
+        for row in values[1:]:
+            row = row + [""] * (len(headers) - len(row))
+            recs.append({headers[j]: row[j] for j in range(len(headers))})
     # Guardamos índice por posición para poder escribir todo en un solo update
     # y evitar exceder cuota por demasiados writes por minuto.
     idx = {
@@ -3149,6 +3176,8 @@ def render_cobranza_tab_gerente():
         recordatorio_activo = st.session_state.get("ger_cob_recordatorio", "")
         estatus_seguimiento = st.session_state.get("ger_cob_estatus", "")
 
+        com_records_cache = com_df.to_dict("records") if not com_df.empty else []
+
         if aplicar_seg:
             if not folios_sel:
                 st.warning("⚠️ Selecciona al menos un folio para aplicar seguimiento.")
@@ -3195,6 +3224,7 @@ def render_cobranza_tab_gerente():
                         "Actualizado_por", "Timestamp", "Fecha_Proximo_Pago",
                         "Recordatorio_Activo", "Estatus_Seguimiento", "Fecha_Cierre", "Mes_Operativo"
                     ],
+                    existing_records=com_records_cache,
                 )
                 st.session_state["ger_cob_force_refresh"] = True
                 st.success("✅ Seguimiento aplicado correctamente.")
@@ -3275,6 +3305,7 @@ def render_cobranza_tab_gerente():
                         "Comentario", "Actualizado_por", "Timestamp", "Fecha_Proximo_Pago",
                         "Recordatorio_Activo", "Estatus_Seguimiento", "Fecha_Cierre", "Mes_Operativo"
                     ],
+                    existing_records=com_records_cache,
                 )
                 st.session_state["ger_cob_force_refresh"] = True
                 st.success(f"✅ Comentario guardado en {len(folios_sel)} folio(s).")
