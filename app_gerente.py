@@ -1359,6 +1359,27 @@ def normalizar_folio(texto):
     return limpio_sin_espacios.upper()
 
 
+def tokenizar_texto(texto):
+    """Divide texto normalizado en tokens alfanuméricos (sin importar el orden)."""
+    texto_norm = normalizar(str(texto or "").strip())
+    return [tok for tok in re.findall(r"[a-z0-9]+", texto_norm) if tok]
+
+
+def coincide_nombre_cliente(keyword_normalizado, nombre_normalizado):
+    """Compara nombre por subcadena exacta o por coincidencia de tokens en cualquier orden."""
+    if not keyword_normalizado or not nombre_normalizado:
+        return False
+    if keyword_normalizado in nombre_normalizado:
+        return True
+
+    tokens_keyword = tokenizar_texto(keyword_normalizado)
+    if not tokens_keyword:
+        return False
+
+    tokens_nombre = set(tokenizar_texto(nombre_normalizado))
+    return all(token in tokens_nombre for token in tokens_keyword)
+
+
 def obtener_fecha_modificacion(row):
     """Devuelve la fecha de modificación sin importar el nombre exacto de la columna."""
     return str(row.get("Fecha_Modificacion") or row.get("fecha_modificacion") or "").strip()
@@ -4294,7 +4315,10 @@ with tab_map["buscar"]:
                 nombre_normalizado = normalizar(nombre) if nombre else ""
                 folio_normalizado = normalizar_folio(folio)
 
-                coincide_cliente = bool(nombre) and keyword_cliente_normalizado in nombre_normalizado
+                coincide_cliente = bool(nombre) and coincide_nombre_cliente(
+                    keyword_cliente_normalizado,
+                    nombre_normalizado,
+                )
                 coincide_folio = bool(folio_normalizado) and keyword_folio_normalizado == folio_normalizado
 
                 if not coincide_cliente and not coincide_folio:
@@ -4367,7 +4391,10 @@ with tab_map["buscar"]:
                 nombre_normalizado = normalizar(nombre) if nombre else ""
                 folio_normalizado = normalizar_folio(folio)
 
-                coincide_cliente = bool(nombre) and keyword_cliente_normalizado in nombre_normalizado
+                coincide_cliente = bool(nombre) and coincide_nombre_cliente(
+                    keyword_cliente_normalizado,
+                    nombre_normalizado,
+                )
                 coincide_folio = bool(folio_normalizado) and keyword_folio_normalizado == folio_normalizado
 
                 if not coincide_cliente and not coincide_folio:
