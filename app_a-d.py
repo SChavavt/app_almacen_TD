@@ -429,19 +429,32 @@ _EXCLUDED_TURNOS_STATUS_VIEW = {
     "Recoge en Aula",
 }
 
+_EXCLUDED_TIPO_ENVIO_STATUS_VIEW = {
+    "🏙️ Pedidos CDMX",
+    "Pedidos CDMX",
+}
+
 
 def _exclude_turnos_from_status_view(df: pd.DataFrame) -> pd.DataFrame:
-    """Exclude specific turnos from status views and metrics."""
+    """Exclude turnos/tipos de envío específicos de vistas de estado y métricas."""
 
-    if df is None or df.empty or "Turno" not in df.columns:
+    if df is None or df.empty:
         return df
 
-    turno_series = df["Turno"].astype(str).str.strip()
-    mask_excluded_turno = turno_series.isin(_EXCLUDED_TURNOS_STATUS_VIEW)
-    if not mask_excluded_turno.any():
+    mask_excluded = pd.Series(False, index=df.index)
+
+    if "Turno" in df.columns:
+        turno_series = df["Turno"].astype(str).str.strip()
+        mask_excluded |= turno_series.isin(_EXCLUDED_TURNOS_STATUS_VIEW)
+
+    if "Tipo_Envio" in df.columns:
+        tipo_envio_series = df["Tipo_Envio"].astype(str).str.strip()
+        mask_excluded |= tipo_envio_series.isin(_EXCLUDED_TIPO_ENVIO_STATUS_VIEW)
+
+    if not mask_excluded.any():
         return df
 
-    return df.loc[~mask_excluded_turno].copy()
+    return df.loc[~mask_excluded].copy()
 
 
 def _build_turno_options_for_local_change(origen_tab: str) -> list[str]:
