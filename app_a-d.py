@@ -5969,7 +5969,8 @@ if df_main is not None:
         with subtabs_local[2]: # 📦 En Bodega
             pedidos_b_display = df_pendientes_proceso_demorado[
                 (df_pendientes_proceso_demorado["Tipo_Envio"] == "📍 Pedido Local") &
-                (df_pendientes_proceso_demorado["Turno"] == "📦 Pasa a Bodega")
+                (df_pendientes_proceso_demorado["Turno"] == "📦 Pasa a Bodega") &
+                (df_pendientes_proceso_demorado["Estado"].isin(estados_visibles))
             ].copy()
             if not pedidos_b_display.empty:
                 pedidos_b_display = ordenar_pedidos_custom(pedidos_b_display)
