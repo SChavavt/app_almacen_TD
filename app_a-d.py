@@ -3693,9 +3693,6 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
                 )
 
         if es_local_bodega:
-            st.markdown("##### 💳 Estado de pago")
-            st.info(f"Estado actual: **{pago_badge}**")
-
             if not pago_confirmado:
                 pago_widget_suffix = f"{row['ID_Pedido']}_{origen_tab}"
                 upload_comp_key = f"uploader_comprobante_{pago_widget_suffix}"
