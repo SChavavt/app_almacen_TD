@@ -6536,7 +6536,13 @@ if df_main is not None:
     
                             # Localiza la fila en 'casos_especiales'
                             gsheet_row_idx = None
-                            if "ID_Pedido" in df_casos.columns and idp:
+                            raw_row_idx = row.get("_gsheet_row_index", row.get("gsheet_row_index"))
+                            try:
+                                if raw_row_idx is not None and not pd.isna(raw_row_idx):
+                                    gsheet_row_idx = int(float(raw_row_idx))
+                            except Exception:
+                                gsheet_row_idx = None
+                            if gsheet_row_idx is None and "ID_Pedido" in df_casos.columns and idp:
                                 matches = df_casos.index[df_casos["ID_Pedido"].astype(str).str.strip() == idp]
                                 if len(matches) > 0:
                                     gsheet_row_idx = int(matches[0]) + 2
@@ -6752,7 +6758,13 @@ if df_main is not None:
 
                         # Localiza la fila en 'casos_especiales'
                         gsheet_row_idx = None
-                        if "ID_Pedido" in df_casos.columns and idp:
+                        raw_row_idx = row.get("_gsheet_row_index", row.get("gsheet_row_index"))
+                        try:
+                            if raw_row_idx is not None and not pd.isna(raw_row_idx):
+                                gsheet_row_idx = int(float(raw_row_idx))
+                        except Exception:
+                            gsheet_row_idx = None
+                        if gsheet_row_idx is None and "ID_Pedido" in df_casos.columns and idp:
                             matches = df_casos.index[df_casos["ID_Pedido"].astype(str).str.strip() == idp]
                             if len(matches) > 0:
                                 gsheet_row_idx = int(matches[0]) + 2
