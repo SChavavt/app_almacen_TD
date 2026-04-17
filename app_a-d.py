@@ -3317,6 +3317,10 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
 
         es_local_no_entregado = es_pedido_local_no_entregado(row)
         tipo_envio_actual = row.get("Tipo_Envio")
+        es_tab_historial_completados = (
+            str(current_main_tab_label).strip() == "✅ Historial Completados"
+            or str(origen_tab).strip() == "Historial"
+        )
 
         # --- Cambiar Fecha (y turno solo para locales) ---
         puede_cambiar_fecha = (
@@ -3325,6 +3329,7 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
                 row['Estado'] not in ["🟢 Completado", "✅ Viajó"]
                 or es_local_no_entregado
             )
+            and not es_tab_historial_completados
         )
         permite_cambiar_turno_local = tipo_envio_actual == "📍 Pedido Local"
         texto_checkbox_cambio = (
