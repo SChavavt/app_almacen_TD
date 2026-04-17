@@ -142,6 +142,7 @@ VENDEDOR_CREDENTIALS = {
     "PAULINA57": "PAULINA TREJO",
     "RUBEN67": "RUBEN",
     "ROBERTO51": "DISTRIBUCION Y UNIVERSIDADES",
+    "SINAI": "SINAI",
 }
 
 st.set_page_config(page_title="Panel de Almacén Integrado", layout="wide")
@@ -4106,17 +4107,14 @@ if "show_grouped_panel_casos" not in globals():
 df_all = load_data_from_gsheets()
 
 # Tabs principales
-tab_labels = [
-    "📈 Dashboard",
-    "🧠 Asistente TD",
-    "⚙️ Auto Local",
-    "🚚 Auto Foráneo",
-    "🧑‍🔧 Surtidores",
+TAB_DEFINITIONS = [
+    ("dashboard", "📈 Dashboard"),
+    ("assistant", "🧠 Asistente TD"),
+    ("auto_local", "⚙️ Auto Local"),
+    ("auto_foraneo", "🚚 Auto Foráneo"),
+    ("surtidores", "🧑‍🔧 Surtidores"),
 ]
 
-# ---------------------------
-# Persistencia de tab activa (para autorefresh)
-# ---------------------------
 init_login_state()
 
 if not get_logged_user():
@@ -4125,22 +4123,32 @@ if not get_logged_user():
         st.session_state.auth_user = usuario_qp
         st.session_state.auth_vendor = VENDEDOR_CREDENTIALS[usuario_qp]
 
+logged_user = get_logged_user().upper()
+if logged_user == "SINAI":
+    visible_tab_keys = ["auto_foraneo", "auto_local", "assistant"]
+else:
+    visible_tab_keys = [tab_key for tab_key, _ in TAB_DEFINITIONS]
+
+visible_tabs = [(tab_key, tab_label) for tab_key, tab_label in TAB_DEFINITIONS if tab_key in visible_tab_keys]
+tab_labels = [tab_label for _, tab_label in visible_tabs]
+tab_options = list(range(len(visible_tabs)))
+
 tab_qp = get_query_param_value("tab")
 if "active_main_tab" not in st.session_state:
     st.session_state.active_main_tab = 0
-elif st.session_state.active_main_tab >= len(tab_labels):
+elif st.session_state.active_main_tab >= len(tab_options):
     st.session_state.active_main_tab = 0
 radio_tab_state = st.session_state.get("_radio_main_tab")
-if isinstance(radio_tab_state, int) and 0 <= radio_tab_state < len(tab_labels):
+if isinstance(radio_tab_state, int) and 0 <= radio_tab_state < len(tab_options):
     st.session_state.active_main_tab = radio_tab_state
 elif tab_qp.isdigit():
     tab_index = int(tab_qp)
-    if 0 <= tab_index < len(tab_labels):
+    if 0 <= tab_index < len(tab_options):
         st.session_state.active_main_tab = tab_index
 
 selected_tab = st.radio(
     "Vista",
-    options=list(range(len(tab_labels))),
+    options=tab_options,
     format_func=lambda i: tab_labels[i],
     index=st.session_state.active_main_tab,
     horizontal=True,
@@ -4148,9 +4156,10 @@ selected_tab = st.radio(
     key="_radio_main_tab",
 )
 st.session_state.active_main_tab = selected_tab
+selected_tab_key = visible_tabs[selected_tab][0]
 
 # helper para "simular" tabs
-tabs = [None] * len(tab_labels)
+tabs = [None] * len(visible_tabs)
 
 logged_vendor = get_logged_vendor()
 logged_user = get_logged_user()
@@ -4201,7 +4210,7 @@ if not logged_vendor:
 # Entradas compartidas para numeración única entre Auto Local y Auto Foráneo
 auto_local_entries = []
 auto_foraneo_entries = []
-if selected_tab in (2, 3, 4):
+if selected_tab_key in {"auto_local", "auto_foraneo", "surtidores"}:
     df_local_auto = get_local_orders(df_all)
     casos_local_auto, _ = get_case_envio_assignments(df_all)
     df_local_auto = drop_local_duplicates_for_cases(df_local_auto, casos_local_auto)
@@ -4238,7 +4247,7 @@ if selected_tab in (2, 3, 4):
 # ---------------------------
 # TAB 1: Asistente interno TD
 # ---------------------------
-if selected_tab == 1:
+if selected_tab_key == "assistant":
     init_td_assistant_state()
 
     st.markdown(
@@ -4396,7 +4405,7 @@ if selected_tab == 1:
 # ---------------------------
 # TAB 1: Auto Local (Casos asignados) — 2 columnas
 # ---------------------------
-if selected_tab == 2:
+if selected_tab_key == "auto_local":
     st_autorefresh(interval=60000, key="auto_refresh_local_casos")
 
     today_local = datetime.now(TZ).date()
@@ -4458,7 +4467,7 @@ if selected_tab == 2:
 # ---------------------------
 # TAB 2: Auto Foráneo (Casos asignados) — 2 columnas
 # ---------------------------
-if selected_tab == 3:
+if selected_tab_key == "auto_foraneo":
     st_autorefresh(interval=60000, key="auto_refresh_foraneo_cdmx")
 
     hoy = datetime.now(TZ).date()
@@ -4542,7 +4551,7 @@ if selected_tab == 3:
 # ---------------------------
 # TAB 3: Surtidores (Asignación)
 # ---------------------------
-if selected_tab == 4:
+if selected_tab_key == "surtidores":
 
     st.markdown("### 🧑‍🔧 Asignación de surtidores")
     st.caption("Selecciona pedidos visibles y escribe tu nombre o inicial para asignarlos.")
@@ -4684,7 +4693,7 @@ if selected_tab == 4:
             st.info("Sin asignaciones registradas.")
 
 
-if selected_tab == 0:
+if selected_tab_key == "dashboard":
     if st.session_state.pop("_pending_full_refresh", False):
         refresh_dashboard_sources()
 
