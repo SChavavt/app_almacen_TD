@@ -457,11 +457,24 @@ def _exclude_turnos_from_status_view(df: pd.DataFrame) -> pd.DataFrame:
     return df.loc[~mask_excluded].copy()
 
 
-def _build_turno_options_for_local_change(origen_tab: str) -> list[str]:
-    """Opciones de reclasificación de turno por subtab local (incluye opción vacía)."""
+def _build_turno_options_for_local_change(
+    origen_tab: str, current_turno: str = ""
+) -> list[str]:
+    """Opciones de turno por subtab local, priorizando el turno actual."""
 
-    opciones = _LOCAL_TURNOS_CAMBIO_POR_SUBTAB.get(str(origen_tab).strip(), [])
-    return ["", *opciones]
+    origen_normalizado = str(origen_tab).strip()
+    turno_actual = str(current_turno).strip()
+
+    opciones_base = _LOCAL_TURNOS_CAMBIO_POR_SUBTAB.get(origen_normalizado, [])
+    opciones = [turno_actual, *opciones_base] if turno_actual else list(opciones_base)
+
+    # Elimina vacíos y duplicados conservando el orden.
+    opciones_limpias = []
+    for opcion in opciones:
+        if opcion and opcion not in opciones_limpias:
+            opciones_limpias.append(opcion)
+
+    return opciones_limpias
 
 
 def _clamp_tab_index(index: Any, options: Sequence[Any]) -> int:
@@ -3369,7 +3382,15 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
                 )
                 col_current_info_date.info(f"**Fecha actual:** {fecha_mostrar}")
 
-                current_turno = row.get("Turno", "")
+                current_turno = str(row.get("Turno", "")).strip()
+                turno_options = _build_turno_options_for_local_change(
+                    origen_tab, current_turno
+                )
+                if not current_turno and turno_options:
+                    current_turno = turno_options[0]
+                puede_editar_turno = (
+                    tipo_envio_actual == "📍 Pedido Local" and len(turno_options) > 1
+                )
                 if tipo_envio_actual == "📍 Pedido Local":
                     col_current_info_turno.info(f"**Turno actual:** {current_turno}")
                 else:
@@ -3411,8 +3432,7 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
                             key=fecha_key,
                         )
 
-                        turno_options = _build_turno_options_for_local_change(origen_tab)
-                        if tipo_envio_actual == "📍 Pedido Local" and len(turno_options) > 1:
+                        if puede_editar_turno:
                             if st.session_state[turno_key] not in turno_options:
                                 st.session_state[turno_key] = turno_options[0]
 
@@ -3444,9 +3464,7 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
                             }
                         )
 
-                    if tipo_envio_actual == "📍 Pedido Local" and len(
-                        _build_turno_options_for_local_change(origen_tab)
-                    ) > 1:
+                    if puede_editar_turno:
                         nuevo_turno = st.session_state[turno_key]
                         if nuevo_turno != current_turno:
                             col_idx = headers.index("Turno") + 1
@@ -3481,45 +3499,6 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
                                 and tipo_envio_actual == "📍 Pedido Local"
                             ):
                                 df.at[idx, "Turno"] = st.session_state[turno_key]
-
-                            # Guardrail: este flujo solo debe cambiar Fecha_Entrega/Turno.
-                            # Si por automatización externa el Estado cambia, lo restauramos.
-                            if "Estado" in headers and estado_antes_cambio:
-                                try:
-                                    row_values = get_sheet_row_values_cached(
-                                        worksheet, int(gsheet_row_index)
-                                    )
-                                    estado_idx = headers.index("Estado")
-                                    estado_despues_cambio = (
-                                        str(row_values[estado_idx]).strip()
-                                        if estado_idx < len(row_values)
-                                        else ""
-                                    )
-                                except Exception:
-                                    estado_despues_cambio = ""
-
-                                if (
-                                    estado_despues_cambio
-                                    and estado_despues_cambio != estado_antes_cambio
-                                ):
-                                    restaurado = update_gsheet_cell(
-                                        worksheet,
-                                        headers,
-                                        gsheet_row_index,
-                                        "Estado",
-                                        estado_antes_cambio,
-                                    )
-                                    if restaurado:
-                                        df.at[idx, "Estado"] = estado_antes_cambio
-                                        row["Estado"] = estado_antes_cambio
-                                        st.warning(
-                                            "⚠️ Detectamos un cambio inesperado de Estado al aplicar Fecha/Turno. "
-                                            "Se restauró el Estado original automáticamente."
-                                        )
-                                    else:
-                                        st.error(
-                                            "❌ Se detectó un cambio inesperado de Estado y no se pudo restaurar automáticamente."
-                                        )
 
                             st.toast(
                                 f"📅 Pedido {row['ID_Pedido']} actualizado.",
