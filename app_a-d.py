@@ -6939,11 +6939,12 @@ if df_main is not None:
                 expander_title = f"🔁 {folio or 's/folio'} – {cliente or 's/cliente'} | Estado: {estado} | Estado_Recepcion: {estado_rec}"
     
             with st.expander(expander_title, expanded=st.session_state["expanded_devoluciones"].get(row_key, False)):
-                if is_foraneo_case and numero_foraneo_visible:
-                    st.markdown(f"**🔢 Número foráneo asignado:** `{numero_foraneo_visible}`")
-
                 row_idx_case = row.get("_gsheet_row_index", row.get("gsheet_row_index"))
                 numero_case_actual = _parse_foraneo_number(row.get("Numero_Foraneo", ""))
+                if is_foraneo_case:
+                    if numero_foraneo_visible:
+                        st.markdown(f"**🔢 Número foráneo asignado:** `{numero_foraneo_visible}`")
+
                 if is_foraneo_case:
                     assign_col, info_col = st.columns([1, 2])
                     with assign_col:
@@ -7605,7 +7606,7 @@ if df_main is not None:
             return out
     
         # ====== RECORRER CADA GARANTÍA ======
-        for orden_garantia, (_, row) in enumerate(garantias_display.iterrows(), start=1):
+        for orden_garantia, (idx, row) in enumerate(garantias_display.iterrows(), start=1):
             idp         = str(row.get("ID_Pedido", "")).strip()
             folio       = str(row.get("Folio_Factura", "")).strip()
             cliente     = str(row.get("Cliente", "")).strip()
@@ -7615,12 +7616,24 @@ if df_main is not None:
             area_resp   = str(row.get("Area_Responsable", "")).strip()
             numero_serie = str(row.get("Numero_Serie", "")).strip()
             fecha_compra = str(row.get("Fecha_Compra", "")).strip()
-            row_key     = (idp or f"{folio}_{cliente}").replace(" ", "_")
+            row_key_base = (idp or f"{folio}_{cliente}").replace(" ", "_") or "sin_id"
+            row_key     = f"{row_key_base}_{idx}"
+
+            tipo_envio_actual = str(row.get("Tipo_Envio_Original", "")).strip()
+            tipo_key   = f"g_tipo_envio_orig_{row_key}"
+            TIPO_OPTS  = ["📍 Pedido Local", "🚚 Pedido Foráneo"]
+
+            if tipo_key not in st.session_state:
+                if tipo_envio_actual in TIPO_OPTS:
+                    st.session_state[tipo_key] = tipo_envio_actual
+                else:
+                    low = tipo_envio_actual.lower()
+                    st.session_state[tipo_key] = "📍 Pedido Local" if "local" in low else "🚚 Pedido Foráneo"
 
             tipo_case = _normalize_text_for_matching(
                 f"{row.get('Tipo_Envio', '')} {row.get('Tipo_Envio_Original', '')}"
             )
-            is_foraneo_case = "foraneo" in tipo_case
+            is_foraneo_case = ("foraneo" in tipo_case) or (st.session_state.get(tipo_key) == "🚚 Pedido Foráneo")
             numero_foraneo_visible = (
                 resolve_case_foraneo_display_number(row, orden_garantia)
                 if is_foraneo_case
@@ -7637,11 +7650,12 @@ if df_main is not None:
             # Título del expander
             expander_title = f"🛠 {folio or 's/folio'} – {cliente or 's/cliente'} | Estado: {estado} | Estado_Recepcion: {estado_rec}"
             with st.expander(expander_title, expanded=st.session_state["expanded_garantias"].get(row_key, False)):
-                if is_foraneo_case and numero_foraneo_visible:
-                    st.markdown(f"**🔢 Número foráneo asignado:** `{numero_foraneo_visible}`")
-
                 row_idx_case = row.get("_gsheet_row_index", row.get("gsheet_row_index"))
                 numero_case_actual = _parse_foraneo_number(row.get("Numero_Foraneo", ""))
+                if is_foraneo_case:
+                    if numero_case_actual is not None:
+                        st.markdown(f"**🔢 Número foráneo asignado:** `{numero_case_actual:02d}`")
+
                 if is_foraneo_case:
                     assign_col, info_col = st.columns([1, 2])
                     with assign_col:
@@ -7730,27 +7744,17 @@ if df_main is not None:
                 st.markdown("#### 🚦 Clasificar envío y fecha")
     
                 # Valores actuales
-                tipo_envio_actual = str(row.get("Tipo_Envio_Original", "")).strip()
                 turno_actual      = str(row.get("Turno", "")).strip()
                 fecha_actual_str  = str(row.get("Fecha_Entrega", "")).strip()
                 fecha_actual_dt   = pd.to_datetime(fecha_actual_str, errors='coerce') if fecha_actual_str else None
                 today_date        = (datetime.now(_TZ).date() if _TZ else datetime.now().date())
     
-                tipo_key   = f"g_tipo_envio_orig_{row_key}"
                 turno_key  = f"g_turno_{row_key}"
                 fecha_key  = f"g_fecha_{row_key}"
     
-                TIPO_OPTS  = ["📍 Pedido Local", "🚚 Pedido Foráneo"]
                 TURNO_OPTS = ["🌤️ Local Día", "🌵 Saltillo", "📦 Pasa a Bodega"]
     
                 # Inicialización en session_state
-                if tipo_key not in st.session_state:
-                    if tipo_envio_actual in TIPO_OPTS:
-                        st.session_state[tipo_key] = tipo_envio_actual
-                    else:
-                        low = tipo_envio_actual.lower()
-                        st.session_state[tipo_key] = "📍 Pedido Local" if "local" in low else "🚚 Pedido Foráneo"
-    
                 if turno_key not in st.session_state:
                     st.session_state[turno_key] = turno_actual if turno_actual in TURNO_OPTS else TURNO_OPTS[0]
     
