@@ -848,7 +848,12 @@ def _parse_material_devuelto_table(material_text: str) -> Optional[pd.DataFrame]
     if not raw:
         return None
 
-    lines = [line.strip() for line in raw.splitlines() if line.strip()]
+    placeholder_tokens = {"", "empty", "none", "nan", "null", "n/a", "na"}
+    lines = [
+        line.strip()
+        for line in raw.splitlines()
+        if line.strip() and line.strip().lower() not in placeholder_tokens
+    ]
     if len(lines) < 2:
         return None
 
@@ -869,6 +874,8 @@ def _parse_material_devuelto_table(material_text: str) -> Optional[pd.DataFrame]
             parts.extend([""] * (len(headers) - len(parts)))
         elif len(parts) > len(headers):
             parts = parts[: len(headers)]
+        if all((str(cell).strip().lower() in placeholder_tokens) for cell in parts):
+            continue
         rows.append(parts)
 
     if not rows:
@@ -879,7 +886,8 @@ def _parse_material_devuelto_table(material_text: str) -> Optional[pd.DataFrame]
 
 def _render_material_devuelto(material_text: str, empty_text: str = "N/A") -> None:
     material = str(material_text or "").strip()
-    if not material:
+    placeholder_tokens = {"", "empty", "none", "nan", "null", "n/a", "na", "[]", "{}"}
+    if not material or material.lower() in placeholder_tokens:
         st.info(empty_text)
         return
 
