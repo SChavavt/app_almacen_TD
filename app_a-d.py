@@ -1,7 +1,6 @@
 
 import time
 import base64
-from io import BytesIO
 import streamlit as st
 import pandas as pd
 from datetime import datetime, timedelta
@@ -37,19 +36,6 @@ REPORTE_GUIAS_SHEET_NAME = "REPORTE GUÍAS"
 REPORTE_GUIAS_ROW_START = 13000
 REPORTE_GUIAS_GROWTH_ROWS = 1000
 REPORTE_GUIAS_LOOKBACK_WINDOW = 1000
-REPORTE_ALMACEN_SHEET_NAME = "Hoja_Ruta"
-REPORTE_ALMACEN_COLUMNS = [
-    "N.",
-    "#FACTURA",
-    "NOMBRE DE LA FACTURA Ó COBRO",
-    "MUNICIPIO",
-    "HORARIO",
-    "CANTIDAD",
-    "FORMA DE PAGO",
-    "VENDEDOR",
-    "NOMBRE DE QUIEN RECIBE",
-    "FIRMA DE RECIBIDO",
-]
 TD_LOGO_PATH = Path("assets/td_logo.png")
 TD_LOGO_ALLOWED_TYPES = ["png", "jpg", "jpeg", "webp"]
 TD_LOGO_ALLOWED_EXTENSIONS = tuple(f".{ext}" for ext in TD_LOGO_ALLOWED_TYPES)
@@ -223,300 +209,6 @@ def escribir_en_reporte_guias(cliente: Any, vendedor: Any, tipo_envio: Any) -> b
         msg = f"Error al escribir en REPORTE GUÍAS: {e}"
         st.error(f"❌ {msg}")
         return False
-
-
-def _normalize_plain_text(value: Any) -> str:
-    txt = str(value or "").strip()
-    txt = " ".join(txt.split())
-    return txt
-
-
-def _remove_accents(value: str) -> str:
-    return "".join(
-        ch for ch in unicodedata.normalize("NFD", str(value or "")) if unicodedata.category(ch) != "Mn"
-    )
-
-
-def _sheet_label_date(fecha: datetime.date) -> str:
-    weekday_names = {
-        0: "LUNES",
-        1: "MARTES",
-        2: "MIÉRCOLES",
-        3: "JUEVES",
-        4: "VIERNES",
-        5: "SÁBADO",
-        6: "DOMINGO",
-    }
-    month_names = {
-        1: "ENERO",
-        2: "FEBRERO",
-        3: "MARZO",
-        4: "ABRIL",
-        5: "MAYO",
-        6: "JUNIO",
-        7: "JULIO",
-        8: "AGOSTO",
-        9: "SEPTIEMBRE",
-        10: "OCTUBRE",
-        11: "NOVIEMBRE",
-        12: "DICIEMBRE",
-    }
-    weekday = weekday_names.get(fecha.weekday(), "")
-    month = month_names.get(fecha.month, "")
-    return f"|{weekday} {fecha.day:02d} DE {month}| (MAÑANA-TARDE)"
-
-
-def _parse_fecha_entrega_local(fecha_raw: Any) -> Optional[datetime.date]:
-    fecha = pd.to_datetime(fecha_raw, errors="coerce", dayfirst=True)
-    if pd.isna(fecha):
-        return None
-    return fecha.date()
-
-
-def _parse_section_title_date(title: str) -> Optional[datetime.date]:
-    normalized = _remove_accents(str(title or "").lower()).replace("|", " ")
-    match = re.search(r"(\d{1,2})\s+de\s+([a-z]+)", normalized)
-    if not match:
-        return None
-    day = int(match.group(1))
-    month_raw = match.group(2)
-    months = {
-        "enero": 1,
-        "febrero": 2,
-        "marzo": 3,
-        "abril": 4,
-        "mayo": 5,
-        "junio": 6,
-        "julio": 7,
-        "agosto": 8,
-        "septiembre": 9,
-        "setiembre": 9,
-        "octubre": 10,
-        "noviembre": 11,
-        "diciembre": 12,
-    }
-    month = months.get(month_raw)
-    if not month:
-        return None
-    year = mx_today().year
-    try:
-        return datetime(year, month, day).date()
-    except Exception:
-        return None
-
-
-def _get_route_excel_key_from_row(row: Any) -> str:
-    rutas = _filter_out_original_route_when_modified(_normalize_urls(row.get("Hoja_Ruta_Mensajero", "")))
-    if not rutas:
-        return ""
-    for raw in rutas:
-        key = extract_s3_key(raw)
-        if key:
-            return key
-    return ""
-
-
-def _extract_hoja_ruta_fields_from_s3(s3_client_param: Any, row: Any) -> dict[str, str]:
-    out = {"municipio": "", "horario": "", "cantidad": "", "recibe": ""}
-    key = _get_route_excel_key_from_row(row)
-    if not key:
-        return out
-    try:
-        obj = s3_client_param.get_object(Bucket=S3_BUCKET_NAME, Key=key)
-        payload = obj["Body"].read()
-        raw_df = pd.read_excel(BytesIO(payload), header=None, dtype=str)
-    except Exception:
-        return out
-
-    df = raw_df.fillna("").astype(str)
-
-    def find_value(label: str) -> str:
-        target = _remove_accents(label).upper().replace(":", "").strip()
-        for r in range(df.shape[0]):
-            for c in range(df.shape[1]):
-                current = _remove_accents(df.iat[r, c]).upper().replace(":", "").strip()
-                if current == target:
-                    for cc in range(c + 1, df.shape[1]):
-                        val = _normalize_plain_text(df.iat[r, cc])
-                        if val:
-                            return val
-        return ""
-
-    out["municipio"] = find_value("MUNICIPIO")
-    out["horario"] = find_value("HORA DE ENTREGA")
-    out["cantidad"] = find_value("GRAN TOTAL A COB")
-    out["recibe"] = find_value("RECIBE")
-    return out
-
-
-def _hoja_ruta_get_all_values(ws: Any) -> list[list[str]]:
-    if hasattr(ws, "get_all_values"):
-        return ws.get_all_values()
-    if hasattr(ws, "get_values"):
-        return ws.get_values()
-    if hasattr(ws, "get_all_records"):
-        records = ws.get_all_records()
-        if not records:
-            return []
-        headers = list(records[0].keys())
-        rows = [[str(rec.get(h, "")) for h in headers] for rec in records]
-        return [headers] + rows
-    return []
-
-
-def _read_hoja_ruta_sections(ws: Any) -> dict[datetime.date, list[dict[str, str]]]:
-    values = _hoja_ruta_get_all_values(ws)
-    sections: dict[datetime.date, list[dict[str, str]]] = {}
-    i = 0
-    while i < len(values):
-        row = values[i] if i < len(values) else []
-        joined = " ".join(str(x or "") for x in row)
-        if "|" not in joined:
-            i += 1
-            continue
-
-        section_date = _parse_section_title_date(joined)
-        if not section_date:
-            i += 1
-            continue
-
-        header_idx = i + 1
-        while header_idx < len(values):
-            hdr = values[header_idx] if header_idx < len(values) else []
-            h0 = _normalize_plain_text(hdr[0] if len(hdr) >= 1 else "").upper()
-            h1 = _normalize_plain_text(hdr[1] if len(hdr) >= 2 else "").upper()
-            if h0 == "N." and "#FACTURA" in h1:
-                break
-            header_idx += 1
-
-        if header_idx >= len(values):
-            i += 1
-            continue
-
-        entries: list[dict[str, str]] = []
-        data_idx = header_idx + 1
-        while data_idx < len(values):
-            data_row = values[data_idx]
-            row_text = " ".join(str(x or "").strip() for x in data_row)
-            if "|" in row_text:
-                break
-            if not any(str(x or "").strip() for x in data_row):
-                # Una fila vacía separa secciones.
-                break
-
-            entries.append(
-                {
-                    "factura": str(data_row[1]).strip() if len(data_row) > 1 else "",
-                    "nombre_factura": str(data_row[2]).strip() if len(data_row) > 2 else "",
-                    "municipio": str(data_row[3]).strip() if len(data_row) > 3 else "",
-                    "horario": str(data_row[4]).strip() if len(data_row) > 4 else "",
-                    "cantidad": str(data_row[5]).strip() if len(data_row) > 5 else "",
-                    "forma_pago": str(data_row[6]).strip() if len(data_row) > 6 else "",
-                    "vendedor": str(data_row[7]).strip() if len(data_row) > 7 else "",
-                    "recibe": str(data_row[8]).strip() if len(data_row) > 8 else "",
-                    "firma": str(data_row[9]).strip() if len(data_row) > 9 else "",
-                }
-            )
-            data_idx += 1
-
-        if entries:
-            sections.setdefault(section_date, []).extend(entries)
-        i = max(i + 1, data_idx + 1)
-    return sections
-
-
-def _render_hoja_ruta_sections_matrix(sections: dict[datetime.date, list[dict[str, str]]]) -> list[list[str]]:
-    matrix: list[list[str]] = []
-    for section_date in sorted(sections.keys(), reverse=True):
-        entries = sections[section_date]
-        matrix.append(["", "", _sheet_label_date(section_date), "", "", "", "", "", "", ""])
-        matrix.append([""] * 10)
-        matrix.append(REPORTE_ALMACEN_COLUMNS.copy())
-        for idx, entry in enumerate(entries, start=1):
-            matrix.append(
-                [
-                    str(idx),
-                    entry.get("factura", ""),
-                    entry.get("nombre_factura", ""),
-                    entry.get("municipio", ""),
-                    entry.get("horario", ""),
-                    entry.get("cantidad", ""),
-                    entry.get("forma_pago", ""),
-                    entry.get("vendedor", ""),
-                    entry.get("recibe", ""),
-                    entry.get("firma", ""),
-                ]
-            )
-        matrix.append([""] * 10)
-    return matrix
-
-
-def _worksheet_update_range(ws: Any, a1_range: str, values: list[list[Any]]) -> None:
-    if hasattr(ws, "update"):
-        try:
-            ws.update(a1_range, values)
-            return
-        except TypeError:
-            ws.update(values, a1_range)
-            return
-    raise AttributeError("La hoja destino no soporta update().")
-
-
-def _append_local_dia_entry_to_hoja_ruta(row: Any, s3_client_param: Any) -> bool:
-    fecha_entrega = _parse_fecha_entrega_local(row.get("Fecha_Entrega", ""))
-    if not fecha_entrega:
-        st.warning("⚠️ No se pudo enviar a Hoja_Ruta: Fecha_Entrega inválida.")
-        return False
-
-    reportes_almacen_id = str(
-        st.secrets.get("gsheets", {}).get(
-            "reportes_almacen_sheet_id",
-            st.secrets.get("gsheets", {}).get("reportes_sheet_id", ""),
-        )
-    ).strip()
-    if not reportes_almacen_id:
-        st.error("❌ Falta configurar gsheets.reportes_almacen_sheet_id en secrets.")
-        return False
-
-    extracted = _extract_hoja_ruta_fields_from_s3(s3_client_param, row)
-    entry = {
-        "factura": _normalize_plain_text(row.get("Folio_Factura", "")),
-        "nombre_factura": _normalize_plain_text(row.get("Cliente", "")),
-        "municipio": _normalize_plain_text(extracted.get("municipio", "")),
-        "horario": _normalize_plain_text(extracted.get("horario", "")),
-        "cantidad": _normalize_plain_text(extracted.get("cantidad", "")),
-        "forma_pago": _normalize_plain_text(row.get("Forma_Pago_Comprobante", "")),
-        "vendedor": _normalize_plain_text(row.get("Vendedor_Registro", "")),
-        "recibe": _normalize_plain_text(extracted.get("recibe", "")),
-        "firma": "",
-    }
-
-    try:
-        client = get_gspread_client(_credentials_json_dict=GSHEETS_CREDENTIALS)
-        ws = client.open_by_key(reportes_almacen_id).worksheet(REPORTE_ALMACEN_SHEET_NAME)
-    except Exception as exc:
-        st.error(f"❌ No se pudo abrir Reportes_Almacen/Hoja_Ruta: {exc}")
-        return False
-
-    sections = _read_hoja_ruta_sections(ws)
-    bucket = sections.setdefault(fecha_entrega, [])
-    exists = any(
-        _normalize_plain_text(item.get("factura", "")) == entry["factura"]
-        and _normalize_plain_text(item.get("nombre_factura", "")) == entry["nombre_factura"]
-        for item in bucket
-    )
-    if not exists:
-        bucket.append(entry)
-
-    matrix = _render_hoja_ruta_sections_matrix(sections)
-    if not matrix:
-        return True
-
-    max_rows = max(len(matrix), int(getattr(ws, "row_count", 0) or 0))
-    blank_block = [[""] * 10 for _ in range(max_rows)]
-    _worksheet_update_range(ws, f"A1:J{max_rows}", blank_block)
-    _worksheet_update_range(ws, f"A1:J{len(matrix)}", matrix)
-    return True
 
 
 def _ensure_visual_state_defaults():
@@ -3478,7 +3170,6 @@ def mostrar_pedido_detalle(
     headers,
     gsheet_row_index,
     col_print_btn,
-    s3_client_param,
 ):
     """Procesa el pedido: actualiza estado a 'En Proceso' sin alterar UI."""
 
@@ -3560,11 +3251,6 @@ def mostrar_pedido_detalle(
                             cliente=row.get("Cliente", ""),
                             vendedor=row.get("Vendedor_Registro", ""),
                             tipo_envio=row.get("Tipo_Envio", ""),
-                        )
-                    elif origen_tab == "Local Día":
-                        _append_local_dia_entry_to_hoja_ruta(
-                            row=row,
-                            s3_client_param=s3_client_param,
                         )
 
                     st.toast("✅ Pedido marcado como 🔵 En Proceso", icon="✅")
@@ -3895,7 +3581,6 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
                 headers,
                 gsheet_row_index,
                 col_print_btn,
-                s3_client_param,
             )
         else:
             col_print_btn.write("")
