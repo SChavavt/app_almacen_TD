@@ -917,92 +917,6 @@ def _append_local_dia_entry_to_hoja_ruta(row: Any, s3_client_param: Any, origen_
     return True
 
 
-def _is_pasa_bodega_order(row: Any, origen_tab: Any = "") -> bool:
-    """True cuando el pedido corresponde al flujo de subtab Pasa a Bodega."""
-    turno = str(row.get("Turno", "") or "").strip()
-    origen = str(origen_tab or "").strip().lower()
-    return turno == "📦 Pasa a Bodega" or origen in {"pasa a bodega", "📦 pasa a bodega"}
-
-
-def _upsert_pasa_bodega_report_row(row: Any) -> bool:
-    """
-    Crea/actualiza registro en Reportes_Almacen/Pasa_Bodega.
-
-    Clave de actualización: NUMERO DE FACTURA (Folio_Factura).
-    Se ejecuta al procesar y al completar para mantener ESTADO/FECHA QUE PASO A RECOGER actualizados.
-    """
-    reportes_almacen_id = str(
-        st.secrets.get("gsheets", {}).get(
-            "reportes_almacen_sheet_id",
-            st.secrets.get("gsheets", {}).get("reportes_sheet_id", ""),
-        )
-    ).strip()
-    if not reportes_almacen_id:
-        st.error("❌ Falta configurar gsheets.reportes_almacen_sheet_id en secrets.")
-        return False
-
-    folio_factura = _normalize_plain_text(row.get("Folio_Factura", ""))
-    if not folio_factura:
-        st.warning("⚠️ No se pudo registrar en Pasa_Bodega: Folio_Factura vacío.")
-        return False
-
-    fecha_completado_raw = row.get("Fecha_Completado", "")
-    if isinstance(fecha_completado_raw, pd.Timestamp):
-        fecha_completado = fecha_completado_raw.strftime("%Y-%m-%d %H:%M:%S")
-    else:
-        fecha_completado = _normalize_plain_text(fecha_completado_raw)
-
-    payload = {
-        "FECHA DE FACTURA": _normalize_plain_text(row.get("Fecha_Entrega", "")),
-        "NUMERO DE FACTURA": folio_factura,
-        "NOMBRE DE CLIENTE": _normalize_plain_text(row.get("Cliente", "")),
-        "VENDEDOR": _normalize_plain_text(row.get("Vendedor_Registro", "")),
-        "ESTADO": _normalize_plain_text(row.get("Estado", "")),
-        "FECHA QUE PASO A RECOGER": fecha_completado,
-        "COMENTARIOS": "",
-    }
-
-    try:
-        client = get_gspread_client(_credentials_json_dict=GSHEETS_CREDENTIALS)
-        ws = client.open_by_key(reportes_almacen_id).worksheet("Pasa_Bodega")
-    except Exception as exc:
-        st.error(f"❌ No se pudo abrir Reportes_Almacen/Pasa_Bodega: {exc}")
-        return False
-
-    try:
-        headers = [str(h or "").strip() for h in ws.row_values(1)]
-    except Exception as exc:
-        st.error(f"❌ No se pudieron leer encabezados de Pasa_Bodega: {exc}")
-        return False
-
-    missing = [col for col in payload.keys() if col not in headers]
-    if missing:
-        st.error(f"❌ Faltan columnas en Pasa_Bodega: {', '.join(missing)}")
-        return False
-
-    num_col_idx = headers.index("NUMERO DE FACTURA") + 1
-    target_row = None
-    try:
-        col_values = ws.col_values(num_col_idx)
-        for i, val in enumerate(col_values[1:], start=2):
-            if str(val or "").strip() == folio_factura:
-                target_row = i
-                break
-    except Exception:
-        target_row = None
-
-    row_values = [payload.get(h, "") for h in headers]
-    try:
-        if target_row:
-            ws.update(f"A{target_row}", [row_values], value_input_option="USER_ENTERED")
-        else:
-            ws.append_row(row_values, value_input_option="USER_ENTERED")
-        return True
-    except Exception as exc:
-        st.error(f"❌ No se pudo actualizar Pasa_Bodega: {exc}")
-        return False
-
-
 def _ensure_visual_state_defaults():
     """Ensure session_state has all UI control keys with safe defaults."""
 
@@ -3526,9 +3440,6 @@ def completar_pedido(
         row["Estado"] = "🟢 Completado"
         row["Fecha_Completado"] = now
 
-    if _is_pasa_bodega_order(row, origen_tab):
-        _upsert_pasa_bodega_report_row(row)
-
     st.session_state["expanded_pedidos"][row["ID_Pedido"]] = True
     st.session_state["expanded_attachments"][row["ID_Pedido"]] = True
 
@@ -4060,9 +3971,6 @@ def mostrar_pedido_detalle(
                             s3_client_param=s3_client_param,
                             origen_tab=origen_tab,
                         )
-
-                    if _is_pasa_bodega_order(row, origen_tab):
-                        _upsert_pasa_bodega_report_row(row)
 
                     st.toast("✅ Pedido marcado como 🔵 En Proceso", icon="✅")
 
