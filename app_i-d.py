@@ -2085,11 +2085,11 @@ def filter_entries_on_date(entries, reference_date):
 def keep_local_entries_prioritizing_today_or_overdue(entries, reference_date):
     """
     Para cada turno local:
-    - Si existe al menos un pedido ACTIVO (no completado/cancelado/viajó)
-      sin fecha o con Fecha_Entrega <= reference_date, oculta los futuros.
-    - Si no hay activos de hoy/atrasados (o ya quedaron completados),
-      muestra los futuros.
+    - Muestra solo la fecha más antigua que todavía tenga pedidos activos.
+    - Cuando esa fecha queda completamente terminada, libera la siguiente fecha.
+    - Los pedidos sin fecha se conservan visibles.
     """
+    _ = reference_date
     grouped: dict[str, list] = {}
     for entry in entries:
         turno = normalize_turno_label(entry.get("turno", "")) or "📍 Local (sin turno)"
@@ -2097,37 +2097,42 @@ def keep_local_entries_prioritizing_today_or_overdue(entries, reference_date):
 
     filtered: list[dict] = []
     for _, turno_entries in grouped.items():
-        due_entries: list[dict] = []
-        future_entries: list[dict] = []
-
+        undated_entries: list[dict] = []
+        dated_entries: list[dict] = []
         for entry in turno_entries:
             dt = entry.get("fecha_entrega_dt")
-            is_due_bucket = False
             if dt is None:
-                is_due_bucket = True
-            else:
-                try:
-                    if pd.isna(dt):
-                        is_due_bucket = True
-                except Exception:
-                    is_due_bucket = True
+                undated_entries.append(entry)
+                continue
+            try:
+                if pd.isna(dt):
+                    undated_entries.append(entry)
+                    continue
+            except Exception:
+                undated_entries.append(entry)
+                continue
+            dated_entries.append(entry)
 
-            if not is_due_bucket:
-                delivery_date = pd.to_datetime(dt).date()
-                is_due_bucket = delivery_date <= reference_date
+        active_dates = sorted(
+            {
+                pd.to_datetime(entry.get("fecha_entrega_dt")).date()
+                for entry in dated_entries
+                if not _is_done_estado(entry.get("estado", ""))
+            }
+        )
 
-            if is_due_bucket:
-                due_entries.append(entry)
-            else:
-                future_entries.append(entry)
-
-        has_active_due = any(not _is_done_estado(e.get("estado", "")) for e in due_entries)
-        if has_active_due:
-            filtered.extend(due_entries)
-        elif future_entries:
-            filtered.extend(future_entries)
+        if active_dates:
+            target_date = active_dates[0]
+            filtered.extend(
+                [
+                    entry
+                    for entry in dated_entries
+                    if pd.to_datetime(entry.get("fecha_entrega_dt")).date() == target_date
+                ]
+            )
+            filtered.extend(undated_entries)
         else:
-            filtered.extend(due_entries)
+            filtered.extend(turno_entries)
 
     return filtered
 
@@ -4436,7 +4441,8 @@ if selected_tab_key == "auto_local":
     )
 
     turno_priority = [
-        "🌤️ Local Día",
+        "☀️ Local Mañana",
+        "🌙 Local Tarde",
         "🌵 Saltillo",
         "📦 Pasa a Bodega",
         "📍 Local (sin turno)",
@@ -4444,8 +4450,6 @@ if selected_tab_key == "auto_local":
     grouped: dict[str, list] = {label: [] for label in turno_priority}
     for entry in combined_entries:
         turno = normalize_turno_label(entry.get("turno", ""))
-        if turno in {"☀️ Local Mañana", "🌙 Local Tarde"}:
-            turno = "🌤️ Local Día"
         if turno in {"🌆 Local CDMX", "🎓 Recoge en Aula", "Recoge en Aula"}:
             continue
         if not turno:
