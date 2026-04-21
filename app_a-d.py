@@ -37,7 +37,14 @@ REPORTE_GUIAS_SHEET_NAME = "REPORTE GUÍAS"
 REPORTE_GUIAS_ROW_START = 13000
 REPORTE_GUIAS_GROWTH_ROWS = 1000
 REPORTE_GUIAS_LOOKBACK_WINDOW = 1000
-REPORTE_ALMACEN_SHEET_NAME = "Hoja_Ruta"
+REPORTE_ALMACEN_SHEET_DEFAULT = "Hoja_Ruta_Mañana"
+REPORTE_ALMACEN_SHEET_BY_TURNO = {
+    "local manana": "Hoja_Ruta_Mañana",
+    "manana": "Hoja_Ruta_Mañana",
+    "local tarde": "Hoja_Ruta_Tarde",
+    "tarde": "Hoja_Ruta_Tarde",
+    "saltillo": "Hoja_Ruta_Saltillo",
+}
 REPORTE_ALMACEN_COLUMNS = [
     "N.",
     "#FACTURA",
@@ -233,6 +240,41 @@ def _normalize_plain_text(value: Any) -> str:
     return txt
 
 
+def _normalize_turno_key(value: Any) -> str:
+    txt = _remove_accents(_normalize_plain_text(value)).lower()
+    txt = re.sub(r"[^\w\s]", " ", txt)
+    txt = " ".join(txt.split())
+    return txt
+
+
+def _resolve_hoja_ruta_sheet_name(origen_tab: Any, turno_value: Any) -> str:
+    candidates = [
+        _normalize_turno_key(origen_tab),
+        _normalize_turno_key(turno_value),
+    ]
+    for candidate in candidates:
+        if candidate in REPORTE_ALMACEN_SHEET_BY_TURNO:
+            return REPORTE_ALMACEN_SHEET_BY_TURNO[candidate]
+    return REPORTE_ALMACEN_SHEET_DEFAULT
+
+
+def _is_hoja_ruta_turno(origen_tab: Any, turno_value: Any) -> bool:
+    candidates = [
+        _normalize_turno_key(origen_tab),
+        _normalize_turno_key(turno_value),
+    ]
+    return any(candidate in REPORTE_ALMACEN_SHEET_BY_TURNO for candidate in candidates)
+
+
+def _resolve_turno_label(origen_tab: Any, turno_value: Any) -> str:
+    normalized = _normalize_turno_key(origen_tab) or _normalize_turno_key(turno_value)
+    if "tarde" in normalized:
+        return "LOCAL TARDE"
+    if "saltillo" in normalized:
+        return "SALTILLO"
+    return "LOCAL MAÑANA"
+
+
 def _remove_accents(value: str) -> str:
     return "".join(
         ch for ch in unicodedata.normalize("NFD", str(value or "")) if unicodedata.category(ch) != "Mn"
@@ -266,6 +308,23 @@ def _sheet_label_date(fecha: datetime.date) -> str:
     weekday = weekday_names.get(fecha.weekday(), "")
     month = month_names.get(fecha.month, "")
     return f"|{weekday} {fecha.day:02d} DE {month}| (MAÑANA-TARDE)"
+
+
+def _start_of_week(fecha: datetime.date) -> datetime.date:
+    return fecha - timedelta(days=fecha.weekday())
+
+
+def _build_section_header(origen_tab: Any, row: Any, fecha_entrega: datetime.date) -> tuple[str, str]:
+    """
+    Devuelve (titulo_visible, marker_semana).
+    marker_semana se usa para diferenciar secciones semanales de Saltillo.
+    """
+    turno_label = _resolve_turno_label(origen_tab, row.get("Turno", ""))
+    if turno_label == "SALTILLO":
+        week_start = _start_of_week(fecha_entrega)
+        return "|SALTILLO|", f"WEEK:{week_start.isoformat()}"
+    base = _sheet_label_date(fecha_entrega)
+    return f"{base}\n({turno_label})", ""
 
 
 def _parse_fecha_entrega_local(fecha_raw: Any) -> Optional[datetime.date]:
@@ -308,13 +367,25 @@ def _parse_section_title_date(title: str) -> Optional[datetime.date]:
 
 
 def _get_route_excel_key_from_row(row: Any) -> str:
-    rutas = _filter_out_original_route_when_modified(_normalize_urls(row.get("Hoja_Ruta_Mensajero", "")))
-    if not rutas:
-        return ""
-    for raw in rutas:
-        key = extract_s3_key(raw)
-        if key:
-            return key
+    fuentes = [
+        row.get("Hoja_Ruta_Mensajero", ""),
+        row.get("Adjuntos_Guia", ""),
+    ]
+    for fuente in fuentes:
+        rutas = _filter_out_original_route_when_modified(_normalize_urls(fuente))
+        if not rutas:
+            continue
+        for raw in rutas:
+            key = extract_s3_key(raw)
+            if not key:
+                continue
+            lower_key = key.lower()
+            if lower_key.endswith(".xlsx") or lower_key.endswith(".xls"):
+                return key
+        for raw in rutas:
+            key = extract_s3_key(raw)
+            if key:
+                return key
     return ""
 
 
@@ -496,7 +567,7 @@ def _worksheet_update_range(ws: Any, a1_range: str, values: list[list[Any]]) -> 
 
 def _is_section_title_text(value: Any) -> bool:
     txt = _remove_accents(_normalize_plain_text(value)).upper()
-    return txt.startswith("|") and " DE " in txt and txt.endswith(")")
+    return txt.startswith("|") and (" DE " in txt or "SALTILLO" in txt)
 
 
 def _match_section_title(cell_value: Any, section_title: str) -> bool:
@@ -505,11 +576,16 @@ def _match_section_title(cell_value: Any, section_title: str) -> bool:
     return a == b
 
 
-def _find_section_title_row(values: list[list[str]], section_title: str) -> Optional[int]:
+def _find_section_title_row(values: list[list[str]], section_title: str, week_marker: str = "") -> Optional[int]:
+    marker_expected = _normalize_plain_text(week_marker)
     for idx, row in enumerate(values, start=1):
         for cell in row:
             if _match_section_title(cell, section_title):
-                return idx
+                if not marker_expected:
+                    return idx
+                marker_cell = _normalize_plain_text(row[0] if row else "")
+                if marker_cell == marker_expected:
+                    return idx
     return None
 
 
@@ -535,18 +611,16 @@ def _find_next_data_row_in_section(values: list[list[str]], header_row: int) -> 
     """
     Devuelve (fila_destino, consecutivo_n) dentro de la sección actual.
     """
-    row_idx = header_row + 1
+    data_start = header_row + 1
+    data_end = header_row + HOJA_RUTA_SECTION_DATA_ROWS
     n_counter = 1
-    while row_idx <= len(values):
-        row = values[row_idx - 1]
-        if any(_is_section_title_text(cell) for cell in row):
-            break
+    for row_idx in range(data_start, data_end + 1):
+        row = values[row_idx - 1] if row_idx - 1 < len(values) else []
         used = any(_normalize_plain_text(c) for c in row[:10])
         if not used:
             return row_idx, n_counter
         n_counter += 1
-        row_idx += 1
-    return row_idx, n_counter
+    return data_end + 1, n_counter
 
 
 def _ensure_rows(ws: Any, needed_row: int) -> None:
@@ -591,6 +665,33 @@ def _copy_section_template_block(ws: Any, source_title_row: int, target_title_ro
                     ),
                     "pasteType": "PASTE_NORMAL",
                     "pasteOrientation": "NORMAL",
+                }
+            }
+        ]
+    }
+    try:
+        spreadsheet.batch_update(req)
+        return True
+    except Exception:
+        return False
+
+
+def _insert_blank_rows(ws: Any, start_row: int, count: int) -> bool:
+    spreadsheet = getattr(ws, "spreadsheet", None)
+    sheet_id = getattr(ws, "id", None)
+    if spreadsheet is None or sheet_id is None or not hasattr(spreadsheet, "batch_update"):
+        return False
+    req = {
+        "requests": [
+            {
+                "insertDimension": {
+                    "range": {
+                        "sheetId": int(sheet_id),
+                        "dimension": "ROWS",
+                        "startIndex": max(0, start_row - 1),
+                        "endIndex": max(0, start_row - 1 + count),
+                    },
+                    "inheritFromBefore": False,
                 }
             }
         ]
@@ -703,7 +804,7 @@ def _format_hoja_ruta_data_row(ws: Any, row_number: int) -> None:
     )
 
 
-def _append_local_dia_entry_to_hoja_ruta(row: Any, s3_client_param: Any) -> bool:
+def _append_local_dia_entry_to_hoja_ruta(row: Any, s3_client_param: Any, origen_tab: Any = "") -> bool:
     fecha_entrega = _parse_fecha_entrega_local(row.get("Fecha_Entrega", ""))
     if not fecha_entrega:
         st.warning("⚠️ No se pudo enviar a Hoja_Ruta: Fecha_Entrega inválida.")
@@ -732,27 +833,38 @@ def _append_local_dia_entry_to_hoja_ruta(row: Any, s3_client_param: Any) -> bool
         "firma": "",
     }
 
+    hoja_ruta_sheet_name = _resolve_hoja_ruta_sheet_name(origen_tab, row.get("Turno", ""))
     try:
         client = get_gspread_client(_credentials_json_dict=GSHEETS_CREDENTIALS)
-        ws = client.open_by_key(reportes_almacen_id).worksheet(REPORTE_ALMACEN_SHEET_NAME)
+        ws = client.open_by_key(reportes_almacen_id).worksheet(hoja_ruta_sheet_name)
     except Exception as exc:
-        st.error(f"❌ No se pudo abrir Reportes_Almacen/Hoja_Ruta: {exc}")
+        st.error(f"❌ No se pudo abrir Reportes_Almacen/{hoja_ruta_sheet_name}: {exc}")
         return False
 
-    section_title = _sheet_label_date(fecha_entrega)
+    section_title, week_marker = _build_section_header(origen_tab, row, fecha_entrega)
     values = _hoja_ruta_get_all_values(ws)
-    title_row = _find_section_title_row(values, section_title)
+    title_row = _find_section_title_row(values, section_title, week_marker=week_marker)
 
     if title_row is None:
-        # Crear nueva sección al final usando una sección existente como plantilla.
-        last_used_row = len(values)
-        title_row = max(1, last_used_row + 2)
+        # Crear nueva sección arriba de las existentes (la más reciente queda primero).
+        first_section_row = _find_first_section_title_row(values)
+        title_row = first_section_row if first_section_row is not None else 1
         header_row = title_row + 2
         data_row = header_row + 1
         data_end_row = data_row + HOJA_RUTA_SECTION_DATA_ROWS - 1
-        _ensure_rows(ws, title_row + HOJA_RUTA_SECTION_TOTAL_ROWS + 2)
+        block_rows = HOJA_RUTA_SECTION_TOTAL_ROWS + 1
+        _ensure_rows(ws, len(values) + block_rows + 5)
 
-        template_title_row = _find_first_section_title_row(values)
+        inserted = False
+        if first_section_row is not None:
+            inserted = _insert_blank_rows(ws, start_row=title_row, count=block_rows)
+            if inserted:
+                template_title_row = first_section_row + block_rows
+            else:
+                template_title_row = first_section_row
+        else:
+            template_title_row = None
+
         cloned = False
         if template_title_row is not None:
             cloned = _copy_section_template_block(
@@ -768,9 +880,10 @@ def _append_local_dia_entry_to_hoja_ruta(row: Any, s3_client_param: Any) -> bool
                 _write_row_values(ws, data_row + n_idx, [str(n_idx + 1)], start_col=1)
 
         # Sobrescribir título de la nueva sección y limpiar contenido B:J de filas de captura.
-        _write_row_values(ws, title_row, ["", "", section_title])
+        _write_row_values(ws, title_row, [week_marker, "", section_title])
         for r in range(data_row, data_end_row + 1):
             _write_row_values(ws, r, [""] * 9, start_col=2)
+        _write_row_values(ws, data_end_row + 1, [""] * 10, start_col=1)
 
         target_row = data_row
         n_value = 1
@@ -782,6 +895,9 @@ def _append_local_dia_entry_to_hoja_ruta(row: Any, s3_client_param: Any) -> bool
             _write_row_values(ws, header_row, REPORTE_ALMACEN_COLUMNS)
             values = _hoja_ruta_get_all_values(ws)
         target_row, n_value = _find_next_data_row_in_section(values, header_row)
+        if n_value > HOJA_RUTA_SECTION_DATA_ROWS:
+            st.warning("⚠️ La sección ya está llena (13 filas). No se agregó el pedido para evitar desbordes.")
+            return False
         _ensure_rows(ws, target_row)
 
     row_values = [
@@ -3849,10 +3965,11 @@ def mostrar_pedido_detalle(
                             vendedor=row.get("Vendedor_Registro", ""),
                             tipo_envio=row.get("Tipo_Envio", ""),
                         )
-                    elif origen_tab in ["Local Día", "Mañana", "Tarde"]:
+                    elif _is_hoja_ruta_turno(origen_tab, row.get("Turno", "")):
                         _append_local_dia_entry_to_hoja_ruta(
                             row=row,
                             s3_client_param=s3_client_param,
+                            origen_tab=origen_tab,
                         )
 
                     st.toast("✅ Pedido marcado como 🔵 En Proceso", icon="✅")
