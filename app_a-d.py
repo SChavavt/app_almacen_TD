@@ -1010,9 +1010,9 @@ _LOCAL_SUBTAB_OPTIONS = [
 ]
 _LOCAL_NO_ENTREGADOS_TAB_LABEL = "🚫 No entregados"
 _LOCAL_TURNOS_CAMBIO_POR_SUBTAB = {
-    "Mañana": ["🌵 Saltillo", "📦 Pasa a Bodega"],
-    "Tarde": ["🌵 Saltillo", "📦 Pasa a Bodega"],
-    "Local Día": ["🌵 Saltillo", "📦 Pasa a Bodega"],  # compatibilidad
+    "Mañana": ["☀️ Local Mañana", "🌙 Local Tarde", "🌵 Saltillo", "📦 Pasa a Bodega"],
+    "Tarde": ["🌙 Local Tarde", "☀️ Local Mañana", "🌵 Saltillo", "📦 Pasa a Bodega"],
+    "Local Día": ["☀️ Local Mañana", "🌙 Local Tarde", "🌵 Saltillo", "📦 Pasa a Bodega"],  # compatibilidad
     "Saltillo": ["☀️ Local Mañana", "🌙 Local Tarde", "📦 Pasa a Bodega"],
     "Pasa a Bodega": ["☀️ Local Mañana", "🌙 Local Tarde", "🌵 Saltillo"],
 }
