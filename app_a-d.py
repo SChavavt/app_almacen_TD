@@ -994,21 +994,27 @@ _TAB_LABELS_BY_TIPO = {
 }
 
 _LOCAL_TURNO_TO_SUBTAB = {
-    "☀️ Local Mañana": "🌤️ Local Día",
-    "🌙 Local Tarde": "🌤️ Local Día",
-    "🌤️ Local Día": "🌤️ Local Día",
+    "☀️ Local Mañana": "☀️ Local Mañana",
+    "🌙 Local Tarde": "🌙 Local Tarde",
+    # Compatibilidad con registros históricos.
+    "🌤️ Local Día": "☀️ Local Mañana",
     "🌵 Saltillo": "⛰️ Saltillo",
     "📦 Pasa a Bodega": "📦 En Bodega",
 }
 
-_LOCAL_SUBTAB_OPTIONS = ["🌤️ Local Día", "⛰️ Saltillo", "📦 En Bodega"]
+_LOCAL_SUBTAB_OPTIONS = [
+    "☀️ Local Mañana",
+    "🌙 Local Tarde",
+    "⛰️ Saltillo",
+    "📦 En Bodega",
+]
 _LOCAL_NO_ENTREGADOS_TAB_LABEL = "🚫 No entregados"
 _LOCAL_TURNOS_CAMBIO_POR_SUBTAB = {
     "Mañana": ["🌵 Saltillo", "📦 Pasa a Bodega"],
     "Tarde": ["🌵 Saltillo", "📦 Pasa a Bodega"],
-    "Local Día": ["🌵 Saltillo", "📦 Pasa a Bodega"],
-    "Saltillo": ["🌤️ Local Día", "📦 Pasa a Bodega"],
-    "Pasa a Bodega": ["🌤️ Local Día", "🌵 Saltillo"],
+    "Local Día": ["🌵 Saltillo", "📦 Pasa a Bodega"],  # compatibilidad
+    "Saltillo": ["☀️ Local Mañana", "🌙 Local Tarde", "📦 Pasa a Bodega"],
+    "Pasa a Bodega": ["☀️ Local Mañana", "🌙 Local Tarde", "🌵 Saltillo"],
 }
 
 
@@ -3843,7 +3849,7 @@ def mostrar_pedido_detalle(
                             vendedor=row.get("Vendedor_Registro", ""),
                             tipo_envio=row.get("Tipo_Envio", ""),
                         )
-                    elif origen_tab == "Local Día":
+                    elif origen_tab in ["Local Día", "Mañana", "Tarde"]:
                         _append_local_dia_entry_to_hoja_ruta(
                             row=row,
                             s3_client_param=s3_client_param,
@@ -6248,142 +6254,109 @@ if df_main is not None:
         """
         components.html(local_tabs_script, height=0)
 
-        with subtabs_local[0]: # 🌤️ Local Día
-            pedidos_local_dia_display = df_pendientes_proceso_demorado[
+        def _render_local_turno_subtab(
+            *,
+            turnos_permitidos: list[str],
+            origen_tab: str,
+            titulo_turno: str,
+            query_param_key: str,
+            session_idx_key: str,
+            session_label_key: str,
+            include_legacy_local_dia: bool = False,
+        ) -> None:
+            turnos = list(turnos_permitidos)
+            if include_legacy_local_dia:
+                turnos.append("🌤️ Local Día")
+
+            pedidos_turno_display = df_pendientes_proceso_demorado[
                 (df_pendientes_proceso_demorado["Tipo_Envio"] == "📍 Pedido Local")
-                & (
-                    df_pendientes_proceso_demorado["Turno"].isin(
-                        ["☀️ Local Mañana", "🌙 Local Tarde", "🌤️ Local Día"]
-                    )
-                )
+                & (df_pendientes_proceso_demorado["Turno"].isin(turnos))
             ].copy()
-            if not pedidos_local_dia_display.empty:
-                pedidos_local_dia_display["Fecha_Entrega_dt"] = pd.to_datetime(
-                    pedidos_local_dia_display["Fecha_Entrega"],
-                    errors="coerce",
-                )
-                estado_entrega_local_dia = (
-                    pedidos_local_dia_display.get("Estado_Entrega", pd.Series(dtype=str))
-                    .astype(str)
-                    .str.strip()
-                )
-                mask_no_entregado_local_dia = (
-                    (pedidos_local_dia_display["Estado"] == "🟢 Completado")
-                    & (estado_entrega_local_dia == "⏳ No Entregado")
-                )
-                pedidos_local_dia_no_entregado = pedidos_local_dia_display[
-                    mask_no_entregado_local_dia
-                ].copy()
-                pedidos_local_dia_activos = pedidos_local_dia_display[
-                    ~mask_no_entregado_local_dia
-                ].copy()
-                fechas_unicas_dt = sorted(
-                    pedidos_local_dia_activos["Fecha_Entrega_dt"].dropna().unique()
-                )
 
-                if fechas_unicas_dt or not pedidos_local_dia_no_entregado.empty:
-                    date_tab_labels = [
-                        f"📅 {pd.to_datetime(fecha).strftime('%d/%m/%Y')}"
-                        for fecha in fechas_unicas_dt
-                    ]
-                    if not pedidos_local_dia_no_entregado.empty:
-                        date_tab_labels = [_LOCAL_NO_ENTREGADOS_TAB_LABEL] + date_tab_labels
+            if pedidos_turno_display.empty:
+                st.session_state[session_idx_key] = 0
+                st.session_state[session_label_key] = ""
+                st.query_params[query_param_key] = "0"
+                st.info(f"No hay pedidos para {titulo_turno}.")
+                return
 
-                    saved_label = st.session_state.get("active_date_tab_m_label", "")
-                    fallback_index = (
-                        date_tab_labels.index(saved_label)
-                        if saved_label in date_tab_labels
-                        else _clamp_tab_index(
-                            st.session_state.get("active_date_tab_m_index", 0),
-                            date_tab_labels,
+            pedidos_turno_display["Fecha_Entrega_dt"] = pd.to_datetime(
+                pedidos_turno_display["Fecha_Entrega"],
+                errors="coerce",
+            )
+            estado_entrega_turno = (
+                pedidos_turno_display.get("Estado_Entrega", pd.Series(dtype=str))
+                .astype(str)
+                .str.strip()
+            )
+            mask_no_entregado_turno = (
+                (pedidos_turno_display["Estado"] == "🟢 Completado")
+                & (estado_entrega_turno == "⏳ No Entregado")
+            )
+            pedidos_turno_no_entregado = pedidos_turno_display[
+                mask_no_entregado_turno
+            ].copy()
+            pedidos_turno_activos = pedidos_turno_display[
+                ~mask_no_entregado_turno
+            ].copy()
+            fechas_unicas_dt = sorted(
+                pedidos_turno_activos["Fecha_Entrega_dt"].dropna().unique()
+            )
+
+            if not fechas_unicas_dt and pedidos_turno_no_entregado.empty:
+                st.session_state[session_idx_key] = 0
+                st.session_state[session_label_key] = ""
+                st.query_params[query_param_key] = "0"
+                st.info(f"No hay pedidos para {titulo_turno}.")
+                return
+
+            date_tab_labels = [
+                f"📅 {pd.to_datetime(fecha).strftime('%d/%m/%Y')}"
+                for fecha in fechas_unicas_dt
+            ]
+            if not pedidos_turno_no_entregado.empty:
+                date_tab_labels = [_LOCAL_NO_ENTREGADOS_TAB_LABEL] + date_tab_labels
+
+            saved_label = st.session_state.get(session_label_key, "")
+            fallback_index = (
+                date_tab_labels.index(saved_label)
+                if saved_label in date_tab_labels
+                else _clamp_tab_index(st.session_state.get(session_idx_key, 0), date_tab_labels)
+            )
+            active_date_tab_index = _resolve_tab_index_from_query(
+                st.query_params,
+                query_param_key,
+                date_tab_labels,
+                fallback_index,
+            )
+            st.session_state[session_idx_key] = active_date_tab_index
+            st.session_state[session_label_key] = date_tab_labels[active_date_tab_index]
+            st.query_params[query_param_key] = str(active_date_tab_index)
+
+            date_tabs_local = st.tabs(date_tab_labels)
+            _emit_recent_tab_group_script(active_date_tab_index, query_param_key)
+
+            for i, tab_label in enumerate(date_tab_labels):
+                with date_tabs_local[i]:
+                    if tab_label == _LOCAL_NO_ENTREGADOS_TAB_LABEL:
+                        st.markdown(
+                            f"#### 🚫 Pedidos Locales - {titulo_turno} - No entregados"
                         )
-                    )
-                    active_date_tab_local_dia_index = _resolve_tab_index_from_query(
-                        st.query_params,
-                        "local_dia_date_tab",
-                        date_tab_labels,
-                        fallback_index,
-                    )
-                    st.session_state["active_date_tab_m_index"] = active_date_tab_local_dia_index
-                    st.session_state["active_date_tab_m_label"] = date_tab_labels[
-                        active_date_tab_local_dia_index
-                    ]
-                    st.query_params["local_dia_date_tab"] = str(active_date_tab_local_dia_index)
-
-                    date_tabs_local_dia = st.tabs(date_tab_labels)
-                    _emit_recent_tab_group_script(
-                        active_date_tab_local_dia_index,
-                        "local_dia_date_tab",
-                    )
-
-                    for i, tab_label in enumerate(date_tab_labels):
-                        with date_tabs_local_dia[i]:
-                            if tab_label == _LOCAL_NO_ENTREGADOS_TAB_LABEL:
-                                st.markdown("#### 🚫 Pedidos Locales - Local Día - No entregados")
-                                if pedidos_local_dia_no_entregado.empty:
-                                    st.info("No hay pedidos locales no entregados.")
-                                else:
-                                    fechas_ne_dt = sorted(
-                                        pedidos_local_dia_no_entregado["Fecha_Entrega_dt"]
-                                        .dropna()
-                                        .unique()
-                                    )
-                                    for fecha_dt in fechas_ne_dt:
-                                        fecha_label = f"📅 {pd.to_datetime(fecha_dt).strftime('%d/%m/%Y')}"
-                                        st.markdown(f"##### {fecha_label}")
-                                        pedidos_fecha = pedidos_local_dia_no_entregado[
-                                            pedidos_local_dia_no_entregado["Fecha_Entrega_dt"] == fecha_dt
-                                        ].copy()
-                                        pedidos_fecha = ordenar_pedidos_custom(pedidos_fecha)
-                                        for orden, (idx, row) in enumerate(
-                                            pedidos_fecha.iterrows(), start=1
-                                        ):
-                                            mostrar_pedido(
-                                                df_main,
-                                                idx,
-                                                row,
-                                                orden,
-                                                "Local Día",
-                                                "📍 Pedidos Locales",
-                                                worksheet_main,
-                                                headers_main,
-                                                s3_client,
-                                            )
-                                    pedidos_sin_fecha = pedidos_local_dia_no_entregado[
-                                        pedidos_local_dia_no_entregado["Fecha_Entrega_dt"].isna()
-                                    ].copy()
-                                    if not pedidos_sin_fecha.empty:
-                                        st.markdown("##### 📅 Sin fecha de entrega")
-                                        pedidos_sin_fecha = ordenar_pedidos_custom(
-                                            pedidos_sin_fecha
-                                        )
-                                        for orden, (idx, row) in enumerate(
-                                            pedidos_sin_fecha.iterrows(), start=1
-                                        ):
-                                            mostrar_pedido(
-                                                df_main,
-                                                idx,
-                                                row,
-                                                orden,
-                                                "Local Día",
-                                                "📍 Pedidos Locales",
-                                                worksheet_main,
-                                                headers_main,
-                                                s3_client,
-                                            )
-                            else:
-                                current_selected_date_dt = pd.to_datetime(
-                                    tab_label.replace("📅 ", ""),
-                                    format="%d/%m/%Y",
-                                )
-                                pedidos_fecha = pedidos_local_dia_activos[
-                                    pedidos_local_dia_activos["Fecha_Entrega_dt"]
-                                    == current_selected_date_dt
+                        if pedidos_turno_no_entregado.empty:
+                            st.info("No hay pedidos locales no entregados.")
+                        else:
+                            fechas_ne_dt = sorted(
+                                pedidos_turno_no_entregado["Fecha_Entrega_dt"]
+                                .dropna()
+                                .unique()
+                            )
+                            for fecha_dt in fechas_ne_dt:
+                                fecha_label = f"📅 {pd.to_datetime(fecha_dt).strftime('%d/%m/%Y')}"
+                                st.markdown(f"##### {fecha_label}")
+                                pedidos_fecha = pedidos_turno_no_entregado[
+                                    pedidos_turno_no_entregado["Fecha_Entrega_dt"] == fecha_dt
                                 ].copy()
                                 pedidos_fecha = ordenar_pedidos_custom(pedidos_fecha)
-                                st.markdown(
-                                    f"#### 🌤️ Pedidos Locales - Local Día - {tab_label}"
-                                )
                                 for orden, (idx, row) in enumerate(
                                     pedidos_fecha.iterrows(), start=1
                                 ):
@@ -6392,24 +6365,82 @@ if df_main is not None:
                                         idx,
                                         row,
                                         orden,
-                                        "Local Día",
+                                        origen_tab,
                                         "📍 Pedidos Locales",
                                         worksheet_main,
                                         headers_main,
                                         s3_client,
                                     )
-                else:
-                    st.session_state["active_date_tab_m_index"] = 0
-                    st.session_state["active_date_tab_m_label"] = ""
-                    st.query_params["local_dia_date_tab"] = "0"
-                    st.info("No hay pedidos para Local Día.")
-            else:
-                st.session_state["active_date_tab_m_index"] = 0
-                st.session_state["active_date_tab_m_label"] = ""
-                st.query_params["local_dia_date_tab"] = "0"
-                st.info("No hay pedidos para Local Día.")
+                            pedidos_sin_fecha = pedidos_turno_no_entregado[
+                                pedidos_turno_no_entregado["Fecha_Entrega_dt"].isna()
+                            ].copy()
+                            if not pedidos_sin_fecha.empty:
+                                st.markdown("##### 📅 Sin fecha de entrega")
+                                pedidos_sin_fecha = ordenar_pedidos_custom(pedidos_sin_fecha)
+                                for orden, (idx, row) in enumerate(
+                                    pedidos_sin_fecha.iterrows(), start=1
+                                ):
+                                    mostrar_pedido(
+                                        df_main,
+                                        idx,
+                                        row,
+                                        orden,
+                                        origen_tab,
+                                        "📍 Pedidos Locales",
+                                        worksheet_main,
+                                        headers_main,
+                                        s3_client,
+                                    )
+                    else:
+                        current_selected_date_dt = pd.to_datetime(
+                            tab_label.replace("📅 ", ""),
+                            format="%d/%m/%Y",
+                        )
+                        pedidos_fecha = pedidos_turno_activos[
+                            pedidos_turno_activos["Fecha_Entrega_dt"]
+                            == current_selected_date_dt
+                        ].copy()
+                        pedidos_fecha = ordenar_pedidos_custom(pedidos_fecha)
+                        st.markdown(
+                            f"#### {titulo_turno} - {tab_label}"
+                        )
+                        for orden, (idx, row) in enumerate(
+                            pedidos_fecha.iterrows(), start=1
+                        ):
+                            mostrar_pedido(
+                                df_main,
+                                idx,
+                                row,
+                                orden,
+                                origen_tab,
+                                "📍 Pedidos Locales",
+                                worksheet_main,
+                                headers_main,
+                                s3_client,
+                            )
 
-        with subtabs_local[1]: # ⛰️ Saltillo
+        with subtabs_local[0]:  # ☀️ Local Mañana
+            _render_local_turno_subtab(
+                turnos_permitidos=["☀️ Local Mañana"],
+                origen_tab="Mañana",
+                titulo_turno="☀️ Pedidos Locales - Local Mañana",
+                query_param_key="local_manana_date_tab",
+                session_idx_key="active_date_tab_manana_index",
+                session_label_key="active_date_tab_manana_label",
+                include_legacy_local_dia=True,
+            )
+
+        with subtabs_local[1]:  # 🌙 Local Tarde
+            _render_local_turno_subtab(
+                turnos_permitidos=["🌙 Local Tarde"],
+                origen_tab="Tarde",
+                titulo_turno="🌙 Pedidos Locales - Local Tarde",
+                query_param_key="local_tarde_date_tab",
+                session_idx_key="active_date_tab_tarde_index",
+                session_label_key="active_date_tab_tarde_label",
+            )
+
+        with subtabs_local[2]: # ⛰️ Saltillo
             pedidos_s_display = df_pendientes_proceso_demorado[
                 (df_pendientes_proceso_demorado["Tipo_Envio"] == "📍 Pedido Local") &
                 (df_pendientes_proceso_demorado["Turno"] == "🌵 Saltillo")
@@ -6568,7 +6599,7 @@ if df_main is not None:
             else:
                 st.info("No hay pedidos para Saltillo.")
 
-        with subtabs_local[2]: # 📦 En Bodega
+        with subtabs_local[3]: # 📦 En Bodega
             pedidos_b_display = df_pendientes_proceso_demorado[
                 (df_pendientes_proceso_demorado["Tipo_Envio"] == "📍 Pedido Local") &
                 (df_pendientes_proceso_demorado["Turno"] == "📦 Pasa a Bodega") &
@@ -7002,7 +7033,12 @@ if df_main is not None:
 
                     # Opciones SIN vacío
                     TIPO_OPTS  = ["📍 Pedido Local", "🚚 Pedido Foráneo"]
-                    TURNO_OPTS = ["🌤️ Local Día", "🌵 Saltillo", "📦 Pasa a Bodega"]
+                    TURNO_OPTS = [
+                        "☀️ Local Mañana",
+                        "🌙 Local Tarde",
+                        "🌵 Saltillo",
+                        "📦 Pasa a Bodega",
+                    ]
 
                     # Inicializar valores en session_state (solo una vez)
                     if tipo_key not in st.session_state:
@@ -7752,7 +7788,12 @@ if df_main is not None:
                 turno_key  = f"g_turno_{row_key}"
                 fecha_key  = f"g_fecha_{row_key}"
     
-                TURNO_OPTS = ["🌤️ Local Día", "🌵 Saltillo", "📦 Pasa a Bodega"]
+                TURNO_OPTS = [
+                    "☀️ Local Mañana",
+                    "🌙 Local Tarde",
+                    "🌵 Saltillo",
+                    "📦 Pasa a Bodega",
+                ]
     
                 # Inicialización en session_state
                 if turno_key not in st.session_state:
