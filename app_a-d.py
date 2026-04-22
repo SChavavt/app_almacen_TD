@@ -367,29 +367,45 @@ def _parse_section_title_date(title: str) -> Optional[datetime.date]:
 
 
 def _get_route_excel_key_from_row(row: Any) -> str:
-    first_any_key = ""
-    fuentes = [
-        row.get("Hoja_Ruta_Mensajero", ""),
-        row.get("Adjuntos_Guia", ""),
-    ]
-    for fuente in fuentes:
-        rutas = _filter_out_original_route_when_modified(_normalize_urls(fuente))
-        if not rutas:
+    """
+    Obtiene la hoja de ruta EXCEL desde adjuntos del pedido (locales),
+    priorizando la versión modificada: {ID_Pedido}/hoja_ruta_mod_{archivo}.
+    Si hay múltiples excels, toma el último.
+    """
+    id_pedido = _normalize_plain_text(row.get("ID_Pedido", ""))
+    adjuntos = _normalize_urls(row.get("Adjuntos", ""))
+    rutas = _filter_out_original_route_when_modified(adjuntos)
+
+    if not rutas:
+        return ""
+
+    excel_keys: list[str] = []
+    for raw in rutas:
+        key = extract_s3_key(raw)
+        if not key:
             continue
-        for raw in rutas:
-            key = extract_s3_key(raw)
-            if not key:
-                continue
-            lower_key = key.lower()
-            if lower_key.endswith(".xlsx") or lower_key.endswith(".xls"):
-                return key
-        for raw in rutas:
-            key = extract_s3_key(raw)
-            if key:
-                if not first_any_key:
-                    first_any_key = key
-                break
-    return first_any_key
+        lower_key = key.lower()
+        if lower_key.endswith(".xlsx") or lower_key.endswith(".xls"):
+            excel_keys.append(key)
+
+    if not excel_keys:
+        return ""
+
+    preferred_mod_keys: list[str] = []
+    mod_prefix = "hoja_ruta_mod_"
+    id_prefix = f"{id_pedido}/".lower() if id_pedido else ""
+
+    for key in excel_keys:
+        key_lower = key.lower()
+        filename = os.path.basename(urlparse(key).path or key).lower()
+        if mod_prefix in filename:
+            if not id_prefix or id_prefix in key_lower:
+                preferred_mod_keys.append(key)
+
+    if preferred_mod_keys:
+        return preferred_mod_keys[-1]
+
+    return excel_keys[-1]
 
 
 def _extract_hoja_ruta_fields_from_s3(s3_client_param: Any, row: Any) -> dict[str, str]:
