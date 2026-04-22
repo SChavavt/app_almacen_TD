@@ -654,7 +654,9 @@ def _find_next_data_row_in_section(values: list[list[str]], header_row: int) -> 
     n_counter = 1
     for row_idx in range(data_start, data_end + 1):
         row = values[row_idx - 1] if row_idx - 1 < len(values) else []
-        used = any(_normalize_plain_text(c) for c in row[:10])
+        # La columna A ("N.") viene prellenada con 1..13 por plantilla; no debe
+        # contar como fila ocupada. Solo evaluamos columnas de captura B:J.
+        used = any(_normalize_plain_text(c) for c in row[1:10])
         if not used:
             return row_idx, n_counter
         n_counter += 1
@@ -951,7 +953,6 @@ def _append_local_dia_entry_to_hoja_ruta(row: Any, s3_client_param: Any, origen_
         entry["firma"],
     ]
     _write_row_values(ws, target_row, row_values)
-    _format_hoja_ruta_data_row(ws, row_number=target_row)
     return True
 
 
