@@ -3577,12 +3577,35 @@ def completar_pedido(
     # 🚀 OPTIMIZACIÓN 3: Actualizar el DataFrame localmente sin recargar desde GSheets
     df.loc[idx, "Estado"] = "🟢 Completado"
     df.loc[idx, "Fecha_Completado"] = now
+
     if isinstance(row, pd.Series):
         row["Estado"] = "🟢 Completado"
         row["Fecha_Completado"] = now
+        row_snapshot = row.to_dict()
+    elif isinstance(row, dict):
+        row["Estado"] = "🟢 Completado"
+        row["Fecha_Completado"] = now
+        row_snapshot = dict(row)
+    else:
+        row_snapshot = {}
 
-    if _is_pasa_bodega_order(row, origen_tab):
-        _upsert_pasa_bodega_report_row(row)
+    # Snapshot robusto para reportes auxiliares (ej. Pasa_Bodega), incluso en flujos
+    # donde `row` llega como dict y no como pd.Series.
+    row_snapshot["Estado"] = "🟢 Completado"
+    row_snapshot["Fecha_Completado"] = now
+    if "Turno" not in row_snapshot and "Turno" in df.columns:
+        row_snapshot["Turno"] = df.loc[idx, "Turno"]
+    if "Folio_Factura" not in row_snapshot and "Folio_Factura" in df.columns:
+        row_snapshot["Folio_Factura"] = df.loc[idx, "Folio_Factura"]
+    if "Cliente" not in row_snapshot and "Cliente" in df.columns:
+        row_snapshot["Cliente"] = df.loc[idx, "Cliente"]
+    if "Vendedor_Registro" not in row_snapshot and "Vendedor_Registro" in df.columns:
+        row_snapshot["Vendedor_Registro"] = df.loc[idx, "Vendedor_Registro"]
+    if "Fecha_Entrega" not in row_snapshot and "Fecha_Entrega" in df.columns:
+        row_snapshot["Fecha_Entrega"] = df.loc[idx, "Fecha_Entrega"]
+
+    if _is_pasa_bodega_order(row_snapshot, origen_tab):
+        _upsert_pasa_bodega_report_row(row_snapshot)
 
     st.session_state["expanded_pedidos"][row["ID_Pedido"]] = True
     st.session_state["expanded_attachments"][row["ID_Pedido"]] = True
