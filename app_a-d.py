@@ -654,9 +654,7 @@ def _find_next_data_row_in_section(values: list[list[str]], header_row: int) -> 
     n_counter = 1
     for row_idx in range(data_start, data_end + 1):
         row = values[row_idx - 1] if row_idx - 1 < len(values) else []
-        # La columna A ("N.") viene prellenada con 1..13 por plantilla; no debe
-        # contar como fila ocupada. Solo evaluamos columnas de captura B:J.
-        used = any(_normalize_plain_text(c) for c in row[1:10])
+        used = any(_normalize_plain_text(c) for c in row[:10])
         if not used:
             return row_idx, n_counter
         n_counter += 1
@@ -829,20 +827,18 @@ def _format_hoja_ruta_new_section(ws: Any, title_row: int, header_row: int) -> N
     )
 
 
-def _format_hoja_ruta_data_row(ws: Any, row_number: int, n_value: int) -> None:
-    """Formato de contenido A:J Calibri 28 + zebra (impar gris, par blanco)."""
-    is_odd = int(n_value) % 2 == 1
-    row_bg = {"red": 0.90, "green": 0.90, "blue": 0.90} if is_odd else {"red": 1.0, "green": 1.0, "blue": 1.0}
+def _format_hoja_ruta_data_row(ws: Any, row_number: int) -> None:
+    """Formato de contenido: B:J Calibri 28 no bold."""
     _set_range_format(
         ws,
         row_start=row_number,
         row_end=row_number,
-        col_start=1,
+        col_start=2,
         col_end=10,
         font_family="Calibri",
         font_size=28,
         bold=False,
-        bg_color=row_bg,
+        bg_color=None,
     )
 
 
@@ -955,7 +951,7 @@ def _append_local_dia_entry_to_hoja_ruta(row: Any, s3_client_param: Any, origen_
         entry["firma"],
     ]
     _write_row_values(ws, target_row, row_values)
-    _format_hoja_ruta_data_row(ws, row_number=target_row, n_value=n_value)
+    _format_hoja_ruta_data_row(ws, row_number=target_row)
     return True
 
 
