@@ -272,6 +272,30 @@ def _recortar_vendedor_dos_nombres(vendedor: Any) -> str:
     return " ".join(p.capitalize() for p in recortado.split())
 
 
+def _format_cantidad_sin_ceros(value: Any) -> str:
+    """
+    Si la cantidad termina en .00, se muestra sin decimales.
+    Ej: '$3,995.00' -> '$3,995'; '$1,089.99' se conserva.
+    """
+    raw = _normalize_plain_text(value)
+    if not raw:
+        return ""
+
+    has_currency = "$" in raw
+    cleaned = raw.replace("$", "").replace(",", "").strip()
+    try:
+        num = float(cleaned)
+    except Exception:
+        return raw
+
+    if abs(num - round(num)) < 1e-9:
+        formatted = f"{int(round(num)):,}"
+        return f"${formatted}" if has_currency else formatted
+
+    formatted = f"{num:,.2f}"
+    return f"${formatted}" if has_currency else formatted
+
+
 def _resolve_hoja_ruta_sheet_name(origen_tab: Any, turno_value: Any) -> str:
     candidates = [
         _normalize_turno_key(origen_tab),
@@ -893,7 +917,7 @@ def _append_local_dia_entry_to_hoja_ruta(row: Any, s3_client_param: Any, origen_
         "nombre_factura": _normalize_plain_text(row.get("Cliente", "")),
         "municipio": _normalize_plain_text(extracted.get("municipio", "")),
         "horario": _format_horario_corto(extracted.get("horario", "")),
-        "cantidad": _normalize_plain_text(extracted.get("cantidad", "")),
+        "cantidad": _format_cantidad_sin_ceros(extracted.get("cantidad", "")),
         "forma_pago": _normalize_plain_text(row.get("Forma_Pago_Comprobante", "")),
         "vendedor": _recortar_vendedor_dos_nombres(row.get("Vendedor_Registro", "")),
         "recibe": _normalize_plain_text(extracted.get("recibe", "")),
