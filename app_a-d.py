@@ -247,6 +247,55 @@ def _normalize_turno_key(value: Any) -> str:
     return txt
 
 
+def _format_horario_corto(value: Any) -> str:
+    """
+    Convierte horarios tipo '10 am a 2 pm' -> '10-2' y '3 pm a 7 pm' -> '3-7'.
+    Si no coincide con el patrón esperado, devuelve el texto normalizado original.
+    """
+    raw = _normalize_plain_text(value)
+    if not raw:
+        return ""
+
+    normalized = _remove_accents(raw).lower().replace(".", "")
+    m = re.search(r"(\d{1,2})(?::\d{2})?\s*(?:am|pm)?\s*a\s*(\d{1,2})(?::\d{2})?\s*(?:am|pm)?", normalized)
+    if not m:
+        return raw
+
+    return f"{int(m.group(1))}-{int(m.group(2))}"
+
+
+def _recortar_vendedor_dos_nombres(vendedor: Any) -> str:
+    """Devuelve solo los primeros dos nombres/palabras del vendedor."""
+    recortado = _recortar_vendedor_para_reporte(vendedor)
+    if not recortado:
+        return ""
+    return " ".join(p.capitalize() for p in recortado.split())
+
+
+def _format_cantidad_sin_ceros(value: Any) -> str:
+    """
+    Si la cantidad termina en .00, se muestra sin decimales.
+    Ej: '$3,995.00' -> '$3,995'; '$1,089.99' se conserva.
+    """
+    raw = _normalize_plain_text(value)
+    if not raw:
+        return ""
+
+    has_currency = "$" in raw
+    cleaned = raw.replace("$", "").replace(",", "").strip()
+    try:
+        num = float(cleaned)
+    except Exception:
+        return raw
+
+    if abs(num - round(num)) < 1e-9:
+        formatted = f"{int(round(num)):,}"
+        return f"${formatted}" if has_currency else formatted
+
+    formatted = f"{num:,.2f}"
+    return f"${formatted}" if has_currency else formatted
+
+
 def _resolve_hoja_ruta_sheet_name(origen_tab: Any, turno_value: Any) -> str:
     candidates = [
         _normalize_turno_key(origen_tab),
@@ -654,7 +703,9 @@ def _find_next_data_row_in_section(values: list[list[str]], header_row: int) -> 
     n_counter = 1
     for row_idx in range(data_start, data_end + 1):
         row = values[row_idx - 1] if row_idx - 1 < len(values) else []
-        used = any(_normalize_plain_text(c) for c in row[:10])
+        # La columna A ("N.") viene prellenada con 1..13 por plantilla; no debe
+        # contar como fila ocupada. Solo evaluamos columnas de captura B:J.
+        used = any(_normalize_plain_text(c) for c in row[1:10])
         if not used:
             return row_idx, n_counter
         n_counter += 1
@@ -827,18 +878,20 @@ def _format_hoja_ruta_new_section(ws: Any, title_row: int, header_row: int) -> N
     )
 
 
-def _format_hoja_ruta_data_row(ws: Any, row_number: int) -> None:
-    """Formato de contenido: B:J Calibri 28 no bold."""
+def _format_hoja_ruta_data_row(ws: Any, row_number: int, n_value: int) -> None:
+    """Formato de contenido A:J Calibri 28 + zebra (impar gris, par blanco)."""
+    is_odd = int(n_value) % 2 == 1
+    row_bg = {"red": 0.90, "green": 0.90, "blue": 0.90} if is_odd else {"red": 1.0, "green": 1.0, "blue": 1.0}
     _set_range_format(
         ws,
         row_start=row_number,
         row_end=row_number,
-        col_start=2,
+        col_start=1,
         col_end=10,
         font_family="Calibri",
         font_size=28,
         bold=False,
-        bg_color=None,
+        bg_color=row_bg,
     )
 
 
@@ -863,10 +916,10 @@ def _append_local_dia_entry_to_hoja_ruta(row: Any, s3_client_param: Any, origen_
         "factura": _normalize_plain_text(row.get("Folio_Factura", "")),
         "nombre_factura": _normalize_plain_text(row.get("Cliente", "")),
         "municipio": _normalize_plain_text(extracted.get("municipio", "")),
-        "horario": _normalize_plain_text(extracted.get("horario", "")),
-        "cantidad": _normalize_plain_text(extracted.get("cantidad", "")),
+        "horario": _format_horario_corto(extracted.get("horario", "")),
+        "cantidad": _format_cantidad_sin_ceros(extracted.get("cantidad", "")),
         "forma_pago": _normalize_plain_text(row.get("Forma_Pago_Comprobante", "")),
-        "vendedor": _normalize_plain_text(row.get("Vendedor_Registro", "")),
+        "vendedor": _recortar_vendedor_dos_nombres(row.get("Vendedor_Registro", "")),
         "recibe": _normalize_plain_text(extracted.get("recibe", "")),
         "firma": "",
     }
@@ -951,7 +1004,7 @@ def _append_local_dia_entry_to_hoja_ruta(row: Any, s3_client_param: Any, origen_
         entry["firma"],
     ]
     _write_row_values(ws, target_row, row_values)
-    _format_hoja_ruta_data_row(ws, row_number=target_row)
+    _format_hoja_ruta_data_row(ws, row_number=target_row, n_value=n_value)
     return True
 
 
