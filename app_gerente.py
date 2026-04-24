@@ -1359,33 +1359,6 @@ def normalizar_folio(texto):
     return limpio_sin_espacios.upper()
 
 
-def normalizar_folio_para_match(texto):
-    """Normaliza folios para comparar aunque vengan con/sin prefijo F."""
-    base = normalizar_folio(texto)
-    if not base:
-        return ""
-    solo_digitos = "".join(re.findall(r"\d+", base))
-    if solo_digitos:
-        return solo_digitos
-    return re.sub(r"[^A-Z0-9]", "", base)
-
-
-def encontrar_columna_por_alias(df: pd.DataFrame, aliases: list[str]) -> str | None:
-    """Busca una columna por nombre, ignorando acentos, espacios y mayúsculas."""
-    if df.empty:
-        return None
-
-    def _norm_col(valor: str) -> str:
-        txt = normalizar(str(valor or ""))
-        return re.sub(r"[^a-z0-9]", "", txt)
-
-    alias_norm = {_norm_col(a) for a in aliases}
-    for col in df.columns:
-        if _norm_col(col) in alias_norm:
-            return col
-    return None
-
-
 def tokenizar_texto(texto):
     """Divide texto normalizado en tokens alfanuméricos (sin importar el orden)."""
     texto_norm = normalizar(str(texto or "").strip())
@@ -5711,7 +5684,6 @@ if "organizador" in tab_map:
 
         # --- Subpestañas internas del organizador ---
         organizer_tab_specs = [
-            ("check_facturas", "🧾 Check de Facturas"),
             ("casos_especiales", "🛡️ Casos especiales"),
             ("hoy", "📌 Hoy"),
             ("agenda", "🗓️ Agenda"),
@@ -5762,90 +5734,6 @@ if "organizador" in tab_map:
 
         if errores_alejandro:
             st.warning("⚠️ Hay errores leyendo alejandro_data. Revisa los logs o ejecuta diagnóstico en modo mantenimiento.")
-
-        with sub_map["check_facturas"]:
-            st.subheader("🧾 Check de Facturas")
-            st.caption(
-                "Sube un archivo con encabezados en la fila 3 (Vendedor, FolioSerie, Cliente, Fecha) "
-                "para detectar qué facturas no existen en datos_pedidos/data_pedidos."
-            )
-
-            archivo_facturas = st.file_uploader(
-                "Archivo de facturas (Excel o CSV)",
-                type=["xlsx", "xls", "csv"],
-                key="organizador_check_facturas_archivo",
-            )
-
-            if archivo_facturas is not None:
-                try:
-                    nombre_archivo = archivo_facturas.name.lower()
-                    if nombre_archivo.endswith(".csv"):
-                        df_facturas = pd.read_csv(archivo_facturas, header=2)
-                    else:
-                        df_facturas = pd.read_excel(archivo_facturas, header=2)
-                except Exception as e:
-                    st.error(f"❌ No se pudo leer el archivo: {e}")
-                    df_facturas = pd.DataFrame()
-
-                if not df_facturas.empty:
-                    col_vendedor = encontrar_columna_por_alias(df_facturas, ["Vendedor"])
-                    col_folio = encontrar_columna_por_alias(df_facturas, ["FolioSerie", "Folio", "Folio_Serie"])
-                    col_cliente = encontrar_columna_por_alias(df_facturas, ["Cliente"])
-                    col_fecha = encontrar_columna_por_alias(df_facturas, ["Fecha", "FechaFactura"])
-
-                    faltantes = []
-                    if col_vendedor is None:
-                        faltantes.append("Vendedor")
-                    if col_folio is None:
-                        faltantes.append("FolioSerie")
-                    if col_cliente is None:
-                        faltantes.append("Cliente")
-                    if col_fecha is None:
-                        faltantes.append("Fecha")
-
-                    if faltantes:
-                        st.error(f"❌ No se encontraron columnas requeridas en fila 3: {', '.join(faltantes)}")
-                    else:
-                        df_facturas = df_facturas[[col_vendedor, col_folio, col_cliente, col_fecha]].copy()
-                        df_facturas.columns = ["Vendedor", "FolioSerie", "Cliente", "Fecha"]
-                        df_facturas["FolioSerie"] = df_facturas["FolioSerie"].astype(str).str.strip()
-                        df_facturas = df_facturas[df_facturas["FolioSerie"] != ""].copy()
-                        df_facturas["_folio_match"] = df_facturas["FolioSerie"].apply(normalizar_folio_para_match)
-                        df_facturas = df_facturas[df_facturas["_folio_match"] != ""].copy()
-
-                        df_pedidos_match = cargar_pedidos().copy()
-                        if "Folio_Factura" not in df_pedidos_match.columns:
-                            df_pedidos_match["Folio_Factura"] = ""
-                        df_pedidos_match["_folio_match"] = df_pedidos_match["Folio_Factura"].apply(normalizar_folio_para_match)
-                        folios_sistema = set(df_pedidos_match["_folio_match"].astype(str).str.strip())
-                        folios_sistema.discard("")
-
-                        df_no_encontradas = (
-                            df_facturas[~df_facturas["_folio_match"].isin(folios_sistema)]
-                            .drop(columns=["_folio_match"])
-                            .drop_duplicates()
-                            .reset_index(drop=True)
-                        )
-
-                        total_archivo = int(len(df_facturas))
-                        total_no_encontradas = int(len(df_no_encontradas))
-                        st.info(
-                            f"Facturas analizadas: {total_archivo} | "
-                            f"No encontradas en sistema: {total_no_encontradas}"
-                        )
-
-                        if total_no_encontradas == 0:
-                            st.success("✅ Todas las facturas del archivo existen en el sistema.")
-                        else:
-                            st.warning("⚠️ Estas facturas no están en data_pedidos/datos_pedidos:")
-                            st.dataframe(df_no_encontradas, use_container_width=True)
-                            st.download_button(
-                                "⬇️ Descargar faltantes (CSV)",
-                                data=df_no_encontradas.to_csv(index=False).encode("utf-8-sig"),
-                                file_name="facturas_no_encontradas.csv",
-                                mime="text/csv",
-                                key="organizador_check_facturas_descargar_csv",
-                            )
 
         with sub_map["hoy"]:
             st.subheader("📌 Hoy")
