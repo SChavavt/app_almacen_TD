@@ -4103,17 +4103,20 @@ def mostrar_pedido_detalle(
     gsheet_row_index,
     col_print_btn,
     s3_client_param,
+    comentario_enterado_ok=True,
 ):
     """Procesa el pedido: actualiza estado a 'En Proceso' sin alterar UI."""
 
     estado_actual_ui = str(row.get("Estado", "")).strip()
     puede_procesar_ui = estado_actual_ui in ["🟡 Pendiente", "🔴 Demorado"]
 
+    boton_procesar_habilitado = puede_procesar_ui and comentario_enterado_ok
+
     if col_print_btn.button(
         "⚙️ Procesar",
         key=f"procesar_{row['ID_Pedido']}_{origen_tab}",
         on_click=_mark_skip_demorado_check_once,
-        disabled=not puede_procesar_ui,
+        disabled=not boton_procesar_habilitado,
     ):
         # Solo para marcar que ya se presionó (si se usa para estilos/toasts)
         st.session_state.setdefault("printed_items", {})
@@ -4471,9 +4474,18 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
         col_order_num, col_client, col_time, col_status, col_vendedor, col_print_btn, col_complete_btn = st.columns([0.5, 2, 1.5, 1, 1.2, 1, 1])
         # --- Mostrar Comentario (si existe)
         comentario = str(row.get("Comentario", "")).strip()
+        comentario_enterado_ok = True
         if comentario:
             st.markdown("##### 📝 Comentario del Pedido")
             st.info(comentario)
+            enterado_key = f"enterado_comentario_{row['ID_Pedido']}"
+            comentario_enterado_ok = st.checkbox(
+                "✅ Enterado",
+                key=enterado_key,
+                help="Marca esta casilla para confirmar que leíste el comentario antes de procesar el pedido.",
+            )
+            if not comentario_enterado_ok and row.get("Estado") in ["🟡 Pendiente", "🔴 Demorado"]:
+                st.caption("⚠️ Debes marcar **Enterado** para habilitar el botón **⚙️ Procesar**.")
 
         if es_local_no_entregado:
             estado_entrega_valor = str(row.get("Estado_Entrega", "")).strip()
@@ -4524,6 +4536,7 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
                 gsheet_row_index,
                 col_print_btn,
                 s3_client_param,
+                comentario_enterado_ok=comentario_enterado_ok,
             )
         else:
             col_print_btn.write("")
