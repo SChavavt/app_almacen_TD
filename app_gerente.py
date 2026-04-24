@@ -5863,6 +5863,12 @@ if "organizador" in tab_map:
                         if "Folio_Factura" not in df_pedidos_match.columns:
                             df_pedidos_match["Folio_Factura"] = ""
                         df_pedidos_match["_folio_match"] = df_pedidos_match["Folio_Factura"].apply(normalizar_folio_para_match)
+                        df_pedidos_match["_folios_factura_set"] = df_pedidos_match["Folio_Factura"].apply(
+                            lambda v: (
+                                extraer_folios_posibles(v)
+                                or ({normalizar_folio_para_match(v)} if normalizar_folio_para_match(v) else set())
+                            )
+                        )
                         columnas_adjuntos = []
                         for col_tmp in df_pedidos_match.columns:
                             norm_col = re.sub(r"[^a-z0-9]", "", normalizar(col_tmp))
@@ -5925,7 +5931,9 @@ if "organizador" in tab_map:
                             ventana_fin = fecha_factura + timedelta(hours=72)
 
                             candidatos_folio = df_pedidos_match[
-                                df_pedidos_match["_folio_match"].astype(str).str.strip() == str(folio_factura).strip()
+                                df_pedidos_match["_folios_factura_set"].apply(
+                                    lambda s: str(folio_factura).strip() in s
+                                )
                             ].copy()
                             match_folio_factura_con_fecha = (
                                 (not candidatos_folio.empty)
