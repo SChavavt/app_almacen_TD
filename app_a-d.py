@@ -1008,6 +1008,94 @@ def _append_local_dia_entry_to_hoja_ruta(row: Any, s3_client_param: Any, origen_
     return True
 
 
+def _remove_factura_from_hoja_ruta_sheet(ws: Any, factura: str) -> bool:
+    """Elimina una factura de la hoja de ruta (B:J), compactando la sección."""
+    factura_norm = _normalize_plain_text(factura).upper()
+    if not factura_norm:
+        return False
+
+    values = _hoja_ruta_get_all_values(ws)
+    removed_any = False
+    title_row = 1
+
+    while title_row <= len(values):
+        row = values[title_row - 1] if title_row - 1 < len(values) else []
+        if not any(_is_section_title_text(cell) for cell in row):
+            title_row += 1
+            continue
+
+        header_row = _find_header_row_below(values, title_row)
+        if header_row is None:
+            title_row += 1
+            continue
+
+        data_start = header_row + 1
+        data_end = header_row + HOJA_RUTA_SECTION_DATA_ROWS
+        filas_data: list[list[str]] = []
+        for row_idx in range(data_start, data_end + 1):
+            src = values[row_idx - 1] if row_idx - 1 < len(values) else []
+            row_bj = [str(src[col]).strip() if col < len(src) else "" for col in range(1, 10)]
+            filas_data.append(row_bj)
+
+        kept_rows = [r for r in filas_data if _normalize_plain_text(r[0]).upper() != factura_norm]
+        removed_count = len(filas_data) - len(kept_rows)
+        if removed_count > 0:
+            removed_any = True
+            kept_rows.extend([[""] * 9 for _ in range(removed_count)])
+            a1_start = gspread.utils.rowcol_to_a1(data_start, 2)
+            a1_end = gspread.utils.rowcol_to_a1(data_end, 10)
+            _worksheet_update_range(ws, f"{a1_start}:{a1_end}", kept_rows)
+            values = _hoja_ruta_get_all_values(ws)
+
+        title_row = data_end + 1
+
+    return removed_any
+
+
+def _sync_local_entry_in_hoja_ruta_after_schedule_change(
+    row: Any,
+    s3_client_param: Any,
+    origen_tab: Any = "",
+) -> bool:
+    """
+    Reubica en Hoja_Ruta un pedido local ya procesado cuando cambia fecha/turno.
+    """
+    reportes_almacen_id = str(
+        st.secrets.get("gsheets", {}).get(
+            "reportes_almacen_sheet_id",
+            st.secrets.get("gsheets", {}).get("reportes_sheet_id", ""),
+        )
+    ).strip()
+    if not reportes_almacen_id:
+        st.error("❌ Falta configurar gsheets.reportes_almacen_sheet_id en secrets.")
+        return False
+
+    factura = _normalize_plain_text(row.get("Folio_Factura", ""))
+    if not factura:
+        st.warning("⚠️ No se pudo sincronizar Hoja_Ruta: Folio_Factura vacío.")
+        return False
+
+    try:
+        client = get_gspread_client(_credentials_json_dict=GSHEETS_CREDENTIALS)
+        book = client.open_by_key(reportes_almacen_id)
+    except Exception as exc:
+        st.error(f"❌ No se pudo abrir Reportes_Almacen: {exc}")
+        return False
+
+    for sheet_name in set(REPORTE_ALMACEN_SHEET_BY_TURNO.values()):
+        try:
+            ws_scan = book.worksheet(sheet_name)
+            _remove_factura_from_hoja_ruta_sheet(ws_scan, factura)
+        except Exception:
+            continue
+
+    return _append_local_dia_entry_to_hoja_ruta(
+        row=row,
+        s3_client_param=s3_client_param,
+        origen_tab=origen_tab,
+    )
+
+
 def _is_pasa_bodega_order(row: Any, origen_tab: Any = "") -> bool:
     """True cuando el pedido corresponde al flujo de subtab Pasa a Bodega."""
     turno = str(row.get("Turno", "") or "").strip()
@@ -4415,9 +4503,13 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
                     st.session_state["expanded_pedidos"][row['ID_Pedido']] = True
                     cambios = []
                     estado_antes_cambio = str(row.get("Estado", "")).strip()
+                    hora_proceso_antes_cambio = str(row.get("Hora_Proceso", "")).strip()
                     nueva_fecha_str = st.session_state[fecha_key].strftime('%Y-%m-%d')
+                    nuevo_turno = st.session_state[turno_key] if permite_cambiar_turno_local else current_turno
+                    hubo_cambio_fecha_turno = False
 
                     if nueva_fecha_str != fecha_actual_str:
+                        hubo_cambio_fecha_turno = True
                         col_idx = headers.index("Fecha_Entrega") + 1
                         cambios.append(
                             {
@@ -4429,8 +4521,8 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
                         )
 
                     if puede_editar_turno:
-                        nuevo_turno = st.session_state[turno_key]
                         if nuevo_turno != current_turno:
+                            hubo_cambio_fecha_turno = True
                             col_idx = headers.index("Turno") + 1
                             cambios.append(
                                 {
@@ -4456,13 +4548,35 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
 
                     if cambios:
                         if batch_update_gsheet_cells(worksheet, cambios, headers=headers):
+                            row_actualizado = dict(row)
+                            row_actualizado["Fecha_Entrega"] = nueva_fecha_str
+                            row_actualizado["Turno"] = nuevo_turno
+
                             if "Fecha_Entrega" in headers:
                                 df.at[idx, "Fecha_Entrega"] = nueva_fecha_str
                             if (
                                 "Turno" in headers
                                 and tipo_envio_actual == "📍 Pedido Local"
                             ):
-                                df.at[idx, "Turno"] = st.session_state[turno_key]
+                                df.at[idx, "Turno"] = nuevo_turno
+
+                            pedido_local_ya_procesado = (
+                                tipo_envio_actual == "📍 Pedido Local"
+                                and (
+                                    bool(hora_proceso_antes_cambio)
+                                    or estado_antes_cambio in ["🔵 En Proceso", "🟢 Completado", "✅ Viajó"]
+                                )
+                            )
+                            if pedido_local_ya_procesado and hubo_cambio_fecha_turno:
+                                synced_ok = _sync_local_entry_in_hoja_ruta_after_schedule_change(
+                                    row=row_actualizado,
+                                    s3_client_param=s3_client_param,
+                                    origen_tab=origen_tab,
+                                )
+                                if not synced_ok:
+                                    st.warning(
+                                        "⚠️ Se guardó la fecha/turno, pero no se pudo sincronizar Hoja_Ruta automáticamente."
+                                    )
 
                             st.toast(
                                 f"📅 Pedido {row['ID_Pedido']} actualizado.",
