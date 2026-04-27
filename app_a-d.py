@@ -8201,6 +8201,7 @@ if df_main is not None:
                     assign_col, info_col = st.columns([1, 2])
                     with assign_col:
                         if st.button("Asignar número foráneo", key=f"assign_num_foraneo_g_{unique_suffix}"):
+                            tipo_foraneo_val = "🚚 Pedido Foráneo"
                             max_actual = 0
                             for val in st.session_state.get("flow_number_map_foraneo", {}).values():
                                 parsed = _parse_foraneo_number(val)
@@ -8216,6 +8217,19 @@ if df_main is not None:
                             if row_idx_int is None or "Numero_Foraneo" not in headers_casos:
                                 st.error("❌ No se pudo identificar la fila para guardar Numero_Foraneo.")
                             else:
+                                ok_tipo = True
+                                if "Tipo_Envio_Original" in headers_casos:
+                                    ok_tipo = update_gsheet_cell(
+                                        worksheet_casos,
+                                        headers_casos,
+                                        row_idx_int,
+                                        "Tipo_Envio_Original",
+                                        tipo_foraneo_val,
+                                    )
+                                if not ok_tipo:
+                                    st.error("❌ No se pudo actualizar Tipo_Envio_Original a 🚚 Pedido Foráneo.")
+                                    st.stop()
+
                                 ok_update = update_gsheet_cell(
                                     worksheet_casos,
                                     headers_casos,
@@ -8224,6 +8238,7 @@ if df_main is not None:
                                     siguiente,
                                 )
                                 if ok_update:
+                                    row["Tipo_Envio_Original"] = tipo_foraneo_val
                                     st.success(f"✅ Número foráneo asignado: {siguiente}")
                                     st.session_state["reload_after_action"] = True
                                     st.rerun()
