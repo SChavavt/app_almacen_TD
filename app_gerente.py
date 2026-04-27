@@ -6023,28 +6023,6 @@ if "organizador" in tab_map:
 
                         total_archivo = int(len(df_facturas))
                         total_no_encontradas = int(len(df_no_encontradas))
-
-                        vendedores_disponibles_check = sorted(
-                            {
-                                str(v).strip()
-                                for v in df_no_encontradas.get("Vendedor", pd.Series(dtype=str)).dropna().tolist()
-                                if str(v).strip()
-                            }
-                        )
-                        opciones_vendedor_check = ["👥 Todos"] + vendedores_disponibles_check
-                        filtro_vendedor_check = st.selectbox(
-                            "Filtrar lista por vendedor",
-                            options=opciones_vendedor_check,
-                            index=0,
-                            key="organizador_check_facturas_filtro_vendedor",
-                        )
-                        if filtro_vendedor_check == "👥 Todos":
-                            df_no_encontradas_filtrado = df_no_encontradas.copy()
-                        else:
-                            df_no_encontradas_filtrado = df_no_encontradas[
-                                df_no_encontradas.get("Vendedor", "").astype(str).str.strip() == filtro_vendedor_check
-                            ].copy()
-
                         st.info(
                             f"Facturas analizadas: {total_archivo} | "
                             f"No encontradas en sistema: {total_no_encontradas}"
@@ -6069,14 +6047,10 @@ if "organizador" in tab_map:
                                 "⚠️ Estas facturas (últimas 72h) no tienen match válido en data_pedidos/datos_pedidos "
                                 "considerando Folio_Factura/Adjuntos/Cliente + regla de fecha:"
                             )
-                            st.caption(
-                                f"Vendedor seleccionado: {filtro_vendedor_check} | "
-                                f"Resultados mostrados: {len(df_no_encontradas_filtrado)}"
-                            )
-                            st.dataframe(df_no_encontradas_filtrado, use_container_width=True)
+                            st.dataframe(df_no_encontradas, use_container_width=True)
                             st.download_button(
                                 "⬇️ Descargar faltantes (CSV)",
-                                data=df_no_encontradas_filtrado.to_csv(index=False).encode("utf-8-sig"),
+                                data=df_no_encontradas.to_csv(index=False).encode("utf-8-sig"),
                                 file_name="facturas_no_encontradas.csv",
                                 mime="text/csv",
                                 key="organizador_check_facturas_descargar_csv",
