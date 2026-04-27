@@ -3072,24 +3072,24 @@ def _collect_route_candidates(
     pedidos_fecha: pd.DataFrame,
     *,
     zone_key: str,
-) -> tuple[list[dict[str, Any]], list[str], list[str], list[str]]:
+) -> tuple[list[dict[str, Any]], list[str], list[str], list[str], list[dict[str, Any]]]:
     pedidos_en_proceso = pedidos_fecha[
         pedidos_fecha.get("Estado", pd.Series("", index=pedidos_fecha.index)).astype(str).str.strip().eq("🔵 En Proceso")
     ].copy()
 
     if pedidos_en_proceso.empty:
-        return [], [], [], []
+        return [], [], [], [], []
 
     df_clientes, _ = _load_clientes_locales_df(GOOGLE_SHEET_ID)
     if df_clientes.empty:
         st.warning("⚠️ No se encontraron registros en la hoja Clientes_Locales.")
-        return [], [], [], []
+        return [], [], [], [], []
 
     df_clientes = _standardize_clientes_locales_columns(df_clientes)
     lat_col, lng_col = _resolve_clientes_coord_columns(df_clientes)
     if not lat_col or not lng_col:
         st.warning("⚠️ La hoja Clientes_Locales no contiene columnas de coordenadas (Latitud/Longitud o Lat_Final/Lng_Final).")
-        return [], [], [], []
+        return [], [], [], [], []
 
     for c in ("Cliente", "Confianza_Final", "Metodo_Final", "Direccion_Final"):
         if c not in df_clientes.columns:
@@ -3108,6 +3108,7 @@ def _collect_route_candidates(
     missing_clients: list[str] = []
     low_conf_clients: list[str] = []
     out_zone_clients: list[str] = []
+    pending_clients: list[dict[str, Any]] = []
     candidates: list[dict[str, Any]] = []
 
     for _, pedido in pedidos_en_proceso.iterrows():
@@ -3115,6 +3116,9 @@ def _collect_route_candidates(
         cliente_norm = _ruta_opt_normalize_cliente(cliente)
         if not cliente_norm or cliente_norm not in clientes_map.index:
             missing_clients.append(cliente or "(sin nombre)")
+            pending_clients.append(
+                {"cliente": cliente or "(sin nombre)", "pedido": pedido, "motivo": "Sin coordenadas en Clientes_Locales"}
+            )
             continue
 
         cli_row = clientes_map.loc[cliente_norm]
@@ -3134,6 +3138,9 @@ def _collect_route_candidates(
 
         if not _coords_in_zone(lat, lng, zone_key):
             out_zone_clients.append(cliente or "(sin nombre)")
+            pending_clients.append(
+                {"cliente": cliente or "(sin nombre)", "pedido": pedido, "motivo": "Coordenada fuera de zona"}
+            )
             continue
 
         candidates.append(
@@ -3147,7 +3154,67 @@ def _collect_route_candidates(
             }
         )
 
-    return candidates, sorted(set(missing_clients)), sorted(set(low_conf_clients)), sorted(set(out_zone_clients))
+    return (
+        candidates,
+        sorted(set(missing_clients)),
+        sorted(set(low_conf_clients)),
+        sorted(set(out_zone_clients)),
+        pending_clients,
+    )
+
+
+def _build_hoja_ruta_download_df(
+    ordered_candidates: list[dict[str, Any]],
+    pending_clients: list[dict[str, Any]],
+) -> pd.DataFrame:
+    rows: list[dict[str, Any]] = []
+    n_value = 1
+
+    for item in ordered_candidates:
+        pedido = item.get("pedido", {})
+        rows.append(
+            {
+                "N.": n_value,
+                "#FACTURA": str(pedido.get("Folio_Factura", "")).strip(),
+                "NOMBRE DE LA FACTURA Ó COBRO": str(pedido.get("Cliente", "")).strip(),
+                "MUNICIPIO": str(pedido.get("Municipio", "")).strip(),
+                "HORARIO": str(pedido.get("Turno", "")).strip(),
+                "CANTIDAD": str(pedido.get("Cantidad", "")).strip(),
+                "FORMA DE PAGO": str(pedido.get("Estado_Pago", "")).strip(),
+                "VENDEDOR": str(pedido.get("Vendedor_Registro", "")).strip(),
+                "NOMBRE DE QUIEN RECIBE": "",
+                "FIRMA DE RECIBIDO": "",
+            }
+        )
+        n_value += 1
+
+    for item in pending_clients:
+        pedido = item.get("pedido", {})
+        motivo = str(item.get("motivo", "")).strip()
+        rows.append(
+            {
+                "N.": n_value,
+                "#FACTURA": str(pedido.get("Folio_Factura", "")).strip(),
+                "NOMBRE DE LA FACTURA Ó COBRO": f"{str(item.get('cliente', '')).strip()} ⚠️ PENDIENTE",
+                "MUNICIPIO": motivo,
+                "HORARIO": str(pedido.get("Turno", "")).strip(),
+                "CANTIDAD": str(pedido.get("Cantidad", "")).strip(),
+                "FORMA DE PAGO": str(pedido.get("Estado_Pago", "")).strip(),
+                "VENDEDOR": str(pedido.get("Vendedor_Registro", "")).strip(),
+                "NOMBRE DE QUIEN RECIBE": "",
+                "FIRMA DE RECIBIDO": "",
+            }
+        )
+        n_value += 1
+
+    df = pd.DataFrame(rows)
+    if df.empty:
+        return pd.DataFrame(columns=REPORTE_ALMACEN_COLUMNS)
+
+    for col in REPORTE_ALMACEN_COLUMNS:
+        if col not in df.columns:
+            df[col] = ""
+    return df[REPORTE_ALMACEN_COLUMNS].copy()
 
 
 def _call_directions_optimized_route(api_key: str, waypoints: list[str]) -> Optional[dict[str, Any]]:
@@ -3209,7 +3276,7 @@ def _render_ruta_optimizada_ui(
             st.session_state.pop(state_key, None)
             return
 
-        candidates, missing_clients, low_conf_clients, out_zone_clients = _collect_route_candidates(
+        candidates, missing_clients, low_conf_clients, out_zone_clients, pending_clients = _collect_route_candidates(
             pedidos_fecha,
             zone_key=route_scope,
         )
@@ -3220,10 +3287,36 @@ def _render_ruta_optimizada_ui(
             st.warning("⚠️ Clientes con coordenada de baja confianza: " + ", ".join(low_conf_clients))
         if out_zone_clients:
             st.warning("⚠️ Clientes fuera de zona y excluidos de ruta: " + ", ".join(out_zone_clients))
+        if pending_clients:
+            st.info(
+                "ℹ️ Se incluirán al final del archivo de hoja de ruta los clientes pendientes "
+                "(sin coordenadas o fuera de zona)."
+            )
 
         if len(candidates) < 2:
             st.info("ℹ️ Se requieren al menos 2 pedidos válidos en 🔵 En Proceso con coordenadas confiables/en zona para generar la ruta.")
-            st.session_state.pop(state_key, None)
+            hoja_ruta_df = _build_hoja_ruta_download_df([], pending_clients)
+            output_excel = BytesIO()
+            with pd.ExcelWriter(output_excel, engine="xlsxwriter") as writer:
+                pd.DataFrame(columns=["Paso", "De", "A", "Distancia", "Tiempo"]).to_excel(
+                    writer, sheet_name="Ruta", index=False
+                )
+                pd.DataFrame(
+                    [{"Métrica": "Distancia total km", "Valor": 0.0}, {"Métrica": "Tiempo total min", "Valor": 0.0}]
+                ).to_excel(writer, sheet_name="Resumen", index=False)
+                hoja_ruta_df.to_excel(writer, sheet_name="Hoja_Ruta_Optimizada", index=False)
+            output_excel.seek(0)
+            st.session_state[state_key] = {
+                "ordered": [],
+                "df_simple": pd.DataFrame(columns=["Paso", "De", "A", "Distancia", "Tiempo"]),
+                "resumen": pd.DataFrame(
+                    [{"Métrica": "Distancia total km", "Valor": 0.0}, {"Métrica": "Tiempo total min", "Valor": 0.0}]
+                ),
+                "map_html": "",
+                "excel_bytes": output_excel.getvalue(),
+                "hoja_ruta_df": hoja_ruta_df,
+                "pending_clients": pending_clients,
+            }
             return
 
         if len(candidates) > _RUTA_OPT_MAX_WAYPOINTS:
@@ -3321,6 +3414,19 @@ def _render_ruta_optimizada_ui(
         with pd.ExcelWriter(output_excel, engine="xlsxwriter") as writer:
             df_simple.to_excel(writer, sheet_name="Ruta", index=False)
             resumen.to_excel(writer, sheet_name="Resumen", index=False)
+            hoja_ruta_df = _build_hoja_ruta_download_df(ordered, pending_clients)
+            hoja_ruta_df.to_excel(writer, sheet_name="Hoja_Ruta_Optimizada", index=False)
+            if pending_clients:
+                pd.DataFrame(
+                    [
+                        {
+                            "Cliente": str(p.get("cliente", "")),
+                            "Motivo": str(p.get("motivo", "")),
+                            "Folio_Factura": str(p.get("pedido", {}).get("Folio_Factura", "")),
+                        }
+                        for p in pending_clients
+                    ]
+                ).to_excel(writer, sheet_name="Pendientes_Coordenadas", index=False)
         output_excel.seek(0)
 
         st.session_state[state_key] = {
@@ -3329,6 +3435,8 @@ def _render_ruta_optimizada_ui(
             "resumen": resumen,
             "map_html": map_html,
             "excel_bytes": output_excel.getvalue(),
+            "hoja_ruta_df": hoja_ruta_df,
+            "pending_clients": pending_clients,
         }
 
     result = st.session_state.get(state_key)
@@ -3338,12 +3446,16 @@ def _render_ruta_optimizada_ui(
     st.markdown("#### 🧭 Secuencia optimizada")
     for i, cliente in enumerate(result["ordered"], start=1):
         st.write(f"{i}. {cliente}")
+    for p in result.get("pending_clients", []):
+        st.write(f"• {p.get('cliente', '')} (pendiente: {p.get('motivo', '')})")
 
     st.markdown("#### 🚚 Tabla simple de reparto")
     st.dataframe(result["df_simple"], use_container_width=True, hide_index=True)
 
     st.markdown("#### 📊 Resumen")
     st.dataframe(result["resumen"], use_container_width=True, hide_index=True)
+    st.markdown("#### 📄 Hoja de ruta optimizada (descargable)")
+    st.dataframe(result.get("hoja_ruta_df", pd.DataFrame(columns=REPORTE_ALMACEN_COLUMNS)), use_container_width=True, hide_index=True)
 
     col_dl_xlsx, col_dl_html = st.columns(2)
     col_dl_xlsx.download_button(
@@ -3353,16 +3465,19 @@ def _render_ruta_optimizada_ui(
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         key=f"dl_xlsx_{context_key}",
     )
-    col_dl_html.download_button(
-        "⬇️ Descargar HTML ruta_optimizada_mapa.html",
-        data=result["map_html"].encode("utf-8"),
-        file_name="ruta_optimizada_mapa.html",
-        mime="text/html",
-        key=f"dl_html_{context_key}",
-    )
+    if result.get("map_html"):
+        col_dl_html.download_button(
+            "⬇️ Descargar HTML ruta_optimizada_mapa.html",
+            data=result["map_html"].encode("utf-8"),
+            file_name="ruta_optimizada_mapa.html",
+            mime="text/html",
+            key=f"dl_html_{context_key}",
+        )
 
-    st.markdown("#### 🗺️ Mapa de ruta")
-    components.html(result["map_html"], height=600)
+        st.markdown("#### 🗺️ Mapa de ruta")
+        components.html(result["map_html"], height=600)
+    else:
+        col_dl_html.info("No hay mapa disponible (faltaron coordenadas válidas).")
 
 
 def batch_update_gsheet_cells(worksheet, updates_list, *, headers: Optional[list[str]] = None):
