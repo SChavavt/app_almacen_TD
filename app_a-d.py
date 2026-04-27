@@ -3251,24 +3251,31 @@ def _collect_route_candidates(
     *,
     zone_key: str,
     google_api_key: str = "",
-) -> tuple[list[dict[str, Any]], list[str], list[str], list[str], list[dict[str, Any]]]:
+) -> tuple[list[dict[str, Any]], list[str], list[str], list[str], list[dict[str, Any]], list[dict[str, Any]]]:
     pedidos_en_proceso = pedidos_fecha[
         pedidos_fecha.get("Estado", pd.Series("", index=pedidos_fecha.index)).astype(str).str.strip().eq("🔵 En Proceso")
     ].copy()
 
+    if "Turno" in pedidos_en_proceso.columns:
+        turnos_series = pedidos_en_proceso["Turno"].astype(str).str.strip()
+        if zone_key == "monterrey":
+            pedidos_en_proceso = pedidos_en_proceso[~turnos_series.eq("🌵 Saltillo")].copy()
+        elif zone_key == "saltillo":
+            pedidos_en_proceso = pedidos_en_proceso[turnos_series.eq("🌵 Saltillo")].copy()
+
     if pedidos_en_proceso.empty:
-        return [], [], [], [], []
+        return [], [], [], [], [], []
 
     df_clientes, _ = _load_clientes_locales_df(GOOGLE_SHEET_ID)
     if df_clientes.empty:
         st.warning("⚠️ No se encontraron registros en la hoja Clientes_Locales.")
-        return [], [], [], [], []
+        return [], [], [], [], [], []
 
     df_clientes = _standardize_clientes_locales_columns(df_clientes)
     lat_col, lng_col = _resolve_clientes_coord_columns(df_clientes)
     if not lat_col or not lng_col:
         st.warning("⚠️ La hoja Clientes_Locales no contiene columnas de coordenadas (Latitud/Longitud o Lat_Final/Lng_Final).")
-        return [], [], [], [], []
+        return [], [], [], [], [], []
 
     for c in ("Cliente", "Confianza_Final", "Metodo_Final", "Direccion_Final"):
         if c not in df_clientes.columns:
@@ -3286,6 +3293,7 @@ def _collect_route_candidates(
     low_conf_clients: list[str] = []
     out_zone_clients: list[str] = []
     pending_clients: list[dict[str, Any]] = []
+    found_coords_to_save: list[dict[str, Any]] = []
     candidates: list[dict[str, Any]] = []
 
     for _, pedido in pedidos_en_proceso.iterrows():
@@ -3323,13 +3331,15 @@ def _collect_route_candidates(
                 direccion = str(auto["direccion"])
                 confianza = str(auto["confianza"])
                 metodo = str(auto["metodo"])
-                _save_cliente_locales_coords(
-                    cliente=cliente,
-                    lat=lat,
-                    lng=lng,
-                    direccion_final=direccion,
-                    confianza_final=confianza,
-                    metodo_final=metodo,
+                found_coords_to_save.append(
+                    {
+                        "cliente": cliente,
+                        "lat": lat,
+                        "lng": lng,
+                        "direccion_final": direccion,
+                        "confianza_final": confianza,
+                        "metodo_final": metodo,
+                    }
                 )
             else:
                 missing_clients.append(cliente or "(sin nombre)")
@@ -3374,6 +3384,7 @@ def _collect_route_candidates(
         sorted(set(low_conf_clients)),
         sorted(set(out_zone_clients)),
         pending_clients,
+        found_coords_to_save,
     )
 
 
@@ -3481,6 +3492,8 @@ def _render_ruta_optimizada_ui(
 ) -> None:
     state_key = f"ruta_opt_result_{context_key}"
     run_key = f"ruta_opt_run_{context_key}"
+    found_coords_key = f"ruta_opt_found_coords_{context_key}"
+    save_coords_key = f"ruta_opt_save_coords_{context_key}"
 
     if st.button("📍 Generar Ruta Optimizada", key=run_key):
         api_key = str(st.secrets.get("api_keys", {}).get("google_maps_api_key", "")).strip()
@@ -3490,11 +3503,19 @@ def _render_ruta_optimizada_ui(
             st.session_state.pop(state_key, None)
             return
 
-        candidates, missing_clients, low_conf_clients, out_zone_clients, pending_clients = _collect_route_candidates(
+        (
+            candidates,
+            missing_clients,
+            low_conf_clients,
+            out_zone_clients,
+            pending_clients,
+            found_coords_to_save,
+        ) = _collect_route_candidates(
             pedidos_fecha,
             zone_key=route_scope,
             google_api_key=api_key,
         )
+        st.session_state[found_coords_key] = found_coords_to_save
 
         if missing_clients:
             st.warning("⚠️ Clientes sin coordenadas en Clientes_Locales: " + ", ".join(missing_clients))
@@ -3591,9 +3612,14 @@ def _render_ruta_optimizada_ui(
             ]
         )
 
-        m = folium.Map(location=[25.67, -100.31], zoom_start=10, control_scale=True)
+        first_leg = legs[0] if legs else {}
+        start_loc = first_leg.get("start_location", {}) if isinstance(first_leg, dict) else {}
+        origin_lat = float(start_loc.get("lat", 25.67))
+        origin_lng = float(start_loc.get("lng", -100.31))
+
+        m = folium.Map(location=[origin_lat, origin_lng], zoom_start=10, control_scale=True)
         folium.Marker(
-            [25.67, -100.31],
+            [origin_lat, origin_lng],
             popup="0. Origen",
             tooltip="Origen",
             icon=folium.Icon(color="green", icon="home"),
@@ -3609,7 +3635,7 @@ def _render_ruta_optimizada_ui(
             ).add_to(m)
 
         folium.Marker(
-            [25.67, -100.31],
+            [origin_lat, origin_lng],
             popup="Regreso a origen",
             tooltip="Regreso",
             icon=folium.Icon(color="blue", icon="flag"),
@@ -3655,6 +3681,25 @@ def _render_ruta_optimizada_ui(
         }
 
     result = st.session_state.get(state_key)
+    coords_found = st.session_state.get(found_coords_key, [])
+    if coords_found:
+        st.info(f"📍 Se encontraron {len(coords_found)} coordenadas nuevas en esta ejecución.")
+        if st.button("💾 Guardar coordenadas encontradas", key=save_coords_key):
+            saved_ok = 0
+            failed = 0
+            for item in coords_found:
+                ok = _save_cliente_locales_coords(**item)
+                if ok:
+                    saved_ok += 1
+                else:
+                    failed += 1
+            if saved_ok:
+                st.success(f"✅ Coordenadas guardadas: {saved_ok}.")
+                _load_clientes_locales_df.clear()
+            if failed:
+                st.warning(f"⚠️ No se pudieron guardar {failed} coordenadas.")
+            st.session_state[found_coords_key] = []
+
     if not result:
         return
 
