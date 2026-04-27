@@ -4943,6 +4943,13 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
                         st.warning("⚠️ Debes subir al menos un comprobante para guardar.")
                     else:
                         updates = []
+                        headers_for_write = headers
+                        try:
+                            fresh_headers = [str(h or "").strip() for h in worksheet.row_values(1)]
+                            if fresh_headers:
+                                headers_for_write = fresh_headers
+                        except Exception:
+                            headers_for_write = headers
                         campos_valores = {
                             "Fecha_Pago_Comprobante": fecha_pago.strftime("%Y-%m-%d"),
                             "Forma_Pago_Comprobante": forma_pago,
@@ -4952,8 +4959,8 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
                             "Estado_Pago": "✅ Pagado",
                         }
                         for col_name, col_value in campos_valores.items():
-                            if col_name in headers:
-                                col_idx = headers.index(col_name) + 1
+                            if col_name in headers_for_write:
+                                col_idx = headers_for_write.index(col_name) + 1
                                 updates.append(
                                     {
                                         "range": gspread.utils.rowcol_to_a1(
@@ -4979,15 +4986,15 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
                                     uploaded_comp_keys.append(uploaded_key)
 
                         if updates and batch_update_gsheet_cells(
-                            worksheet, updates, headers=headers
+                            worksheet, updates, headers=headers_for_write
                         ):
                             # Salvaguarda: en algunos casos Google Sheets puede terminar
                             # mostrando un valor inesperado (p. ej. fecha) en Estado_Pago.
                             # Verificamos y forzamos "✅ Pagado" si no quedó confirmado.
-                            if "Estado_Pago" in headers:
+                            if "Estado_Pago" in headers_for_write:
                                 estado_guardado = ""
                                 try:
-                                    col_estado = headers.index("Estado_Pago") + 1
+                                    col_estado = headers_for_write.index("Estado_Pago") + 1
                                     estado_guardado = str(
                                         worksheet.cell(gsheet_row_index, col_estado).value or ""
                                     ).strip()
@@ -4997,7 +5004,7 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
                                 if not _estado_pago_es_pagado(estado_guardado):
                                     update_gsheet_cell(
                                         worksheet,
-                                        headers,
+                                        headers_for_write,
                                         gsheet_row_index,
                                         "Estado_Pago",
                                         "✅ Pagado",
@@ -5008,13 +5015,13 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
                                     df.at[idx, col_name] = col_value
                                     row[col_name] = col_value
 
-                            if uploaded_comp_keys and "Adjuntos" in headers:
+                            if uploaded_comp_keys and "Adjuntos" in headers_for_write:
                                 nueva_lista_adjuntos = _merge_uploaded_urls(
                                     row.get("Adjuntos", ""), uploaded_comp_keys
                                 )
                                 if update_gsheet_cell(
                                     worksheet,
-                                    headers,
+                                    headers_for_write,
                                     gsheet_row_index,
                                     "Adjuntos",
                                     nueva_lista_adjuntos,
