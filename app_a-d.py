@@ -1161,6 +1161,14 @@ def _upsert_pasa_bodega_report_row(row: Any) -> bool:
         st.warning("⚠️ No se pudo registrar en Pasa_Bodega: Folio_Factura vacío.")
         return False
 
+    def _folio_key(value: Any) -> str:
+        text = normalize_sheet_text(value).strip().lower()
+        if text.endswith(".0"):
+            maybe_num = text[:-2]
+            if maybe_num.replace("-", "").isdigit():
+                text = maybe_num
+        return text
+
     payload = {
         "FECHA DE FACTURA": _format_pasa_bodega_date(row.get("Fecha_Entrega", "")),
         "NUMERO DE FACTURA": folio_factura,
@@ -1192,9 +1200,10 @@ def _upsert_pasa_bodega_report_row(row: Any) -> bool:
     num_col_idx = headers.index("NUMERO DE FACTURA") + 1
     target_row = None
     try:
+        folio_target_key = _folio_key(folio_factura)
         col_values = ws.col_values(num_col_idx)
         for i, val in enumerate(col_values[1:], start=2):
-            if str(val or "").strip() == folio_factura:
+            if _folio_key(val) == folio_target_key:
                 target_row = i
                 break
     except Exception:
@@ -3735,7 +3744,6 @@ def completar_pedido(
             "values": [[now_str]],
         },
     ]
-
     if not batch_update_gsheet_cells(worksheet, updates, headers=headers):
         st.error("❌ No se pudo completar el pedido.")
         return False
