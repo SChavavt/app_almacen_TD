@@ -3005,6 +3005,12 @@ _RUTA_OPT_ZONE_CONFIG = {
 }
 _RUTA_OPT_CLIENTES_SHEET = "Clientes_Locales"
 _RUTA_OPT_MAX_WAYPOINTS = 23
+_RUTA_OPT_NOMINATIM_URL = "https://nominatim.openstreetmap.org/search"
+_RUTA_OPT_MUNICIPIO_FIXES = {
+    "gral escobedo": "general escobedo",
+    "gpe": "guadalupe",
+    "san nicolas": "san nicolas de los garza",
+}
 
 
 def _ruta_opt_normalize_cliente(value: Any) -> str:
@@ -3068,10 +3074,183 @@ def _coords_in_zone(lat: float, lng: float, zone_key: str) -> bool:
     return cfg["lat_min"] <= lat <= cfg["lat_max"] and cfg["lng_min"] <= lng <= cfg["lng_max"]
 
 
+def _ruta_opt_clean_basic_address(address: str) -> str:
+    txt = normalize_sheet_text(address)
+    txt = re.sub(r"\b(loc(?:al)?|interior|int\.?|torre|piso|depto|cons(?:ultorio)?)\b\.?\s*[a-z0-9-]*", "", txt, flags=re.IGNORECASE)
+    txt = re.sub(r"\bav\.?\b", "Avenida", txt, flags=re.IGNORECASE)
+    txt = re.sub(r"\bblvd\.?\b", "Boulevard", txt, flags=re.IGNORECASE)
+    txt = re.sub(r"\s+", " ", txt).strip(" ,;-")
+    return txt
+
+
+def _ruta_opt_clean_aggressive_address(address: str) -> str:
+    txt = _ruta_opt_clean_basic_address(address)
+    txt = re.sub(r"\b(cons|consultorio|int|interior|local|depto|dep)\b\.?\s*[a-z0-9-]*", "", txt, flags=re.IGNORECASE)
+    txt = re.sub(r"(\d+)\s*al\s*(\d+)", r"\1", txt, flags=re.IGNORECASE)
+    txt = re.sub(r"[-_/]+", " ", txt)
+    txt = re.sub(r"\s+", " ", txt).strip(" ,;-")
+    return txt
+
+
+def _ruta_opt_fix_municipio(municipio: str) -> str:
+    m = normalize_sheet_text(municipio).lower()
+    return _RUTA_OPT_MUNICIPIO_FIXES.get(m, municipio)
+
+
+def _ruta_opt_geocode_nominatim(address: str) -> Optional[tuple[float, float]]:
+    if not address:
+        return None
+    try:
+        resp = requests.get(
+            _RUTA_OPT_NOMINATIM_URL,
+            params={"q": address, "format": "jsonv2", "limit": 1, "countrycodes": "mx"},
+            headers={"User-Agent": "app_almacen_td/1.0 (route_optimizer)"},
+            timeout=12,
+        )
+        if resp.status_code != 200:
+            return None
+        data = resp.json()
+        if not data:
+            return None
+        first = data[0]
+        return float(first.get("lat")), float(first.get("lon"))
+    except Exception:
+        return None
+
+
+def _ruta_opt_geocode_google(address: str, api_key: str) -> Optional[tuple[float, float]]:
+    if not address or not api_key:
+        return None
+    try:
+        resp = requests.get(
+            "https://maps.googleapis.com/maps/api/geocode/json",
+            params={"address": address, "region": "mx", "language": "es", "key": api_key},
+            timeout=12,
+        )
+        if resp.status_code != 200:
+            return None
+        data = resp.json()
+        if data.get("status") != "OK" or not data.get("results"):
+            return None
+        loc = data["results"][0]["geometry"]["location"]
+        return float(loc.get("lat")), float(loc.get("lng"))
+    except Exception:
+        return None
+
+
+def _save_cliente_locales_coords(
+    *,
+    cliente: str,
+    lat: float,
+    lng: float,
+    direccion_final: str,
+    confianza_final: str,
+    metodo_final: str,
+) -> bool:
+    try:
+        client = get_gspread_client(_credentials_json_dict=GSHEETS_CREDENTIALS)
+        ws = client.open_by_key(GOOGLE_SHEET_ID).worksheet(_RUTA_OPT_CLIENTES_SHEET)
+        values = ws.get_all_values()
+        if not values:
+            return False
+        headers = values[0]
+        rows = values[1:]
+    except Exception:
+        return False
+
+    header_idx = {_normalize_header_key(h): i + 1 for i, h in enumerate(headers)}
+    cliente_col = header_idx.get("cliente")
+    lat_col = header_idx.get("lat_final") or header_idx.get("latitud")
+    lng_col = header_idx.get("lng_final") or header_idx.get("longitud")
+    dir_col = header_idx.get("direccion_final")
+    conf_col = header_idx.get("confianza_final")
+    met_col = header_idx.get("metodo_final")
+
+    if not cliente_col or not lat_col or not lng_col:
+        return False
+
+    cliente_norm = _ruta_opt_normalize_cliente(cliente)
+    row_target = None
+    for i, row in enumerate(rows, start=2):
+        cell_val = row[cliente_col - 1] if len(row) >= cliente_col else ""
+        if _ruta_opt_normalize_cliente(cell_val) == cliente_norm:
+            row_target = i
+            break
+
+    if row_target is None:
+        return False
+
+    updates = [
+        {"range": gspread.utils.rowcol_to_a1(row_target, lat_col), "values": [[lat]]},
+        {"range": gspread.utils.rowcol_to_a1(row_target, lng_col), "values": [[lng]]},
+    ]
+    if dir_col:
+        updates.append({"range": gspread.utils.rowcol_to_a1(row_target, dir_col), "values": [[direccion_final]]})
+    if conf_col:
+        updates.append({"range": gspread.utils.rowcol_to_a1(row_target, conf_col), "values": [[confianza_final]]})
+    if met_col:
+        updates.append({"range": gspread.utils.rowcol_to_a1(row_target, met_col), "values": [[metodo_final]]})
+
+    return batch_update_gsheet_cells(ws, updates)
+
+
+def _attempt_autogeocode_for_cliente(
+    *,
+    pedido: pd.Series,
+    cliente_row: pd.Series,
+    zone_key: str,
+    google_api_key: str,
+) -> Optional[dict[str, Any]]:
+    municipio = str(cliente_row.get("Municipio", "") or pedido.get("Municipio", "")).strip()
+    calle = str(cliente_row.get("CalleyNumero", "")).strip()
+    col = str(cliente_row.get("Col", "")).strip()
+    cp = str(cliente_row.get("C_P.", "")).strip()
+    direccion_final = str(cliente_row.get("Direccion_Final", "")).strip()
+
+    base_addr = direccion_final or ", ".join([x for x in [calle, col, municipio, cp, "Mexico"] if x])
+    if not base_addr:
+        return None
+
+    municipio_fix = _ruta_opt_fix_municipio(municipio)
+    zone_city = "Saltillo, Coahuila, Mexico" if zone_key == "saltillo" else "Monterrey, Nuevo Leon, Mexico"
+    basic = _ruta_opt_clean_basic_address(base_addr)
+    aggr = _ruta_opt_clean_aggressive_address(base_addr)
+    with_zone = f"{basic}, {zone_city}"
+    with_municipio_fix = f"{aggr}, {municipio_fix}, {zone_city}" if municipio_fix else f"{aggr}, {zone_city}"
+
+    attempts: list[tuple[str, str, str]] = [
+        ("FILTRO_1_OSM", base_addr, "OSM"),
+        ("FILTRO_2_OSM", basic, "OSM"),
+        ("FILTRO_SALTILLO_OSM" if zone_key == "saltillo" else "FILTRO_ZONA_OSM", with_zone, "OSM"),
+        ("FILTRO_3_OSM", aggr, "OSM"),
+        ("FILTRO_3_5_OSM", with_municipio_fix, "OSM"),
+        ("GOOGLE", with_municipio_fix, "GOOGLE"),
+    ]
+
+    for metodo, addr, engine in attempts:
+        result = _ruta_opt_geocode_google(addr, google_api_key) if engine == "GOOGLE" else _ruta_opt_geocode_nominatim(addr)
+        if not result:
+            continue
+        lat, lng = result
+        if not _coords_in_zone(lat, lng, zone_key):
+            continue
+        confianza = "OK_ALTO" if engine == "GOOGLE" else "OK_REVISAR"
+        return {
+            "lat": lat,
+            "lng": lng,
+            "direccion": addr,
+            "confianza": confianza,
+            "metodo": metodo,
+        }
+
+    return None
+
+
 def _collect_route_candidates(
     pedidos_fecha: pd.DataFrame,
     *,
     zone_key: str,
+    google_api_key: str = "",
 ) -> tuple[list[dict[str, Any]], list[str], list[str], list[str], list[dict[str, Any]]]:
     pedidos_en_proceso = pedidos_fecha[
         pedidos_fecha.get("Estado", pd.Series("", index=pedidos_fecha.index)).astype(str).str.strip().eq("🔵 En Proceso")
@@ -3099,11 +3278,9 @@ def _collect_route_candidates(
     clientes_work["_cliente_norm"] = clientes_work["Cliente"].apply(_ruta_opt_normalize_cliente)
     clientes_work[lat_col] = pd.to_numeric(clientes_work[lat_col], errors="coerce")
     clientes_work[lng_col] = pd.to_numeric(clientes_work[lng_col], errors="coerce")
-    clientes_work = clientes_work.dropna(subset=[lat_col, lng_col]).copy()
-
-    # Si hay múltiples filas por cliente, priorizamos la primera con coordenadas válidas.
     clientes_work = clientes_work.drop_duplicates(subset=["_cliente_norm"], keep="first")
     clientes_map = clientes_work.set_index("_cliente_norm")
+    geocode_cache: dict[str, Optional[dict[str, Any]]] = {}
 
     missing_clients: list[str] = []
     low_conf_clients: list[str] = []
@@ -3122,11 +3299,48 @@ def _collect_route_candidates(
             continue
 
         cli_row = clientes_map.loc[cliente_norm]
-        lat = float(cli_row.get(lat_col))
-        lng = float(cli_row.get(lng_col))
+        lat_raw = cli_row.get(lat_col)
+        lng_raw = cli_row.get(lng_col)
+
+        lat = float(lat_raw) if pd.notna(lat_raw) else np.nan
+        lng = float(lng_raw) if pd.notna(lng_raw) else np.nan
         confianza = str(cli_row.get("Confianza_Final", "")).strip().upper()
         metodo = str(cli_row.get("Metodo_Final", "")).strip()
         direccion = str(cli_row.get("Direccion_Final", "")).strip()
+
+        if pd.isna(lat) or pd.isna(lng):
+            if cliente_norm not in geocode_cache:
+                geocode_cache[cliente_norm] = _attempt_autogeocode_for_cliente(
+                    pedido=pedido,
+                    cliente_row=cli_row,
+                    zone_key=zone_key,
+                    google_api_key=google_api_key,
+                )
+            auto = geocode_cache.get(cliente_norm)
+            if auto:
+                lat = float(auto["lat"])
+                lng = float(auto["lng"])
+                direccion = str(auto["direccion"])
+                confianza = str(auto["confianza"])
+                metodo = str(auto["metodo"])
+                _save_cliente_locales_coords(
+                    cliente=cliente,
+                    lat=lat,
+                    lng=lng,
+                    direccion_final=direccion,
+                    confianza_final=confianza,
+                    metodo_final=metodo,
+                )
+            else:
+                missing_clients.append(cliente or "(sin nombre)")
+                pending_clients.append(
+                    {
+                        "cliente": cliente or "(sin nombre)",
+                        "pedido": pedido,
+                        "motivo": "Sin coordenadas y no se logró geocodificar automáticamente",
+                    }
+                )
+                continue
 
         low_conf = (
             confianza == "REVISAR"
@@ -3279,6 +3493,7 @@ def _render_ruta_optimizada_ui(
         candidates, missing_clients, low_conf_clients, out_zone_clients, pending_clients = _collect_route_candidates(
             pedidos_fecha,
             zone_key=route_scope,
+            google_api_key=api_key,
         )
 
         if missing_clients:
