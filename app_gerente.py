@@ -7,6 +7,7 @@ import boto3
 import gspread
 import pdfplumber
 import json
+import hashlib
 import re
 import unicodedata
 from io import BytesIO
@@ -5841,188 +5842,232 @@ if "organizador" in tab_map:
                         df_facturas = df_facturas[df_facturas["FolioSerie"] != ""].copy()
                         df_facturas["_folio_match"] = df_facturas["FolioSerie"].apply(normalizar_folio_para_match)
                         df_facturas = df_facturas[df_facturas["_folio_match"] != ""].copy()
-                        ahora_cdmx = now_cdmx()
-                        ahora_naive = ahora_cdmx.replace(tzinfo=None)
-                        limite_72h = ahora_naive - timedelta(hours=72)
+                        contenido_archivo = archivo_facturas.getvalue()
+                        hash_archivo = hashlib.md5(contenido_archivo).hexdigest()
+                        firma_archivo = f"{archivo_facturas.name}|{len(contenido_archivo)}|{hash_archivo}"
+                        cache_key_check = "organizador_check_facturas_cache"
+                        filtro_key_check = "organizador_check_facturas_filtro_vendedor"
+                        cache_check = st.session_state.get(cache_key_check)
 
-                        df_facturas["_fecha_factura_dt"] = pd.to_datetime(
-                            df_facturas["Fecha"], errors="coerce", dayfirst=True
-                        )
-                        df_facturas = df_facturas[df_facturas["_fecha_factura_dt"].notna()].copy()
-                        df_facturas = df_facturas[
-                            (df_facturas["_fecha_factura_dt"] >= limite_72h)
-                            & (df_facturas["_fecha_factura_dt"] <= ahora_naive)
-                        ].copy()
-                        if df_facturas.empty:
-                            st.info(
-                                "No hay filas en el archivo dentro de las últimas 72 horas según la columna Fecha "
-                                f"({limite_72h.strftime('%d/%m/%Y %H:%M')} a {ahora_naive.strftime('%d/%m/%Y %H:%M')})."
-                            )
-
-                        df_pedidos_match = cargar_pedidos().copy()
-                        if "Folio_Factura" not in df_pedidos_match.columns:
-                            df_pedidos_match["Folio_Factura"] = ""
-                        df_pedidos_match["_folio_match"] = df_pedidos_match["Folio_Factura"].apply(normalizar_folio_para_match)
-                        df_pedidos_match["_folios_factura_set"] = df_pedidos_match["Folio_Factura"].apply(
-                            lambda v: (
-                                extraer_folios_posibles(v)
-                                or ({normalizar_folio_para_match(v)} if normalizar_folio_para_match(v) else set())
-                            )
-                        )
-                        columnas_adjuntos = []
-                        for col_tmp in df_pedidos_match.columns:
-                            norm_col = re.sub(r"[^a-z0-9]", "", normalizar(col_tmp))
-                            if norm_col in {"adjuntos", "adjuntossurtido", "adjuntossurtidos"}:
-                                columnas_adjuntos.append(col_tmp)
-                        if not columnas_adjuntos:
-                            columnas_adjuntos = [c for c in ["Adjuntos", "Adjuntos_Surtido"] if c in df_pedidos_match.columns]
-                        for c_adj in columnas_adjuntos:
-                            df_pedidos_match[c_adj] = df_pedidos_match[c_adj].astype(str)
-                        if columnas_adjuntos:
-                            df_pedidos_match["_folios_adjuntos_set"] = df_pedidos_match[columnas_adjuntos].apply(
-                                lambda r: set().union(*(extraer_folios_posibles(v) for v in r.tolist())),
-                                axis=1,
-                            )
+                        if cache_check and cache_check.get("firma_archivo") == firma_archivo:
+                            limite_72h = cache_check["limite_72h"]
+                            ahora_naive = cache_check["ahora_naive"]
+                            total_archivo = cache_check["total_archivo"]
+                            total_no_encontradas = cache_check["total_no_encontradas"]
+                            df_no_encontradas = cache_check["df_no_encontradas"].copy()
+                            df_match_cliente_sin_folio = cache_check["df_match_cliente_sin_folio"].copy()
                         else:
-                            df_pedidos_match["_folios_adjuntos_set"] = [set() for _ in range(len(df_pedidos_match))]
-                        col_hora_registro = encontrar_columna_por_alias(
-                            df_pedidos_match,
-                            ["Hora_Registro", "Fecha_Hora_Registro", "Fecha_Registro", "Created_At"],
-                        )
-                        if col_hora_registro is None:
-                            df_pedidos_match["_hora_registro_dt"] = pd.NaT
-                        else:
-                            df_pedidos_match["_hora_registro_dt"] = pd.to_datetime(
-                                df_pedidos_match[col_hora_registro], errors="coerce"
+                            st.session_state.pop(filtro_key_check, None)
+                            ahora_cdmx = now_cdmx()
+                            ahora_naive = ahora_cdmx.replace(tzinfo=None)
+                            limite_72h = ahora_naive - timedelta(hours=72)
+
+                            df_facturas["_fecha_factura_dt"] = pd.to_datetime(
+                                df_facturas["Fecha"], errors="coerce", dayfirst=True
                             )
-
-                        col_cliente_sistema = encontrar_columna_por_alias(
-                            df_pedidos_match,
-                            ["Cliente", "Nombre_Cliente", "NombreCliente", "Razon_Social", "Razón Social"],
-                        )
-                        if col_cliente_sistema is None:
-                            df_pedidos_match["_cliente_norm"] = ""
-                        else:
-                            df_pedidos_match["_cliente_norm"] = (
-                                df_pedidos_match[col_cliente_sistema]
-                                .astype(str)
-                                .apply(normalizar)
-                                .str.strip()
-                            )
-                        clientes_sistema_norm = [
-                            c for c in df_pedidos_match["_cliente_norm"].dropna().astype(str).tolist() if c
-                        ]
-                        df_facturas["_cliente_norm"] = df_facturas["Cliente"].astype(str).apply(normalizar).str.strip()
-                        validos_por_folio = []
-                        validos_por_cliente = []
-                        validos_por_adjuntos = []
-                        total_a_analizar = int(len(df_facturas))
-                        progreso_match = st.progress(
-                            0,
-                            text=f"Analizando facturas... 0/{total_a_analizar}",
-                        )
-                        estado_match = st.empty()
-
-                        for idx, (_, fila_factura) in enumerate(df_facturas.iterrows(), start=1):
-                            fecha_factura = fila_factura.get("_fecha_factura_dt")
-                            folio_factura = fila_factura.get("_folio_match", "")
-                            cliente_factura = fila_factura.get("_cliente_norm", "")
-                            ventana_inicio_folio = fecha_factura - timedelta(hours=72)
-                            ventana_fin = fecha_factura + timedelta(hours=72)
-
-                            candidatos_folio = df_pedidos_match[
-                                df_pedidos_match["_folios_factura_set"].apply(
-                                    lambda s: str(folio_factura).strip() in s
+                            df_facturas = df_facturas[df_facturas["_fecha_factura_dt"].notna()].copy()
+                            df_facturas = df_facturas[
+                                (df_facturas["_fecha_factura_dt"] >= limite_72h)
+                                & (df_facturas["_fecha_factura_dt"] <= ahora_naive)
+                            ].copy()
+                            if df_facturas.empty:
+                                st.info(
+                                    "No hay filas en el archivo dentro de las últimas 72 horas según la columna Fecha "
+                                    f"({limite_72h.strftime('%d/%m/%Y %H:%M')} a {ahora_naive.strftime('%d/%m/%Y %H:%M')})."
                                 )
-                            ].copy()
-                            match_folio_factura_con_fecha = (
-                                (not candidatos_folio.empty)
-                                and candidatos_folio["_hora_registro_dt"].between(ventana_inicio_folio, ventana_fin).any()
-                            )
-                            candidatos_adjuntos = df_pedidos_match[
-                                df_pedidos_match["_folios_adjuntos_set"].apply(lambda s: str(folio_factura).strip() in s)
-                            ].copy()
-                            match_folio_adjuntos_con_fecha = (
-                                (not candidatos_adjuntos.empty)
-                                and candidatos_adjuntos["_hora_registro_dt"].between(ventana_inicio_folio, ventana_fin).any()
-                            )
-                            match_folio_con_fecha = bool(match_folio_factura_con_fecha or match_folio_adjuntos_con_fecha)
 
-                            candidatos_cliente = df_pedidos_match.iloc[0:0].copy()
-                            if cliente_factura and not match_folio_con_fecha:
-                                candidatos_cliente = df_pedidos_match[
-                                    df_pedidos_match["_cliente_norm"].astype(str).apply(
-                                        lambda c: coincide_nombre_cliente(cliente_factura, c)
+                            df_pedidos_match = cargar_pedidos().copy()
+                            if "Folio_Factura" not in df_pedidos_match.columns:
+                                df_pedidos_match["Folio_Factura"] = ""
+                            df_pedidos_match["_folio_match"] = df_pedidos_match["Folio_Factura"].apply(normalizar_folio_para_match)
+                            df_pedidos_match["_folios_factura_set"] = df_pedidos_match["Folio_Factura"].apply(
+                                lambda v: (
+                                    extraer_folios_posibles(v)
+                                    or ({normalizar_folio_para_match(v)} if normalizar_folio_para_match(v) else set())
+                                )
+                            )
+                            columnas_adjuntos = []
+                            for col_tmp in df_pedidos_match.columns:
+                                norm_col = re.sub(r"[^a-z0-9]", "", normalizar(col_tmp))
+                                if norm_col in {"adjuntos", "adjuntossurtido", "adjuntossurtidos"}:
+                                    columnas_adjuntos.append(col_tmp)
+                            if not columnas_adjuntos:
+                                columnas_adjuntos = [c for c in ["Adjuntos", "Adjuntos_Surtido"] if c in df_pedidos_match.columns]
+                            for c_adj in columnas_adjuntos:
+                                df_pedidos_match[c_adj] = df_pedidos_match[c_adj].astype(str)
+                            if columnas_adjuntos:
+                                df_pedidos_match["_folios_adjuntos_set"] = df_pedidos_match[columnas_adjuntos].apply(
+                                    lambda r: set().union(*(extraer_folios_posibles(v) for v in r.tolist())),
+                                    axis=1,
+                                )
+                            else:
+                                df_pedidos_match["_folios_adjuntos_set"] = [set() for _ in range(len(df_pedidos_match))]
+                            col_hora_registro = encontrar_columna_por_alias(
+                                df_pedidos_match,
+                                ["Hora_Registro", "Fecha_Hora_Registro", "Fecha_Registro", "Created_At"],
+                            )
+                            if col_hora_registro is None:
+                                df_pedidos_match["_hora_registro_dt"] = pd.NaT
+                            else:
+                                df_pedidos_match["_hora_registro_dt"] = pd.to_datetime(
+                                    df_pedidos_match[col_hora_registro], errors="coerce"
+                                )
+
+                            col_cliente_sistema = encontrar_columna_por_alias(
+                                df_pedidos_match,
+                                ["Cliente", "Nombre_Cliente", "NombreCliente", "Razon_Social", "Razón Social"],
+                            )
+                            if col_cliente_sistema is None:
+                                df_pedidos_match["_cliente_norm"] = ""
+                            else:
+                                df_pedidos_match["_cliente_norm"] = (
+                                    df_pedidos_match[col_cliente_sistema]
+                                    .astype(str)
+                                    .apply(normalizar)
+                                    .str.strip()
+                                )
+                            df_facturas["_cliente_norm"] = df_facturas["Cliente"].astype(str).apply(normalizar).str.strip()
+                            validos_por_folio = []
+                            validos_por_cliente = []
+                            validos_por_adjuntos = []
+                            total_a_analizar = int(len(df_facturas))
+                            progreso_match = st.progress(
+                                0,
+                                text=f"Analizando facturas... 0/{total_a_analizar}",
+                            )
+                            estado_match = st.empty()
+
+                            for idx, (_, fila_factura) in enumerate(df_facturas.iterrows(), start=1):
+                                fecha_factura = fila_factura.get("_fecha_factura_dt")
+                                folio_factura = fila_factura.get("_folio_match", "")
+                                cliente_factura = fila_factura.get("_cliente_norm", "")
+                                ventana_inicio_folio = fecha_factura - timedelta(hours=72)
+                                ventana_fin = fecha_factura + timedelta(hours=72)
+
+                                candidatos_folio = df_pedidos_match[
+                                    df_pedidos_match["_folios_factura_set"].apply(
+                                        lambda s: str(folio_factura).strip() in s
                                     )
                                 ].copy()
-                            match_cliente_con_fecha = (
-                                (not candidatos_cliente.empty)
-                                and candidatos_cliente["_hora_registro_dt"].between(fecha_factura, ventana_fin).any()
-                            )
+                                match_folio_factura_con_fecha = (
+                                    (not candidatos_folio.empty)
+                                    and candidatos_folio["_hora_registro_dt"].between(ventana_inicio_folio, ventana_fin).any()
+                                )
+                                candidatos_adjuntos = df_pedidos_match[
+                                    df_pedidos_match["_folios_adjuntos_set"].apply(lambda s: str(folio_factura).strip() in s)
+                                ].copy()
+                                match_folio_adjuntos_con_fecha = (
+                                    (not candidatos_adjuntos.empty)
+                                    and candidatos_adjuntos["_hora_registro_dt"].between(ventana_inicio_folio, ventana_fin).any()
+                                )
+                                match_folio_con_fecha = bool(match_folio_factura_con_fecha or match_folio_adjuntos_con_fecha)
 
-                            validos_por_folio.append(bool(match_folio_con_fecha))
-                            validos_por_adjuntos.append(bool(match_folio_adjuntos_con_fecha))
-                            validos_por_cliente.append(bool(match_cliente_con_fecha and not match_folio_con_fecha))
-
-                            porcentaje = int((idx / total_a_analizar) * 100) if total_a_analizar else 100
-                            progreso_match.progress(
-                                porcentaje,
-                                text=f"Analizando facturas... {idx}/{total_a_analizar}",
-                            )
-                            if idx == total_a_analizar or idx % 25 == 0:
-                                estado_match.caption(
-                                    f"Procesadas {idx} de {total_a_analizar} facturas."
+                                candidatos_cliente = df_pedidos_match.iloc[0:0].copy()
+                                if cliente_factura and not match_folio_con_fecha:
+                                    candidatos_cliente = df_pedidos_match[
+                                        df_pedidos_match["_cliente_norm"].astype(str).apply(
+                                            lambda c: coincide_nombre_cliente(cliente_factura, c)
+                                        )
+                                    ].copy()
+                                match_cliente_con_fecha = (
+                                    (not candidatos_cliente.empty)
+                                    and candidatos_cliente["_hora_registro_dt"].between(fecha_factura, ventana_fin).any()
                                 )
 
-                        progreso_match.progress(100, text=f"Análisis completado: {total_a_analizar}/{total_a_analizar}")
-                        estado_match.caption("✅ Revisión terminada.")
+                                validos_por_folio.append(bool(match_folio_con_fecha))
+                                validos_por_adjuntos.append(bool(match_folio_adjuntos_con_fecha))
+                                validos_por_cliente.append(bool(match_cliente_con_fecha and not match_folio_con_fecha))
 
-                        df_facturas["_match_valido_folio"] = validos_por_folio
-                        df_facturas["_match_valido_adjuntos"] = validos_por_adjuntos
-                        df_facturas["_match_valido_cliente_sin_folio"] = validos_por_cliente
-
-                        df_no_encontradas = (
-                            df_facturas[
-                                ~(
-                                    df_facturas["_match_valido_folio"]
-                                    | df_facturas["_match_valido_adjuntos"]
-                                    | df_facturas["_match_valido_cliente_sin_folio"]
+                                porcentaje = int((idx / total_a_analizar) * 100) if total_a_analizar else 100
+                                progreso_match.progress(
+                                    porcentaje,
+                                    text=f"Analizando facturas... {idx}/{total_a_analizar}",
                                 )
-                            ]
-                            .drop(
-                                columns=[
-                                    "_folio_match",
-                                    "_fecha_factura_dt",
-                                    "_cliente_norm",
-                                    "_match_valido_folio",
-                                    "_match_valido_adjuntos",
-                                    "_match_valido_cliente_sin_folio",
-                                ],
-                                errors="ignore",
-                            )
-                            .drop_duplicates()
-                            .reset_index(drop=True)
-                        )
+                                if idx == total_a_analizar or idx % 25 == 0:
+                                    estado_match.caption(
+                                        f"Procesadas {idx} de {total_a_analizar} facturas."
+                                    )
 
-                        df_match_cliente_sin_folio = (
-                            df_facturas[df_facturas["_match_valido_cliente_sin_folio"]]
-                            .drop(
-                                columns=[
-                                    "_folio_match",
-                                    "_fecha_factura_dt",
-                                    "_cliente_norm",
-                                    "_match_valido_folio",
-                                    "_match_valido_adjuntos",
-                                    "_match_valido_cliente_sin_folio",
-                                ],
-                                errors="ignore",
-                            )
-                            .drop_duplicates()
-                            .reset_index(drop=True)
-                        )
+                            progreso_match.progress(100, text=f"Análisis completado: {total_a_analizar}/{total_a_analizar}")
+                            estado_match.caption("✅ Revisión terminada.")
 
-                        total_archivo = int(len(df_facturas))
-                        total_no_encontradas = int(len(df_no_encontradas))
+                            df_facturas["_match_valido_folio"] = validos_por_folio
+                            df_facturas["_match_valido_adjuntos"] = validos_por_adjuntos
+                            df_facturas["_match_valido_cliente_sin_folio"] = validos_por_cliente
+
+                            df_no_encontradas = (
+                                df_facturas[
+                                    ~(
+                                        df_facturas["_match_valido_folio"]
+                                        | df_facturas["_match_valido_adjuntos"]
+                                        | df_facturas["_match_valido_cliente_sin_folio"]
+                                    )
+                                ]
+                                .drop(
+                                    columns=[
+                                        "_folio_match",
+                                        "_fecha_factura_dt",
+                                        "_cliente_norm",
+                                        "_match_valido_folio",
+                                        "_match_valido_adjuntos",
+                                        "_match_valido_cliente_sin_folio",
+                                    ],
+                                    errors="ignore",
+                                )
+                                .drop_duplicates()
+                                .reset_index(drop=True)
+                            )
+
+                            df_match_cliente_sin_folio = (
+                                df_facturas[df_facturas["_match_valido_cliente_sin_folio"]]
+                                .drop(
+                                    columns=[
+                                        "_folio_match",
+                                        "_fecha_factura_dt",
+                                        "_cliente_norm",
+                                        "_match_valido_folio",
+                                        "_match_valido_adjuntos",
+                                        "_match_valido_cliente_sin_folio",
+                                    ],
+                                    errors="ignore",
+                                )
+                                .drop_duplicates()
+                                .reset_index(drop=True)
+                            )
+
+                            total_archivo = int(len(df_facturas))
+                            total_no_encontradas = int(len(df_no_encontradas))
+                            st.session_state[cache_key_check] = {
+                                "firma_archivo": firma_archivo,
+                                "limite_72h": limite_72h,
+                                "ahora_naive": ahora_naive,
+                                "total_archivo": total_archivo,
+                                "total_no_encontradas": total_no_encontradas,
+                                "df_no_encontradas": df_no_encontradas.copy(),
+                                "df_match_cliente_sin_folio": df_match_cliente_sin_folio.copy(),
+                            }
+
+                        vendedores_disponibles_check = sorted(
+                            {
+                                str(v).strip()
+                                for v in df_no_encontradas.get("Vendedor", pd.Series(dtype=str)).dropna().tolist()
+                                if str(v).strip()
+                            }
+                        )
+                        opciones_vendedor_check = ["👥 Todos"] + vendedores_disponibles_check
+                        filtro_vendedor_check = st.selectbox(
+                            "Filtrar lista por vendedor",
+                            options=opciones_vendedor_check,
+                            index=0,
+                            key="organizador_check_facturas_filtro_vendedor",
+                        )
+                        if filtro_vendedor_check == "👥 Todos":
+                            df_no_encontradas_filtrado = df_no_encontradas.copy()
+                        else:
+                            df_no_encontradas_filtrado = df_no_encontradas[
+                                df_no_encontradas.get("Vendedor", "").astype(str).str.strip() == filtro_vendedor_check
+                            ].copy()
+
                         st.info(
                             f"Facturas analizadas: {total_archivo} | "
                             f"No encontradas en sistema: {total_no_encontradas}"
@@ -6047,10 +6092,14 @@ if "organizador" in tab_map:
                                 "⚠️ Estas facturas (últimas 72h) no tienen match válido en data_pedidos/datos_pedidos "
                                 "considerando Folio_Factura/Adjuntos/Cliente + regla de fecha:"
                             )
-                            st.dataframe(df_no_encontradas, use_container_width=True)
+                            st.caption(
+                                f"Vendedor seleccionado: {filtro_vendedor_check} | "
+                                f"Resultados mostrados: {len(df_no_encontradas_filtrado)}"
+                            )
+                            st.dataframe(df_no_encontradas_filtrado, use_container_width=True)
                             st.download_button(
                                 "⬇️ Descargar faltantes (CSV)",
-                                data=df_no_encontradas.to_csv(index=False).encode("utf-8-sig"),
+                                data=df_no_encontradas_filtrado.to_csv(index=False).encode("utf-8-sig"),
                                 file_name="facturas_no_encontradas.csv",
                                 mime="text/csv",
                                 key="organizador_check_facturas_descargar_csv",
