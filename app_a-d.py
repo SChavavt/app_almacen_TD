@@ -3106,8 +3106,16 @@ def confirmar_modificacion_surtido(
     mod_texto,
 ):
     """Confirma modificación de surtido priorizando batch y con fallback seguro."""
+    live_headers = list(headers or [])
+    try:
+        fetched_headers = worksheet.row_values(1)
+        if fetched_headers:
+            live_headers = fetched_headers
+    except Exception:
+        # Si falla la lectura de encabezados, usamos los que ya traíamos en memoria.
+        live_headers = list(headers or [])
 
-    if "Modificacion_Surtido" not in headers:
+    if "Modificacion_Surtido" not in live_headers:
         st.error("❌ No existe la columna 'Modificacion_Surtido' para confirmar el cambio.")
         return False
 
@@ -3117,57 +3125,57 @@ def confirmar_modificacion_surtido(
         {
             "range": gspread.utils.rowcol_to_a1(
                 gsheet_row_index,
-                headers.index("Modificacion_Surtido") + 1,
+                live_headers.index("Modificacion_Surtido") + 1,
             ),
             "values": [[texto_confirmado]],
         }
     ]
 
-    if "Estado" in headers:
+    if "Estado" in live_headers:
         updates.append(
             {
                 "range": gspread.utils.rowcol_to_a1(
                     gsheet_row_index,
-                    headers.index("Estado") + 1,
+                    live_headers.index("Estado") + 1,
                 ),
                 "values": [["🔵 En Proceso"]],
             }
         )
 
-    if "Hora_Proceso" in headers:
+    if "Hora_Proceso" in live_headers:
         updates.append(
             {
                 "range": gspread.utils.rowcol_to_a1(
                     gsheet_row_index,
-                    headers.index("Hora_Proceso") + 1,
+                    live_headers.index("Hora_Proceso") + 1,
                 ),
                 "values": [[mx_now_str()]],
             }
         )
 
-    if batch_update_gsheet_cells(worksheet, updates, headers=headers):
+    if batch_update_gsheet_cells(worksheet, updates, headers=live_headers):
         return True
 
     # Fallback resiliente: conservar funcionalidad aunque falle la operación batch.
     ok = update_gsheet_cell(
         worksheet,
-        headers,
+        live_headers,
         gsheet_row_index,
         "Modificacion_Surtido",
         texto_confirmado,
     )
-    if ok and "Estado" in headers:
+    if ok and "Estado" in live_headers:
         ok = update_gsheet_cell(
             worksheet,
-            headers,
+            live_headers,
             gsheet_row_index,
             "Estado",
             "🔵 En Proceso",
         )
-    if ok and "Hora_Proceso" in headers:
+    if ok and "Hora_Proceso" in live_headers:
         ok = update_gsheet_cell(
             worksheet,
-            headers,
+            live_headers,
             gsheet_row_index,
             "Hora_Proceso",
             mx_now_str(),
