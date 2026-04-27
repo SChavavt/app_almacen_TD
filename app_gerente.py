@@ -7,6 +7,7 @@ import boto3
 import gspread
 import pdfplumber
 import json
+import hashlib
 import re
 import unicodedata
 from io import BytesIO
@@ -1393,10 +1394,49 @@ def folio_visual_desde_archivo(texto):
 
 
 def extraer_folios_posibles(texto: str) -> set[str]:
-    """Extrae folios potenciales desde texto libre (ej. nombres de PDF en adjuntos)."""
+    """Extrae folios potenciales desde texto libre (ej. nombres de PDF o texto OCR)."""
     valor = str(texto or "")
-    tokens = set(re.findall(r"[fF]?\d{5,}", valor))
-    return {normalizar_folio_para_match(t) for t in tokens if normalizar_folio_para_match(t)}
+    tokens = set()
+    tokens.update(re.findall(r"[fF]\s*[-_:]?\s*\d{5,}", valor))
+    tokens.update(re.findall(r"\b\d{5,}\b", valor))
+    tokens.update(re.findall(r"[fF]?\d{5,}", valor))
+    tokens_limpios = [re.sub(r"[^0-9fF]", "", t) for t in tokens]
+    return {normalizar_folio_para_match(t) for t in tokens_limpios if normalizar_folio_para_match(t)}
+
+
+def extraer_pdf_keys_desde_celda(valor: str) -> list[str]:
+    """Extrae llaves S3 de PDFs desde texto libre, URL o valores separados por comas/saltos."""
+    texto = str(valor or "").strip()
+    if not texto:
+        return []
+
+    candidatos = []
+
+    # URLs embebidas en texto libre.
+    for url in re.findall(r"https?://[^\s,;]+", texto):
+        key = extract_s3_key(url)
+        key = str(key or "").split("?", 1)[0].strip().lstrip("/")
+        if key.lower().endswith(".pdf"):
+            candidatos.append(unquote(key))
+
+    # Separadores comunes (coma, salto de línea, punto y coma).
+    for parte in partir_urls(texto):
+        key = extract_s3_key(parte)
+        key = str(key or "").split("?", 1)[0].strip().lstrip("/")
+        if key.lower().endswith(".pdf"):
+            candidatos.append(unquote(key))
+            continue
+        match_pdf = re.search(r"([A-Za-z0-9_\-./%]+\.pdf)", str(parte), flags=re.IGNORECASE)
+        if match_pdf:
+            candidatos.append(unquote(match_pdf.group(1).lstrip("/")))
+
+    # Quitar duplicados preservando orden.
+    out, seen = [], set()
+    for key in candidatos:
+        if key and key not in seen:
+            seen.add(key)
+            out.append(key)
+    return out
 
 
 def encontrar_columna_por_alias(df: pd.DataFrame, aliases: list[str]) -> str | None:
@@ -5841,188 +5881,243 @@ if "organizador" in tab_map:
                         df_facturas = df_facturas[df_facturas["FolioSerie"] != ""].copy()
                         df_facturas["_folio_match"] = df_facturas["FolioSerie"].apply(normalizar_folio_para_match)
                         df_facturas = df_facturas[df_facturas["_folio_match"] != ""].copy()
-                        ahora_cdmx = now_cdmx()
-                        ahora_naive = ahora_cdmx.replace(tzinfo=None)
-                        limite_72h = ahora_naive - timedelta(hours=72)
+                        contenido_archivo = archivo_facturas.getvalue()
+                        hash_archivo = hashlib.md5(contenido_archivo).hexdigest()
+                        firma_archivo = f"{archivo_facturas.name}|{len(contenido_archivo)}|{hash_archivo}"
+                        cache_key_check = "organizador_check_facturas_cache"
+                        filtro_key_check = "organizador_check_facturas_filtro_vendedor"
+                        cache_check = st.session_state.get(cache_key_check)
 
-                        df_facturas["_fecha_factura_dt"] = pd.to_datetime(
-                            df_facturas["Fecha"], errors="coerce", dayfirst=True
-                        )
-                        df_facturas = df_facturas[df_facturas["_fecha_factura_dt"].notna()].copy()
-                        df_facturas = df_facturas[
-                            (df_facturas["_fecha_factura_dt"] >= limite_72h)
-                            & (df_facturas["_fecha_factura_dt"] <= ahora_naive)
-                        ].copy()
-                        if df_facturas.empty:
-                            st.info(
-                                "No hay filas en el archivo dentro de las últimas 72 horas según la columna Fecha "
-                                f"({limite_72h.strftime('%d/%m/%Y %H:%M')} a {ahora_naive.strftime('%d/%m/%Y %H:%M')})."
-                            )
-
-                        df_pedidos_match = cargar_pedidos().copy()
-                        if "Folio_Factura" not in df_pedidos_match.columns:
-                            df_pedidos_match["Folio_Factura"] = ""
-                        df_pedidos_match["_folio_match"] = df_pedidos_match["Folio_Factura"].apply(normalizar_folio_para_match)
-                        df_pedidos_match["_folios_factura_set"] = df_pedidos_match["Folio_Factura"].apply(
-                            lambda v: (
-                                extraer_folios_posibles(v)
-                                or ({normalizar_folio_para_match(v)} if normalizar_folio_para_match(v) else set())
-                            )
-                        )
-                        columnas_adjuntos = []
-                        for col_tmp in df_pedidos_match.columns:
-                            norm_col = re.sub(r"[^a-z0-9]", "", normalizar(col_tmp))
-                            if norm_col in {"adjuntos", "adjuntossurtido", "adjuntossurtidos"}:
-                                columnas_adjuntos.append(col_tmp)
-                        if not columnas_adjuntos:
-                            columnas_adjuntos = [c for c in ["Adjuntos", "Adjuntos_Surtido"] if c in df_pedidos_match.columns]
-                        for c_adj in columnas_adjuntos:
-                            df_pedidos_match[c_adj] = df_pedidos_match[c_adj].astype(str)
-                        if columnas_adjuntos:
-                            df_pedidos_match["_folios_adjuntos_set"] = df_pedidos_match[columnas_adjuntos].apply(
-                                lambda r: set().union(*(extraer_folios_posibles(v) for v in r.tolist())),
-                                axis=1,
-                            )
+                        if cache_check and cache_check.get("firma_archivo") == firma_archivo:
+                            limite_72h = cache_check["limite_72h"]
+                            ahora_naive = cache_check["ahora_naive"]
+                            total_archivo = cache_check["total_archivo"]
+                            total_no_encontradas = cache_check["total_no_encontradas"]
+                            df_no_encontradas = cache_check["df_no_encontradas"].copy()
+                            df_match_cliente_sin_folio = cache_check["df_match_cliente_sin_folio"].copy()
                         else:
-                            df_pedidos_match["_folios_adjuntos_set"] = [set() for _ in range(len(df_pedidos_match))]
-                        col_hora_registro = encontrar_columna_por_alias(
-                            df_pedidos_match,
-                            ["Hora_Registro", "Fecha_Hora_Registro", "Fecha_Registro", "Created_At"],
-                        )
-                        if col_hora_registro is None:
-                            df_pedidos_match["_hora_registro_dt"] = pd.NaT
-                        else:
-                            df_pedidos_match["_hora_registro_dt"] = pd.to_datetime(
-                                df_pedidos_match[col_hora_registro], errors="coerce"
+                            st.session_state.pop(filtro_key_check, None)
+                            ahora_cdmx = now_cdmx()
+                            ahora_naive = ahora_cdmx.replace(tzinfo=None)
+                            limite_72h = ahora_naive - timedelta(hours=72)
+
+                            df_facturas["_fecha_factura_dt"] = pd.to_datetime(
+                                df_facturas["Fecha"], errors="coerce", dayfirst=True
                             )
-
-                        col_cliente_sistema = encontrar_columna_por_alias(
-                            df_pedidos_match,
-                            ["Cliente", "Nombre_Cliente", "NombreCliente", "Razon_Social", "Razón Social"],
-                        )
-                        if col_cliente_sistema is None:
-                            df_pedidos_match["_cliente_norm"] = ""
-                        else:
-                            df_pedidos_match["_cliente_norm"] = (
-                                df_pedidos_match[col_cliente_sistema]
-                                .astype(str)
-                                .apply(normalizar)
-                                .str.strip()
-                            )
-                        clientes_sistema_norm = [
-                            c for c in df_pedidos_match["_cliente_norm"].dropna().astype(str).tolist() if c
-                        ]
-                        df_facturas["_cliente_norm"] = df_facturas["Cliente"].astype(str).apply(normalizar).str.strip()
-                        validos_por_folio = []
-                        validos_por_cliente = []
-                        validos_por_adjuntos = []
-                        total_a_analizar = int(len(df_facturas))
-                        progreso_match = st.progress(
-                            0,
-                            text=f"Analizando facturas... 0/{total_a_analizar}",
-                        )
-                        estado_match = st.empty()
-
-                        for idx, (_, fila_factura) in enumerate(df_facturas.iterrows(), start=1):
-                            fecha_factura = fila_factura.get("_fecha_factura_dt")
-                            folio_factura = fila_factura.get("_folio_match", "")
-                            cliente_factura = fila_factura.get("_cliente_norm", "")
-                            ventana_inicio_folio = fecha_factura - timedelta(hours=72)
-                            ventana_fin = fecha_factura + timedelta(hours=72)
-
-                            candidatos_folio = df_pedidos_match[
-                                df_pedidos_match["_folios_factura_set"].apply(
-                                    lambda s: str(folio_factura).strip() in s
+                            df_facturas = df_facturas[df_facturas["_fecha_factura_dt"].notna()].copy()
+                            df_facturas = df_facturas[
+                                (df_facturas["_fecha_factura_dt"] >= limite_72h)
+                                & (df_facturas["_fecha_factura_dt"] <= ahora_naive)
+                            ].copy()
+                            if df_facturas.empty:
+                                st.info(
+                                    "No hay filas en el archivo dentro de las últimas 72 horas según la columna Fecha "
+                                    f"({limite_72h.strftime('%d/%m/%Y %H:%M')} a {ahora_naive.strftime('%d/%m/%Y %H:%M')})."
                                 )
-                            ].copy()
-                            match_folio_factura_con_fecha = (
-                                (not candidatos_folio.empty)
-                                and candidatos_folio["_hora_registro_dt"].between(ventana_inicio_folio, ventana_fin).any()
-                            )
-                            candidatos_adjuntos = df_pedidos_match[
-                                df_pedidos_match["_folios_adjuntos_set"].apply(lambda s: str(folio_factura).strip() in s)
-                            ].copy()
-                            match_folio_adjuntos_con_fecha = (
-                                (not candidatos_adjuntos.empty)
-                                and candidatos_adjuntos["_hora_registro_dt"].between(ventana_inicio_folio, ventana_fin).any()
-                            )
-                            match_folio_con_fecha = bool(match_folio_factura_con_fecha or match_folio_adjuntos_con_fecha)
 
-                            candidatos_cliente = df_pedidos_match.iloc[0:0].copy()
-                            if cliente_factura and not match_folio_con_fecha:
-                                candidatos_cliente = df_pedidos_match[
-                                    df_pedidos_match["_cliente_norm"].astype(str).apply(
-                                        lambda c: coincide_nombre_cliente(cliente_factura, c)
+                            df_pedidos_match = cargar_pedidos().copy()
+                            if "Folio_Factura" not in df_pedidos_match.columns:
+                                df_pedidos_match["Folio_Factura"] = ""
+                            df_pedidos_match["_folio_match"] = df_pedidos_match["Folio_Factura"].apply(normalizar_folio_para_match)
+                            df_pedidos_match["_folios_factura_set"] = df_pedidos_match["Folio_Factura"].apply(
+                                lambda v: (
+                                    extraer_folios_posibles(v)
+                                    or ({normalizar_folio_para_match(v)} if normalizar_folio_para_match(v) else set())
+                                )
+                            )
+                            columnas_adjuntos = []
+                            for col_tmp in df_pedidos_match.columns:
+                                norm_col = re.sub(r"[^a-z0-9]", "", normalizar(col_tmp))
+                                if norm_col in {"adjuntos", "adjuntossurtido", "adjuntossurtidos"}:
+                                    columnas_adjuntos.append(col_tmp)
+                            if not columnas_adjuntos:
+                                columnas_adjuntos = [c for c in ["Adjuntos", "Adjuntos_Surtido"] if c in df_pedidos_match.columns]
+                            for c_adj in columnas_adjuntos:
+                                df_pedidos_match[c_adj] = df_pedidos_match[c_adj].astype(str)
+                            if columnas_adjuntos:
+                                df_pedidos_match["_folios_adjuntos_set"] = df_pedidos_match[columnas_adjuntos].apply(
+                                    lambda r: set().union(*(extraer_folios_posibles(v) for v in r.tolist())),
+                                    axis=1,
+                                )
+                                df_pedidos_match["_adjuntos_pdf_keys"] = df_pedidos_match[columnas_adjuntos].apply(
+                                    lambda r: list(dict.fromkeys(
+                                        key_pdf
+                                        for v in r.tolist()
+                                        for key_pdf in extraer_pdf_keys_desde_celda(v)
+                                    )),
+                                    axis=1,
+                                )
+                            else:
+                                df_pedidos_match["_folios_adjuntos_set"] = [set() for _ in range(len(df_pedidos_match))]
+                                df_pedidos_match["_adjuntos_pdf_keys"] = [[] for _ in range(len(df_pedidos_match))]
+                            pdf_folios_cache = st.session_state.get("organizador_check_facturas_pdf_folios_cache", {})
+                            col_hora_registro = encontrar_columna_por_alias(
+                                df_pedidos_match,
+                                ["Hora_Registro", "Fecha_Hora_Registro", "Fecha_Registro", "Created_At"],
+                            )
+                            if col_hora_registro is None:
+                                df_pedidos_match["_hora_registro_dt"] = pd.NaT
+                            else:
+                                df_pedidos_match["_hora_registro_dt"] = pd.to_datetime(
+                                    df_pedidos_match[col_hora_registro], errors="coerce"
+                                )
+
+                            col_cliente_sistema = encontrar_columna_por_alias(
+                                df_pedidos_match,
+                                ["Cliente", "Nombre_Cliente", "NombreCliente", "Razon_Social", "Razón Social"],
+                            )
+                            if col_cliente_sistema is None:
+                                df_pedidos_match["_cliente_norm"] = ""
+                            else:
+                                df_pedidos_match["_cliente_norm"] = (
+                                    df_pedidos_match[col_cliente_sistema]
+                                    .astype(str)
+                                    .apply(normalizar)
+                                    .str.strip()
+                                )
+                            df_facturas["_cliente_norm"] = df_facturas["Cliente"].astype(str).apply(normalizar).str.strip()
+                            validos_por_folio = []
+                            validos_por_cliente = []
+                            validos_por_adjuntos = []
+                            total_a_analizar = int(len(df_facturas))
+                            progreso_match = st.progress(
+                                0,
+                                text=f"Analizando facturas... 0/{total_a_analizar}",
+                            )
+                            estado_match = st.empty()
+
+                            for idx, (_, fila_factura) in enumerate(df_facturas.iterrows(), start=1):
+                                fecha_factura = fila_factura.get("_fecha_factura_dt")
+                                folio_factura = fila_factura.get("_folio_match", "")
+                                cliente_factura = fila_factura.get("_cliente_norm", "")
+                                ventana_inicio_folio = fecha_factura - timedelta(hours=72)
+                                ventana_fin = fecha_factura + timedelta(hours=72)
+
+                                candidatos_folio = df_pedidos_match[
+                                    df_pedidos_match["_folios_factura_set"].apply(
+                                        lambda s: str(folio_factura).strip() in s
                                     )
                                 ].copy()
-                            match_cliente_con_fecha = (
-                                (not candidatos_cliente.empty)
-                                and candidatos_cliente["_hora_registro_dt"].between(fecha_factura, ventana_fin).any()
-                            )
+                                match_folio_factura_con_fecha = (
+                                    (not candidatos_folio.empty)
+                                    and candidatos_folio["_hora_registro_dt"].between(ventana_inicio_folio, ventana_fin).any()
+                                )
+                                candidatos_adjuntos = df_pedidos_match[
+                                    df_pedidos_match["_folios_adjuntos_set"].apply(lambda s: str(folio_factura).strip() in s)
+                                ].copy()
+                                match_folio_adjuntos_con_fecha = (
+                                    (not candidatos_adjuntos.empty)
+                                    and candidatos_adjuntos["_hora_registro_dt"].between(ventana_inicio_folio, ventana_fin).any()
+                                )
+                                match_folio_con_fecha = bool(match_folio_factura_con_fecha or match_folio_adjuntos_con_fecha)
 
-                            validos_por_folio.append(bool(match_folio_con_fecha))
-                            validos_por_adjuntos.append(bool(match_folio_adjuntos_con_fecha))
-                            validos_por_cliente.append(bool(match_cliente_con_fecha and not match_folio_con_fecha))
-
-                            porcentaje = int((idx / total_a_analizar) * 100) if total_a_analizar else 100
-                            progreso_match.progress(
-                                porcentaje,
-                                text=f"Analizando facturas... {idx}/{total_a_analizar}",
-                            )
-                            if idx == total_a_analizar or idx % 25 == 0:
-                                estado_match.caption(
-                                    f"Procesadas {idx} de {total_a_analizar} facturas."
+                                candidatos_cliente = df_pedidos_match.iloc[0:0].copy()
+                                if cliente_factura and not match_folio_con_fecha:
+                                    candidatos_cliente = df_pedidos_match[
+                                        df_pedidos_match["_cliente_norm"].astype(str).apply(
+                                            lambda c: coincide_nombre_cliente(cliente_factura, c)
+                                        )
+                                    ].copy()
+                                match_cliente_con_fecha = (
+                                    (not candidatos_cliente.empty)
+                                    and candidatos_cliente["_hora_registro_dt"].between(fecha_factura, ventana_fin).any()
                                 )
 
-                        progreso_match.progress(100, text=f"Análisis completado: {total_a_analizar}/{total_a_analizar}")
-                        estado_match.caption("✅ Revisión terminada.")
+                                validos_por_folio.append(bool(match_folio_con_fecha))
+                                validos_por_adjuntos.append(bool(match_folio_adjuntos_con_fecha))
+                                validos_por_cliente.append(bool(match_cliente_con_fecha and not match_folio_con_fecha))
 
-                        df_facturas["_match_valido_folio"] = validos_por_folio
-                        df_facturas["_match_valido_adjuntos"] = validos_por_adjuntos
-                        df_facturas["_match_valido_cliente_sin_folio"] = validos_por_cliente
-
-                        df_no_encontradas = (
-                            df_facturas[
-                                ~(
-                                    df_facturas["_match_valido_folio"]
-                                    | df_facturas["_match_valido_adjuntos"]
-                                    | df_facturas["_match_valido_cliente_sin_folio"]
+                                porcentaje = int((idx / total_a_analizar) * 100) if total_a_analizar else 100
+                                progreso_match.progress(
+                                    porcentaje,
+                                    text=f"Analizando facturas... {idx}/{total_a_analizar}",
                                 )
-                            ]
-                            .drop(
-                                columns=[
-                                    "_folio_match",
-                                    "_fecha_factura_dt",
-                                    "_cliente_norm",
-                                    "_match_valido_folio",
-                                    "_match_valido_adjuntos",
-                                    "_match_valido_cliente_sin_folio",
-                                ],
-                                errors="ignore",
-                            )
-                            .drop_duplicates()
-                            .reset_index(drop=True)
-                        )
+                                if idx == total_a_analizar or idx % 25 == 0:
+                                    estado_match.caption(
+                                        f"Procesadas {idx} de {total_a_analizar} facturas."
+                                    )
 
-                        df_match_cliente_sin_folio = (
-                            df_facturas[df_facturas["_match_valido_cliente_sin_folio"]]
-                            .drop(
-                                columns=[
-                                    "_folio_match",
-                                    "_fecha_factura_dt",
-                                    "_cliente_norm",
-                                    "_match_valido_folio",
-                                    "_match_valido_adjuntos",
-                                    "_match_valido_cliente_sin_folio",
-                                ],
-                                errors="ignore",
-                            )
-                            .drop_duplicates()
-                            .reset_index(drop=True)
-                        )
+                            progreso_match.progress(100, text=f"Análisis completado: {total_a_analizar}/{total_a_analizar}")
+                            estado_match.caption("✅ Revisión terminada.")
 
-                        total_archivo = int(len(df_facturas))
-                        total_no_encontradas = int(len(df_no_encontradas))
+                            df_facturas["_match_valido_folio"] = validos_por_folio
+                            df_facturas["_match_valido_adjuntos"] = validos_por_adjuntos
+                            df_facturas["_match_valido_cliente_sin_folio"] = validos_por_cliente
+
+                            df_no_encontradas = (
+                                df_facturas[
+                                    ~(
+                                        df_facturas["_match_valido_folio"]
+                                        | df_facturas["_match_valido_adjuntos"]
+                                        | df_facturas["_match_valido_cliente_sin_folio"]
+                                    )
+                                ]
+                                .drop(
+                                    columns=[
+                                        "_folio_match",
+                                        "_fecha_factura_dt",
+                                        "_cliente_norm",
+                                        "_match_valido_folio",
+                                        "_match_valido_adjuntos",
+                                        "_match_valido_cliente_sin_folio",
+                                    ],
+                                    errors="ignore",
+                                )
+                                .drop_duplicates()
+                                .reset_index(drop=True)
+                            )
+
+                            df_match_cliente_sin_folio = (
+                                df_facturas[df_facturas["_match_valido_cliente_sin_folio"]]
+                                .drop(
+                                    columns=[
+                                        "_folio_match",
+                                        "_fecha_factura_dt",
+                                        "_cliente_norm",
+                                        "_match_valido_folio",
+                                        "_match_valido_adjuntos",
+                                        "_match_valido_cliente_sin_folio",
+                                    ],
+                                    errors="ignore",
+                                )
+                                .drop_duplicates()
+                                .reset_index(drop=True)
+                            )
+
+                            total_archivo = int(len(df_facturas))
+                            total_no_encontradas = int(len(df_no_encontradas))
+                            st.session_state["organizador_check_facturas_pdf_folios_cache"] = pdf_folios_cache
+                            st.session_state[cache_key_check] = {
+                                "firma_archivo": firma_archivo,
+                                "limite_72h": limite_72h,
+                                "ahora_naive": ahora_naive,
+                                "total_archivo": total_archivo,
+                                "total_no_encontradas": total_no_encontradas,
+                                "df_no_encontradas": df_no_encontradas.copy(),
+                                "df_match_cliente_sin_folio": df_match_cliente_sin_folio.copy(),
+                            }
+
+                        vendedores_disponibles_check = sorted(
+                            {
+                                str(v).strip()
+                                for v in df_no_encontradas.get("Vendedor", pd.Series(dtype=str)).dropna().tolist()
+                                if str(v).strip()
+                            }
+                        )
+                        opciones_vendedor_check = ["👥 Todos"] + vendedores_disponibles_check
+                        filtro_vendedor_check = st.selectbox(
+                            "Filtrar lista por vendedor",
+                            options=opciones_vendedor_check,
+                            index=0,
+                            key="organizador_check_facturas_filtro_vendedor",
+                        )
+                        if filtro_vendedor_check == "👥 Todos":
+                            df_no_encontradas_filtrado = df_no_encontradas.copy()
+                        else:
+                            df_no_encontradas_filtrado = df_no_encontradas[
+                                df_no_encontradas.get("Vendedor", "").astype(str).str.strip() == filtro_vendedor_check
+                            ].copy()
+
                         st.info(
                             f"Facturas analizadas: {total_archivo} | "
                             f"No encontradas en sistema: {total_no_encontradas}"
@@ -6043,14 +6138,153 @@ if "organizador" in tab_map:
                                 "y con ventana de fecha lógica."
                             )
                         else:
+                            firma_refinado = f"{firma_archivo}|{filtro_vendedor_check}"
+                            cache_refinado = st.session_state.get("organizador_check_facturas_pdf_refinado", {})
+                            if cache_refinado.get("firma_refinado") == firma_refinado:
+                                df_no_encontradas_filtrado = cache_refinado.get(
+                                    "df_no_encontradas_filtrado", df_no_encontradas_filtrado
+                                ).copy()
+
+                            with st.expander("🔎 Validación opcional por folio dentro de PDFs adjuntos", expanded=False):
+                                st.caption(
+                                    "Esta validación es más lenta. Úsala solo si quieres revisar faltantes por "
+                                    "folio dentro del contenido de PDFs de Adjuntos/Adjuntos_Surtido."
+                                )
+                                if st.button(
+                                    "▶️ Ejecutar validación PDF solo para faltantes mostrados",
+                                    key="organizador_check_facturas_pdf_refinar_btn",
+                                ):
+                                    df_objetivo_pdf = df_no_encontradas_filtrado.copy()
+                                    st.caption(f"Se validarán {len(df_objetivo_pdf)} fila(s) de la tabla actual mostrada.")
+                                    if df_objetivo_pdf.empty:
+                                        st.info("No hay faltantes en la vista actual para validar por PDF.")
+                                    else:
+                                        with st.spinner("Analizando PDFs de adjuntos para los faltantes mostrados..."):
+                                            df_pedidos_pdf = cargar_pedidos().copy()
+                                            col_hora_pdf = encontrar_columna_por_alias(
+                                                df_pedidos_pdf,
+                                                ["Hora_Registro", "Fecha_Hora_Registro", "Fecha_Registro", "Created_At"],
+                                            )
+                                            if col_hora_pdf is None:
+                                                df_pedidos_pdf["_hora_registro_dt"] = pd.NaT
+                                            else:
+                                                df_pedidos_pdf["_hora_registro_dt"] = pd.to_datetime(
+                                                    df_pedidos_pdf[col_hora_pdf], errors="coerce"
+                                                )
+                                            col_vendedor_pdf = encontrar_columna_por_alias(
+                                                df_pedidos_pdf,
+                                                ["Vendedor_Registro", "Vendedor", "Nombre_Vendedor", "Usuario", "id_vendedor", "ID_Vendedor", "Id_Vendedor"],
+                                            )
+                                            if col_vendedor_pdf is None:
+                                                df_pedidos_pdf["_vendedor_norm"] = ""
+                                            else:
+                                                df_pedidos_pdf["_vendedor_norm"] = (
+                                                    df_pedidos_pdf[col_vendedor_pdf].astype(str).apply(normalizar).str.strip()
+                                                )
+
+                                            cols_adj_pdf = [
+                                                c for c in df_pedidos_pdf.columns
+                                                if re.sub(r"[^a-z0-9]", "", normalizar(c))
+                                                in {"adjuntos", "adjuntossurtido", "adjuntossurtidos"}
+                                            ]
+                                            if not cols_adj_pdf:
+                                                cols_adj_pdf = [c for c in ["Adjuntos", "Adjuntos_Surtido"] if c in df_pedidos_pdf.columns]
+                                            for c_adj in cols_adj_pdf:
+                                                df_pedidos_pdf[c_adj] = df_pedidos_pdf[c_adj].astype(str)
+
+                                            if cols_adj_pdf:
+                                                df_pedidos_pdf["_adjuntos_pdf_keys"] = df_pedidos_pdf[cols_adj_pdf].apply(
+                                                    lambda r: list(dict.fromkeys(
+                                                        key_pdf
+                                                        for v in r.tolist()
+                                                        for key_pdf in extraer_pdf_keys_desde_celda(v)
+                                                    )),
+                                                    axis=1,
+                                                )
+                                            else:
+                                                df_pedidos_pdf["_adjuntos_pdf_keys"] = [[] for _ in range(len(df_pedidos_pdf))]
+
+                                            pdf_folios_cache = st.session_state.get(
+                                                "organizador_check_facturas_pdf_folios_cache", {}
+                                            )
+
+                                            def _folio_en_pdfs(keys_pdf, folio_objetivo):
+                                                folio_objetivo = str(folio_objetivo or "").strip()
+                                                if not folio_objetivo:
+                                                    return False
+                                                encontrados = set()
+                                                for key_pdf in keys_pdf:
+                                                    key_pdf = str(key_pdf or "").strip()
+                                                    if not key_pdf:
+                                                        continue
+                                                    if key_pdf not in pdf_folios_cache:
+                                                        texto_pdf = extraer_texto_pdf(key_pdf)
+                                                        if isinstance(texto_pdf, str) and not texto_pdf.startswith("[ERROR AL LEER PDF]"):
+                                                            pdf_folios_cache[key_pdf] = list(extraer_folios_posibles(texto_pdf))
+                                                        else:
+                                                            pdf_folios_cache[key_pdf] = []
+                                                    encontrados.update(pdf_folios_cache.get(key_pdf, []))
+                                                return folio_objetivo in encontrados
+
+                                            def _folio_en_nombre_pdf(keys_pdf, folio_objetivo):
+                                                folio_objetivo = str(folio_objetivo or "").strip()
+                                                if not folio_objetivo:
+                                                    return False
+                                                for key_pdf in keys_pdf:
+                                                    if folio_objetivo in extraer_folios_posibles(str(key_pdf or "")):
+                                                        return True
+                                                return False
+
+                                            idx_match_pdf = set()
+                                            for idx_fila, fila_f in df_objetivo_pdf.iterrows():
+                                                folio_f = normalizar_folio_para_match(fila_f.get("FolioSerie", ""))
+                                                fecha_f = pd.to_datetime(fila_f.get("Fecha", ""), errors="coerce", dayfirst=True)
+                                                vendedor_f = normalizar(str(fila_f.get("Vendedor", "") or "").strip())
+                                                if not folio_f or pd.isna(fecha_f):
+                                                    continue
+                                                ventana_ini = fecha_f - timedelta(hours=72)
+                                                ventana_fin = fecha_f + timedelta(hours=72)
+                                                candidatos = df_pedidos_pdf[
+                                                    df_pedidos_pdf["_hora_registro_dt"].between(ventana_ini, ventana_fin)
+                                                    & df_pedidos_pdf["_adjuntos_pdf_keys"].apply(lambda ks: bool(ks))
+                                                ]
+                                                if vendedor_f:
+                                                    candidatos = candidatos[
+                                                        candidatos["_vendedor_norm"].astype(str).str.strip() == vendedor_f
+                                                    ]
+                                                if candidatos.empty:
+                                                    continue
+                                                if candidatos["_adjuntos_pdf_keys"].apply(
+                                                    lambda ks: _folio_en_nombre_pdf(ks, folio_f) or _folio_en_pdfs(ks, folio_f)
+                                                ).any():
+                                                    idx_match_pdf.add(idx_fila)
+
+                                            st.session_state["organizador_check_facturas_pdf_folios_cache"] = pdf_folios_cache
+                                            df_no_encontradas_filtrado = (
+                                                df_objetivo_pdf.loc[~df_objetivo_pdf.index.isin(idx_match_pdf)]
+                                                .copy()
+                                                .reset_index(drop=True)
+                                            )
+                                            st.session_state["organizador_check_facturas_pdf_refinado"] = {
+                                                "firma_refinado": firma_refinado,
+                                                "df_no_encontradas_filtrado": df_no_encontradas_filtrado.copy(),
+                                            }
+                                            st.success(
+                                                f"Validación PDF completada. Se descartaron {len(idx_match_pdf)} factura(s) que sí tenían folio dentro de PDF adjunto."
+                                            )
+
                             st.warning(
                                 "⚠️ Estas facturas (últimas 72h) no tienen match válido en data_pedidos/datos_pedidos "
                                 "considerando Folio_Factura/Adjuntos/Cliente + regla de fecha:"
                             )
-                            st.dataframe(df_no_encontradas, use_container_width=True)
+                            st.caption(
+                                f"Vendedor seleccionado: {filtro_vendedor_check} | "
+                                f"Resultados mostrados: {len(df_no_encontradas_filtrado)}"
+                            )
+                            st.dataframe(df_no_encontradas_filtrado, use_container_width=True)
                             st.download_button(
                                 "⬇️ Descargar faltantes (CSV)",
-                                data=df_no_encontradas.to_csv(index=False).encode("utf-8-sig"),
+                                data=df_no_encontradas_filtrado.to_csv(index=False).encode("utf-8-sig"),
                                 file_name="facturas_no_encontradas.csv",
                                 mime="text/csv",
                                 key="organizador_check_facturas_descargar_csv",
