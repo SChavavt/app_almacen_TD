@@ -6643,7 +6643,7 @@ if df_main is not None:
             for _, row_alerta in pedidos_bodega_demorados.iterrows():
                 folio_alerta = str(row_alerta.get("Folio_Factura", "")).strip() or "s/folio"
                 cliente_alerta = str(row_alerta.get("Cliente", "")).strip() or "s/cliente"
-                id_alerta = str(row_alerta.get("ID_Pedido", "")).strip() or "s/id"
+                vendedor_alerta = str(row_alerta.get("Vendedor_Registro", "")).strip() or "s/id"
                 fecha_proc = row_alerta.get("Hora_Proceso_dt")
                 fecha_proc_txt = (
                     fecha_proc.strftime("%Y-%m-%d %H:%M")
@@ -6652,7 +6652,7 @@ if df_main is not None:
                 )
                 dias_alerta = int(row_alerta.get("Dias_Habiles_Proceso", 0))
                 st.markdown(
-                    f"- 🚨 **{folio_alerta}** · {cliente_alerta} · ID: `{id_alerta}` · "
+                    f"- 🚨 **{folio_alerta}** · {cliente_alerta} · Vendedor: `{vendedor_alerta}` · "
                     f"Hora_Proceso: {fecha_proc_txt} · **{dias_alerta} días hábiles**"
                 )
 
