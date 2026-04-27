@@ -363,15 +363,32 @@ def _start_of_week(fecha: datetime.date) -> datetime.date:
     return fecha - timedelta(days=fecha.weekday())
 
 
+def _previous_or_same_saturday(fecha: datetime.date) -> datetime.date:
+    days_since_saturday = (fecha.weekday() - 5) % 7
+    return fecha - timedelta(days=days_since_saturday)
+
+
+def _start_of_saltillo_biweekly_cycle(fecha: datetime.date) -> datetime.date:
+    """
+    Saltillo opera en ciclos quincenales (cada 2 semanas) anclados al
+    sábado 2026-04-25.
+    """
+    anchor = datetime(2026, 4, 25).date()
+    saturday_ref = _previous_or_same_saturday(fecha)
+    delta_days = (saturday_ref - anchor).days
+    cycle_steps = delta_days // 14
+    return anchor + timedelta(days=cycle_steps * 14)
+
+
 def _build_section_header(origen_tab: Any, row: Any, fecha_entrega: datetime.date) -> tuple[str, str]:
     """
     Devuelve (titulo_visible, marker_semana).
-    marker_semana se usa para diferenciar secciones semanales de Saltillo.
+    marker_semana se usa para diferenciar secciones de Saltillo.
     """
     turno_label = _resolve_turno_label(origen_tab, row.get("Turno", ""))
     if turno_label == "SALTILLO":
-        week_start = _start_of_week(fecha_entrega)
-        return "|SALTILLO|", f"WEEK:{week_start.isoformat()}"
+        cycle_start = _start_of_saltillo_biweekly_cycle(fecha_entrega)
+        return "|SALTILLO|", f"BIWEEK:{cycle_start.isoformat()}"
     base = _sheet_label_date(fecha_entrega)
     return f"{base}\n({turno_label})", ""
 
