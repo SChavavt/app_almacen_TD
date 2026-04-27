@@ -1115,9 +1115,11 @@ def _sync_local_entry_in_hoja_ruta_after_schedule_change(
 
 def _is_pasa_bodega_order(row: Any, origen_tab: Any = "") -> bool:
     """True cuando el pedido corresponde al flujo de subtab Pasa a Bodega."""
-    turno = str(row.get("Turno", "") or "").strip()
+    turno = normalize_sheet_text(str(row.get("Turno", "") or "")).strip().lower()
     origen = str(origen_tab or "").strip().lower()
-    return turno == "📦 Pasa a Bodega" or origen in {"pasa a bodega", "📦 pasa a bodega"}
+    turno_es_bodega = ("bodega" in turno) and ("pasa" in turno)
+    origen_es_bodega = ("bodega" in origen) and ("pasa" in origen)
+    return turno_es_bodega or origen_es_bodega
 
 
 def _format_pasa_bodega_date(value: Any) -> str:
@@ -1167,6 +1169,8 @@ def _upsert_pasa_bodega_report_row(row: Any) -> bool:
             maybe_num = text[:-2]
             if maybe_num.replace("-", "").isdigit():
                 text = maybe_num
+        # Evita duplicados por variaciones de formato (espacios, guiones, etc.).
+        text = re.sub(r"[^a-z0-9]", "", text)
         return text
 
     payload = {
@@ -3777,6 +3781,8 @@ def completar_pedido(
         row_snapshot["Vendedor_Registro"] = df.loc[idx, "Vendedor_Registro"]
     if "Fecha_Entrega" not in row_snapshot and "Fecha_Entrega" in df.columns:
         row_snapshot["Fecha_Entrega"] = df.loc[idx, "Fecha_Entrega"]
+    if not str(row_snapshot.get("Turno", "") or "").strip() and _is_pasa_bodega_order({}, origen_tab):
+        row_snapshot["Turno"] = "📦 Pasa a Bodega"
 
     if _is_pasa_bodega_order(row_snapshot, origen_tab):
         _upsert_pasa_bodega_report_row(row_snapshot)
