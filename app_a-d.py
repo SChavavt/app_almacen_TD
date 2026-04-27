@@ -3293,7 +3293,7 @@ def _collect_route_candidates(
     low_conf_clients: list[str] = []
     out_zone_clients: list[str] = []
     pending_clients: list[dict[str, Any]] = []
-    found_coords_to_save: list[dict[str, Any]] = []
+    found_coords_to_save_map: dict[str, dict[str, Any]] = {}
     candidates: list[dict[str, Any]] = []
 
     for _, pedido in pedidos_en_proceso.iterrows():
@@ -3331,16 +3331,14 @@ def _collect_route_candidates(
                 direccion = str(auto["direccion"])
                 confianza = str(auto["confianza"])
                 metodo = str(auto["metodo"])
-                found_coords_to_save.append(
-                    {
-                        "cliente": cliente,
-                        "lat": lat,
-                        "lng": lng,
-                        "direccion_final": direccion,
-                        "confianza_final": confianza,
-                        "metodo_final": metodo,
-                    }
-                )
+                found_coords_to_save_map[cliente_norm] = {
+                    "cliente": cliente,
+                    "lat": lat,
+                    "lng": lng,
+                    "direccion_final": direccion,
+                    "confianza_final": confianza,
+                    "metodo_final": metodo,
+                }
             else:
                 missing_clients.append(cliente or "(sin nombre)")
                 pending_clients.append(
@@ -3384,7 +3382,7 @@ def _collect_route_candidates(
         sorted(set(low_conf_clients)),
         sorted(set(out_zone_clients)),
         pending_clients,
-        found_coords_to_save,
+        list(found_coords_to_save_map.values()),
     )
 
 
@@ -3685,9 +3683,13 @@ def _render_ruta_optimizada_ui(
     if coords_found:
         st.info(f"📍 Se encontraron {len(coords_found)} coordenadas nuevas en esta ejecución.")
         if st.button("💾 Guardar coordenadas encontradas", key=save_coords_key):
+            dedup_to_save: dict[str, dict[str, Any]] = {}
+            for item in coords_found:
+                dedup_to_save[_ruta_opt_normalize_cliente(item.get("cliente", ""))] = item
+
             saved_ok = 0
             failed = 0
-            for item in coords_found:
+            for item in dedup_to_save.values():
                 ok = _save_cliente_locales_coords(**item)
                 if ok:
                     saved_ok += 1
