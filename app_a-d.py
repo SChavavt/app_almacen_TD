@@ -21,6 +21,9 @@ from typing import Any, Optional, Sequence
 import unicodedata
 import numpy as np
 from pathlib import Path
+import requests
+import folium
+import polyline
 
 _MX_TZ = timezone("America/Mexico_City")
 
@@ -2993,6 +2996,373 @@ def cargar_pedidos_desde_google_sheet(sheet_id, worksheet_name):
     except Exception as e:
         st.error(f"❌ Error al cargar la hoja {worksheet_name}: {e}")
         return pd.DataFrame(), []
+
+
+_RUTA_OPT_ORIGIN = "KM 3.6 Carretera Nacional, Monterrey, Nuevo Leon, Mexico"
+_RUTA_OPT_ZONE_CONFIG = {
+    "monterrey": {"lat_min": 25.35, "lat_max": 25.95, "lng_min": -100.55, "lng_max": -100.05},
+    "saltillo": {"lat_min": 25.20, "lat_max": 25.75, "lng_min": -101.30, "lng_max": -100.65},
+}
+_RUTA_OPT_CLIENTES_SHEET = "Clientes_Locales"
+_RUTA_OPT_MAX_WAYPOINTS = 23
+
+
+def _ruta_opt_normalize_cliente(value: Any) -> str:
+    txt = normalize_sheet_text(value)
+    txt = _remove_accents(txt).lower()
+    txt = " ".join(txt.split())
+    return txt
+
+
+def _normalize_header_key(value: Any) -> str:
+    txt = _remove_accents(str(value or "")).lower().strip()
+    txt = re.sub(r"[^a-z0-9]+", "_", txt)
+    txt = txt.strip("_")
+    return txt
+
+
+def _standardize_clientes_locales_columns(df_clientes: pd.DataFrame) -> pd.DataFrame:
+    """
+    Normaliza encabezados de Clientes_Locales para soportar variaciones de formato
+    (espacios, mayúsculas, acentos, puntos, etc.).
+    """
+    if df_clientes is None or df_clientes.empty:
+        return df_clientes
+
+    alias_map = {
+        "cliente": "Cliente",
+        "latitud": "Latitud",
+        "longitud": "Longitud",
+        "lat_final": "Lat_Final",
+        "lng_final": "Lng_Final",
+        "direccion_final": "Direccion_Final",
+        "confianza_final": "Confianza_Final",
+        "metodo_final": "Metodo_Final",
+    }
+
+    rename_map: dict[str, str] = {}
+    for col in df_clientes.columns:
+        canonical = alias_map.get(_normalize_header_key(col))
+        if canonical and col != canonical:
+            rename_map[col] = canonical
+
+    if rename_map:
+        df_clientes = df_clientes.rename(columns=rename_map)
+
+    return df_clientes
+
+
+@st.cache_data(ttl=300)
+def _load_clientes_locales_df(sheet_id: str) -> tuple[pd.DataFrame, list[str]]:
+    return cargar_pedidos_desde_google_sheet(sheet_id, _RUTA_OPT_CLIENTES_SHEET)
+
+
+def _resolve_clientes_coord_columns(df_clientes: pd.DataFrame) -> tuple[Optional[str], Optional[str]]:
+    lat_col = "Latitud" if "Latitud" in df_clientes.columns else ("Lat_Final" if "Lat_Final" in df_clientes.columns else None)
+    lng_col = "Longitud" if "Longitud" in df_clientes.columns else ("Lng_Final" if "Lng_Final" in df_clientes.columns else None)
+    return lat_col, lng_col
+
+
+def _coords_in_zone(lat: float, lng: float, zone_key: str) -> bool:
+    cfg = _RUTA_OPT_ZONE_CONFIG[zone_key]
+    return cfg["lat_min"] <= lat <= cfg["lat_max"] and cfg["lng_min"] <= lng <= cfg["lng_max"]
+
+
+def _collect_route_candidates(
+    pedidos_fecha: pd.DataFrame,
+    *,
+    zone_key: str,
+) -> tuple[list[dict[str, Any]], list[str], list[str], list[str]]:
+    pedidos_en_proceso = pedidos_fecha[
+        pedidos_fecha.get("Estado", pd.Series("", index=pedidos_fecha.index)).astype(str).str.strip().eq("🔵 En Proceso")
+    ].copy()
+
+    if pedidos_en_proceso.empty:
+        return [], [], [], []
+
+    df_clientes, _ = _load_clientes_locales_df(GOOGLE_SHEET_ID)
+    if df_clientes.empty:
+        st.warning("⚠️ No se encontraron registros en la hoja Clientes_Locales.")
+        return [], [], [], []
+
+    df_clientes = _standardize_clientes_locales_columns(df_clientes)
+    lat_col, lng_col = _resolve_clientes_coord_columns(df_clientes)
+    if not lat_col or not lng_col:
+        st.warning("⚠️ La hoja Clientes_Locales no contiene columnas de coordenadas (Latitud/Longitud o Lat_Final/Lng_Final).")
+        return [], [], [], []
+
+    for c in ("Cliente", "Confianza_Final", "Metodo_Final", "Direccion_Final"):
+        if c not in df_clientes.columns:
+            df_clientes[c] = ""
+
+    clientes_work = df_clientes.copy()
+    clientes_work["_cliente_norm"] = clientes_work["Cliente"].apply(_ruta_opt_normalize_cliente)
+    clientes_work[lat_col] = pd.to_numeric(clientes_work[lat_col], errors="coerce")
+    clientes_work[lng_col] = pd.to_numeric(clientes_work[lng_col], errors="coerce")
+    clientes_work = clientes_work.dropna(subset=[lat_col, lng_col]).copy()
+
+    # Si hay múltiples filas por cliente, priorizamos la primera con coordenadas válidas.
+    clientes_work = clientes_work.drop_duplicates(subset=["_cliente_norm"], keep="first")
+    clientes_map = clientes_work.set_index("_cliente_norm")
+
+    missing_clients: list[str] = []
+    low_conf_clients: list[str] = []
+    out_zone_clients: list[str] = []
+    candidates: list[dict[str, Any]] = []
+
+    for _, pedido in pedidos_en_proceso.iterrows():
+        cliente = str(pedido.get("Cliente", "")).strip()
+        cliente_norm = _ruta_opt_normalize_cliente(cliente)
+        if not cliente_norm or cliente_norm not in clientes_map.index:
+            missing_clients.append(cliente or "(sin nombre)")
+            continue
+
+        cli_row = clientes_map.loc[cliente_norm]
+        lat = float(cli_row.get(lat_col))
+        lng = float(cli_row.get(lng_col))
+        confianza = str(cli_row.get("Confianza_Final", "")).strip().upper()
+        metodo = str(cli_row.get("Metodo_Final", "")).strip()
+        direccion = str(cli_row.get("Direccion_Final", "")).strip()
+
+        low_conf = (
+            confianza == "REVISAR"
+            or ("google" in metodo.lower())
+            or (direccion == "")
+        )
+        if low_conf:
+            low_conf_clients.append(cliente or "(sin nombre)")
+
+        if not _coords_in_zone(lat, lng, zone_key):
+            out_zone_clients.append(cliente or "(sin nombre)")
+            continue
+
+        candidates.append(
+            {
+                "cliente": cliente,
+                "cliente_norm": cliente_norm,
+                "lat": lat,
+                "lng": lng,
+                "direccion": direccion,
+                "pedido": pedido,
+            }
+        )
+
+    return candidates, sorted(set(missing_clients)), sorted(set(low_conf_clients)), sorted(set(out_zone_clients))
+
+
+def _call_directions_optimized_route(api_key: str, waypoints: list[str]) -> Optional[dict[str, Any]]:
+    if not waypoints:
+        return None
+
+    params = {
+        "origin": _RUTA_OPT_ORIGIN,
+        "destination": _RUTA_OPT_ORIGIN,
+        "waypoints": "optimize:true|" + "|".join(waypoints),
+        "mode": "driving",
+        "departure_time": "now",
+        "traffic_model": "best_guess",
+        "language": "es",
+        "region": "mx",
+        "key": api_key,
+    }
+    try:
+        response = requests.get(
+            "https://maps.googleapis.com/maps/api/directions/json",
+            params=params,
+            timeout=25,
+        )
+    except requests.RequestException as exc:
+        st.error(f"❌ Error al llamar Google Directions API: {exc}")
+        return None
+
+    if response.status_code != 200:
+        st.error(f"❌ Google Directions respondió con HTTP {response.status_code}.")
+        return None
+
+    data = response.json()
+    status = data.get("status", "")
+    if status != "OK":
+        st.error(f"❌ Google Directions no pudo generar la ruta. Status: {status}.")
+        return None
+
+    routes = data.get("routes", [])
+    if not routes:
+        st.error("❌ Google Directions no devolvió rutas.")
+        return None
+    return routes[0]
+
+
+def _render_ruta_optimizada_ui(
+    *,
+    pedidos_fecha: pd.DataFrame,
+    route_scope: str,
+    context_key: str,
+) -> None:
+    state_key = f"ruta_opt_result_{context_key}"
+    run_key = f"ruta_opt_run_{context_key}"
+
+    if st.button("📍 Generar Ruta Optimizada", key=run_key):
+        api_key = str(st.secrets.get("api_keys", {}).get("google_maps_api_key", "")).strip()
+        _ = str(st.secrets.get("api_keys", {}).get("openai_api_key", "")).strip()  # reservado para uso futuro
+        if not api_key:
+            st.error("❌ No se encontró api_keys.google_maps_api_key en Streamlit secrets.")
+            st.session_state.pop(state_key, None)
+            return
+
+        candidates, missing_clients, low_conf_clients, out_zone_clients = _collect_route_candidates(
+            pedidos_fecha,
+            zone_key=route_scope,
+        )
+
+        if missing_clients:
+            st.warning("⚠️ Clientes sin coordenadas en Clientes_Locales: " + ", ".join(missing_clients))
+        if low_conf_clients:
+            st.warning("⚠️ Clientes con coordenada de baja confianza: " + ", ".join(low_conf_clients))
+        if out_zone_clients:
+            st.warning("⚠️ Clientes fuera de zona y excluidos de ruta: " + ", ".join(out_zone_clients))
+
+        if len(candidates) < 2:
+            st.info("ℹ️ Se requieren al menos 2 pedidos válidos en 🔵 En Proceso con coordenadas confiables/en zona para generar la ruta.")
+            st.session_state.pop(state_key, None)
+            return
+
+        if len(candidates) > _RUTA_OPT_MAX_WAYPOINTS:
+            st.warning(
+                f"⚠️ Google Directions permite hasta {_RUTA_OPT_MAX_WAYPOINTS} waypoints optimizados por solicitud. "
+                "Se tomarán los primeros pedidos válidos."
+            )
+            candidates = candidates[:_RUTA_OPT_MAX_WAYPOINTS]
+
+        wp = [f"{c['lat']},{c['lng']}" for c in candidates]
+        route = _call_directions_optimized_route(api_key, wp)
+        if not route:
+            st.session_state.pop(state_key, None)
+            return
+
+        order_idx = route.get("waypoint_order", [])
+        ordered = [candidates[i] for i in order_idx] if order_idx else candidates
+        legs = route.get("legs", [])
+
+        rows_simple: list[dict[str, Any]] = []
+        dist_total_m = 0
+        dur_total_s = 0
+
+        for i, leg in enumerate(legs):
+            if i == 0:
+                de_txt = "Origen"
+                a_txt = ordered[0]["cliente"] if ordered else "Destino"
+            elif i == len(legs) - 1:
+                de_txt = ordered[-1]["cliente"] if ordered else "Origen"
+                a_txt = "Origen"
+            else:
+                de_txt = ordered[i - 1]["cliente"]
+                a_txt = ordered[i]["cliente"]
+
+            dist = leg.get("distance", {})
+            dur = leg.get("duration_in_traffic") or leg.get("duration") or {}
+            dist_val = int(dist.get("value", 0) or 0)
+            dur_val = int(dur.get("value", 0) or 0)
+            dist_total_m += dist_val
+            dur_total_s += dur_val
+
+            rows_simple.append(
+                {
+                    "Paso": i + 1,
+                    "De": de_txt,
+                    "A": a_txt,
+                    "Distancia": dist.get("text", ""),
+                    "Tiempo": dur.get("text", ""),
+                }
+            )
+
+        df_simple = pd.DataFrame(rows_simple)
+        resumen = pd.DataFrame(
+            [
+                {"Métrica": "Distancia total km", "Valor": round(dist_total_m / 1000, 2)},
+                {"Métrica": "Tiempo total min", "Valor": round(dur_total_s / 60, 1)},
+            ]
+        )
+
+        m = folium.Map(location=[25.67, -100.31], zoom_start=10, control_scale=True)
+        folium.Marker(
+            [25.67, -100.31],
+            popup="0. Origen",
+            tooltip="Origen",
+            icon=folium.Icon(color="green", icon="home"),
+        ).add_to(m)
+
+        for step, c in enumerate(ordered, start=1):
+            popup_txt = f"{step}. {c['cliente']}<br>{c['direccion'] or (str(c['lat']) + ',' + str(c['lng']))}"
+            folium.Marker(
+                [c["lat"], c["lng"]],
+                popup=popup_txt,
+                tooltip=f"{step}. {c['cliente']}",
+                icon=folium.DivIcon(html=f"""<div style="font-size: 12pt; color: #111; font-weight: 700;">{step}</div>"""),
+            ).add_to(m)
+
+        folium.Marker(
+            [25.67, -100.31],
+            popup="Regreso a origen",
+            tooltip="Regreso",
+            icon=folium.Icon(color="blue", icon="flag"),
+        ).add_to(m)
+
+        try:
+            encoded_points = route.get("overview_polyline", {}).get("points", "")
+            if encoded_points:
+                decoded = polyline.decode(encoded_points)
+                folium.PolyLine(decoded, color="#1f77b4", weight=5, opacity=0.85).add_to(m)
+        except Exception:
+            pass
+
+        map_html = m.get_root().render()
+
+        output_excel = BytesIO()
+        with pd.ExcelWriter(output_excel, engine="xlsxwriter") as writer:
+            df_simple.to_excel(writer, sheet_name="Ruta", index=False)
+            resumen.to_excel(writer, sheet_name="Resumen", index=False)
+        output_excel.seek(0)
+
+        st.session_state[state_key] = {
+            "ordered": [c["cliente"] for c in ordered],
+            "df_simple": df_simple,
+            "resumen": resumen,
+            "map_html": map_html,
+            "excel_bytes": output_excel.getvalue(),
+        }
+
+    result = st.session_state.get(state_key)
+    if not result:
+        return
+
+    st.markdown("#### 🧭 Secuencia optimizada")
+    for i, cliente in enumerate(result["ordered"], start=1):
+        st.write(f"{i}. {cliente}")
+
+    st.markdown("#### 🚚 Tabla simple de reparto")
+    st.dataframe(result["df_simple"], use_container_width=True, hide_index=True)
+
+    st.markdown("#### 📊 Resumen")
+    st.dataframe(result["resumen"], use_container_width=True, hide_index=True)
+
+    col_dl_xlsx, col_dl_html = st.columns(2)
+    col_dl_xlsx.download_button(
+        "⬇️ Descargar Excel ruta_simple_reparto.xlsx",
+        data=result["excel_bytes"],
+        file_name="ruta_simple_reparto.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        key=f"dl_xlsx_{context_key}",
+    )
+    col_dl_html.download_button(
+        "⬇️ Descargar HTML ruta_optimizada_mapa.html",
+        data=result["map_html"].encode("utf-8"),
+        file_name="ruta_optimizada_mapa.html",
+        mime="text/html",
+        key=f"dl_html_{context_key}",
+    )
+
+    st.markdown("#### 🗺️ Mapa de ruta")
+    components.html(result["map_html"], height=600)
 
 
 def batch_update_gsheet_cells(worksheet, updates_list, *, headers: Optional[list[str]] = None):
@@ -6920,6 +7290,13 @@ if df_main is not None:
                             pedidos_turno_activos["Fecha_Entrega_dt"]
                             == current_selected_date_dt
                         ].copy()
+                        route_scope = "monterrey"
+                        route_context = f"local_{origen_tab}_{tab_label}".replace(" ", "_")
+                        _render_ruta_optimizada_ui(
+                            pedidos_fecha=pedidos_fecha,
+                            route_scope=route_scope,
+                            context_key=route_context,
+                        )
                         pedidos_fecha = ordenar_pedidos_custom(pedidos_fecha)
                         st.markdown(
                             f"#### {titulo_turno} - {tab_label}"
@@ -7093,6 +7470,12 @@ if df_main is not None:
                                     pedidos_s_activos["Fecha_Entrega_dt"]
                                     == current_selected_date_dt
                                 ].copy()
+                                route_context = f"saltillo_{tab_label}".replace(" ", "_")
+                                _render_ruta_optimizada_ui(
+                                    pedidos_fecha=pedidos_fecha,
+                                    route_scope="saltillo",
+                                    context_key=route_context,
+                                )
                                 pedidos_fecha = ordenar_pedidos_custom(pedidos_fecha)
                                 st.markdown(
                                     f"#### ⛰️ Pedidos Locales - Saltillo - {tab_label}"
