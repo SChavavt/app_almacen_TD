@@ -1821,7 +1821,11 @@ def _normalize_text_for_matching(text: str) -> str:
 
 def _is_exact_pedido_foraneo(tipo_envio: Any) -> bool:
     """True solo para el literal de negocio '🚚 Pedido Foráneo' (normalizado)."""
-    return _normalize_text_for_matching(str(tipo_envio)) == "🚚 pedido foraneo"
+    tipo_norm = _normalize_text_for_matching(str(tipo_envio or ""))
+    # Permite variantes visuales del mismo literal (emoji/prefijos),
+    # sin confundir otros tipos de envío que solo contienen "foraneo".
+    tipo_norm = re.sub(r"^[^a-z0-9]+", "", tipo_norm)
+    return tipo_norm == "pedido foraneo"
 
 
 def _flow_key(value: Any) -> str:
@@ -1875,6 +1879,38 @@ def _parse_foraneo_number(raw: Any) -> Optional[int]:
     except ValueError:
         return None
     return value if value > 0 else None
+
+
+def _get_next_foraneo_number(
+    worksheet_casos: Any,
+    headers_casos: list[str],
+    flow_map_foraneo: Optional[dict[str, str]] = None,
+) -> str:
+    """Calcula el siguiente número foráneo libre usando mapa de flujo + hoja actual."""
+    used_numbers: set[int] = set()
+
+    for val in (flow_map_foraneo or {}).values():
+        parsed = _parse_foraneo_number(val)
+        if parsed is not None:
+            used_numbers.add(parsed)
+
+    if worksheet_casos is not None and "Numero_Foraneo" in headers_casos:
+        try:
+            col_idx = headers_casos.index("Numero_Foraneo") + 1
+            values = worksheet_casos.col_values(col_idx)
+        except Exception:
+            values = []
+
+        for raw in values[1:]:
+            parsed = _parse_foraneo_number(raw)
+            if parsed is not None:
+                used_numbers.add(parsed)
+
+    next_number = 1
+    while next_number in used_numbers:
+        next_number += 1
+
+    return f"{next_number:02d}"
 
 
 def _parse_row_sort_datetime(row: pd.Series) -> pd.Timestamp:
@@ -7485,12 +7521,11 @@ if df_main is not None:
                     assign_col, info_col = st.columns([1, 2])
                     with assign_col:
                         if st.button("Asignar número foráneo", key=f"assign_num_foraneo_{row_key}"):
-                            max_actual = 0
-                            for val in st.session_state.get("flow_number_map_foraneo", {}).values():
-                                parsed = _parse_foraneo_number(val)
-                                if parsed and parsed > max_actual:
-                                    max_actual = parsed
-                            siguiente = f"{max_actual + 1:02d}"
+                            siguiente = _get_next_foraneo_number(
+                                worksheet_casos=worksheet_casos,
+                                headers_casos=headers_casos,
+                                flow_map_foraneo=st.session_state.get("flow_number_map_foraneo", {}),
+                            )
 
                             try:
                                 row_idx_int = int(float(row_idx_case)) if row_idx_case is not None and not pd.isna(row_idx_case) else None
@@ -8201,12 +8236,11 @@ if df_main is not None:
                     assign_col, info_col = st.columns([1, 2])
                     with assign_col:
                         if st.button("Asignar número foráneo", key=f"assign_num_foraneo_g_{unique_suffix}"):
-                            max_actual = 0
-                            for val in st.session_state.get("flow_number_map_foraneo", {}).values():
-                                parsed = _parse_foraneo_number(val)
-                                if parsed and parsed > max_actual:
-                                    max_actual = parsed
-                            siguiente = f"{max_actual + 1:02d}"
+                            siguiente = _get_next_foraneo_number(
+                                worksheet_casos=worksheet_casos,
+                                headers_casos=headers_casos,
+                                flow_map_foraneo=st.session_state.get("flow_number_map_foraneo", {}),
+                            )
 
                             try:
                                 row_idx_int = int(float(row_idx_case)) if row_idx_case is not None and not pd.isna(row_idx_case) else None
