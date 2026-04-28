@@ -655,13 +655,13 @@ def _normalize_municipio_for_hoja_ruta(value: Any) -> str:
     if normalized_tokens[0] in {"NA", "N A", "N/A", "SIN", "NINGUNO"}:
         return ""
 
-    # Si solo viene el estado no forzar municipio.
+    # Si solo viene el estado, conservar "NUEVO LEON" tal cual.
     if "NUEVO" in normalized_set and "LEON" in normalized_set and len(normalized_set) <= 3:
         if not any(
             city in normalized_set
             for city in ("MONTERREY", "GUADALUPE", "APODACA", "ESCOBEDO", "SALTILLO", "GARCIA", "SANTIAGO", "JUAREZ")
         ):
-            return ""
+            return "NUEVO LEON"
 
     # Cualquier variación de (Gral./General) Escobedo debe quedar como ESCOBEDO.
     if any(tok.startswith("ESCOBEDO") for tok in normalized_tokens):
