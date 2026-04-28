@@ -5364,6 +5364,14 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
 
                 if aplicar_cambios:
                     st.session_state["expanded_pedidos"][row['ID_Pedido']] = True
+                    live_headers = list(headers or [])
+                    try:
+                        fetched_headers = worksheet.row_values(1)
+                        if fetched_headers:
+                            live_headers = fetched_headers
+                    except Exception:
+                        live_headers = list(headers or [])
+
                     cambios = []
                     estado_antes_cambio = str(row.get("Estado", "")).strip()
                     hora_proceso_antes_cambio = str(row.get("Hora_Proceso", "")).strip()
@@ -5372,8 +5380,11 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
                     hubo_cambio_fecha_turno = False
 
                     if nueva_fecha_str != fecha_actual_str:
+                        if "Fecha_Entrega" not in live_headers:
+                            st.error("❌ No se encontró la columna 'Fecha_Entrega' en Google Sheets.")
+                            return
                         hubo_cambio_fecha_turno = True
-                        col_idx = headers.index("Fecha_Entrega") + 1
+                        col_idx = live_headers.index("Fecha_Entrega") + 1
                         cambios.append(
                             {
                                 'range': gspread.utils.rowcol_to_a1(
@@ -5385,8 +5396,11 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
 
                     if puede_editar_turno:
                         if nuevo_turno != current_turno:
+                            if "Turno" not in live_headers:
+                                st.error("❌ No se encontró la columna 'Turno' en Google Sheets.")
+                                return
                             hubo_cambio_fecha_turno = True
-                            col_idx = headers.index("Turno") + 1
+                            col_idx = live_headers.index("Turno") + 1
                             cambios.append(
                                 {
                                     'range': gspread.utils.rowcol_to_a1(
@@ -5398,8 +5412,8 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
 
                     # Blindaje adicional: en este flujo el Estado no debe cambiar.
                     # Forzamos conservar el Estado en el mismo batch para evitar drift.
-                    if cambios and "Estado" in headers and estado_antes_cambio:
-                        col_idx_estado = headers.index("Estado") + 1
+                    if cambios and "Estado" in live_headers and estado_antes_cambio:
+                        col_idx_estado = live_headers.index("Estado") + 1
                         cambios.append(
                             {
                                 "range": gspread.utils.rowcol_to_a1(
@@ -5410,15 +5424,15 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
                         )
 
                     if cambios:
-                        if batch_update_gsheet_cells(worksheet, cambios, headers=headers):
+                        if batch_update_gsheet_cells(worksheet, cambios, headers=live_headers):
                             row_actualizado = dict(row)
                             row_actualizado["Fecha_Entrega"] = nueva_fecha_str
                             row_actualizado["Turno"] = nuevo_turno
 
-                            if "Fecha_Entrega" in headers:
+                            if "Fecha_Entrega" in live_headers:
                                 df.at[idx, "Fecha_Entrega"] = nueva_fecha_str
                             if (
-                                "Turno" in headers
+                                "Turno" in live_headers
                                 and tipo_envio_actual == "📍 Pedido Local"
                             ):
                                 df.at[idx, "Turno"] = nuevo_turno
