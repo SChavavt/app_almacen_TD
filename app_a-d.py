@@ -24,6 +24,7 @@ from pathlib import Path
 import requests
 import folium
 import polyline
+import pdfplumber
 
 _MX_TZ = timezone("America/Mexico_City")
 
@@ -160,14 +161,15 @@ def _obtener_siguiente_fila_reporte_guias(ws: Any) -> int:
 
     while fila_fin >= fila_inicio:
         bloque_inicio = max(fila_inicio, fila_fin - REPORTE_GUIAS_LOOKBACK_WINDOW + 1)
-        rango_lectura = f"C{bloque_inicio}:F{fila_fin}"
+        # Buscar por NOMBRE (columna C) evita falsos positivos en otras columnas
+        # de plantillas prellenadas (p. ej. vendedor/fecha en filas futuras).
+        rango_lectura = f"C{bloque_inicio}:C{fila_fin}"
         valores = _leer_rango_reporte_guias(ws, rango_lectura)
 
         for offset in range(len(valores) - 1, -1, -1):
             fila = valores[offset] if offset < len(valores) else []
             c_val = str(fila[0]).strip() if len(fila) >= 1 else ""
-            f_val = str(fila[3]).strip() if len(fila) >= 4 else ""
-            if c_val or f_val:
+            if c_val:
                 return bloque_inicio + offset + 1
 
         if bloque_inicio == fila_inicio:
@@ -176,6 +178,35 @@ def _obtener_siguiente_fila_reporte_guias(ws: Any) -> int:
         fila_fin = bloque_inicio - 1
 
     return fila_inicio
+
+
+def _es_duplicado_inmediato_reporte_guias(
+    ws: Any,
+    fila_destino: int,
+    cliente_str: str,
+    vendedor_recortado: str,
+    numero_guia: str,
+) -> bool:
+    fila_prev = max(REPORTE_GUIAS_ROW_START, int(fila_destino) - 1)
+    if fila_prev < REPORTE_GUIAS_ROW_START:
+        return False
+    try:
+        valores_prev = _leer_rango_reporte_guias(ws, f"B{fila_prev}:F{fila_prev}")
+    except Exception:
+        return False
+    if not valores_prev:
+        return False
+    fila = valores_prev[0] if isinstance(valores_prev[0], list) else []
+    guia_prev = str(fila[0]).strip() if len(fila) >= 1 else ""
+    cliente_prev = str(fila[1]).strip() if len(fila) >= 2 else ""
+    vendedor_prev = str(fila[4]).strip() if len(fila) >= 5 else ""
+    if cliente_prev != str(cliente_str or "").strip():
+        return False
+    if numero_guia and guia_prev and guia_prev == str(numero_guia).strip():
+        return True
+    if vendedor_prev and vendedor_prev == str(vendedor_recortado or "").strip():
+        return True
+    return False
 
 
 def _escribir_reporte_guias_c_f(ws: Any, fila_destino: int, cliente_str: str, vendedor_recortado: str) -> None:
@@ -201,7 +232,102 @@ def _escribir_reporte_guias_c_f(ws: Any, fila_destino: int, cliente_str: str, ve
     ws.update_cells(cells)
 
 
-def escribir_en_reporte_guias(cliente: Any, vendedor: Any, tipo_envio: Any) -> bool:
+def _escribir_reporte_guias_b(ws: Any, fila_destino: int, numero_guia: str) -> None:
+    numero_guia_str = str(numero_guia or "").strip()
+    if not numero_guia_str:
+        return
+    _asegurar_filas_para_reporte_guias(ws, fila_destino)
+
+    if hasattr(ws, "batch_update"):
+        ws.batch_update([{"range": f"B{fila_destino}", "values": [[numero_guia_str]]}])
+        return
+
+    b_col = gspread.utils.a1_to_rowcol(f"B{fila_destino}")[1]
+    cells = [gspread.Cell(row=fila_destino, col=b_col, value=numero_guia_str)]
+    ws.update_cells(cells)
+
+
+def _nombre_desde_url_o_key(value: Any) -> str:
+    val = str(value or "").strip()
+    if not val:
+        return ""
+    parsed = urlparse(val)
+    base = parsed.path if parsed.path else val
+    return os.path.basename(unquote(base)).strip()
+
+
+def _es_pdf_no_factura(file_name: str) -> bool:
+    normalized = _remove_accents(str(file_name or "")).lower()
+    if not normalized.endswith(".pdf"):
+        return False
+    return ("factura" not in normalized) and ("fact." not in normalized)
+
+
+def _seleccionar_pdf_guia(row: Any) -> Any:
+    adjuntos = _normalize_urls(row.get("Adjuntos", ""))
+    candidatos_adjuntos = []
+    candidatos_prioritarios = []
+
+    for raw in adjuntos:
+        nombre = _nombre_desde_url_o_key(raw)
+        if not _es_pdf_no_factura(nombre):
+            continue
+        candidatos_adjuntos.append(raw)
+        low = _remove_accents(nombre).lower()
+        if ("guia" in low) or ("descarga" in low):
+            candidatos_prioritarios.append(raw)
+
+    if candidatos_prioritarios:
+        return candidatos_prioritarios[0]
+    if candidatos_adjuntos:
+        return candidatos_adjuntos[0]
+
+    for key in ("Adjuntos_Guia", "Adjuntos_guia"):
+        guias = _normalize_urls(row.get(key, ""))
+        for raw in guias:
+            nombre = _nombre_desde_url_o_key(raw)
+            if str(nombre).lower().endswith(".pdf"):
+                return raw
+    return None
+
+
+def _extraer_waybill_desde_pdf_url(pdf_url: str) -> str:
+    if not pdf_url:
+        return ""
+    try:
+        response = requests.get(pdf_url, timeout=20)
+        response.raise_for_status()
+        with pdfplumber.open(BytesIO(response.content)) as pdf:
+            texto = "\n".join((p.extract_text() or "") for p in pdf.pages)
+        m = re.search(r"WAYBILL[^\d]*(\d[\d\s]{7,20}\d)", texto, flags=re.IGNORECASE)
+        if m:
+            solo_digitos = re.sub(r"\D", "", m.group(1))
+            if len(solo_digitos) >= 10:
+                solo_digitos = solo_digitos[:10]
+                return f"{solo_digitos[:2]} {solo_digitos[2:6]} {solo_digitos[6:10]}"
+            return m.group(1).strip()
+    except Exception:
+        return ""
+    return ""
+
+
+def _obtener_numero_guia_desde_row(row: Any, s3_client_param: Any) -> str:
+    raw_pdf = _seleccionar_pdf_guia(row)
+    if not raw_pdf:
+        return ""
+    pdf_url = resolve_storage_url(s3_client_param, raw_pdf)
+    if not pdf_url:
+        return ""
+    return _extraer_waybill_desde_pdf_url(pdf_url)
+
+
+def escribir_en_reporte_guias(
+    cliente: Any,
+    vendedor: Any,
+    tipo_envio: Any,
+    row: Any = None,
+    s3_client_param: Any = None,
+) -> bool:
     tipo_envio_str = str(tipo_envio or "")
     if "Foráneo" not in tipo_envio_str:
         return True
@@ -222,13 +348,24 @@ def escribir_en_reporte_guias(cliente: Any, vendedor: Any, tipo_envio: Any) -> b
 
         vendedor_recortado = _recortar_vendedor_para_reporte(vendedor)
         cliente_str = str(cliente or "").strip()
+        numero_guia = _obtener_numero_guia_desde_row(row, s3_client_param) if row is not None else ""
 
-        _escribir_reporte_guias_c_f(
+        # Evita doble inserción accidental en reruns/doble clic.
+        if _es_duplicado_inmediato_reporte_guias(
             ws_reporte,
             fila_destino=fila_destino,
             cliente_str=cliente_str,
             vendedor_recortado=vendedor_recortado,
+            numero_guia=numero_guia,
+        ):
+            return True
+
+        # Mantener exactamente el flujo original de C/F.
+        _escribir_reporte_guias_c_f(
+            ws_reporte, fila_destino=fila_destino, cliente_str=cliente_str, vendedor_recortado=vendedor_recortado
         )
+        # Escribir la guía en la columna inmediata a la izquierda del cliente (columna B).
+        _escribir_reporte_guias_b(ws_reporte, fila_destino=fila_destino, numero_guia=numero_guia)
 
         return True
     except Exception as e:
@@ -5199,6 +5336,8 @@ def mostrar_pedido_detalle(
                             cliente=row.get("Cliente", ""),
                             vendedor=row.get("Vendedor_Registro", ""),
                             tipo_envio=row.get("Tipo_Envio", ""),
+                            row=row,
+                            s3_client_param=s3_client_param,
                         )
                     elif _is_pasa_bodega_order(row, origen_tab):
                         _upsert_pasa_bodega_report_row(row)
@@ -6317,6 +6456,8 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
                                     cliente=row.get("Cliente", ""),
                                     vendedor=row.get("Vendedor_Registro", ""),
                                     tipo_envio=row.get("Tipo_Envio", ""),
+                                    row=row,
+                                    s3_client_param=s3_client_param,
                                 )
                             st.success("✅ Cambios de surtido confirmados y pedido en '🔵 En Proceso'.")
                             st.cache_data.clear()
@@ -6363,6 +6504,8 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
                                         cliente=row.get("Cliente", ""),
                                         vendedor=row.get("Vendedor_Registro", ""),
                                         tipo_envio=row.get("Tipo_Envio", ""),
+                                        row=row,
+                                        s3_client_param=s3_client_param,
                                     )
                                 st.success(
                                     "✅ Cambios de surtido confirmados y pedido en '🔵 En Proceso'."
@@ -8693,6 +8836,8 @@ if df_main is not None:
                                                     cliente=row.get("Cliente", ""),
                                                     vendedor=row.get("Vendedor_Registro", ""),
                                                     tipo_envio=row.get("Tipo_Envio", ""),
+                                                    row=row,
+                                                    s3_client_param=s3_client,
                                                 )
                                             st.success("✅ Cambios de surtido confirmados y pedido en '🔵 En Proceso'.")
                                             st.cache_data.clear()
@@ -9468,6 +9613,8 @@ if df_main is not None:
                                                     cliente=row.get("Cliente", ""),
                                                     vendedor=row.get("Vendedor_Registro", ""),
                                                     tipo_envio=row.get("Tipo_Envio", ""),
+                                                    row=row,
+                                                    s3_client_param=s3_client,
                                                 )
                                             st.success("✅ Cambios de surtido confirmados y pedido en '🔵 En Proceso'.")
                                             st.cache_data.clear()
