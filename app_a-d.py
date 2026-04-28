@@ -834,6 +834,8 @@ def _set_range_format(
     font_size: int,
     bold: bool,
     bg_color: Optional[dict[str, float]] = None,
+    horizontal_alignment: Optional[str] = None,
+    vertical_alignment: Optional[str] = None,
 ) -> None:
     """Aplica formato a un rango usando Spreadsheet.batch_update."""
     spreadsheet = getattr(ws, "spreadsheet", None)
@@ -852,6 +854,12 @@ def _set_range_format(
     if bg_color is not None:
         user_format["backgroundColor"] = bg_color
         fields += ",userEnteredFormat.backgroundColor"
+    if horizontal_alignment:
+        user_format["horizontalAlignment"] = str(horizontal_alignment).upper()
+        fields += ",userEnteredFormat.horizontalAlignment"
+    if vertical_alignment:
+        user_format["verticalAlignment"] = str(vertical_alignment).upper()
+        fields += ",userEnteredFormat.verticalAlignment"
 
     req = {
         "requests": [
@@ -912,14 +920,25 @@ def _format_hoja_ruta_data_row(ws: Any, row_number: int, n_value: int) -> None:
         font_size=28,
         bold=False,
         bg_color=row_bg,
+        horizontal_alignment="CENTER",
+        vertical_alignment="MIDDLE",
     )
 
 
 def _append_local_dia_entry_to_hoja_ruta(row: Any, s3_client_param: Any, origen_tab: Any = "") -> bool:
+    st.session_state["last_hoja_ruta_error"] = ""
+
+    def _fail(msg: str, *, warning: bool = False) -> bool:
+        st.session_state["last_hoja_ruta_error"] = msg
+        if warning:
+            st.warning(msg)
+        else:
+            st.error(msg)
+        return False
+
     fecha_entrega = _parse_fecha_entrega_local(row.get("Fecha_Entrega", ""))
     if not fecha_entrega:
-        st.warning("⚠️ No se pudo enviar a Hoja_Ruta: Fecha_Entrega inválida.")
-        return False
+        return _fail("⚠️ No se pudo enviar a Hoja_Ruta: Fecha_Entrega inválida.", warning=True)
 
     reportes_almacen_id = str(
         st.secrets.get("gsheets", {}).get(
@@ -928,19 +947,26 @@ def _append_local_dia_entry_to_hoja_ruta(row: Any, s3_client_param: Any, origen_
         )
     ).strip()
     if not reportes_almacen_id:
-        st.error("❌ Falta configurar gsheets.reportes_almacen_sheet_id en secrets.")
-        return False
+        return _fail("❌ Falta configurar gsheets.reportes_almacen_sheet_id en secrets.")
 
     extracted = _extract_hoja_ruta_fields_from_s3(s3_client_param, row)
+    def _upper_text(value: Any) -> str:
+        return _normalize_plain_text(value).upper()
+
+    def _max_two_words(value: Any) -> str:
+        text = _upper_text(value)
+        words = [w for w in text.split() if w]
+        return " ".join(words[:2])
+
     entry = {
-        "factura": _normalize_plain_text(row.get("Folio_Factura", "")),
-        "nombre_factura": _normalize_plain_text(row.get("Cliente", "")),
-        "municipio": _normalize_plain_text(extracted.get("municipio", "")),
-        "horario": _format_horario_corto(extracted.get("horario", "")),
-        "cantidad": _format_cantidad_sin_ceros(extracted.get("cantidad", "")),
-        "forma_pago": _normalize_plain_text(row.get("Estado_Pago", "")),
-        "vendedor": _recortar_vendedor_dos_nombres(row.get("Vendedor_Registro", "")),
-        "recibe": _normalize_plain_text(extracted.get("recibe", "")),
+        "factura": _upper_text(row.get("Folio_Factura", "")),
+        "nombre_factura": _upper_text(row.get("Cliente", "")),
+        "municipio": _max_two_words(extracted.get("municipio", "")),
+        "horario": _upper_text(_format_horario_corto(extracted.get("horario", ""))),
+        "cantidad": _upper_text(_format_cantidad_sin_ceros(extracted.get("cantidad", ""))),
+        "forma_pago": _upper_text(row.get("Estado_Pago", "")),
+        "vendedor": _upper_text(_recortar_vendedor_dos_nombres(row.get("Vendedor_Registro", ""))),
+        "recibe": "",
         "firma": "",
     }
 
@@ -949,8 +975,7 @@ def _append_local_dia_entry_to_hoja_ruta(row: Any, s3_client_param: Any, origen_
         client = get_gspread_client(_credentials_json_dict=GSHEETS_CREDENTIALS)
         ws = client.open_by_key(reportes_almacen_id).worksheet(hoja_ruta_sheet_name)
     except Exception as exc:
-        st.error(f"❌ No se pudo abrir Reportes_Almacen/{hoja_ruta_sheet_name}: {exc}")
-        return False
+        return _fail(f"❌ No se pudo abrir Reportes_Almacen/{hoja_ruta_sheet_name}: {exc}")
 
     section_title, week_marker = _build_section_header(origen_tab, row, fecha_entrega)
     values = _hoja_ruta_get_all_values(ws)
@@ -1007,8 +1032,10 @@ def _append_local_dia_entry_to_hoja_ruta(row: Any, s3_client_param: Any, origen_
             values = _hoja_ruta_get_all_values(ws)
         target_row, n_value = _find_next_data_row_in_section(values, header_row)
         if n_value > HOJA_RUTA_SECTION_DATA_ROWS:
-            st.warning("⚠️ La sección ya está llena (13 filas). No se agregó el pedido para evitar desbordes.")
-            return False
+            return _fail(
+                "⚠️ La sección ya está llena (13 filas). No se agregó el pedido para evitar desbordes.",
+                warning=True,
+            )
         _ensure_rows(ws, target_row)
 
     row_values = [
@@ -1151,6 +1178,16 @@ def _upsert_pasa_bodega_report_row(row: Any) -> bool:
     Clave de actualización: NUMERO DE FACTURA (Folio_Factura).
     Se ejecuta al procesar y al completar para mantener ESTADO/FECHA QUE PASO A RECOGER actualizados.
     """
+    st.session_state["last_pasa_bodega_error"] = ""
+
+    def _fail(msg: str, *, warning: bool = False) -> bool:
+        st.session_state["last_pasa_bodega_error"] = msg
+        if warning:
+            st.warning(msg)
+        else:
+            st.error(msg)
+        return False
+
     reportes_almacen_id = str(
         st.secrets.get("gsheets", {}).get(
             "reportes_almacen_sheet_id",
@@ -1158,13 +1195,11 @@ def _upsert_pasa_bodega_report_row(row: Any) -> bool:
         )
     ).strip()
     if not reportes_almacen_id:
-        st.error("❌ Falta configurar gsheets.reportes_almacen_sheet_id en secrets.")
-        return False
+        return _fail("❌ Falta configurar gsheets.reportes_almacen_sheet_id en secrets.")
 
     folio_factura = _normalize_plain_text(row.get("Folio_Factura", ""))
     if not folio_factura:
-        st.warning("⚠️ No se pudo registrar en Pasa_Bodega: Folio_Factura vacío.")
-        return False
+        return _fail("⚠️ No se pudo registrar en Pasa_Bodega: Folio_Factura vacío.", warning=True)
 
     def _folio_key(value: Any) -> str:
         text = normalize_sheet_text(value).strip().lower()
@@ -1190,19 +1225,16 @@ def _upsert_pasa_bodega_report_row(row: Any) -> bool:
         client = get_gspread_client(_credentials_json_dict=GSHEETS_CREDENTIALS)
         ws = client.open_by_key(reportes_almacen_id).worksheet("Pasa_Bodega")
     except Exception as exc:
-        st.error(f"❌ No se pudo abrir Reportes_Almacen/Pasa_Bodega: {exc}")
-        return False
+        return _fail(f"❌ No se pudo abrir Reportes_Almacen/Pasa_Bodega: {exc}")
 
     try:
         headers = [str(h or "").strip() for h in ws.row_values(1)]
     except Exception as exc:
-        st.error(f"❌ No se pudieron leer encabezados de Pasa_Bodega: {exc}")
-        return False
+        return _fail(f"❌ No se pudieron leer encabezados de Pasa_Bodega: {exc}")
 
     missing = [col for col in payload.keys() if col not in headers]
     if missing:
-        st.error(f"❌ Faltan columnas en Pasa_Bodega: {', '.join(missing)}")
-        return False
+        return _fail(f"❌ Faltan columnas en Pasa_Bodega: {', '.join(missing)}")
 
     num_col_idx = headers.index("NUMERO DE FACTURA") + 1
     target_row = None
@@ -1228,8 +1260,7 @@ def _upsert_pasa_bodega_report_row(row: Any) -> bool:
             ws.format(f"B{written_row}:D{written_row}", {"horizontalAlignment": "CENTER"})
         return True
     except Exception as exc:
-        st.error(f"❌ No se pudo actualizar Pasa_Bodega: {exc}")
-        return False
+        return _fail(f"❌ No se pudo actualizar Pasa_Bodega: {exc}")
 
 
 def _ensure_visual_state_defaults():
@@ -4611,7 +4642,14 @@ def completar_pedido(
         row_snapshot["Turno"] = "📦 Pasa a Bodega"
 
     if _is_pasa_bodega_order(row_snapshot, origen_tab):
-        _upsert_pasa_bodega_report_row(row_snapshot)
+        updated_bodega = _upsert_pasa_bodega_report_row(row_snapshot)
+        if not updated_bodega:
+            motivo = str(st.session_state.get("last_pasa_bodega_error", "")).strip()
+            detalle = f" Motivo: {motivo}" if motivo else ""
+            st.warning(
+                "⚠️ El pedido se completó, pero no se pudo actualizar Pasa_Bodega."
+                + detalle
+            )
 
     st.session_state["expanded_pedidos"][row["ID_Pedido"]] = True
     st.session_state["expanded_attachments"][row["ID_Pedido"]] = True
@@ -5129,6 +5167,27 @@ def mostrar_pedido_detalle(
                         "values": [[now_str]],
                     },
                 ]
+
+                preflight_row = dict(row)
+                preflight_row["Estado"] = "🔵 En Proceso"
+                preflight_row["Hora_Proceso"] = now_str
+
+                needs_hoja_ruta = _is_hoja_ruta_turno(origen_tab, row.get("Turno", ""))
+                if needs_hoja_ruta:
+                    wrote_hoja_ruta = _append_local_dia_entry_to_hoja_ruta(
+                        row=preflight_row,
+                        s3_client_param=s3_client_param,
+                        origen_tab=origen_tab,
+                    )
+                    if not wrote_hoja_ruta:
+                        motivo = str(st.session_state.get("last_hoja_ruta_error", "")).strip()
+                        detalle = f" Motivo: {motivo}" if motivo else ""
+                        st.error(
+                            "❌ No se procesó el pedido porque no se escribió en Hoja_Ruta."
+                            + detalle
+                        )
+                        return
+
                 if batch_update_gsheet_cells(worksheet, updates, headers=headers):
                     df.at[idx, "Estado"] = "🔵 En Proceso"
                     df.at[idx, "Hora_Proceso"] = now_str
@@ -5141,14 +5200,7 @@ def mostrar_pedido_detalle(
                             vendedor=row.get("Vendedor_Registro", ""),
                             tipo_envio=row.get("Tipo_Envio", ""),
                         )
-                    elif _is_hoja_ruta_turno(origen_tab, row.get("Turno", "")):
-                        _append_local_dia_entry_to_hoja_ruta(
-                            row=row,
-                            s3_client_param=s3_client_param,
-                            origen_tab=origen_tab,
-                        )
-
-                    if _is_pasa_bodega_order(row, origen_tab):
+                    elif _is_pasa_bodega_order(row, origen_tab):
                         _upsert_pasa_bodega_report_row(row)
 
                     st.toast("✅ Pedido marcado como 🔵 En Proceso", icon="✅")
