@@ -649,9 +649,19 @@ def _normalize_municipio_for_hoja_ruta(value: Any) -> str:
     }
     normalized_tokens = [alias_map.get(tok, tok) for tok in tokens]
 
+    normalized_set = set(normalized_tokens)
+
     # Vacíos informativos.
     if normalized_tokens[0] in {"NA", "N A", "N/A", "SIN", "NINGUNO"}:
         return ""
+
+    # Si solo viene el estado no forzar municipio.
+    if "NUEVO" in normalized_set and "LEON" in normalized_set and len(normalized_set) <= 3:
+        if not any(
+            city in normalized_set
+            for city in ("MONTERREY", "GUADALUPE", "APODACA", "ESCOBEDO", "SALTILLO", "GARCIA", "SANTIAGO", "JUAREZ")
+        ):
+            return ""
 
     # Cualquier variación de (Gral./General) Escobedo debe quedar como ESCOBEDO.
     if any(tok.startswith("ESCOBEDO") for tok in normalized_tokens):
@@ -663,6 +673,27 @@ def _normalize_municipio_for_hoja_ruta(value: Any) -> str:
             return "SAN PEDRO"
         if second.startswith("NICOLAS"):
             return "SAN NICOLAS"
+
+    # Detectar municipios conocidos aunque vengan con prefijos/sufijos (ej. "centro monterrey").
+    known_single_word = (
+        "MONTERREY",
+        "GUADALUPE",
+        "APODACA",
+        "SALTILLO",
+        "SANTIAGO",
+        "GARCIA",
+        "JUAREZ",
+        "CUAUHTEMOC",
+    )
+    for city in known_single_word:
+        if city in normalized_set:
+            return city
+
+    # Casos compuestos frecuentes.
+    if "BENITO" in normalized_set and "JUAREZ" in normalized_set:
+        return "JUAREZ"
+    if "GUSTAVO" in normalized_set and "MADERO" in normalized_set:
+        return "MADERO"
 
     # General Escobedo / Gral Escobedo -> ESCOBEDO (1 palabra).
     if normalized_tokens[0] == "GENERAL" and len(normalized_tokens) >= 2:
