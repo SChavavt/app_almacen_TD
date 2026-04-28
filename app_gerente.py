@@ -162,6 +162,7 @@ PEDIDOS_COLUMNAS_MINIMAS = [
     "Refacturacion_Tipo", "Refacturacion_Subtipo", "Folio_Factura_Refacturada", "fecha_modificacion", "Fecha_Modificacion",
     "Tipo_Envio", "id_vendedor", "ID_Vendedor", "Id_Vendedor"
 ]
+FACTURAS_FALTANTES_COLUMNAS = ["Vendedor", "FolioSerie", "Cliente", "Fecha"]
 
 # ===== ALEJANDRO DATA (Organizador) =====
 ALE_SHEETS = (
@@ -262,6 +263,43 @@ def _extract_sheet_id(value: str) -> str:
     if m:
         return m.group(1)
     return raw
+
+
+def guardar_facturas_faltantes_en_sheet(df_faltantes: pd.DataFrame) -> tuple[bool, str]:
+    """Reemplaza por completo la hoja Facturas_Faltantes con columnas limpias del check."""
+    try:
+        ws = get_main_worksheet("Facturas_Faltantes")
+        df_out = df_faltantes.copy() if isinstance(df_faltantes, pd.DataFrame) else pd.DataFrame()
+        for col in FACTURAS_FALTANTES_COLUMNAS:
+            if col not in df_out.columns:
+                df_out[col] = ""
+            df_out[col] = df_out[col].astype(str).fillna("").str.strip()
+        df_out = df_out[FACTURAS_FALTANTES_COLUMNAS].drop_duplicates().reset_index(drop=True)
+        values = [FACTURAS_FALTANTES_COLUMNAS] + df_out.values.tolist()
+
+        if hasattr(ws, "clear"):
+            ws.clear()
+
+        if hasattr(ws, "update"):
+            ws.update("A1", values, value_input_option="USER_ENTERED")
+        elif hasattr(ws, "batch_update"):
+            ws.batch_update([{"range": "A1", "values": values}])
+        elif hasattr(ws, "update_cells"):
+            total_rows = len(values)
+            total_cols = max((len(r) for r in values), default=0)
+            cells = []
+            for r_idx in range(total_rows):
+                row_vals = values[r_idx]
+                for c_idx in range(total_cols):
+                    val = row_vals[c_idx] if c_idx < len(row_vals) else ""
+                    cells.append(gspread.Cell(row=r_idx + 1, col=c_idx + 1, value=str(val)))
+            ws.update_cells(cells)
+        else:
+            return False, "La versión de gspread no soporta escritura compatible."
+
+        return True, f"Facturas_Faltantes actualizada con {len(df_out)} fila(s)."
+    except Exception as e:
+        return False, f"No se pudo guardar Facturas_Faltantes: {e}"
 
 
 def _is_truthy(value) -> bool:
@@ -6096,6 +6134,15 @@ if "organizador" in tab_map:
                                 "df_no_encontradas": df_no_encontradas.copy(),
                                 "df_match_cliente_sin_folio": df_match_cliente_sin_folio.copy(),
                             }
+
+                        guardado_sig_key = "organizador_check_facturas_guardado_sig"
+                        if st.session_state.get(guardado_sig_key) != firma_archivo:
+                            ok_guardado_ff, msg_guardado_ff = guardar_facturas_faltantes_en_sheet(df_no_encontradas)
+                            if ok_guardado_ff:
+                                st.session_state[guardado_sig_key] = firma_archivo
+                                st.success(f"✅ {msg_guardado_ff}")
+                            else:
+                                st.error(f"❌ {msg_guardado_ff}")
 
                         vendedores_disponibles_check = sorted(
                             {
