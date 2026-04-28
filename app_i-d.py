@@ -7,6 +7,7 @@ import numpy as np
 from datetime import datetime, timedelta
 import json
 import re
+import hashlib
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 import boto3
@@ -2680,6 +2681,10 @@ SHEET_CONFIRMADOS = "pedidos_confirmados"
 SHEET_PEDIDOS_HISTORICOS = "datos_pedidos"
 SHEET_ZONAS_REMOTAS = "Zonas_Remotas"
 SHEET_PRODUCTOS = "Productos"
+SHEET_FACTURAS_FALTANTES = "Facturas_Faltantes"
+
+FACTURAS_FALTANTES_REQUIRED_COLUMNS = ["Vendedor", "FolioSerie", "Cliente", "Fecha"]
+FACTURAS_FALTANTES_ALLOWED_USERS = {"SCHAVA", "ALEJANDRO38"}
 
 
 # --- Auth helpers ---
@@ -3249,6 +3254,288 @@ def _clean_cliente_name(x: str) -> str:
 
 def _normalize_vendedor_name(value) -> str:
     return sanitize_text(value).casefold()
+
+
+def _normalize_header_token(value: object) -> str:
+    text = sanitize_text(value).strip().lower()
+    text = unicodedata.normalize("NFKD", text)
+    text = "".join(ch for ch in text if not unicodedata.combining(ch))
+    return re.sub(r"[^a-z0-9]", "", text)
+
+
+def _find_column_by_alias(df: pd.DataFrame, aliases: list[str]) -> Optional[str]:
+    if df.empty:
+        return None
+    normalized_aliases = {_normalize_header_token(a) for a in aliases}
+    for col in df.columns:
+        if _normalize_header_token(col) in normalized_aliases:
+            return col
+    return None
+
+
+def _parse_facturas_faltantes_upload(uploaded_file) -> tuple[pd.DataFrame, str]:
+    if uploaded_file is None:
+        return pd.DataFrame(), "No se recibió archivo."
+
+    filename = sanitize_text(uploaded_file.name).lower()
+
+    def _read_with_header(header_idx: int) -> tuple[pd.DataFrame, str]:
+        try:
+            uploaded_file.seek(0)
+            if filename.endswith(".csv"):
+                work_df = pd.read_csv(uploaded_file, header=header_idx, dtype=str, keep_default_na=False)
+            else:
+                work_df = pd.read_excel(uploaded_file, header=header_idx, dtype=str)
+            return work_df, ""
+        except Exception as exc:
+            return pd.DataFrame(), str(exc)
+
+    def _extract_required_columns(work_df: pd.DataFrame) -> tuple[pd.DataFrame, str]:
+        if work_df.empty:
+            return pd.DataFrame(), "El archivo no contiene filas con datos."
+
+        col_vendedor = _find_column_by_alias(work_df, ["Vendedor"])
+        col_folio = _find_column_by_alias(work_df, ["FolioSerie", "Folio", "Folio_Serie"])
+        col_cliente = _find_column_by_alias(work_df, ["Cliente"])
+        col_fecha = _find_column_by_alias(work_df, ["Fecha", "FechaFactura"])
+
+        missing = []
+        if col_vendedor is None:
+            missing.append("Vendedor")
+        if col_folio is None:
+            missing.append("FolioSerie")
+        if col_cliente is None:
+            missing.append("Cliente")
+        if col_fecha is None:
+            missing.append("Fecha")
+        if missing:
+            return pd.DataFrame(), f"No se encontraron columnas requeridas: {', '.join(missing)}"
+
+        parsed_df = work_df[[col_vendedor, col_folio, col_cliente, col_fecha]].copy()
+        parsed_df.columns = FACTURAS_FALTANTES_REQUIRED_COLUMNS
+        parsed_df = parsed_df.fillna("")
+        for col in FACTURAS_FALTANTES_REQUIRED_COLUMNS:
+            parsed_df[col] = parsed_df[col].astype(str).map(sanitize_text)
+        parsed_df = parsed_df[parsed_df["FolioSerie"] != ""].copy()
+        parsed_df = parsed_df.drop_duplicates().reset_index(drop=True)
+
+        if parsed_df.empty:
+            return pd.DataFrame(), "No se detectaron folios válidos después de limpiar el archivo."
+        return parsed_df, ""
+
+    # Soporta encabezados en fila 1 (como en la captura) y fallback a fila 3.
+    work_header_1, err_h1 = _read_with_header(0)
+    parsed_header_1, parse_h1_err = _extract_required_columns(work_header_1)
+    if not parsed_header_1.empty:
+        return parsed_header_1, ""
+
+    work_header_3, err_h3 = _read_with_header(2)
+    parsed_header_3, parse_h3_err = _extract_required_columns(work_header_3)
+    if not parsed_header_3.empty:
+        return parsed_header_3, ""
+
+    if err_h1 and err_h3:
+        return pd.DataFrame(), f"No se pudo leer el archivo: {err_h1}"
+    return pd.DataFrame(), (
+        "No se encontraron las columnas requeridas con encabezado en fila 1 ni en fila 3. "
+        f"Detalle fila 1: {parse_h1_err or 'sin columnas válidas'}. "
+        f"Detalle fila 3: {parse_h3_err or 'sin columnas válidas'}."
+    )
+
+
+@st.cache_data(ttl=120, show_spinner=False)
+def load_facturas_faltantes_from_gsheets() -> pd.DataFrame:
+    try:
+        ws = _open_worksheet_with_retry(
+            g_spread_client,
+            GOOGLE_SHEET_ID,
+            SHEET_FACTURAS_FALTANTES,
+            max_attempts=2,
+            cooldown_seconds=90,
+        )
+        records = ws.get_all_records()
+        df = pd.DataFrame(records)
+    except Exception:
+        return pd.DataFrame(columns=FACTURAS_FALTANTES_REQUIRED_COLUMNS)
+
+    for col in FACTURAS_FALTANTES_REQUIRED_COLUMNS:
+        if col not in df.columns:
+            df[col] = ""
+        df[col] = df[col].astype(str).map(sanitize_text)
+
+    return df[FACTURAS_FALTANTES_REQUIRED_COLUMNS].copy()
+
+
+def replace_facturas_faltantes_sheet(df_new: pd.DataFrame) -> tuple[bool, str]:
+    if df_new.empty:
+        return False, "No hay filas para guardar."
+
+    try:
+        ws = _open_worksheet_with_retry(
+            g_spread_client,
+            GOOGLE_SHEET_ID,
+            SHEET_FACTURAS_FALTANTES,
+            max_attempts=2,
+            cooldown_seconds=90,
+        )
+        rows_to_write = [FACTURAS_FALTANTES_REQUIRED_COLUMNS] + (
+            df_new[FACTURAS_FALTANTES_REQUIRED_COLUMNS].fillna("").astype(str).values.tolist()
+        )
+        if hasattr(ws, "clear"):
+            ws.clear()
+
+        if hasattr(ws, "update"):
+            ws.update("A1", rows_to_write, value_input_option="USER_ENTERED")
+        elif hasattr(ws, "batch_update"):
+            ws.batch_update([{"range": "A1", "values": rows_to_write}])
+        elif hasattr(ws, "update_cells"):
+            total_rows = len(rows_to_write)
+            total_cols = max((len(r) for r in rows_to_write), default=0)
+            cells = []
+            for r_idx in range(total_rows):
+                row_values = rows_to_write[r_idx]
+                for c_idx in range(total_cols):
+                    val = row_values[c_idx] if c_idx < len(row_values) else ""
+                    cells.append(gspread.Cell(row=r_idx + 1, col=c_idx + 1, value=str(val)))
+            ws.update_cells(cells)
+        else:
+            return False, "La versión actual de gspread no soporta método de escritura compatible."
+
+        load_facturas_faltantes_from_gsheets.clear()
+        return True, f"Se cargaron {len(df_new)} fila(s) en {SHEET_FACTURAS_FALTANTES}."
+    except Exception as exc:
+        return False, f"No se pudo guardar en Google Sheets: {exc}"
+
+
+def _normalize_factura_key(value: object) -> str:
+    text = sanitize_text(value).lower()
+    text = unicodedata.normalize("NFKD", text)
+    text = "".join(ch for ch in text if not unicodedata.combining(ch))
+    return re.sub(r"[^a-z0-9]", "", text)
+
+
+def _extract_possible_folios(value: object) -> set[str]:
+    normalized = _normalize_factura_key(value)
+    if not normalized:
+        return set()
+    tokens = re.findall(r"[a-z]*\d{3,}[a-z0-9]*", normalized)
+    return {tok for tok in tokens if tok}
+
+
+def _run_facturas_faltantes_check(df_facturas: pd.DataFrame) -> dict[str, object]:
+    empty_result = {
+        "total_archivo": 0,
+        "total_no_encontradas": 0,
+        "limite_72h": None,
+        "ahora": None,
+        "df_no_encontradas": pd.DataFrame(columns=FACTURAS_FALTANTES_REQUIRED_COLUMNS),
+        "df_match_cliente": pd.DataFrame(columns=FACTURAS_FALTANTES_REQUIRED_COLUMNS),
+    }
+    if df_facturas.empty:
+        return empty_result
+
+    work = df_facturas.copy()
+    for col in FACTURAS_FALTANTES_REQUIRED_COLUMNS:
+        if col not in work.columns:
+            work[col] = ""
+        work[col] = work[col].astype(str).map(sanitize_text)
+    work["Fecha_dt"] = pd.to_datetime(work["Fecha"], errors="coerce", dayfirst=True)
+    work = work[work["Fecha_dt"].notna()].copy()
+    if work.empty:
+        return empty_result
+
+    ahora = pd.Timestamp.now(tz=TZ).tz_localize(None)
+    limite_72h = ahora - timedelta(hours=72)
+    work = work[(work["Fecha_dt"] >= limite_72h) & (work["Fecha_dt"] <= ahora)].copy()
+    if work.empty:
+        return {
+            **empty_result,
+            "limite_72h": limite_72h,
+            "ahora": ahora,
+        }
+
+    df_actual = load_data_from_gsheets().copy()
+    df_hist = load_historicos_from_gsheets().copy()
+    pedidos = pd.concat([df_actual, df_hist], ignore_index=True, sort=False)
+    if pedidos.empty:
+        no_encontradas = work[FACTURAS_FALTANTES_REQUIRED_COLUMNS].drop_duplicates().reset_index(drop=True)
+        return {
+            "total_archivo": int(len(work)),
+            "total_no_encontradas": int(len(no_encontradas)),
+            "limite_72h": limite_72h,
+            "ahora": ahora,
+            "df_no_encontradas": no_encontradas,
+            "df_match_cliente": pd.DataFrame(columns=FACTURAS_FALTANTES_REQUIRED_COLUMNS),
+        }
+
+    if "Hora_Registro" not in pedidos.columns:
+        pedidos["Hora_Registro"] = pd.NaT
+    pedidos["Hora_Registro_dt"] = pd.to_datetime(pedidos["Hora_Registro"], errors="coerce")
+    if "Folio_Factura" not in pedidos.columns:
+        pedidos["Folio_Factura"] = ""
+    if "Cliente" not in pedidos.columns:
+        pedidos["Cliente"] = ""
+
+    pedidos["Folio_Set"] = pedidos["Folio_Factura"].apply(_extract_possible_folios)
+    adj_cols = [c for c in ["Adjuntos", "Adjuntos_Surtido"] if c in pedidos.columns]
+    if adj_cols:
+        pedidos["Adjuntos_Set"] = pedidos[adj_cols].fillna("").astype(str).agg(" ".join, axis=1).apply(_extract_possible_folios)
+    else:
+        pedidos["Adjuntos_Set"] = [set() for _ in range(len(pedidos))]
+    pedidos["Cliente_norm"] = pedidos["Cliente"].apply(_normalize_factura_key)
+
+    work["Folio_norm"] = work["FolioSerie"].apply(_normalize_factura_key)
+    work["Cliente_norm"] = work["Cliente"].apply(_normalize_factura_key)
+
+    match_folio_flags = []
+    match_cliente_flags = []
+    for _, factura in work.iterrows():
+        folio = factura["Folio_norm"]
+        cliente = factura["Cliente_norm"]
+        fecha = factura["Fecha_dt"]
+        ventana_ini_folio = fecha - timedelta(hours=72)
+        ventana_fin = fecha + timedelta(hours=72)
+
+        candidatos_folio = pedidos[
+            pedidos["Folio_Set"].apply(lambda s: bool(folio and folio in s))
+            | pedidos["Adjuntos_Set"].apply(lambda s: bool(folio and folio in s))
+        ]
+        match_folio = (
+            (not candidatos_folio.empty)
+            and candidatos_folio["Hora_Registro_dt"].between(ventana_ini_folio, ventana_fin).any()
+        )
+
+        match_cliente = False
+        if cliente and not match_folio:
+            candidatos_cliente = pedidos[
+                pedidos["Cliente_norm"].apply(lambda c: bool(c and (cliente in c or c in cliente)))
+            ]
+            match_cliente = (
+                (not candidatos_cliente.empty)
+                and candidatos_cliente["Hora_Registro_dt"].between(fecha, ventana_fin).any()
+            )
+
+        match_folio_flags.append(bool(match_folio))
+        match_cliente_flags.append(bool(match_cliente))
+
+    work["match_folio"] = match_folio_flags
+    work["match_cliente"] = match_cliente_flags
+
+    df_no_encontradas = work[~(work["match_folio"] | work["match_cliente"])][
+        FACTURAS_FALTANTES_REQUIRED_COLUMNS
+    ].drop_duplicates().reset_index(drop=True)
+    df_match_cliente = work[work["match_cliente"]][
+        FACTURAS_FALTANTES_REQUIRED_COLUMNS
+    ].drop_duplicates().reset_index(drop=True)
+
+    return {
+        "total_archivo": int(len(work)),
+        "total_no_encontradas": int(len(df_no_encontradas)),
+        "limite_72h": limite_72h,
+        "ahora": ahora,
+        "df_no_encontradas": df_no_encontradas,
+        "df_match_cliente": df_match_cliente,
+    }
 
 
 def _resolve_sales_datetime(df: pd.DataFrame) -> pd.Series:
@@ -4723,6 +5010,124 @@ if selected_tab_key == "dashboard":
         refresh_dashboard_sources()
 
     st_autorefresh(interval=60000, key="auto_refresh_dashboard")
+    logged_user_upper = get_logged_user().upper()
+
+    with st.expander("🧾 Facturas faltantes por enviar", expanded=False):
+        can_upload_facturas = logged_user_upper in FACTURAS_FALTANTES_ALLOWED_USERS
+
+        if can_upload_facturas:
+            uploaded_facturas = st.file_uploader(
+                "Subir archivo de facturas (Excel o CSV, encabezados en fila 3)",
+                type=["xlsx", "xls", "csv"],
+                key="dashboard_facturas_faltantes_uploader",
+            )
+            if uploaded_facturas is not None:
+                parsed_facturas, parse_error = _parse_facturas_faltantes_upload(uploaded_facturas)
+                if parse_error:
+                    st.error(f"❌ {parse_error}")
+                else:
+                    st.success(f"Archivo listo: {len(parsed_facturas)} fila(s) válidas detectadas.")
+                    st.dataframe(parsed_facturas, use_container_width=True, height=220, hide_index=True)
+                    file_bytes = uploaded_facturas.getvalue()
+                    upload_sig = (
+                        f"{sanitize_text(uploaded_facturas.name)}|{len(file_bytes)}|"
+                        f"{hashlib.md5(file_bytes).hexdigest()}"
+                    )
+                    sig_key = "dashboard_facturas_faltantes_last_upload_sig"
+                    if st.session_state.get(sig_key) != upload_sig:
+                        ok_save, msg_save = replace_facturas_faltantes_sheet(parsed_facturas)
+                        if ok_save:
+                            st.session_state[sig_key] = upload_sig
+                            st.success(f"✅ {msg_save}")
+                            st.rerun()
+                        else:
+                            st.error(f"❌ {msg_save}")
+
+        st.markdown("---")
+        col_ff_1, col_ff_2 = st.columns([0.7, 0.3])
+        with col_ff_1:
+            st.markdown("**Vista compartida actual (`Facturas_Faltantes`)**")
+        with col_ff_2:
+            if st.button("🔄 Actualizar lista", key="dashboard_facturas_faltantes_refresh", use_container_width=True):
+                load_facturas_faltantes_from_gsheets.clear()
+                st.rerun()
+
+        df_facturas_faltantes = load_facturas_faltantes_from_gsheets()
+        if df_facturas_faltantes.empty:
+            st.info("No hay registros en `Facturas_Faltantes`.")
+        else:
+            st.dataframe(df_facturas_faltantes, use_container_width=True, height=260, hide_index=True)
+            st.download_button(
+                "⬇️ Descargar facturas faltantes (CSV)",
+                data=df_facturas_faltantes.to_csv(index=False).encode("utf-8-sig"),
+                file_name="Facturas_Faltantes.csv",
+                mime="text/csv",
+                key="dashboard_facturas_faltantes_download",
+            )
+
+            st.markdown("#### 🔎 Check de facturas (misma lógica operativa)")
+            result = _run_facturas_faltantes_check(df_facturas_faltantes)
+            limite_72h = result.get("limite_72h")
+            ahora_ref = result.get("ahora")
+            total_archivo = int(result.get("total_archivo", 0))
+            total_no = int(result.get("total_no_encontradas", 0))
+            df_no_encontradas = result.get("df_no_encontradas", pd.DataFrame())
+            df_match_cliente = result.get("df_match_cliente", pd.DataFrame())
+
+            vendedores_disponibles = sorted(
+                {
+                    sanitize_text(v)
+                    for v in df_no_encontradas.get("Vendedor", pd.Series(dtype=str)).dropna().tolist()
+                    if sanitize_text(v)
+                }
+            )
+            opciones_vendedor = ["👥 Todos"] + vendedores_disponibles
+            filtro_vendedor = st.selectbox(
+                "Filtrar faltantes por vendedor",
+                opciones_vendedor,
+                index=0,
+                key="dashboard_facturas_faltantes_filtro_vendedor",
+            )
+            if filtro_vendedor == "👥 Todos":
+                df_no_filtrado = df_no_encontradas.copy()
+            else:
+                df_no_filtrado = df_no_encontradas[
+                    df_no_encontradas["Vendedor"].astype(str).map(sanitize_text) == filtro_vendedor
+                ].copy()
+
+            st.info(
+                f"Facturas analizadas: {total_archivo} | No encontradas en sistema: {total_no}"
+            )
+            if limite_72h is not None and ahora_ref is not None:
+                st.caption(
+                    f"Ventana usada: últimas 72h ({limite_72h.strftime('%d/%m/%Y %H:%M')} a "
+                    f"{ahora_ref.strftime('%d/%m/%Y %H:%M')}). "
+                    "Orden de validación: Folio_Factura/Adjuntos (±72h) y luego Cliente (Fecha a +72h)."
+                )
+
+            if total_archivo == 0:
+                st.info("No hay facturas válidas en las últimas 72 horas para revisar.")
+            elif total_no == 0:
+                st.success("✅ Todas las facturas revisadas tienen match válido en sistema.")
+            else:
+                st.warning(
+                    "⚠️ Estas facturas no tienen match válido por folio/adjuntos/cliente con regla de fecha:"
+                )
+                st.caption(
+                    f"Vendedor seleccionado: {filtro_vendedor} | Resultados mostrados: {len(df_no_filtrado)}"
+                )
+                st.dataframe(df_no_filtrado, use_container_width=True, hide_index=True)
+                st.download_button(
+                    "⬇️ Descargar faltantes del check (CSV)",
+                    data=df_no_filtrado.to_csv(index=False).encode("utf-8-sig"),
+                    file_name="facturas_no_encontradas.csv",
+                    mime="text/csv",
+                    key="dashboard_facturas_check_descargar_csv",
+                )
+
+            if not df_match_cliente.empty:
+                st.info("ℹ️ Coincidencias detectadas por cliente (sin folio) con regla de fecha:")
+                st.dataframe(df_match_cliente, use_container_width=True, hide_index=True)
 
     df_conf = get_cached_confirmados_df(SHEET_CONFIRMADOS)
     if df_conf.empty:
