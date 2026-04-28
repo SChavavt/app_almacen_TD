@@ -4632,14 +4632,6 @@ def _preserve_and_mark_skip_demorado() -> None:
     _mark_skip_demorado_check_once()
 
 
-def _on_comentario_enterado_change(row_id: str, origen_tab: str) -> None:
-    """Preserva contexto visual al marcar/desmarcar Enterado en comentarios."""
-
-    _mark_skip_demorado_check_once()
-    preserve_tab_state()
-    marcar_contexto_pedido(row_id, origen_tab, scroll=False)
-
-
 def completar_pedido(
     df: pd.DataFrame,
     idx: int,
@@ -5191,21 +5183,30 @@ def mostrar_pedido_detalle(
     gsheet_row_index,
     col_print_btn,
     s3_client_param,
-    comentario_enterado_ok=True,
+    comentario_requiere_confirmacion=False,
+    comentario_enterado_key: Optional[str] = None,
 ):
     """Procesa el pedido: actualiza estado a 'En Proceso' sin alterar UI."""
 
     estado_actual_ui = str(row.get("Estado", "")).strip()
     puede_procesar_ui = estado_actual_ui in ["🟡 Pendiente", "🔴 Demorado"]
 
-    boton_procesar_habilitado = puede_procesar_ui and comentario_enterado_ok
-
     if col_print_btn.button(
         "⚙️ Procesar",
         key=f"procesar_{row['ID_Pedido']}_{origen_tab}",
         on_click=_mark_skip_demorado_check_once,
-        disabled=not boton_procesar_habilitado,
+        disabled=not puede_procesar_ui,
     ):
+        comentario_enterado_ok = True
+        if comentario_requiere_confirmacion and comentario_enterado_key:
+            comentario_enterado_ok = bool(
+                st.session_state.get(comentario_enterado_key, False)
+            )
+
+        if not comentario_enterado_ok:
+            st.warning("⚠️ Debes marcar **Enterado** antes de procesar este pedido.")
+            return
+
         # Solo para marcar que ya se presionó (si se usa para estilos/toasts)
         st.session_state.setdefault("printed_items", {})
         st.session_state["printed_items"][row["ID_Pedido"]] = True
@@ -5359,11 +5360,9 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
     ) else ""
     comentario_resumen = str(row.get("Comentario", "")).strip()
     enterado_key = f"enterado_comentario_{row['ID_Pedido']}"
-    comentario_enterado_actual = bool(st.session_state.get(enterado_key, False))
-    comentario_marker = "💬 " if (comentario_resumen and not comentario_enterado_actual) else ""
     st.markdown(f'<a name="pedido_{row["ID_Pedido"]}"></a>', unsafe_allow_html=True)
     _render_bulk_selector(row)
-    titulo_expander = f"{guia_marker}{comentario_marker}{row['Estado']} - {folio} - {row['Cliente']}"
+    titulo_expander = f"{guia_marker}{row['Estado']} - {folio} - {row['Cliente']}"
     if es_local_bodega:
         titulo_expander = f"{titulo_expander} | Estado de pago: {pago_badge}"
 
@@ -5630,19 +5629,17 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
         col_order_num, col_client, col_time, col_status, col_vendedor, col_print_btn, col_complete_btn = st.columns([0.5, 2, 1.5, 1, 1.2, 1, 1])
         # --- Mostrar Comentario (si existe)
         comentario = comentario_resumen
-        comentario_enterado_ok = True
+        comentario_requiere_confirmacion = bool(comentario)
         if comentario:
             st.markdown("##### 💬 Comentario del Pedido")
             st.info(comentario)
-            comentario_enterado_ok = st.checkbox(
+            comentario_enterado_actual = st.checkbox(
                 "✅ Enterado",
                 key=enterado_key,
                 help="Marca esta casilla para confirmar que leíste el comentario antes de procesar el pedido.",
-                on_change=_on_comentario_enterado_change,
-                args=(row["ID_Pedido"], origen_tab),
             )
-            if not comentario_enterado_ok and row.get("Estado") in ["🟡 Pendiente", "🔴 Demorado"]:
-                st.caption("⚠️ Debes marcar **Enterado** para habilitar el botón **⚙️ Procesar**.")
+            if not comentario_enterado_actual and row.get("Estado") in ["🟡 Pendiente", "🔴 Demorado"]:
+                st.caption("⚠️ Si no está marcado **Enterado**, al intentar procesar se mostrará una alerta.")
 
         if es_local_no_entregado:
             estado_entrega_valor = str(row.get("Estado_Entrega", "")).strip()
@@ -5693,7 +5690,8 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
                 gsheet_row_index,
                 col_print_btn,
                 s3_client_param,
-                comentario_enterado_ok=comentario_enterado_ok,
+                comentario_requiere_confirmacion=comentario_requiere_confirmacion,
+                comentario_enterado_key=enterado_key,
             )
         else:
             col_print_btn.write("")
