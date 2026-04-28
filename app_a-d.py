@@ -834,8 +834,6 @@ def _set_range_format(
     font_size: int,
     bold: bool,
     bg_color: Optional[dict[str, float]] = None,
-    horizontal_alignment: Optional[str] = None,
-    vertical_alignment: Optional[str] = None,
 ) -> None:
     """Aplica formato a un rango usando Spreadsheet.batch_update."""
     spreadsheet = getattr(ws, "spreadsheet", None)
@@ -854,12 +852,6 @@ def _set_range_format(
     if bg_color is not None:
         user_format["backgroundColor"] = bg_color
         fields += ",userEnteredFormat.backgroundColor"
-    if horizontal_alignment:
-        user_format["horizontalAlignment"] = str(horizontal_alignment).upper()
-        fields += ",userEnteredFormat.horizontalAlignment"
-    if vertical_alignment:
-        user_format["verticalAlignment"] = str(vertical_alignment).upper()
-        fields += ",userEnteredFormat.verticalAlignment"
 
     req = {
         "requests": [
@@ -920,8 +912,6 @@ def _format_hoja_ruta_data_row(ws: Any, row_number: int, n_value: int) -> None:
         font_size=28,
         bold=False,
         bg_color=row_bg,
-        horizontal_alignment="CENTER",
-        vertical_alignment="MIDDLE",
     )
 
 
@@ -942,18 +932,15 @@ def _append_local_dia_entry_to_hoja_ruta(row: Any, s3_client_param: Any, origen_
         return False
 
     extracted = _extract_hoja_ruta_fields_from_s3(s3_client_param, row)
-    def _upper_text(value: Any) -> str:
-        return _normalize_plain_text(value).upper()
-
     entry = {
-        "factura": _upper_text(row.get("Folio_Factura", "")),
-        "nombre_factura": _upper_text(row.get("Cliente", "")),
-        "municipio": _upper_text(extracted.get("municipio", "")),
-        "horario": _upper_text(_format_horario_corto(extracted.get("horario", ""))),
-        "cantidad": _upper_text(_format_cantidad_sin_ceros(extracted.get("cantidad", ""))),
-        "forma_pago": _upper_text(row.get("Estado_Pago", "")),
-        "vendedor": _upper_text(_recortar_vendedor_dos_nombres(row.get("Vendedor_Registro", ""))),
-        "recibe": "",
+        "factura": _normalize_plain_text(row.get("Folio_Factura", "")),
+        "nombre_factura": _normalize_plain_text(row.get("Cliente", "")),
+        "municipio": _normalize_plain_text(extracted.get("municipio", "")),
+        "horario": _format_horario_corto(extracted.get("horario", "")),
+        "cantidad": _format_cantidad_sin_ceros(extracted.get("cantidad", "")),
+        "forma_pago": _normalize_plain_text(row.get("Estado_Pago", "")),
+        "vendedor": _recortar_vendedor_dos_nombres(row.get("Vendedor_Registro", "")),
+        "recibe": _normalize_plain_text(extracted.get("recibe", "")),
         "firma": "",
     }
 
