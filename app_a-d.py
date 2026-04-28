@@ -4750,10 +4750,11 @@ def _preserve_and_mark_skip_demorado() -> None:
 
 
 def _on_comentario_enterado_change(row_id: str, origen_tab: str) -> None:
-    """Mantiene la UX estable al marcar/desmarcar Enterado sin saltos de pestaña."""
+    """Preserva contexto visual al marcar/desmarcar Enterado en comentarios."""
 
     _mark_skip_demorado_check_once()
-    ensure_expanders_open(row_id, "expanded_pedidos")
+    preserve_tab_state()
+    marcar_contexto_pedido(row_id, origen_tab, scroll=False)
 
 
 def completar_pedido(
