@@ -621,6 +621,88 @@ def _extract_hoja_ruta_fields_from_s3(s3_client_param: Any, row: Any) -> dict[st
     return out
 
 
+def _normalize_municipio_for_hoja_ruta(value: Any) -> str:
+    """
+    Normaliza MUNICIPIO para Hoja_Ruta con reglas operativas:
+    - Solo permitir 2 palabras para SAN PEDRO y SAN NICOLAS.
+    - Para el resto, usar solo 1 palabra (municipio principal).
+    """
+    raw = _normalize_plain_text(value)
+    if not raw:
+        return ""
+
+    cleaned = _remove_accents(raw).upper()
+    cleaned = re.sub(r"[^A-Z0-9 ]+", " ", cleaned)
+    cleaned = " ".join(cleaned.split())
+    if not cleaned:
+        return ""
+
+    # Alias frecuentes / errores de captura.
+    tokens = [t for t in cleaned.split() if t]
+    alias_map = {
+        "GPE": "GUADALUPE",
+        "MTY": "MONTERREY",
+        "NTERREY": "MONTERREY",
+        "NONTERREY": "MONTERREY",
+        "GRA": "GENERAL",
+        "GRAL": "GENERAL",
+    }
+    normalized_tokens = [alias_map.get(tok, tok) for tok in tokens]
+
+    normalized_set = set(normalized_tokens)
+
+    # Vacíos informativos.
+    if normalized_tokens[0] in {"NA", "N A", "N/A", "SIN", "NINGUNO"}:
+        return ""
+
+    # Si solo viene el estado, conservar "NUEVO LEON" tal cual.
+    if "NUEVO" in normalized_set and "LEON" in normalized_set and len(normalized_set) <= 3:
+        if not any(
+            city in normalized_set
+            for city in ("MONTERREY", "GUADALUPE", "APODACA", "ESCOBEDO", "SALTILLO", "GARCIA", "SANTIAGO", "JUAREZ")
+        ):
+            return "NUEVO LEON"
+
+    # Cualquier variación de (Gral./General) Escobedo debe quedar como ESCOBEDO.
+    if any(tok.startswith("ESCOBEDO") for tok in normalized_tokens):
+        return "ESCOBEDO"
+
+    if normalized_tokens[0] == "SAN" and len(normalized_tokens) >= 2:
+        second = normalized_tokens[1]
+        if second.startswith("PEDRO"):
+            return "SAN PEDRO"
+        if second.startswith("NICOLAS"):
+            return "SAN NICOLAS"
+
+    # Detectar municipios conocidos aunque vengan con prefijos/sufijos (ej. "centro monterrey").
+    known_single_word = (
+        "MONTERREY",
+        "GUADALUPE",
+        "APODACA",
+        "SALTILLO",
+        "SANTIAGO",
+        "GARCIA",
+        "JUAREZ",
+        "CUAUHTEMOC",
+    )
+    for city in known_single_word:
+        if city in normalized_set:
+            return city
+
+    # Casos compuestos frecuentes.
+    if "BENITO" in normalized_set and "JUAREZ" in normalized_set:
+        return "JUAREZ"
+    if "GUSTAVO" in normalized_set and "MADERO" in normalized_set:
+        return "MADERO"
+
+    # General Escobedo / Gral Escobedo -> ESCOBEDO (1 palabra).
+    if normalized_tokens[0] == "GENERAL" and len(normalized_tokens) >= 2:
+        return normalized_tokens[1]
+
+    # Regla general: solo primera palabra.
+    return normalized_tokens[0]
+
+
 def _hoja_ruta_get_all_values(ws: Any) -> list[list[str]]:
     if hasattr(ws, "get_all_values"):
         return ws.get_all_values()
@@ -1050,15 +1132,10 @@ def _append_local_dia_entry_to_hoja_ruta(row: Any, s3_client_param: Any, origen_
     def _upper_text(value: Any) -> str:
         return _normalize_plain_text(value).upper()
 
-    def _max_two_words(value: Any) -> str:
-        text = _upper_text(value)
-        words = [w for w in text.split() if w]
-        return " ".join(words[:2])
-
     entry = {
         "factura": _upper_text(row.get("Folio_Factura", "")),
         "nombre_factura": _upper_text(row.get("Cliente", "")),
-        "municipio": _max_two_words(extracted.get("municipio", "")),
+        "municipio": _normalize_municipio_for_hoja_ruta(extracted.get("municipio", "")),
         "horario": _upper_text(_format_horario_corto(extracted.get("horario", ""))),
         "cantidad": _upper_text(_format_cantidad_sin_ceros(extracted.get("cantidad", ""))),
         "forma_pago": _upper_text(row.get("Estado_Pago", "")),
