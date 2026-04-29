@@ -2934,6 +2934,78 @@ def render_cobranza_tab_gerente():
             key_suffix="load_cobranza_data_unexpected",
         )
         return
+
+    with st.expander("📋 Clientes con saldo pendiente", expanded=False):
+        if base_df.empty:
+            st.caption("No hay información base de cobranza para mostrar saldos.")
+        else:
+            saldos_df = base_df.copy()
+            saldos_df["Codigo"] = saldos_df.get("Codigo", "").astype(str)
+            saldos_df["Saldo"] = pd.to_numeric(saldos_df.get("Saldo", 0), errors="coerce").fillna(0.0)
+            saldos_df["No_Vencido"] = pd.to_numeric(saldos_df.get("No_Vencido", 0), errors="coerce").fillna(0.0)
+            saldos_df["Vencido"] = pd.to_numeric(saldos_df.get("Vencido", 0), errors="coerce").fillna(0.0)
+            saldos_df = saldos_df[saldos_df["Saldo"] > 0].copy()
+
+            if saldos_df.empty:
+                st.caption("No hay clientes con saldo pendiente en la base actual.")
+            else:
+                col_f1, col_f2, col_f3 = st.columns(3)
+                with col_f1:
+                    anios_opts = ["Todos"] + sorted({str(m).split("-")[0] for m in saldos_df.get("Mes", pd.Series(dtype='string')).astype(str) if re.match(r"^\d{4}-\d{2}$", str(m))})
+                    anio_sel = st.selectbox("Año", options=anios_opts, key="ger_cob_saldos_anio")
+                with col_f2:
+                    meses_nums = [f"{i:02d}" for i in range(1, 13)]
+                    mes_num_sel = st.selectbox("Mes", options=["Todos"] + meses_nums, key="ger_cob_saldos_mes")
+                with col_f3:
+                    orden_sel = st.selectbox(
+                        "Orden",
+                        options=[
+                            "Vencimientos más antiguos a más recientes",
+                            "Vencidas más caras a más baratas",
+                            "Fecha de vencimiento más reciente a más antigua",
+                        ],
+                        key="ger_cob_saldos_orden",
+                    )
+
+                if anio_sel != "Todos":
+                    saldos_df = saldos_df[saldos_df.get("Mes", "").astype(str).str.startswith(f"{anio_sel}-")]
+                if mes_num_sel != "Todos":
+                    saldos_df = saldos_df[saldos_df.get("Mes", "").astype(str).str.endswith(f"-{mes_num_sel}")]
+
+                venc_res = pd.DataFrame(columns=["Codigo", "Fecha_Vencimiento_Min", "Fecha_Vencimiento_Max", "Saldo_Vencido_Total"])
+                if not venc_df.empty:
+                    tmp_v = venc_df.copy()
+                    tmp_v["Codigo"] = tmp_v.get("Codigo", "").astype(str)
+                    tmp_v["Saldo_Vence"] = pd.to_numeric(tmp_v.get("Saldo_Vence", 0), errors="coerce").fillna(0.0)
+                    tmp_v["Fecha_Vencimiento_dt"] = pd.to_datetime(tmp_v.get("Fecha_Vencimiento", ""), errors="coerce")
+                    if anio_sel != "Todos":
+                        tmp_v = tmp_v[tmp_v.get("Mes", "").astype(str).str.startswith(f"{anio_sel}-")]
+                    if mes_num_sel != "Todos":
+                        tmp_v = tmp_v[tmp_v.get("Mes", "").astype(str).str.endswith(f"-{mes_num_sel}")]
+
+                    venc_res = tmp_v.groupby("Codigo", as_index=False).agg(
+                        Fecha_Vencimiento_Min=("Fecha_Vencimiento_dt", "min"),
+                        Fecha_Vencimiento_Max=("Fecha_Vencimiento_dt", "max"),
+                        Saldo_Vencido_Total=("Saldo_Vence", "sum"),
+                    )
+
+                saldos_df = saldos_df.merge(venc_res, on="Codigo", how="left")
+                saldos_df["Fecha_Vencimiento_Min"] = pd.to_datetime(saldos_df.get("Fecha_Vencimiento_Min"), errors="coerce")
+                saldos_df["Fecha_Vencimiento_Max"] = pd.to_datetime(saldos_df.get("Fecha_Vencimiento_Max"), errors="coerce")
+
+                if orden_sel == "Vencidas más caras a más baratas":
+                    saldos_df = saldos_df.sort_values(["Vencido", "Saldo_Vencido_Total", "Saldo"], ascending=[False, False, False])
+                elif orden_sel == "Fecha de vencimiento más reciente a más antigua":
+                    saldos_df = saldos_df.sort_values(["Fecha_Vencimiento_Max", "Saldo"], ascending=[False, False], na_position="last")
+                else:
+                    saldos_df = saldos_df.sort_values(["Fecha_Vencimiento_Min", "Saldo"], ascending=[True, False], na_position="last")
+
+                saldos_df["Fecha_Vencimiento_Min"] = saldos_df["Fecha_Vencimiento_Min"].dt.strftime("%Y-%m-%d")
+                saldos_df["Fecha_Vencimiento_Max"] = saldos_df["Fecha_Vencimiento_Max"].dt.strftime("%Y-%m-%d")
+                cols_saldos = ["Mes", "Codigo", "Razon_Social", "Saldo", "Vencido", "No_Vencido", "Saldo_Vencido_Total", "Fecha_Vencimiento_Min", "Fecha_Vencimiento_Max", "Tipo_Pago", "Ultima_Actualizacion"]
+                cols_saldos = [c for c in cols_saldos if c in saldos_df.columns]
+                st.dataframe(saldos_df[cols_saldos], use_container_width=True, hide_index=True)
+
     st.markdown("### Comentarios")
     meses_disponibles = _cobranza_meses_disponibles(base_df)
     mes_actual = now_cdmx().strftime("%Y-%m")
