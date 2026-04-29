@@ -5023,10 +5023,32 @@ if selected_tab_key == "dashboard":
         if df_facturas_faltantes.empty:
             st.info("No hay registros en `Facturas_Faltantes`.")
         else:
-            st.dataframe(df_facturas_faltantes, use_container_width=True, height=260, hide_index=True)
+            df_facturas_vista = df_facturas_faltantes.copy()
+            vendedor_col = _find_column_by_alias(df_facturas_vista, ["Vendedor"])
+            if vendedor_col:
+                vendedores_disponibles = sorted(
+                    {
+                        sanitize_text(v)
+                        for v in df_facturas_vista[vendedor_col].dropna().astype(str).tolist()
+                        if sanitize_text(v)
+                    }
+                )
+                vendedor_sel = st.selectbox(
+                    "Filtrar por vendedor",
+                    options=["(Todos)"] + vendedores_disponibles,
+                    index=0,
+                    key="dashboard_facturas_faltantes_vendedor_filter",
+                )
+                if vendedor_sel != "(Todos)":
+                    vendedor_norm = _normalize_vendedor_name(vendedor_sel)
+                    df_facturas_vista = df_facturas_vista[
+                        df_facturas_vista[vendedor_col].map(_normalize_vendedor_name) == vendedor_norm
+                    ].copy()
+
+            st.dataframe(df_facturas_vista, use_container_width=True, height=260, hide_index=True)
             st.download_button(
                 "⬇️ Descargar facturas faltantes (CSV)",
-                data=df_facturas_faltantes.to_csv(index=False).encode("utf-8-sig"),
+                data=df_facturas_vista.to_csv(index=False).encode("utf-8-sig"),
                 file_name="Facturas_Faltantes.csv",
                 mime="text/csv",
                 key="dashboard_facturas_faltantes_download",
