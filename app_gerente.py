@@ -3280,8 +3280,8 @@ def render_cobranza_tab_gerente():
             st.session_state["ger_cob_comentario"] = comentario_pref
             st.session_state["ger_cob_fecha_picker"] = pd.to_datetime(fecha_pago_existente_txt).date() if fecha_pago_existente_txt else date.today()
             st.session_state["ger_cob_seguimiento_activo"] = seguimiento_activo_pref
-            st.session_state["ger_cob_recordatorio"] = recordatorio_existente if recordatorio_existente in {"SI", "NO"} else ""
-            st.session_state["ger_cob_estatus"] = estatus_existente if estatus_existente in {"PENDIENTE", "PROMESA_PAGO", "LIQUIDADO"} else ""
+            st.session_state["ger_cob_recordatorio"] = recordatorio_existente if recordatorio_existente in {"SI", "NO"} else "SI"
+            st.session_state["ger_cob_estatus"] = estatus_existente if estatus_existente == "PROMESA_PAGO" else "PROMESA_PAGO"
             st.session_state["ger_cob_prefill_ctx"] = prefill_ctx
 
         st.session_state["ger_cob_seguimiento_activo"] = True
@@ -3295,12 +3295,12 @@ def render_cobranza_tab_gerente():
                 )
                 st.selectbox(
                     "Recordatorio activo",
-                    options=["", "SI", "NO"],
+                    options=["SI", "NO"],
                     key="ger_cob_recordatorio",
                 )
                 st.selectbox(
                     "Estatus de seguimiento",
-                    options=["", "PENDIENTE", "PROMESA_PAGO", "LIQUIDADO"],
+                    options=["PROMESA_PAGO"],
                     key="ger_cob_estatus",
                     help="PROMESA_PAGO agrupa promesas de pago; LIQUIDADO equivale a pagado completo y deja de mostrarse en seguimiento.",
                 )
@@ -4096,8 +4096,12 @@ def render_seguimiento_cobranza_tab_gerente(usuario_actual: str | None):
                 fechas_vencimiento_cli.append(fecha_txt)
             folio_txt = _cobranza_clean_text(row.get("Folio", ""))
             estatus_txt = _cobranza_clean_text(row.get("Estatus_Seguimiento", "")).upper() or "PROMESA_PAGO"
+            comentario_txt = _cobranza_clean_text(row.get("Comentario", ""))
+            marca_estado = ""
+            if estatus_txt == "LIQUIDADO":
+                marca_estado = " 🟩 Liquidado"
             opciones_cli.append(row_id)
-            etiquetas_cli[row_id] = f"Folio {folio_txt} · Estatus {estatus_txt} · Próximo pago {fecha_txt}"
+            etiquetas_cli[row_id] = f"Folio {folio_txt}{marca_estado} · Estatus {estatus_txt} · Próximo pago {fecha_txt}"
 
         if not opciones_cli:
             continue
