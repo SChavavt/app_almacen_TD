@@ -5227,12 +5227,26 @@ if "modificar" in tab_map:
                 tabla_garantias = tabla_garantias.rename(columns=columnas_tabla)
                 st.dataframe(tabla_garantias, use_container_width=True)
 
-                opciones_select = [None] + df_garantias_filtrado.index.tolist()
+                df_garantias_filtrado = df_garantias_filtrado.reset_index(drop=False).rename(
+                    columns={"index": "__source_index"}
+                )
+                df_garantias_filtrado["__option_key"] = df_garantias_filtrado.apply(
+                    lambda r: f"{r.get('__sheet_row', '')}|{r.get('ID_Pedido', '')}|{r.get('__source_index', '')}",
+                    axis=1,
+                )
+                opcion_vacia = "__none__"
+                opciones_select = [opcion_vacia] + df_garantias_filtrado["__option_key"].tolist()
+                opciones_por_key = (
+                    df_garantias_filtrado.drop_duplicates(subset="__option_key", keep="last")
+                    .set_index("__option_key")
+                )
 
-                def format_garantia(idx):
-                    if idx is None:
+                def format_garantia(option_key):
+                    if option_key == opcion_vacia:
                         return "Selecciona un caso especial"
-                    row = df_garantias_filtrado.loc[idx]
+                    if option_key not in opciones_por_key.index:
+                        return "Caso especial no disponible"
+                    row = opciones_por_key.loc[option_key]
                     hora = formatear_fecha(row.get("Hora_Registro"), "%d/%m/%Y %H:%M")
                     estado = row.get("Estado_Caso") or row.get("Estado") or ""
                     return (
@@ -5241,15 +5255,18 @@ if "modificar" in tab_map:
                         f"🔍 {estado} | 🕒 {hora}"
                     )
 
-                idx_garantia = st.selectbox(
+                selected_option_key = st.selectbox(
                     "Selecciona un caso especial para ver detalles:",
                     opciones_select,
                     format_func=format_garantia,
                     key="select_caso_especial",
                 )
 
-                if idx_garantia is not None and idx_garantia in df_garantias_filtrado.index:
-                    row_garantia = df_garantias_filtrado.loc[idx_garantia]
+                if (
+                    selected_option_key != opcion_vacia
+                    and selected_option_key in opciones_por_key.index
+                ):
+                    row_garantia = opciones_por_key.loc[selected_option_key]
                     pedido_sel = row_garantia.get("ID_Pedido")
                     source_sel = "casos"
                     sheet_row_sel = row_garantia.get("__sheet_row")
@@ -5588,6 +5605,8 @@ if "modificar" in tab_map:
         st.markdown(
             f"📦 **Cliente:** {row['Cliente']} &nbsp;&nbsp;&nbsp;&nbsp; 🧾 **Folio Factura:** {row.get('Folio_Factura', 'N/A')}"
         )
+        cliente_objetivo = str(row.get("Cliente", "") or "").strip() or "N/A"
+        folio_objetivo = str(row.get("Folio_Factura", row.get("Folio", "")) or "").strip() or "N/A"
 
         with st.expander("📎 Adjuntar Archivos — Gestionar guías y documentos", expanded=False):
             col_guias = "Adjuntos_Guia" if source_sel == "pedidos" else "Hoja_Ruta_Mensajero"
@@ -5611,8 +5630,16 @@ if "modificar" in tab_map:
 
             uploaded_guias = st.file_uploader("📄 Guías", accept_multiple_files=True)
             uploaded_otros = st.file_uploader("📁 Otros", accept_multiple_files=True)
+            st.info(f"Vas a guardar en: Cliente **{cliente_objetivo}** / Folio **{folio_objetivo}**.")
+            confirmar_subida = st.checkbox(
+                "Confirmo que este es el cliente y folio correctos para subir archivos.",
+                key=f"confirmar_subida_archivos_{source_sel}_{pedido_sel}",
+            )
 
             if st.button("⬆️ Subir archivos"):
+                if not confirmar_subida:
+                    st.warning("⚠️ Confirma cliente y folio antes de subir archivos.")
+                    st.stop()
                 nuevas_guias_urls, nuevas_otros_urls = [], []
                 for file in uploaded_guias or []:
                     key = f"adjuntos_pedidos/{pedido_sel}/{file.name}"
@@ -5672,8 +5699,16 @@ if "modificar" in tab_map:
                     opciones_seguimiento,
                     index=index_preseleccion,
                 )
+                st.caption(f"Vas a guardar en: Cliente {cliente_objetivo} / Folio {folio_objetivo}")
+                confirmar_seguimiento = st.checkbox(
+                    "Confirmo cliente y folio para guardar seguimiento.",
+                    key=f"confirmar_seguimiento_{source_sel}_{pedido_sel}",
+                )
 
                 if st.button("Guardar seguimiento"):
+                    if not confirmar_seguimiento:
+                        st.warning("⚠️ Confirma cliente y folio antes de guardar seguimiento.")
+                        st.stop()
                     if actualizar_celdas_y_confirmar(
                         [("Seguimiento", seguimiento_sel)],
                         "🔄 Seguimiento de garantía guardado correctamente.",
@@ -5682,7 +5717,15 @@ if "modificar" in tab_map:
                         st.rerun()
 
         comentario_usuario = st.text_area("📝 Comentario desde almacén", key="comentario_almacen")
+        st.caption(f"Vas a guardar en: Cliente {cliente_objetivo} / Folio {folio_objetivo}")
+        confirmar_comentario = st.checkbox(
+            "Confirmo cliente y folio para guardar comentario.",
+            key=f"confirmar_comentario_{source_sel}_{pedido_sel}",
+        )
         if st.button("Guardar comentario"):
+            if not confirmar_comentario:
+                st.warning("⚠️ Confirma cliente y folio antes de guardar comentario.")
+                st.stop()
             comentario_limpio = comentario_usuario.strip()
             if not comentario_limpio:
                 st.warning("⚠️ Debes ingresar un comentario antes de guardarlo.")
