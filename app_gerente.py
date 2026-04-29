@@ -3934,6 +3934,42 @@ def render_seguimiento_cobranza_tab_gerente(usuario_actual: str | None):
 
     cliente_nom = base_df[["Codigo", "Razon_Social"]].drop_duplicates() if not base_df.empty else pd.DataFrame(columns=["Codigo", "Razon_Social"])
 
+    st.markdown("#### 📋 Clientes con saldo pendiente")
+    if base_df.empty:
+        st.caption("No hay información base de cobranza para mostrar saldos.")
+    else:
+        saldos_df = base_df.copy()
+        saldos_df["Codigo"] = saldos_df.get("Codigo", "").astype(str)
+        saldos_df["Saldo"] = pd.to_numeric(saldos_df.get("Saldo", 0), errors="coerce").fillna(0.0)
+        saldos_df["No_Vencido"] = pd.to_numeric(saldos_df.get("No_Vencido", 0), errors="coerce").fillna(0.0)
+        saldos_df["Vencido"] = pd.to_numeric(saldos_df.get("Vencido", 0), errors="coerce").fillna(0.0)
+        saldos_df = saldos_df[saldos_df["Saldo"] > 0].copy()
+
+        if saldos_df.empty:
+            st.caption("No hay clientes con saldo pendiente en la base actual.")
+        else:
+            seg_resumen = com_df.copy()
+            seg_resumen["Codigo"] = seg_resumen.get("Codigo", "").astype(str)
+            seg_resumen["_ts"] = pd.to_datetime(seg_resumen.get("Timestamp", ""), errors="coerce")
+            seg_resumen = seg_resumen.sort_values(["Codigo", "_ts"], ascending=[True, True])
+            seg_resumen = seg_resumen.drop_duplicates(subset=["Codigo"], keep="last")
+
+            saldos_df = saldos_df.merge(
+                seg_resumen[[c for c in ["Codigo", "Fecha_Proximo_Pago", "Estatus_Seguimiento", "Comentario", "Actualizado_por"] if c in seg_resumen.columns]],
+                on="Codigo",
+                how="left",
+            )
+
+            saldos_df["Fecha_Proximo_Pago"] = pd.to_datetime(saldos_df.get("Fecha_Proximo_Pago", ""), errors="coerce").dt.strftime("%Y-%m-%d")
+            saldos_df = saldos_df.sort_values(["Saldo", "Vencido", "Codigo"], ascending=[False, False, True])
+
+            cols_saldos = [
+                "Codigo", "Razon_Social", "Saldo", "Vencido", "No_Vencido", "Tipo_Pago", "Fecha_Proximo_Pago",
+                "Estatus_Seguimiento", "Comentario", "Actualizado_por", "Ultima_Actualizacion"
+            ]
+            cols_saldos = [c for c in cols_saldos if c in saldos_df.columns]
+            st.dataframe(saldos_df[cols_saldos], use_container_width=True, hide_index=True)
+
     seg_tmp = com_df.copy()
     seg_tmp["Mes_Operativo"] = seg_tmp.get("Mes_Operativo", "").astype(str)
     mask_mes_op_vacio = seg_tmp["Mes_Operativo"].str.strip() == ""
