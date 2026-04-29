@@ -5010,7 +5010,17 @@ if selected_tab_key == "dashboard":
 
     st_autorefresh(interval=60000, key="auto_refresh_dashboard")
 
-    with st.expander("🧾 Facturas faltantes por enviar", expanded=False):
+    if "dashboard_facturas_faltantes_open" not in st.session_state:
+        st.session_state.dashboard_facturas_faltantes_open = False
+
+    def _keep_facturas_faltantes_open():
+        st.session_state.dashboard_facturas_faltantes_open = True
+
+    with st.expander(
+        "🧾 Facturas faltantes por enviar",
+        expanded=st.session_state.dashboard_facturas_faltantes_open,
+    ):
+        st.session_state.dashboard_facturas_faltantes_open = True
         col_ff_1, col_ff_2 = st.columns([0.7, 0.3])
         with col_ff_1:
             st.markdown("**Vista compartida actual (`Facturas_Faltantes`)**")
@@ -5023,10 +5033,52 @@ if selected_tab_key == "dashboard":
         if df_facturas_faltantes.empty:
             st.info("No hay registros en `Facturas_Faltantes`.")
         else:
-            st.dataframe(df_facturas_faltantes, use_container_width=True, height=260, hide_index=True)
+            df_facturas_vista = df_facturas_faltantes.copy()
+            filtros_cols = st.columns(2)
+            vendedor_col = _find_column_by_alias(df_facturas_vista, ["Vendedor"])
+            if vendedor_col:
+                vendedores_disponibles = sorted(
+                    {
+                        sanitize_text(v)
+                        for v in df_facturas_vista[vendedor_col].dropna().astype(str).tolist()
+                        if sanitize_text(v)
+                    }
+                )
+                with filtros_cols[0]:
+                    vendedor_sel = st.selectbox(
+                        "Filtrar por vendedor",
+                        options=["(Todos)"] + vendedores_disponibles,
+                        index=0,
+                        key="dashboard_facturas_faltantes_vendedor_filter",
+                        on_change=_keep_facturas_faltantes_open,
+                    )
+                if vendedor_sel != "(Todos)":
+                    vendedor_norm = _normalize_vendedor_name(vendedor_sel)
+                    df_facturas_vista = df_facturas_vista[
+                        df_facturas_vista[vendedor_col].map(_normalize_vendedor_name) == vendedor_norm
+                    ].copy()
+
+            fecha_col = _find_column_by_alias(df_facturas_vista, ["Fecha"])
+            if fecha_col:
+                fecha_parseada = pd.to_datetime(df_facturas_vista[fecha_col], errors="coerce", dayfirst=True)
+                dias_disponibles = sorted(
+                    {int(d) for d in fecha_parseada.dt.day.dropna().tolist()}
+                )
+                with filtros_cols[1]:
+                    dia_sel = st.selectbox(
+                        "Filtrar por día",
+                        options=["(Todos)"] + [str(d) for d in dias_disponibles],
+                        index=0,
+                        key="dashboard_facturas_faltantes_dia_filter",
+                        on_change=_keep_facturas_faltantes_open,
+                    )
+                if dia_sel != "(Todos)":
+                    df_facturas_vista = df_facturas_vista[fecha_parseada.dt.day == int(dia_sel)].copy()
+
+            st.dataframe(df_facturas_vista, use_container_width=True, height=260, hide_index=True)
             st.download_button(
                 "⬇️ Descargar facturas faltantes (CSV)",
-                data=df_facturas_faltantes.to_csv(index=False).encode("utf-8-sig"),
+                data=df_facturas_vista.to_csv(index=False).encode("utf-8-sig"),
                 file_name="Facturas_Faltantes.csv",
                 mime="text/csv",
                 key="dashboard_facturas_faltantes_download",
