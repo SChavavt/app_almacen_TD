@@ -2956,7 +2956,11 @@ def _get_column_index_cached(sheet_name: str, column_name: str) -> Optional[int]
         return cached
 
     ws = _worksheet_by_name(sheet_name)
-    headers = ws.row_values(1)
+    try:
+        headers = ws.row_values(1)
+    except Exception:
+        # Evita que una falla transitoria de Google Sheets tumbe toda la app.
+        return cached if isinstance(cached, int) and cached > 0 else None
     if column_name not in headers:
         return None
 
