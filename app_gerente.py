@@ -4151,13 +4151,17 @@ def render_seguimiento_cobranza_tab_gerente(usuario_actual: str | None):
     seg_gestion["Codigo"] = seg_gestion.get("Codigo", "").astype(str)
     seg_gestion["Razon_Social"] = seg_gestion.get("Razon_Social", "").astype(str)
 
-    st.caption("Selecciona uno o varios folios por cliente para aplicar cambios masivos.")
-    row_sel_multi: list[int] = []
+    st.caption("Selecciona un cliente y luego uno o varios folios para aplicar cambios.")
+    clientes_ops = []
+    clientes_labels = {}
+    cliente_folios_map = {}
+
     for (codigo_cli, razon_cli), grp in seg_gestion.groupby(["Codigo", "Razon_Social"], sort=True):
         grp_sorted = grp.sort_values(["Fecha_Proximo_Pago", "Folio"]).copy()
         opciones_cli = []
         etiquetas_cli = {}
         fechas_vencimiento_cli = []
+
         for _, row in grp_sorted.iterrows():
             row_id = int(row.get("_row_id", 0) or 0)
             if row_id <= 0:
@@ -4168,32 +4172,46 @@ def render_seguimiento_cobranza_tab_gerente(usuario_actual: str | None):
                 fechas_vencimiento_cli.append(fecha_txt)
             folio_txt = _cobranza_clean_text(row.get("Folio", ""))
             estatus_txt = _cobranza_clean_text(row.get("Estatus_Seguimiento", "")).upper() or "PROMESA_PAGO"
-            comentario_txt = _cobranza_clean_text(row.get("Comentario", ""))
-            marca_estado = ""
-            if estatus_txt == "LIQUIDADO":
-                marca_estado = " 🟩 Liquidado"
+            marca_estado = " 🟩 Liquidado" if estatus_txt == "LIQUIDADO" else ""
             opciones_cli.append(row_id)
-            etiquetas_cli[row_id] = f"Folio {folio_txt}{marca_estado} · Estatus {estatus_txt} · Próximo pago {fecha_txt}"
+            etiquetas_cli[row_id] = f"Folio {folio_txt}{marca_estado} · Estatus {estatus_txt} · Próximo pago {fecha_txt or 'Sin fecha'}"
 
         if not opciones_cli:
             continue
 
+        cliente_key = f"{_cobranza_clean_text(codigo_cli)}|{_cobranza_clean_text(razon_cli)}"
         fechas_unicas = sorted(set(fechas_vencimiento_cli))
         fechas_label = ", ".join(fechas_unicas) if fechas_unicas else "Sin fecha"
-        exp_title = (
+        clientes_ops.append(cliente_key)
+        clientes_labels[cliente_key] = (
             f"{_cobranza_clean_text(codigo_cli)} · {_cobranza_clean_text(razon_cli)} "
             f"({len(opciones_cli)} folios) · Vence: {fechas_label}"
         )
-        with st.expander(exp_title, expanded=False):
-            sel_cli = st.multiselect(
-                "Folios en seguimiento",
-                options=opciones_cli,
-                format_func=lambda rid, map_et=etiquetas_cli: map_et.get(rid, str(rid)),
-                key=f"ger_seg_rows_cli_{_cobranza_clean_text(codigo_cli)}",
-            )
-            row_sel_multi.extend(int(rid) for rid in sel_cli)
+        cliente_folios_map[cliente_key] = {
+            "opciones": opciones_cli,
+            "labels": etiquetas_cli,
+        }
 
-    row_sel_multi = sorted(set(row_sel_multi))
+    if not clientes_ops:
+        st.info("No hay clientes con folios editables para esta vista.")
+        return
+
+    cliente_sel = st.selectbox(
+        "Cliente",
+        options=clientes_ops,
+        format_func=lambda k: clientes_labels.get(k, k),
+        key="ger_seg_cliente_selector",
+    )
+
+    cliente_payload = cliente_folios_map.get(cliente_sel, {"opciones": [], "labels": {}})
+    row_sel_multi = st.multiselect(
+        "Folios en seguimiento",
+        options=cliente_payload.get("opciones", []),
+        format_func=lambda rid, map_et=cliente_payload.get("labels", {}): map_et.get(rid, str(rid)),
+        key="ger_seg_rows_multi",
+    )
+
+    row_sel_multi = sorted(set(int(rid) for rid in row_sel_multi))
     if not row_sel_multi:
         st.info("Selecciona al menos un folio para habilitar la edición de estatus, fecha y comentarios.")
         return
