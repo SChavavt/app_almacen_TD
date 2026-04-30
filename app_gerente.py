@@ -3397,28 +3397,10 @@ def render_cobranza_tab_gerente():
             st.session_state["ger_cob_estatus"] = estatus_existente if estatus_existente == "PROMESA_PAGO" else "PROMESA_PAGO"
             st.session_state["ger_cob_prefill_ctx"] = prefill_ctx
 
-        com_records_cache = com_df.to_dict("records") if not com_df.empty else []
-
-        with st.form("ger_cob_form", clear_on_submit=False):
-            accion_code = st.selectbox(
-                "Acción de cobranza",
-                options=list(acciones_cobranza.keys()),
-                format_func=lambda c: acciones_cobranza[c],
-                key="ger_cob_accion",
-            )
-            respuesta_code = st.selectbox(
-                "Respuesta / estado del cliente",
-                options=list(respuestas_cliente.keys()),
-                format_func=lambda c: respuestas_cliente[c],
-                key="ger_cob_respuesta",
-            )
-            comentario = st.text_area("Comentario adicional (opcional)", key="ger_cob_comentario")
-
-            seguimiento_activo = st.checkbox(
-                "🔔 Seguimiento de próximo pago",
-                key="ger_cob_seguimiento_activo",
-            )
-            if seguimiento_activo:
+        st.session_state["ger_cob_seguimiento_activo"] = True
+        aplicar_seg = False
+        with st.expander("🔔 Seguimiento de próximo pago", expanded=False):
+            with st.form("ger_cob_seguimiento_form", clear_on_submit=False):
                 st.date_input(
                     "Fecha de próximo pago",
                     key="ger_cob_fecha_picker",
@@ -3435,12 +3417,81 @@ def render_cobranza_tab_gerente():
                     key="ger_cob_estatus",
                     help="PROMESA_PAGO agrupa promesas de pago; LIQUIDADO equivale a pagado completo y deja de mostrarse en seguimiento.",
                 )
+                aplicar_seg = st.form_submit_button("Aplicar seguimiento")
 
-            guardar_comentario = st.form_submit_button("Guardar comentario y seguimiento")
+        fecha_pago_dt = st.session_state.get("ger_cob_fecha_picker")
+        recordatorio_activo = st.session_state.get("ger_cob_recordatorio", "")
+        estatus_seguimiento = st.session_state.get("ger_cob_estatus", "")
 
-        fecha_pago_dt = st.session_state.get("ger_cob_fecha_picker") if st.session_state.get("ger_cob_seguimiento_activo") else None
-        recordatorio_activo = st.session_state.get("ger_cob_recordatorio", "") if st.session_state.get("ger_cob_seguimiento_activo") else ""
-        estatus_seguimiento = st.session_state.get("ger_cob_estatus", "") if st.session_state.get("ger_cob_seguimiento_activo") else ""
+        com_records_cache = com_df.to_dict("records") if not com_df.empty else []
+
+        if aplicar_seg:
+            if not folios_sel:
+                st.warning("⚠️ Selecciona al menos un folio para aplicar seguimiento.")
+            elif not any([fecha_pago_dt, str(recordatorio_activo).strip(), str(estatus_seguimiento).strip()]):
+                st.warning("⚠️ Captura al menos fecha, recordatorio o estatus para aplicar seguimiento.")
+            else:
+                dia_guardado = int(dia_sel)
+                estatus_form = str(estatus_seguimiento or "").strip().upper()
+                fecha_proximo_pago = ""
+                if fecha_pago_dt and estatus_form in {"PENDIENTE", "PROMESA_PAGO"}:
+                    fecha_proximo_pago = pd.to_datetime(fecha_pago_dt).strftime("%Y-%m-%d")
+
+                fecha_cierre = now_cdmx().strftime("%Y-%m-%d") if estatus_form == "LIQUIDADO" else ""
+                mes_operativo = _cobranza_mes_operativo(
+                    mes_com if mes_com != "TODOS" else mes_actual,
+                    estatus_form,
+                    fecha_proximo_pago,
+                )
+                timestamp_actual = now_cdmx().strftime("%Y-%m-%d %H:%M:%S")
+                usuario_actualizado = _safe_str(usuario_actual)
+
+                seg_df = pd.DataFrame([
+                    {
+                        "Mes": mes_com if mes_com != "TODOS" else mes_actual,
+                        "Codigo": codigo,
+                        "Folio": folio,
+                        "Dia": str(dia_guardado),
+                        "Comentario": "",
+                        "Actualizado_por": usuario_actualizado,
+                        "Timestamp": timestamp_actual,
+                        "Fecha_Proximo_Pago": fecha_proximo_pago,
+                        "Recordatorio_Activo": str(recordatorio_activo or "").strip().upper(),
+                        "Estatus_Seguimiento": estatus_form,
+                        "Fecha_Cierre": fecha_cierre,
+                        "Mes_Operativo": mes_operativo,
+                    }
+                    for folio in folios_sel
+                ])
+                cobranza_upsert_rows_by_key(
+                    ws_com,
+                    seg_df[com_headers],
+                    ["Mes", "Codigo", "Folio", "Dia"],
+                    [
+                        "Actualizado_por", "Timestamp", "Fecha_Proximo_Pago",
+                        "Recordatorio_Activo", "Estatus_Seguimiento", "Fecha_Cierre", "Mes_Operativo"
+                    ],
+                    existing_records=com_records_cache,
+                )
+                st.session_state["ger_cob_force_refresh"] = True
+                st.success("✅ Seguimiento aplicado correctamente.")
+                st.rerun()
+
+        with st.form("ger_cob_form", clear_on_submit=False):
+            accion_code = st.selectbox(
+                "Acción de cobranza",
+                options=list(acciones_cobranza.keys()),
+                format_func=lambda c: acciones_cobranza[c],
+                key="ger_cob_accion",
+            )
+            respuesta_code = st.selectbox(
+                "Respuesta / estado del cliente",
+                options=list(respuestas_cliente.keys()),
+                format_func=lambda c: respuestas_cliente[c],
+                key="ger_cob_respuesta",
+            )
+            comentario = st.text_area("Comentario adicional (opcional)", key="ger_cob_comentario")
+            guardar_comentario = st.form_submit_button("Guardar comentario")
 
         if guardar_comentario:
             fecha_txt = now_cdmx().strftime("%d/%m")
