@@ -534,7 +534,16 @@ def _build_section_header(origen_tab: Any, row: Any, fecha_entrega: datetime.dat
 
 
 def _parse_fecha_entrega_local(fecha_raw: Any) -> Optional[datetime.date]:
-    fecha = pd.to_datetime(fecha_raw, errors="coerce", dayfirst=True)
+    raw = str(fecha_raw or "").strip()
+    if not raw:
+        return None
+
+    # Si llega en formato ISO (YYYY-MM-DD), no usar dayfirst=True porque
+    # fechas como 2026-05-04 podrían interpretarse como 2026-04-05.
+    if re.fullmatch(r"\d{4}-\d{2}-\d{2}", raw):
+        fecha = pd.to_datetime(raw, errors="coerce", format="%Y-%m-%d")
+    else:
+        fecha = pd.to_datetime(raw, errors="coerce", dayfirst=True)
     if pd.isna(fecha):
         return None
     return fecha.date()
