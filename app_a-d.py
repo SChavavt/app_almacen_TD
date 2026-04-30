@@ -5662,16 +5662,29 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
                     nuevo_turno = st.session_state[turno_key] if permite_cambiar_turno_local else current_turno
                     hubo_cambio_fecha_turno = False
 
+                    def _header_col_idx(header_name: str, aliases: Optional[list[str]] = None) -> Optional[int]:
+                        aliases = aliases or []
+                        target_keys = [_normalize_header_key(header_name)] + [
+                            _normalize_header_key(alias) for alias in aliases
+                        ]
+                        for i, header_val in enumerate(live_headers, start=1):
+                            if _normalize_header_key(header_val) in target_keys:
+                                return i
+                        return None
+
+                    col_idx_fecha_entrega = _header_col_idx("Fecha_Entrega", aliases=["Fecha Entrega"])
+                    col_idx_turno = _header_col_idx("Turno")
+                    col_idx_estado = _header_col_idx("Estado")
+
                     if nueva_fecha_str != fecha_actual_str:
-                        if "Fecha_Entrega" not in live_headers:
+                        if not col_idx_fecha_entrega:
                             st.error("❌ No se encontró la columna 'Fecha_Entrega' en Google Sheets.")
                             return
                         hubo_cambio_fecha_turno = True
-                        col_idx = live_headers.index("Fecha_Entrega") + 1
                         cambios.append(
                             {
                                 'range': gspread.utils.rowcol_to_a1(
-                                    gsheet_row_index, col_idx
+                                    gsheet_row_index, col_idx_fecha_entrega
                                 ),
                                 'values': [[nueva_fecha_str]],
                             }
@@ -5679,32 +5692,26 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
 
                     if puede_editar_turno:
                         if nuevo_turno != current_turno:
-                            if "Turno" not in live_headers:
+                            if not col_idx_turno:
                                 st.error("❌ No se encontró la columna 'Turno' en Google Sheets.")
                                 return
                             hubo_cambio_fecha_turno = True
-                            col_idx = live_headers.index("Turno") + 1
                             cambios.append(
                                 {
                                     'range': gspread.utils.rowcol_to_a1(
-                                        gsheet_row_index, col_idx
+                                        gsheet_row_index, col_idx_turno
                                     ),
                                     'values': [[nuevo_turno]],
                                 }
                             )
 
-                    # Blindaje adicional: en este flujo el Estado no debe cambiar.
-                    # Forzamos conservar el Estado en el mismo batch para evitar drift.
-                    if cambios and "Estado" in live_headers and estado_antes_cambio:
-                        col_idx_estado = live_headers.index("Estado") + 1
-                        cambios.append(
-                            {
-                                "range": gspread.utils.rowcol_to_a1(
-                                    gsheet_row_index, col_idx_estado
-                                ),
-                                "values": [[estado_antes_cambio]],
-                            }
-                        )
+                    # Regla de negocio: en este flujo Estado NO debe cambiar.
+                    # Validamos que el batch solo incluya Fecha_Entrega y/o Turno.
+                    if cambios and col_idx_estado:
+                        estado_a1 = gspread.utils.rowcol_to_a1(gsheet_row_index, col_idx_estado)
+                        if any(item.get("range") == estado_a1 for item in cambios):
+                            st.error("❌ Error interno: este flujo no puede escribir en la columna Estado.")
+                            return
 
                     if cambios:
                         if batch_update_gsheet_cells(worksheet, cambios, headers=live_headers):
