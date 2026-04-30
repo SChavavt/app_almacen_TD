@@ -2944,7 +2944,6 @@ def render_cobranza_tab_gerente():
             saldos_df["Saldo"] = pd.to_numeric(saldos_df.get("Saldo", 0), errors="coerce").fillna(0.0)
             saldos_df["No_Vencido"] = pd.to_numeric(saldos_df.get("No_Vencido", 0), errors="coerce").fillna(0.0)
             saldos_df["Vencido"] = pd.to_numeric(saldos_df.get("Vencido", 0), errors="coerce").fillna(0.0)
-            saldos_df = saldos_df[saldos_df["Saldo"] > 0].copy()
 
             if saldos_df.empty:
                 st.caption("No hay clientes con saldo pendiente en la base actual.")
@@ -2976,20 +2975,62 @@ def render_cobranza_tab_gerente():
                 if not venc_df.empty:
                     tmp_v = venc_df.copy()
                     tmp_v["Codigo"] = tmp_v.get("Codigo", "").astype(str)
+                    tmp_v["_folio_norm"] = tmp_v.get("Folio", "").apply(_cobranza_clean_text)
                     tmp_v["Saldo_Vence"] = pd.to_numeric(tmp_v.get("Saldo_Vence", 0), errors="coerce").fillna(0.0)
                     tmp_v["Fecha_Vencimiento_dt"] = pd.to_datetime(tmp_v.get("Fecha_Vencimiento", ""), errors="coerce")
+                    tmp_v = tmp_v[tmp_v["_folio_norm"].astype(str).str.strip() != ""].copy()
                     if anio_sel != "Todos":
                         tmp_v = tmp_v[tmp_v.get("Mes", "").astype(str).str.startswith(f"{anio_sel}-")]
                     if mes_num_sel != "Todos":
                         tmp_v = tmp_v[tmp_v.get("Mes", "").astype(str).str.endswith(f"-{mes_num_sel}")]
+
+                    folios_liquidados: set[str] = set()
+                    if not com_df.empty and not tmp_v.empty:
+                        com_fil = com_df.copy()
+                        com_fil["Codigo"] = com_fil.get("Codigo", "").astype(str)
+                        if anio_sel != "Todos":
+                            com_fil = com_fil[com_fil.get("Mes", "").astype(str).str.startswith(f"{anio_sel}-")]
+                        if mes_num_sel != "Todos":
+                            com_fil = com_fil[com_fil.get("Mes", "").astype(str).str.endswith(f"-{mes_num_sel}")]
+                        if not com_fil.empty:
+                            com_fil["_folio_norm"] = com_fil.get("Folio", "").apply(_cobranza_clean_text)
+                            com_fil = com_fil[com_fil["_folio_norm"].astype(str).str.strip() != ""].copy()
+                            com_fil["_ts"] = pd.to_datetime(com_fil.get("Timestamp", ""), errors="coerce")
+                            com_fil["_dia_num"] = pd.to_numeric(com_fil.get("Dia", ""), errors="coerce")
+                            com_fil["_row_sort"] = pd.to_numeric(
+                                com_fil.get("__row", com_fil.get("__row_number__", pd.Series(index=com_fil.index, dtype="float64"))),
+                                errors="coerce",
+                            )
+                            com_fil = com_fil.sort_values(
+                                ["Codigo", "_folio_norm", "_ts", "_dia_num", "_row_sort"],
+                                ascending=[True, True, True, True, True],
+                            )
+                            ultimos = com_fil.drop_duplicates(subset=["Codigo", "_folio_norm"], keep="last").copy()
+                            estatus_norm = ultimos.get("Estatus_Seguimiento", "").astype(str).str.upper().str.strip()
+                            comentario_norm = ultimos.get("Comentario", "").astype(str)
+                            mask_liq = (
+                                estatus_norm.isin({"LIQUIDADO", "PAGO_COMPLETO", "PAGADO", "CERRADO"})
+                                | comentario_norm.apply(_cobranza_es_pago_completo)
+                            )
+                            folios_liquidados = set(
+                                (ultimos.loc[mask_liq, "Codigo"].astype(str) + "|" + ultimos.loc[mask_liq, "_folio_norm"].astype(str)).tolist()
+                            )
+
+                    if folios_liquidados:
+                        key_v = tmp_v["Codigo"].astype(str) + "|" + tmp_v["_folio_norm"].astype(str)
+                        tmp_v = tmp_v[~key_v.isin(folios_liquidados)].copy()
 
                     venc_res = tmp_v.groupby("Codigo", as_index=False).agg(
                         Fecha_Vencimiento_Min=("Fecha_Vencimiento_dt", "min"),
                         Fecha_Vencimiento_Max=("Fecha_Vencimiento_dt", "max"),
                         Saldo_Vencido_Total=("Saldo_Vence", "sum"),
                     )
-
                 saldos_df = saldos_df.merge(venc_res, on="Codigo", how="left")
+                saldos_df["Saldo_Vencido_Total"] = pd.to_numeric(saldos_df.get("Saldo_Vencido_Total", 0), errors="coerce").fillna(0.0)
+                saldos_df["Vencido"] = saldos_df["Saldo_Vencido_Total"]
+                saldos_df["Saldo"] = saldos_df["Saldo_Vencido_Total"]
+                saldos_df["No_Vencido"] = 0.0
+                saldos_df = saldos_df[saldos_df["Saldo"] > 0].copy()
                 saldos_df["Fecha_Vencimiento_Min"] = pd.to_datetime(saldos_df.get("Fecha_Vencimiento_Min"), errors="coerce")
                 saldos_df["Fecha_Vencimiento_Max"] = pd.to_datetime(saldos_df.get("Fecha_Vencimiento_Max"), errors="coerce")
 
