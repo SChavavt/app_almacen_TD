@@ -3992,7 +3992,6 @@ def render_seguimiento_cobranza_tab_gerente(usuario_actual: str | None):
     with top_actions_col:
         if st.button("🔄 Recargar conexión", key="ger_seg_cob_top_retry"):
             reset_cobranza_connection_state()
-            st.session_state.pop("ger_seg_cob_data_cache", None)
             st.rerun()
 
     ws_base, _, ws_com = get_cobranza_worksheets_safe()
@@ -4025,33 +4024,23 @@ def render_seguimiento_cobranza_tab_gerente(usuario_actual: str | None):
             )
         return
 
-    cache_payload = st.session_state.get("ger_seg_cob_data_cache")
-    if isinstance(cache_payload, dict) and {"base_df", "com_df"}.issubset(cache_payload.keys()):
-        base_df = cache_payload.get("base_df", pd.DataFrame()).copy()
-        com_df = cache_payload.get("com_df", pd.DataFrame()).copy()
-    else:
-        try:
-            base_df = pd.DataFrame(cobranza_load_records_with_rows(ws_base))
-            com_df = pd.DataFrame(cobranza_load_records_with_rows(ws_com))
-            st.session_state["ger_seg_cob_data_cache"] = {
-                "base_df": base_df.copy(),
-                "com_df": com_df.copy(),
-                "updated_at": now_cdmx().strftime("%Y-%m-%d %H:%M:%S"),
-            }
-        except gspread.exceptions.APIError as e:
-            _render_cobranza_retry_box(
-                "⚠️ No se pudieron leer los seguimientos desde Google Sheets en este momento.",
-                error=e,
-                key_suffix="load_seg_cob_data",
-            )
-            return
-        except Exception as e:
-            _render_cobranza_retry_box(
-                "⚠️ Ocurrió un problema al cargar el seguimiento de cobranza.",
-                error=e,
-                key_suffix="load_seg_cob_data_unexpected",
-            )
-            return
+    try:
+        base_df = pd.DataFrame(cobranza_load_records_with_rows(ws_base))
+        com_df = pd.DataFrame(cobranza_load_records_with_rows(ws_com))
+    except gspread.exceptions.APIError as e:
+        _render_cobranza_retry_box(
+            "⚠️ No se pudieron leer los seguimientos desde Google Sheets en este momento.",
+            error=e,
+            key_suffix="load_seg_cob_data",
+        )
+        return
+    except Exception as e:
+        _render_cobranza_retry_box(
+            "⚠️ Ocurrió un problema al cargar el seguimiento de cobranza.",
+            error=e,
+            key_suffix="load_seg_cob_data_unexpected",
+        )
+        return
     if com_df.empty:
         st.info("Aún no hay seguimientos capturados.")
         return
@@ -4203,17 +4192,13 @@ def render_seguimiento_cobranza_tab_gerente(usuario_actual: str | None):
     seg_gestion["Codigo"] = seg_gestion.get("Codigo", "").astype(str)
     seg_gestion["Razon_Social"] = seg_gestion.get("Razon_Social", "").astype(str)
 
-    st.caption("Selecciona un cliente y luego uno o varios folios para aplicar cambios.")
-    clientes_ops = []
-    clientes_labels = {}
-    cliente_folios_map = {}
-
+    st.caption("Selecciona uno o varios folios por cliente para aplicar cambios masivos.")
+    row_sel_multi: list[int] = []
     for (codigo_cli, razon_cli), grp in seg_gestion.groupby(["Codigo", "Razon_Social"], sort=True):
         grp_sorted = grp.sort_values(["Fecha_Proximo_Pago", "Folio"]).copy()
         opciones_cli = []
         etiquetas_cli = {}
         fechas_vencimiento_cli = []
-
         for _, row in grp_sorted.iterrows():
             row_id = int(row.get("_row_id", 0) or 0)
             if row_id <= 0:
@@ -4224,54 +4209,32 @@ def render_seguimiento_cobranza_tab_gerente(usuario_actual: str | None):
                 fechas_vencimiento_cli.append(fecha_txt)
             folio_txt = _cobranza_clean_text(row.get("Folio", ""))
             estatus_txt = _cobranza_clean_text(row.get("Estatus_Seguimiento", "")).upper() or "PROMESA_PAGO"
-            marca_estado = " 🟩 Liquidado" if estatus_txt == "LIQUIDADO" else ""
+            comentario_txt = _cobranza_clean_text(row.get("Comentario", ""))
+            marca_estado = ""
+            if estatus_txt == "LIQUIDADO":
+                marca_estado = " 🟩 Liquidado"
             opciones_cli.append(row_id)
-            etiquetas_cli[row_id] = f"Folio {folio_txt}{marca_estado} · Estatus {estatus_txt} · Próximo pago {fecha_txt or 'Sin fecha'}"
+            etiquetas_cli[row_id] = f"Folio {folio_txt}{marca_estado} · Estatus {estatus_txt} · Próximo pago {fecha_txt}"
 
         if not opciones_cli:
             continue
 
-        cliente_key = f"{_cobranza_clean_text(codigo_cli)}|{_cobranza_clean_text(razon_cli)}"
         fechas_unicas = sorted(set(fechas_vencimiento_cli))
         fechas_label = ", ".join(fechas_unicas) if fechas_unicas else "Sin fecha"
-        clientes_ops.append(cliente_key)
-        clientes_labels[cliente_key] = (
+        exp_title = (
             f"{_cobranza_clean_text(codigo_cli)} · {_cobranza_clean_text(razon_cli)} "
             f"({len(opciones_cli)} folios) · Vence: {fechas_label}"
         )
-        cliente_folios_map[cliente_key] = {
-            "opciones": opciones_cli,
-            "labels": etiquetas_cli,
-        }
+        with st.expander(exp_title, expanded=False):
+            sel_cli = st.multiselect(
+                "Folios en seguimiento",
+                options=opciones_cli,
+                format_func=lambda rid, map_et=etiquetas_cli: map_et.get(rid, str(rid)),
+                key=f"ger_seg_rows_cli_{_cobranza_clean_text(codigo_cli)}",
+            )
+            row_sel_multi.extend(int(rid) for rid in sel_cli)
 
-    if not clientes_ops:
-        st.info("No hay clientes con folios editables para esta vista.")
-        return
-
-    if len(clientes_ops) == 1:
-        cliente_sel = clientes_ops[0]
-        st.caption(f"Cliente: {clientes_labels.get(cliente_sel, cliente_sel)}")
-    else:
-        cliente_sel = st.selectbox(
-            "Cliente",
-            options=clientes_ops,
-            format_func=lambda k: clientes_labels.get(k, k),
-            key="ger_seg_cliente_selector",
-        )
-
-    cliente_payload = cliente_folios_map.get(cliente_sel, {"opciones": [], "labels": {}})
-    folios_opts = cliente_payload.get("opciones", [])
-    default_rows = folios_opts if len(folios_opts) == 1 else []
-    row_sel_multi = st.multiselect(
-        "Folios en seguimiento",
-        options=folios_opts,
-        default=default_rows,
-        format_func=lambda rid, map_et=cliente_payload.get("labels", {}): map_et.get(rid, str(rid)),
-        key="ger_seg_rows_multi",
-        help="Si el cliente solo tiene 1 folio, se selecciona automáticamente.",
-    )
-
-    row_sel_multi = sorted(set(int(rid) for rid in row_sel_multi))
+    row_sel_multi = sorted(set(row_sel_multi))
     if not row_sel_multi:
         st.info("Selecciona al menos un folio para habilitar la edición de estatus, fecha y comentarios.")
         return
@@ -4342,7 +4305,6 @@ def render_seguimiento_cobranza_tab_gerente(usuario_actual: str | None):
 
         cobranza_update_row_values(ws_com, row_number, row_values)
 
-    st.session_state.pop("ger_seg_cob_data_cache", None)
     st.success(f"✅ Seguimiento actualizado en {len(row_sel_multi)} folio(s).")
     st.rerun()
 
