@@ -3038,6 +3038,17 @@ def render_cobranza_tab_gerente():
                 saldos_df["Fecha_Vencimiento_Min"] = pd.to_datetime(saldos_df.get("Fecha_Vencimiento_Min"), errors="coerce")
                 saldos_df["Fecha_Vencimiento_Max"] = pd.to_datetime(saldos_df.get("Fecha_Vencimiento_Max"), errors="coerce")
 
+                # La base histórica guarda un registro por cliente y mes.
+                # Para evitar ocultar clientes con movimientos distintos, solo colapsamos duplicados
+                # cuando tienen el mismo código y el mismo saldo/ventana de vencimiento.
+                saldos_df["_mes_dt"] = pd.to_datetime(saldos_df.get("Mes", "") + "-01", errors="coerce")
+                saldos_df["_ult_act_dt"] = pd.to_datetime(saldos_df.get("Ultima_Actualizacion", ""), errors="coerce")
+                saldos_df = saldos_df.sort_values(["Codigo", "_mes_dt", "_ult_act_dt"], ascending=[True, False, False])
+                saldos_df = saldos_df.drop_duplicates(
+                    subset=["Codigo", "Saldo_Vencido_Total", "Fecha_Vencimiento_Min", "Fecha_Vencimiento_Max"],
+                    keep="first",
+                ).copy()
+
                 if orden_sel == "Vencidas más caras a más baratas":
                     saldos_df = saldos_df.sort_values(["Vencido", "Saldo_Vencido_Total", "Saldo"], ascending=[False, False, False])
                 elif orden_sel == "Fecha de vencimiento más reciente a más antigua":
