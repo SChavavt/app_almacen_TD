@@ -875,10 +875,14 @@ def construir_descarga_flujo_por_categoria():
     df_foraneos = df_foraneos.iloc[::-1].reset_index(drop=True)
     df_casos = df_casos.iloc[::-1].reset_index(drop=True)
 
+    df_locales_out = df_locales.reindex(columns=columnas_salida, fill_value="")
+    df_foraneos_out = df_foraneos.reindex(columns=columnas_salida, fill_value="")
+    df_casos_out = df_casos.reindex(columns=columnas_salida, fill_value="")
+
     return {
-        "locales": df_locales[columnas_salida],
-        "foraneos": df_foraneos[columnas_salida],
-        "casos": df_casos[columnas_salida],
+        "locales": df_locales_out,
+        "foraneos": df_foraneos_out,
+        "casos": df_casos_out,
     }
 
 
