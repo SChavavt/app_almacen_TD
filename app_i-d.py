@@ -5137,7 +5137,18 @@ if selected_tab_key == "dashboard":
             if logged_vendor:
                 vendedores_raw = [logged_vendor]
 
-    _vendedores = sorted({sanitize_text(v) for v in vendedores_raw if sanitize_text(v)})
+    allowed_vendor_names = {
+        sanitize_text(nombre)
+        for user_key, nombre in VENDEDOR_CREDENTIALS.items()
+        if sanitize_text(nombre) and not is_non_vendor_user(user_key)
+    }
+    _vendedores = sorted(
+        {
+            sanitize_text(v)
+            for v in vendedores_raw
+            if sanitize_text(v) and sanitize_text(v) in allowed_vendor_names
+        }
+    )
 
     total_ventas = float(get_numeric_column(df_conf, "Monto_Comprobante", default=0.0).sum())
     total_pedidos = int(len(df_conf))
