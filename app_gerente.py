@@ -3056,16 +3056,8 @@ def render_cobranza_tab_gerente():
                 else:
                     saldos_df = saldos_df.sort_values(["Fecha_Vencimiento_Min", "Saldo"], ascending=[True, False], na_position="last")
 
-                # La base histórica guarda un registro por cliente y mes.
-                # Si el filtro está en "Todos", consolidamos por cliente para evitar filas repetidas.
-                saldos_df["_mes_dt"] = pd.to_datetime(saldos_df.get("Mes", "") + "-01", errors="coerce")
-                saldos_df["_ult_act_dt"] = pd.to_datetime(saldos_df.get("Ultima_Actualizacion", ""), errors="coerce")
-                saldos_df = saldos_df.sort_values(["Codigo", "_mes_dt", "_ult_act_dt"], ascending=[True, False, False])
-                saldos_df = saldos_df.drop_duplicates(subset=["Codigo"], keep="first").copy()
-
                 saldos_df["Fecha_Vencimiento_Min"] = saldos_df["Fecha_Vencimiento_Min"].dt.strftime("%Y-%m-%d")
                 saldos_df["Fecha_Vencimiento_Max"] = saldos_df["Fecha_Vencimiento_Max"].dt.strftime("%Y-%m-%d")
-                saldos_df = saldos_df.drop(columns=[c for c in ["_mes_dt", "_ult_act_dt"] if c in saldos_df.columns])
                 cols_saldos = ["Mes", "Codigo", "Razon_Social", "Saldo", "Vencido", "No_Vencido", "Saldo_Vencido_Total", "Fecha_Vencimiento_Min", "Fecha_Vencimiento_Max", "Tipo_Pago", "Ultima_Actualizacion"]
                 cols_saldos = [c for c in cols_saldos if c in saldos_df.columns]
                 st.dataframe(saldos_df[cols_saldos], use_container_width=True, hide_index=True)
