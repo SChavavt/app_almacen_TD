@@ -5017,6 +5017,13 @@ if selected_tab_key == "dashboard":
     if "dashboard_facturas_faltantes_open" not in st.session_state:
         st.session_state.dashboard_facturas_faltantes_open = False
 
+    hora_actual_local = datetime.now(TZ).time()
+    ventana_revision_inicio = datetime.strptime("17:30", "%H:%M").time()
+    ventana_revision_fin = datetime.strptime("19:00", "%H:%M").time()
+    ventana_revision_activa = ventana_revision_inicio <= hora_actual_local <= ventana_revision_fin
+    if ventana_revision_activa:
+        st.session_state.dashboard_facturas_faltantes_open = True
+
     def _keep_facturas_faltantes_open():
         st.session_state.dashboard_facturas_faltantes_open = True
 
@@ -5025,6 +5032,11 @@ if selected_tab_key == "dashboard":
         expanded=st.session_state.dashboard_facturas_faltantes_open,
     ):
         st.session_state.dashboard_facturas_faltantes_open = True
+        if ventana_revision_activa:
+            st.warning(
+                "⏰ Recordatorio diario (5:30 p.m. a 7:00 p.m.): revisa las facturas faltantes "
+                "para asegurar que todas las pendientes se envíen hoy."
+            )
         col_ff_1, col_ff_2 = st.columns([0.7, 0.3])
         with col_ff_1:
             st.markdown("**Vista compartida actual (`Facturas_Faltantes`)**")
