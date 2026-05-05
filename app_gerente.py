@@ -3990,8 +3990,8 @@ def render_seguimiento_cobranza_tab_gerente(usuario_actual: str | None):
             st.session_state.pop("ger_seg_cob_data_cache", None)
             st.rerun()
 
-    ws_base, _, ws_com = get_cobranza_worksheets_safe()
-    if not ws_base or not ws_com:
+    ws_base, ws_venc, ws_com = get_cobranza_worksheets_safe()
+    if not ws_base or not ws_venc or not ws_com:
         return
 
     base_headers = ["Mes", "Codigo", "Razon_Social", "Saldo", "No_Vencido", "Vencido", "Tipo_Pago", "Ultima_Actualizacion"]
@@ -4022,15 +4022,18 @@ def render_seguimiento_cobranza_tab_gerente(usuario_actual: str | None):
         return
 
     cache_payload = st.session_state.get("ger_seg_cob_data_cache")
-    if isinstance(cache_payload, dict) and {"base_df", "com_df"}.issubset(cache_payload.keys()):
+    if isinstance(cache_payload, dict) and {"base_df", "venc_df", "com_df"}.issubset(cache_payload.keys()):
         base_df = cache_payload.get("base_df", pd.DataFrame()).copy()
+        venc_df = cache_payload.get("venc_df", pd.DataFrame()).copy()
         com_df = cache_payload.get("com_df", pd.DataFrame()).copy()
     else:
         try:
             base_df = pd.DataFrame(cobranza_load_records_with_rows(ws_base))
+            venc_df = pd.DataFrame(cobranza_load_records_with_rows(ws_venc))
             com_df = pd.DataFrame(cobranza_load_records_with_rows(ws_com))
             st.session_state["ger_seg_cob_data_cache"] = {
                 "base_df": base_df.copy(),
+                "venc_df": venc_df.copy(),
                 "com_df": com_df.copy(),
                 "updated_at": now_cdmx().strftime("%Y-%m-%d %H:%M:%S"),
             }
@@ -4051,6 +4054,85 @@ def render_seguimiento_cobranza_tab_gerente(usuario_actual: str | None):
     if com_df.empty:
         st.info("Aún no hay seguimientos capturados.")
         return
+
+    st.markdown("#### 📤 Exportar comentarios del día")
+    ts_today = pd.to_datetime(com_df.get("Timestamp", ""), errors="coerce")
+    hoy_cdmx = pd.Timestamp(now_cdmx().date())
+    com_hoy = com_df[ts_today.dt.normalize() == hoy_cdmx].copy()
+    if com_hoy.empty:
+        st.caption("Hoy no hay comentarios en `cobranza_comentarios` para exportar.")
+    else:
+        com_hoy["_ts"] = ts_today.loc[com_hoy.index]
+        com_hoy = com_hoy.sort_values(["Codigo", "Folio", "_ts"]).drop_duplicates(subset=["Codigo", "Folio"], keep="last")
+
+        base_nom = base_df[["Codigo", "Razon_Social"]].drop_duplicates() if not base_df.empty else pd.DataFrame(columns=["Codigo", "Razon_Social"])
+        venc_cols = ["Codigo", "Folio", "Saldo_Vence", "Fecha_Factura", "Fecha_Vencimiento", "Condicion"]
+        venc_local = venc_df[[c for c in venc_cols if c in venc_df.columns]].copy() if not venc_df.empty else pd.DataFrame(columns=venc_cols)
+        if not venc_local.empty:
+            venc_local = venc_local.sort_values(["Codigo", "Folio"]).drop_duplicates(subset=["Codigo", "Folio"], keep="last")
+
+        export_df = com_hoy.merge(base_nom, on="Codigo", how="left")
+        export_df = export_df.merge(venc_local, on=["Codigo", "Folio"], how="left")
+        export_df["Término_Crédito"] = export_df.get("Condicion", "")
+        export_df["Factura"] = export_df.get("Folio", "")
+        export_df["Monto"] = export_df.get("Saldo_Vence", "")
+        export_df["Fecha_Emisión"] = export_df.get("Fecha_Factura", "")
+        export_df["Fecha_Vencimiento"] = export_df.get("Fecha_Vencimiento", "")
+        export_df["Comentario"] = export_df.get("Comentario", "")
+        export_df = export_df.rename(columns={"Razon_Social": "Cliente"})
+
+        export_df["Hora de Accion Realizada"] = pd.to_datetime(export_df.get("Timestamp", ""), errors="coerce").dt.strftime("%H:%M:%S")
+        export_df["Monto"] = pd.to_numeric(export_df.get("Monto", ""), errors="coerce")
+        cols_export = ["Cliente", "Factura", "Monto", "Fecha_Emisión", "Fecha_Vencimiento", "Término_Crédito", "Comentario", "Hora de Accion Realizada"]
+        export_df = export_df[[c for c in cols_export if c in export_df.columns]].copy()
+
+        bio = BytesIO()
+        with pd.ExcelWriter(bio, engine="xlsxwriter") as writer:
+            export_df.to_excel(writer, sheet_name="Cobros_Del_Dia", index=False)
+            worksheet = writer.sheets.get("Cobros_Del_Dia")
+            if worksheet is not None and not export_df.empty:
+                header_fmt = writer.book.add_format({
+                    "bold": True,
+                    "bg_color": "#D9EAF7",
+                    "border": 1,
+                    "align": "center",
+                    "valign": "vcenter",
+                })
+                money_fmt = writer.book.add_format({"num_format": '"$"#,##0.00'})
+                border_fmt = writer.book.add_format({"border": 1})
+
+                # Encabezados con fondo azul claro y borde
+                for idx_col, col_name in enumerate(export_df.columns):
+                    worksheet.write(0, idx_col, col_name, header_fmt)
+
+                # Bordes para celdas con contenido (sin tocar celdas vacías)
+                total_rows = len(export_df)
+                total_cols = len(export_df.columns)
+                worksheet.conditional_format(
+                    1, 0, total_rows, total_cols - 1,
+                    {"type": "no_blanks", "format": border_fmt}
+                )
+
+                # Congela encabezado y primeras 2 columnas (Cliente, Factura)
+                worksheet.freeze_panes(1, 2)
+
+                for idx_col, col_name in enumerate(export_df.columns):
+                    col_values = export_df[col_name].astype(str).fillna("")
+                    max_len_data = int(col_values.map(len).max()) if not col_values.empty else 0
+                    max_len = max(max_len_data, len(str(col_name))) + 2
+                    max_len = min(max_len, 80)
+                    if col_name == "Monto":
+                        worksheet.set_column(idx_col, idx_col, max_len, money_fmt)
+                    else:
+                        worksheet.set_column(idx_col, idx_col, max_len)
+        st.download_button(
+            "⬇️ Descargar Excel de cobros del día",
+            data=bio.getvalue(),
+            file_name=f"cobros_{hoy_cdmx.strftime('%Y-%m-%d')}.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            use_container_width=True,
+            key="ger_seg_cob_download_hoy",
+        )
 
     cliente_nom = base_df[["Codigo", "Razon_Social"]].drop_duplicates() if not base_df.empty else pd.DataFrame(columns=["Codigo", "Razon_Social"])
 
