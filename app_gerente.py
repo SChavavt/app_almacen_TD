@@ -19,6 +19,7 @@ import urllib.parse
 import urllib.request
 import time
 import calendar
+import base64
 from zoneinfo import ZoneInfo
 
 # --- CONFIGURACIÓN DE STREAMLIT ---
@@ -33,6 +34,47 @@ def now_cdmx() -> datetime:
     """Fecha/hora actual en zona horaria de Ciudad de México."""
     return datetime.now(MEXICO_CITY_TZ)
 
+
+def _mail_config():
+    cfg = st.secrets.get("mail", {})
+    return cfg if isinstance(cfg, dict) else {}
+
+
+def _parse_hhmm(texto: str) -> tuple[int, int] | None:
+    raw = str(texto or "").strip()
+    if not re.match(r"^\d{2}:\d{2}$", raw):
+        return None
+    hh, mm = raw.split(":")
+    hhi, mmi = int(hh), int(mm)
+    if not (0 <= hhi <= 23 and 0 <= mmi <= 59):
+        return None
+    return hhi, mmi
+
+
+def _send_mail_sendgrid(*, from_email: str, to_emails: list[str], subject: str, html_content: str, attachment_name: str, attachment_bytes: bytes, api_key: str):
+    payload = {
+        "personalizations": [{"to": [{"email": e} for e in to_emails]}],
+        "from": {"email": from_email},
+        "subject": subject,
+        "content": [{"type": "text/html", "value": html_content}],
+        "attachments": [
+            {
+                "content": base64.b64encode(attachment_bytes).decode("utf-8"),
+                "filename": attachment_name,
+                "type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                "disposition": "attachment",
+            }
+        ],
+    }
+    req = urllib.request.Request(
+        "https://api.sendgrid.com/v3/mail/send",
+        data=json.dumps(payload).encode("utf-8"),
+        method="POST",
+        headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+    )
+    with urllib.request.urlopen(req, timeout=20) as resp:
+        return resp.status
+
 # ===== SPREADSHEETS =====
 SPREADSHEET_ID_MAIN = "1aWkSelodaz0nWfQx7FZAysGnIYGQFJxAN7RO3YgCiZY"
 SPREADSHEET_ID_ALEJANDRO = "1lWZEL228boUMH_tAdQ3_ZGkYHZZuEkfv"
@@ -42,6 +84,7 @@ _MAIN_SPREADSHEET_CACHE = None
 _COBRANZA_SPREADSHEET_CACHE = None
 _COBRANZA_WS_CACHE = None
 _COBRANZA_VALUES_CACHE = {}
+_COBRANZA_MAIL_LAST_SENT = {}
 
 
 def _cobranza_cache_key(ws):
@@ -4142,6 +4185,63 @@ def render_seguimiento_cobranza_tab_gerente(usuario_actual: str | None):
             use_container_width=True,
             key="ger_seg_cob_download_hoy",
         )
+        mail_cfg = _mail_config()
+        provider = str(mail_cfg.get("provider", "")).strip().lower()
+        to_emails = [str(e).strip() for e in (mail_cfg.get("to_emails", []) or []) if str(e).strip()]
+        from_email = str(mail_cfg.get("from_email", "")).strip()
+        subject = str(mail_cfg.get("subject", "Cobranza - Comentarios del día")).strip()
+        send_time = str(mail_cfg.get("send_time", "")).strip()
+        timezone_name = str(mail_cfg.get("timezone", "America/Mexico_City")).strip() or "America/Mexico_City"
+        sendgrid_api_key = str(st.secrets.get("sendgrid", {}).get("api_key", "")).strip()
+        excel_bytes = bio.getvalue()
+
+        if provider == "sendgrid" and from_email and to_emails and sendgrid_api_key:
+            st.caption(f"Correo automático configurado vía SendGrid a las {send_time or 'hora no definida'} ({timezone_name}).")
+            schedule_hhmm = _parse_hhmm(send_time)
+            tz_ok = True
+            try:
+                tz_send = ZoneInfo(timezone_name)
+            except Exception:
+                tz_ok = False
+                tz_send = MEXICO_CITY_TZ
+            now_send_tz = datetime.now(tz_send)
+            stamp_key = f"{now_send_tz.date().isoformat()}|{','.join(to_emails)}|{subject}"
+            should_autosend = bool(schedule_hhmm and tz_ok and now_send_tz.hour == schedule_hhmm[0] and now_send_tz.minute >= schedule_hhmm[1])
+            sent_today = _COBRANZA_MAIL_LAST_SENT.get(stamp_key)
+
+            if should_autosend and not sent_today:
+                try:
+                    _send_mail_sendgrid(
+                        from_email=from_email,
+                        to_emails=to_emails,
+                        subject=subject,
+                        html_content="<p>Adjunto encontrarás el Excel de comentarios del día de cobranza.</p>",
+                        attachment_name=f"cobros_{hoy_cdmx.strftime('%Y-%m-%d')}.xlsx",
+                        attachment_bytes=excel_bytes,
+                        api_key=sendgrid_api_key,
+                    )
+                    _COBRANZA_MAIL_LAST_SENT[stamp_key] = now_send_tz.isoformat()
+                    st.success("📧 Correo automático enviado con el Excel del día.")
+                except Exception as e:
+                    st.warning(f"No se pudo enviar el correo automático: {e}")
+
+            if st.button("📧 Enviar ahora por correo", use_container_width=True, key="ger_seg_cob_mail_hoy"):
+                try:
+                    _send_mail_sendgrid(
+                        from_email=from_email,
+                        to_emails=to_emails,
+                        subject=subject,
+                        html_content="<p>Adjunto encontrarás el Excel de comentarios del día de cobranza.</p>",
+                        attachment_name=f"cobros_{hoy_cdmx.strftime('%Y-%m-%d')}.xlsx",
+                        attachment_bytes=excel_bytes,
+                        api_key=sendgrid_api_key,
+                    )
+                    _COBRANZA_MAIL_LAST_SENT[stamp_key] = now_send_tz.isoformat()
+                    st.success("✅ Correo enviado correctamente.")
+                except Exception as e:
+                    st.error(f"❌ Error enviando correo: {e}")
+        else:
+            st.caption("Para habilitar envío por correo, configura [mail] y [sendgrid] en secrets.")
 
     cliente_nom = base_df[["Codigo", "Razon_Social"]].drop_duplicates() if not base_df.empty else pd.DataFrame(columns=["Codigo", "Razon_Social"])
 
