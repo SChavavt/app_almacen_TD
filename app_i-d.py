@@ -5052,6 +5052,23 @@ if selected_tab_key == "dashboard":
             df_facturas_vista = df_facturas_faltantes.copy()
             filtros_cols = st.columns(2)
             vendedor_col = _find_column_by_alias(df_facturas_vista, ["Vendedor"])
+            with filtros_cols[0]:
+                mostrar_congreso_cdmx = st.checkbox(
+                    "Mostrar facturas de CONGRESO y PEDIDOS CDMX",
+                    value=False,
+                    key="dashboard_facturas_faltantes_show_congreso_cdmx",
+                    on_change=_keep_facturas_faltantes_open,
+                )
+
+            if vendedor_col and not mostrar_congreso_cdmx:
+                vendedores_ocultos = {
+                    _normalize_vendedor_name("CONGRESO"),
+                    _normalize_vendedor_name("PEDIDOS CDMX"),
+                }
+                df_facturas_vista = df_facturas_vista[
+                    ~df_facturas_vista[vendedor_col].map(_normalize_vendedor_name).isin(vendedores_ocultos)
+                ].copy()
+
             if vendedor_col:
                 vendedores_disponibles = sorted(
                     {
