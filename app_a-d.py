@@ -1375,8 +1375,8 @@ def _is_pasa_bodega_order(row: Any, origen_tab: Any = "") -> bool:
     return turno_es_bodega or origen_es_bodega
 
 
-def _format_pasa_bodega_date(value: Any) -> str:
-    """Formatea fecha como `DD-Month-YYYY` (ej. 02-January-2026)."""
+def _format_pasa_bodega_date(value: Any, include_time: bool = False) -> str:
+    """Formatea fecha como `DD-Month-YYYY` o `DD-Month-YYYY HH:MM:SS` cuando include_time=True."""
     if value is None:
         return ""
     if isinstance(value, pd.Timestamp):
@@ -1391,7 +1391,7 @@ def _format_pasa_bodega_date(value: Any) -> str:
         if pd.isna(parsed):
             return ""
         dt = parsed.to_pydatetime()
-    return dt.strftime("%d-%B-%Y")
+    return dt.strftime("%d-%B-%Y %H:%M:%S") if include_time else dt.strftime("%d-%B-%Y")
 
 
 def _upsert_pasa_bodega_report_row(row: Any) -> bool:
@@ -1440,7 +1440,7 @@ def _upsert_pasa_bodega_report_row(row: Any) -> bool:
         "NOMBRE DE CLIENTE": _normalize_plain_text(row.get("Cliente", "")),
         "VENDEDOR": _normalize_plain_text(row.get("Vendedor_Registro", "")),
         "ESTADO": _normalize_plain_text(row.get("Estado", "")),
-        "FECHA QUE PASO A RECOGER": _format_pasa_bodega_date(row.get("Fecha_Completado", "")),
+        "FECHA QUE PASO A RECOGER": _format_pasa_bodega_date(row.get("Fecha_Completado", ""), include_time=True),
         "COMENTARIOS": "",
     }
 
@@ -1461,15 +1461,29 @@ def _upsert_pasa_bodega_report_row(row: Any) -> bool:
 
     num_col_idx = headers.index("NUMERO DE FACTURA") + 1
     target_row = None
+    folio_target_key = _folio_key(folio_factura)
+
+    # Búsqueda robusta para evitar duplicados/omisiones cuando existen huecos en la columna.
     try:
-        folio_target_key = _folio_key(folio_factura)
-        col_values = ws.col_values(num_col_idx)
-        for i, val in enumerate(col_values[1:], start=2):
-            if _folio_key(val) == folio_target_key:
-                target_row = i
+        all_values = ws.get_all_values()
+        for row_idx, row_vals in enumerate(all_values[1:], start=2):
+            current_val = row_vals[num_col_idx - 1] if len(row_vals) >= num_col_idx else ""
+            if _folio_key(current_val) == folio_target_key:
+                target_row = row_idx
                 break
     except Exception:
         target_row = None
+
+    # Fallback compatible con versiones antiguas de gspread.
+    if target_row is None:
+        try:
+            col_values = ws.col_values(num_col_idx)
+            for i, val in enumerate(col_values[1:], start=2):
+                if _folio_key(val) == folio_target_key:
+                    target_row = i
+                    break
+        except Exception:
+            target_row = None
 
     row_values = [payload.get(h, "") for h in headers]
     try:
