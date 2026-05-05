@@ -2867,6 +2867,15 @@ def _fetch_with_retry(worksheet, cache_key: str, max_attempts: int = 4):
                 f"Reintentando en {wait_time} s (intento {attempt}/{max_attempts})."
             )
             time.sleep(wait_time)
+        except Exception as e:
+            last_error = e
+            wait_time = min(10, 2 ** attempt)
+            if attempt == 1:
+                st.warning(
+                    "⚠️ Error temporal de conexión al leer Google Sheets. "
+                    "Reintentando automáticamente..."
+                )
+            time.sleep(wait_time)
 
     if last_success is not None:
         st.info(
@@ -2916,6 +2925,15 @@ def _open_worksheet_with_retry(
             if attempt == 1:
                 st.warning(
                     f"⚠️ Error temporal al abrir la hoja '{sheet_name}'. "
+                    "Reintentando automáticamente..."
+                )
+            time.sleep(wait_time)
+        except Exception as e:
+            last_error = e
+            wait_time = min(5, attempt)
+            if attempt == 1:
+                st.warning(
+                    f"⚠️ Error de red al abrir la hoja '{sheet_name}'. "
                     "Reintentando automáticamente..."
                 )
             time.sleep(wait_time)
