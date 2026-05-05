@@ -2409,6 +2409,16 @@ def parse_antiguedad_cobranza_excel(file, mes: str = "") -> pd.DataFrame:
 
 
 
+def _mark_cobranza_transient_failure(cooldown_seconds: int = 25):
+    """Registra un cooldown para evitar golpear Google Sheets durante un 429 transitorio."""
+    st.session_state["ger_cob_retry_after_ts"] = time.time() + max(1, cooldown_seconds)
+
+
+def _cobranza_retry_cooldown_remaining() -> int:
+    """Segundos restantes del cooldown de reconexión de Cobranza."""
+    retry_after = float(st.session_state.get("ger_cob_retry_after_ts", 0) or 0)
+    return max(0, int(retry_after - time.time()))
+
 
 def reset_cobranza_connection_state(clear_session: bool = True):
     """Limpia caches de Cobranza para forzar una reconexión fresca a Google Sheets."""
@@ -2424,13 +2434,15 @@ def reset_cobranza_connection_state(clear_session: bool = True):
             "ger_cob_force_refresh",
             "ger_cob_stats",
             "ger_cob_missing",
+            "ger_cob_retry_after_ts",
         ]:
             st.session_state.pop(key, None)
 
 
 def _render_cobranza_retry_box(message: str, *, error: Exception | None = None, key_suffix: str = ""):
     """Muestra un aviso de conexión con una acción visible para reintentar."""
-    retry_key = f"retry_cobranza_connection_{key_suffix}_{uuid.uuid4().hex}"
+    cooldown = _cobranza_retry_cooldown_remaining()
+    retry_key = f"retry_cobranza_connection_{key_suffix}"
     col_msg, col_btn = st.columns([5, 1])
     with col_msg:
         st.warning(message)
@@ -2438,13 +2450,16 @@ def _render_cobranza_retry_box(message: str, *, error: Exception | None = None, 
             "La pestaña permanece visible, pero sin conexión activa a Google Sheets. "
             "Puedes reintentar la conexión sin recargar toda la app."
         )
+        if cooldown > 0:
+            st.caption(f"Reintento recomendado en ~{cooldown}s para evitar más límites temporales.")
         if error is not None:
             with st.expander("Ver detalle técnico", expanded=False):
                 st.code(str(error))
     with col_btn:
         st.write("")
         st.write("")
-        if st.button("🔄 Recargar conexión", key=retry_key):
+        btn_label = "⏳ Espera para reintentar" if cooldown > 0 else "🔄 Recargar conexión"
+        if st.button(btn_label, key=retry_key, disabled=cooldown > 0):
             reset_cobranza_connection_state()
             st.rerun()
 
@@ -2458,6 +2473,15 @@ def get_cobranza_worksheets_safe():
 
     spreadsheet_id = get_cobranza_spreadsheet_id()
     service_email = str(credentials_dict.get("client_email", "(sin client_email en secrets)"))
+
+    cooldown = _cobranza_retry_cooldown_remaining()
+    if cooldown > 0:
+        _render_cobranza_retry_box(
+            f"⚠️ Google Sheets en pausa temporal. Reintenta en ~{cooldown}s.",
+            key_suffix="worksheets_cooldown",
+        )
+        return None, None, None
+
     try:
         ss = get_cobranza_spreadsheet()
         ws_base = _retry_gspread_api_call(lambda: ss.worksheet("cobranza_base"), retries=4, base_delay=0.9)
@@ -2474,6 +2498,7 @@ def get_cobranza_worksheets_safe():
         return None, None, None
     except gspread.exceptions.APIError as e:
         if _is_transient_gspread_error(e):
+            _mark_cobranza_transient_failure()
             _render_cobranza_retry_box(
                 "⚠️ Google Sheets en límite temporal (429). Reintenta en unos segundos.",
                 error=e,
@@ -2835,6 +2860,7 @@ def render_cobranza_tab_gerente():
             st.info(f"ℹ️ Se actualizaron {backfill_count} comentario(s) históricos con Mes_Operativo.")
     except gspread.exceptions.APIError as e:
         if _is_transient_gspread_error(e):
+            _mark_cobranza_transient_failure()
             _render_cobranza_retry_box(
                 "⚠️ Google Sheets está con límite temporal de lecturas (quota/rate limit). "
                 "Puedes reintentar en unos segundos.",
@@ -3980,6 +4006,7 @@ def render_seguimiento_cobranza_tab_gerente(usuario_actual: str | None):
         cobranza_backfill_mes_operativo(ws_com)
     except gspread.exceptions.APIError as e:
         if _is_transient_gspread_error(e):
+            _mark_cobranza_transient_failure()
             _render_cobranza_retry_box(
                 "⚠️ Google Sheets está con límite temporal de lecturas. Reintenta en unos segundos.",
                 error=e,
