@@ -2849,15 +2849,19 @@ def render_cobranza_tab_gerente():
         )
 
     try:
-        migracion_comentarios = cobranza_migrar_comentarios_con_folio(ws_com)
-        cobranza_ensure_headers(ws_base, base_headers)
-        cobranza_ensure_headers(ws_venc, venc_headers)
-        cobranza_ensure_headers(ws_com, com_headers)
-        backfill_count = cobranza_backfill_mes_operativo(ws_com)
-        if migracion_comentarios:
-            st.info("ℹ️ Se migró la hoja de comentarios para incluir la columna Folio sin perder datos existentes.")
-        if backfill_count:
-            st.info(f"ℹ️ Se actualizaron {backfill_count} comentario(s) históricos con Mes_Operativo.")
+        schema_cache = st.session_state.get("ger_cob_schema_checked_at")
+        needs_schema_check = not isinstance(schema_cache, datetime) or (datetime.now() - schema_cache).total_seconds() > 90
+        if needs_schema_check:
+            migracion_comentarios = cobranza_migrar_comentarios_con_folio(ws_com)
+            cobranza_ensure_headers(ws_base, base_headers)
+            cobranza_ensure_headers(ws_venc, venc_headers)
+            cobranza_ensure_headers(ws_com, com_headers)
+            backfill_count = cobranza_backfill_mes_operativo(ws_com)
+            st.session_state["ger_cob_schema_checked_at"] = datetime.now()
+            if migracion_comentarios:
+                st.info("ℹ️ Se migró la hoja de comentarios para incluir la columna Folio sin perder datos existentes.")
+            if backfill_count:
+                st.info(f"ℹ️ Se actualizaron {backfill_count} comentario(s) históricos con Mes_Operativo.")
     except gspread.exceptions.APIError as e:
         if _is_transient_gspread_error(e):
             _mark_cobranza_transient_failure()
@@ -4001,9 +4005,13 @@ def render_seguimiento_cobranza_tab_gerente(usuario_actual: str | None):
     ]
 
     try:
-        cobranza_ensure_headers(ws_base, base_headers)
-        cobranza_ensure_headers(ws_com, com_headers)
-        cobranza_backfill_mes_operativo(ws_com)
+        schema_cache = st.session_state.get("ger_seg_cob_schema_checked_at")
+        needs_schema_check = not isinstance(schema_cache, datetime) or (datetime.now() - schema_cache).total_seconds() > 90
+        if needs_schema_check:
+            cobranza_ensure_headers(ws_base, base_headers)
+            cobranza_ensure_headers(ws_com, com_headers)
+            cobranza_backfill_mes_operativo(ws_com)
+            st.session_state["ger_seg_cob_schema_checked_at"] = datetime.now()
     except gspread.exceptions.APIError as e:
         if _is_transient_gspread_error(e):
             _mark_cobranza_transient_failure()
