@@ -3212,38 +3212,35 @@ def render_cobranza_tab_gerente():
                     agenda_df = agenda_df[agenda_df["Saldo_Vence"] > 0].copy()
 
                     if not agenda_df.empty:
-                        fecha_base = pd.Timestamp(now_cdmx().date())
-                        agenda_df["Dias_Vencidos"] = (fecha_base - agenda_df["Fecha_Vencimiento_dt"]).dt.days.clip(lower=0)
                         agenda_df["Etiqueta_Cliente"] = agenda_df["Codigo"] + " · " + agenda_df["Cliente_Nombre"].str.slice(0, 40)
                         agenda_df["Texto_Evento"] = (
                             "Folio " + agenda_df["Folio"]
                             + "<br>Razón social: " + agenda_df["Razon_Social"]
                             + "<br>Saldo: $" + agenda_df["Saldo_Vence"].map(lambda x: f"{x:,.2f}")
                         )
+
                         st.markdown("#### 🗓️ Agenda visual de vencimientos")
                         st.caption("Cada punto representa un folio pendiente con su fecha de vencimiento y monto.")
 
                         fig_agenda = px.scatter(
                             agenda_df,
                             x="Fecha_Vencimiento_dt",
-                            y="Dias_Vencidos",
+                            y="Etiqueta_Cliente",
                             size="Saldo_Vence",
                             color="Saldo_Vence",
                             color_continuous_scale="OrRd",
                             hover_name="Folio",
                             hover_data={
+                                "Codigo": True,
                                 "Cliente_Nombre": False,
                                 "Saldo_Vence": ':,.2f',
                                 "Fecha_Vencimiento_dt": '|%Y-%m-%d',
                                 "Etiqueta_Cliente": False,
-                                "Codigo": True,
-                                "Dias_Vencidos": True,
                             },
                             labels={
                                 "Fecha_Vencimiento_dt": "Fecha de vencimiento",
+                                "Etiqueta_Cliente": "Razón social",
                                 "Saldo_Vence": "Saldo vencido",
-                                "Codigo": "Código cliente",
-                                "Dias_Vencidos": "Días vencidos",
                             },
                             height=420,
                         )
@@ -3258,11 +3255,7 @@ def render_cobranza_tab_gerente():
                             ),
                             hovertemplate="<b>%{hovertext}</b><br><br>Fecha de vencimiento=%{x|%Y-%m-%d}<br>Saldo vencido=%{marker.color:,.2f}<br>Codigo=%{customdata[1]}<br>Cliente=%{customdata[0]}<extra></extra>",
                         )
-                        fig_agenda.update_layout(
-                            margin=dict(l=10, r=10, t=10, b=10),
-                            coloraxis_colorbar_title="Saldo",
-                            yaxis=dict(title="Días vencidos", showgrid=True, zeroline=False),
-                        )
+                        fig_agenda.update_layout(margin=dict(l=10, r=10, t=10, b=10), coloraxis_colorbar_title="Saldo")
                         st.plotly_chart(fig_agenda, use_container_width=True)
 
 
