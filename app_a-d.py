@@ -1202,6 +1202,12 @@ def _append_local_dia_entry_to_hoja_ruta(row: Any, s3_client_param: Any, origen_
 
     section_title, week_marker = _build_section_header(origen_tab, row, fecha_entrega)
     values = _hoja_ruta_get_all_values(ws)
+    factura_norm = _normalize_plain_text(entry["factura"]).upper()
+    if factura_norm:
+        for row_vals in values:
+            factura_cell = row_vals[1] if len(row_vals) > 1 else ""
+            if _normalize_plain_text(factura_cell).upper() == factura_norm:
+                return True
     title_row = _find_section_title_row(values, section_title, week_marker=week_marker)
 
     if title_row is None:
