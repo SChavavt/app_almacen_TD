@@ -3163,7 +3163,101 @@ def render_cobranza_tab_gerente():
                 saldos_df = saldos_df.drop(columns=[c for c in ["_mes_dt", "_ult_act_dt"] if c in saldos_df.columns])
                 cols_saldos = ["Mes", "Codigo", "Razon_Social", "Saldo", "Vencido", "No_Vencido", "Saldo_Vencido_Total", "Fecha_Vencimiento_Min", "Fecha_Vencimiento_Max", "Tipo_Pago", "Ultima_Actualizacion"]
                 cols_saldos = [c for c in cols_saldos if c in saldos_df.columns]
-                st.dataframe(saldos_df[cols_saldos], use_container_width=True, hide_index=True)
+                tabla_saldos = saldos_df[cols_saldos].copy()
+                cols_mxn = [c for c in ["Saldo", "Vencido", "No_Vencido", "Saldo_Vencido_Total"] if c in tabla_saldos.columns]
+                for c in cols_mxn:
+                    tabla_saldos[c] = pd.to_numeric(tabla_saldos[c], errors="coerce").fillna(0.0).map(lambda x: f"$ {x:,.2f} MXN")
+                st.dataframe(tabla_saldos, use_container_width=True, hide_index=True)
+
+                # Vista visual tipo agenda/calendario de vencimientos por cliente y folio.
+                if not venc_df.empty:
+                    agenda_df = venc_df.copy()
+                    agenda_df["Codigo"] = agenda_df.get("Codigo", pd.Series("", index=agenda_df.index)).astype(str)
+                    agenda_df["Folio"] = agenda_df.get("Folio", pd.Series("", index=agenda_df.index)).astype(str)
+                    agenda_df["Razon_Social"] = agenda_df.get("Razon_Social", pd.Series("", index=agenda_df.index)).astype(str)
+                    agenda_df["Razon Social"] = agenda_df.get("Razon Social", pd.Series("", index=agenda_df.index)).astype(str)
+                    nombre_por_codigo = {}
+                    if "saldos_df" in locals() and isinstance(saldos_df, pd.DataFrame) and not saldos_df.empty:
+                        cod_ser = saldos_df.get("Codigo", pd.Series("", index=saldos_df.index)).astype(str)
+                        nom_ser = saldos_df.get("Razon_Social", pd.Series("", index=saldos_df.index)).astype(str)
+                        nombre_por_codigo.update({c: n for c, n in zip(cod_ser.tolist(), nom_ser.tolist()) if str(c).strip() and str(n).strip()})
+                    if isinstance(base_df, pd.DataFrame) and not base_df.empty:
+                        cod_ser_b = base_df.get("Codigo", pd.Series("", index=base_df.index)).astype(str)
+                        nom_ser_b = base_df.get("Razon_Social", pd.Series("", index=base_df.index)).astype(str)
+                        for c, n in zip(cod_ser_b.tolist(), nom_ser_b.tolist()):
+                            if str(c).strip() and str(n).strip() and c not in nombre_por_codigo:
+                                nombre_por_codigo[c] = n
+                    agenda_df["Nombre_Por_Codigo"] = agenda_df["Codigo"].map(nombre_por_codigo).fillna("").astype(str)
+                    agenda_df["Cliente_Nombre"] = agenda_df["Razon_Social"].where(
+                        agenda_df["Razon_Social"].str.strip() != "",
+                        agenda_df["Razon Social"],
+                    ).astype(str)
+                    agenda_df["Cliente_Nombre"] = agenda_df["Cliente_Nombre"].where(
+                        agenda_df["Cliente_Nombre"].str.strip() != "",
+                        agenda_df["Nombre_Por_Codigo"],
+                    ).astype(str)
+                    agenda_df["Saldo_Vence"] = pd.to_numeric(agenda_df.get("Saldo_Vence", 0), errors="coerce").fillna(0.0)
+                    agenda_df["Fecha_Vencimiento_dt"] = pd.to_datetime(agenda_df.get("Fecha_Vencimiento", ""), errors="coerce")
+                    agenda_df = agenda_df.dropna(subset=["Fecha_Vencimiento_dt"]).copy()
+
+                    if anio_sel != "Todos":
+                        agenda_df = agenda_df[agenda_df.get("Mes", "").astype(str).str.startswith(f"{anio_sel}-")]
+                    if mes_num_sel != "Todos":
+                        agenda_df = agenda_df[agenda_df.get("Mes", "").astype(str).str.endswith(f"-{mes_num_sel}")]
+
+                    if folios_liquidados:
+                        agenda_keys = agenda_df["Codigo"].astype(str) + "|" + agenda_df["Folio"].apply(_cobranza_clean_text)
+                        agenda_df = agenda_df[~agenda_keys.isin(folios_liquidados)].copy()
+
+                    agenda_df = agenda_df[agenda_df["Saldo_Vence"] > 0].copy()
+
+                    if not agenda_df.empty:
+                        agenda_df["Etiqueta_Cliente"] = agenda_df["Codigo"] + " · " + agenda_df["Cliente_Nombre"].str.slice(0, 40)
+                        agenda_df["Texto_Evento"] = (
+                            "Folio " + agenda_df["Folio"]
+                            + "<br>Razón social: " + agenda_df["Razon_Social"]
+                            + "<br>Saldo: $" + agenda_df["Saldo_Vence"].map(lambda x: f"{x:,.2f}")
+                        )
+
+                        st.markdown("#### 🗓️ Agenda visual de vencimientos")
+                        st.caption("Cada punto representa un folio pendiente con su fecha de vencimiento y monto.")
+
+                        fig_agenda = px.scatter(
+                            agenda_df,
+                            x="Fecha_Vencimiento_dt",
+                            y="Etiqueta_Cliente",
+                            size="Saldo_Vence",
+                            color="Saldo_Vence",
+                            color_continuous_scale="OrRd",
+                            hover_name="Folio",
+                            hover_data={
+                                "Codigo": True,
+                                "Cliente_Nombre": False,
+                                "Saldo_Vence": ':,.2f',
+                                "Fecha_Vencimiento_dt": '|%Y-%m-%d',
+                                "Etiqueta_Cliente": False,
+                            },
+                            labels={
+                                "Fecha_Vencimiento_dt": "Fecha de vencimiento",
+                                "Etiqueta_Cliente": "Razón social",
+                                "Saldo_Vence": "Saldo vencido",
+                            },
+                            height=420,
+                        )
+                        fig_agenda.update_traces(
+                            marker=dict(line=dict(width=0.6, color="rgba(70,70,70,0.35)"), sizemin=8, opacity=0.85),
+                            customdata=np.stack(
+                                [
+                                    agenda_df["Cliente_Nombre"].fillna("").astype(str),
+                                    agenda_df["Codigo"].fillna("").astype(str),
+                                ],
+                                axis=-1,
+                            ),
+                            hovertemplate="<b>%{hovertext}</b><br><br>Fecha de vencimiento=%{x|%Y-%m-%d}<br>Saldo vencido=%{marker.color:,.2f}<br>Codigo=%{customdata[1]}<br>Cliente=%{customdata[0]}<extra></extra>",
+                        )
+                        fig_agenda.update_layout(margin=dict(l=10, r=10, t=10, b=10), coloraxis_colorbar_title="Saldo")
+                        st.plotly_chart(fig_agenda, use_container_width=True)
+
 
     st.markdown("### Comentarios")
     meses_disponibles = _cobranza_meses_disponibles(base_df)
