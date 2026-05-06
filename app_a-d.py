@@ -3172,6 +3172,27 @@ def _updates_list_to_column_values(
     return values
 
 
+def _get_live_headers_preserving_positions(worksheet, fallback_headers=None):
+    """Lee encabezados de la fila 1 conservando posiciones de columna (incluye vacíos intermedios)."""
+    try:
+        total_cols = int(getattr(worksheet, "col_count", 0) or 0)
+        if total_cols > 0:
+            last_col_letter = gspread.utils.rowcol_to_a1(1, total_cols)[:-1]
+            header_range = f"A1:{last_col_letter}1"
+            values = worksheet.get(header_range, pad_values=True)
+            if values and isinstance(values, list):
+                row = values[0] if values[0] is not None else []
+                if isinstance(row, list):
+                    return list(row)
+    except Exception:
+        pass
+
+    try:
+        return list(worksheet.row_values(1))
+    except Exception:
+        return list(fallback_headers or [])
+
+
 def update_gsheet_cell(worksheet, headers, row_index, col_name, value):
     """
     Actualiza una celda específica en Google Sheets.
@@ -3179,11 +3200,33 @@ def update_gsheet_cell(worksheet, headers, row_index, col_name, value):
     col_name es el nombre de la columna.
     headers es la lista de encabezados obtenida previamente.
     """
-    if col_name not in headers:
+    def _normalize_header_name(name: Any) -> str:
+        return str(name or "").strip().lower()
+
+    col_index = None
+    col_name_norm = _normalize_header_name(col_name)
+
+    # 1) Preferir lectura directa de encabezados en vivo para resolver por nombre de columna
+    #    y no por posición precargada.
+    try:
+        live_headers = _get_live_headers_preserving_positions(worksheet, headers)
+        for idx, header in enumerate(live_headers, start=1):
+            if _normalize_header_name(header) == col_name_norm:
+                col_index = idx
+                break
+    except Exception:
+        pass
+
+    # 2) Fallback con los headers en memoria.
+    if col_index is None:
+        for idx, header in enumerate(headers or [], start=1):
+            if _normalize_header_name(header) == col_name_norm:
+                col_index = idx
+                break
+
+    if col_index is None:
         st.error(f"❌ Error: La columna '{col_name}' no se encontró en Google Sheets para la actualización. Verifica los encabezados.")
         return False
-
-    col_index = headers.index(col_name) + 1  # Convertir a índice base 1 de gspread
 
     max_attempts = 3
     base_delay = 1
@@ -4194,14 +4237,28 @@ def confirmar_modificacion_surtido(
     """Confirma modificación de surtido priorizando batch y con fallback seguro."""
     live_headers = list(headers or [])
     try:
-        fetched_headers = worksheet.row_values(1)
+        fetched_headers = _get_live_headers_preserving_positions(worksheet, headers)
         if fetched_headers:
             live_headers = fetched_headers
     except Exception:
         # Si falla la lectura de encabezados, usamos los que ya traíamos en memoria.
         live_headers = list(headers or [])
 
-    if "Modificacion_Surtido" not in live_headers:
+    def _normalize_header_name(name: Any) -> str:
+        return str(name or "").strip().lower()
+
+    def _find_col_index_by_name(header_name: str) -> Optional[int]:
+        target = _normalize_header_name(header_name)
+        for idx, header in enumerate(live_headers, start=1):
+            if _normalize_header_name(header) == target:
+                return idx
+        return None
+
+    col_mod = _find_col_index_by_name("Modificacion_Surtido")
+    col_estado = _find_col_index_by_name("Estado")
+    col_hora = _find_col_index_by_name("Hora_Proceso")
+
+    if col_mod is None:
         st.error("❌ No existe la columna 'Modificacion_Surtido' para confirmar el cambio.")
         return False
 
@@ -4211,29 +4268,29 @@ def confirmar_modificacion_surtido(
         {
             "range": gspread.utils.rowcol_to_a1(
                 gsheet_row_index,
-                live_headers.index("Modificacion_Surtido") + 1,
+                col_mod,
             ),
             "values": [[texto_confirmado]],
         }
     ]
 
-    if "Estado" in live_headers:
+    if col_estado is not None:
         updates.append(
             {
                 "range": gspread.utils.rowcol_to_a1(
                     gsheet_row_index,
-                    live_headers.index("Estado") + 1,
+                    col_estado,
                 ),
                 "values": [["🔵 En Proceso"]],
             }
         )
 
-    if "Hora_Proceso" in live_headers:
+    if col_hora is not None:
         updates.append(
             {
                 "range": gspread.utils.rowcol_to_a1(
                     gsheet_row_index,
-                    live_headers.index("Hora_Proceso") + 1,
+                    col_hora,
                 ),
                 "values": [[mx_now_str()]],
             }
@@ -4250,7 +4307,7 @@ def confirmar_modificacion_surtido(
         "Modificacion_Surtido",
         texto_confirmado,
     )
-    if ok and "Estado" in live_headers:
+    if ok and col_estado is not None:
         ok = update_gsheet_cell(
             worksheet,
             live_headers,
@@ -4258,7 +4315,7 @@ def confirmar_modificacion_surtido(
             "Estado",
             "🔵 En Proceso",
         )
-    if ok and "Hora_Proceso" in live_headers:
+    if ok and col_hora is not None:
         ok = update_gsheet_cell(
             worksheet,
             live_headers,
@@ -4268,6 +4325,34 @@ def confirmar_modificacion_surtido(
         )
 
     return ok
+
+
+def resolve_caso_gsheet_row_index(df_casos, row, id_pedido, folio, cliente):
+    """Resuelve fila de Google Sheets para casos_especiales priorizando índice persistido en la fila."""
+    gsheet_row_idx = None
+
+    raw_row_idx = row.get("_gsheet_row_index", row.get("gsheet_row_index"))
+    try:
+        if raw_row_idx is not None and not pd.isna(raw_row_idx):
+            gsheet_row_idx = int(float(raw_row_idx))
+    except Exception:
+        gsheet_row_idx = None
+
+    if gsheet_row_idx is None and "ID_Pedido" in df_casos.columns and id_pedido:
+        matches = df_casos.index[df_casos["ID_Pedido"].astype(str).str.strip() == str(id_pedido).strip()]
+        if len(matches) > 0:
+            gsheet_row_idx = int(matches[0]) + 2
+
+    if gsheet_row_idx is None:
+        filt = (
+            df_casos.get("Folio_Factura", pd.Series(dtype=str)).astype(str).str.strip().eq(str(folio).strip()) &
+            df_casos.get("Cliente", pd.Series(dtype=str)).astype(str).str.strip().eq(str(cliente).strip())
+        )
+        matches = df_casos.index[filt] if hasattr(filt, "any") else []
+        if len(matches) > 0:
+            gsheet_row_idx = int(matches[0]) + 2
+
+    return gsheet_row_idx
 
 
 def mirror_guide_value(
@@ -8920,19 +9005,9 @@ if df_main is not None:
                             )
                             if mod_confirmation_action:
                                 try:
-                                    gsheet_row_idx = None
-                                    if "ID_Pedido" in df_casos.columns and idp:
-                                        matches = df_casos.index[df_casos["ID_Pedido"].astype(str).str.strip() == idp]
-                                        if len(matches) > 0:
-                                            gsheet_row_idx = int(matches[0]) + 2
-                                    if gsheet_row_idx is None:
-                                        filt = (
-                                            df_casos.get("Folio_Factura", pd.Series(dtype=str)).astype(str).str.strip().eq(folio) &
-                                            df_casos.get("Cliente", pd.Series(dtype=str)).astype(str).str.strip().eq(cliente)
-                                        )
-                                        matches = df_casos.index[filt] if hasattr(filt, "any") else []
-                                        if len(matches) > 0:
-                                            gsheet_row_idx = int(matches[0]) + 2
+                                    gsheet_row_idx = resolve_caso_gsheet_row_index(
+                                        df_casos, row, idp, folio, cliente
+                                    )
     
                                     if gsheet_row_idx is None:
                                         st.error("❌ No se encontró el caso para confirmar la modificación.")
@@ -9649,19 +9724,9 @@ if df_main is not None:
                 if estado == "🛠 Modificación":
                     if colB.button("🔧 Procesar Modificación", key=f"proc_mod_g_{unique_suffix}"):
                         try:
-                            gsheet_row_idx = None
-                            if "ID_Pedido" in df_casos.columns and idp:
-                                matches = df_casos.index[df_casos["ID_Pedido"].astype(str).str.strip() == idp]
-                                if len(matches) > 0:
-                                    gsheet_row_idx = int(matches[0]) + 2
-                            if gsheet_row_idx is None:
-                                filt = (
-                                    df_casos.get("Folio_Factura", pd.Series(dtype=str)).astype(str).str.strip().eq(folio) &
-                                    df_casos.get("Cliente", pd.Series(dtype=str)).astype(str).str.strip().eq(cliente)
-                                )
-                                matches = df_casos.index[filt] if hasattr(filt, "any") else []
-                                if len(matches) > 0:
-                                    gsheet_row_idx = int(matches[0]) + 2
+                            gsheet_row_idx = resolve_caso_gsheet_row_index(
+                                df_casos, row, idp, folio, cliente
+                            )
     
                             if gsheet_row_idx is None:
                                 st.error("❌ No se encontró el caso en 'casos_especiales'.")
@@ -9697,19 +9762,9 @@ if df_main is not None:
                             )
                             if mod_confirmation_action:
                                 try:
-                                    gsheet_row_idx = None
-                                    if "ID_Pedido" in df_casos.columns and idp:
-                                        matches = df_casos.index[df_casos["ID_Pedido"].astype(str).str.strip() == idp]
-                                        if len(matches) > 0:
-                                            gsheet_row_idx = int(matches[0]) + 2
-                                    if gsheet_row_idx is None:
-                                        filt = (
-                                            df_casos.get("Folio_Factura", pd.Series(dtype=str)).astype(str).str.strip().eq(folio) &
-                                            df_casos.get("Cliente", pd.Series(dtype=str)).astype(str).str.strip().eq(cliente)
-                                        )
-                                        matches = df_casos.index[filt] if hasattr(filt, "any") else []
-                                        if len(matches) > 0:
-                                            gsheet_row_idx = int(matches[0]) + 2
+                                    gsheet_row_idx = resolve_caso_gsheet_row_index(
+                                        df_casos, row, idp, folio, cliente
+                                    )
     
                                     if gsheet_row_idx is None:
                                         st.error("❌ No se encontró el caso para confirmar la modificación.")
