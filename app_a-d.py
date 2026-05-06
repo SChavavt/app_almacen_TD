@@ -3172,27 +3172,6 @@ def _updates_list_to_column_values(
     return values
 
 
-def _get_live_headers_preserving_positions(worksheet, fallback_headers=None):
-    """Lee encabezados de la fila 1 conservando posiciones de columna (incluye vacíos intermedios)."""
-    try:
-        total_cols = int(getattr(worksheet, "col_count", 0) or 0)
-        if total_cols > 0:
-            last_col_letter = gspread.utils.rowcol_to_a1(1, total_cols)[:-1]
-            header_range = f"A1:{last_col_letter}1"
-            values = worksheet.get(header_range, pad_values=True)
-            if values and isinstance(values, list):
-                row = values[0] if values[0] is not None else []
-                if isinstance(row, list):
-                    return list(row)
-    except Exception:
-        pass
-
-    try:
-        return list(worksheet.row_values(1))
-    except Exception:
-        return list(fallback_headers or [])
-
-
 def update_gsheet_cell(worksheet, headers, row_index, col_name, value):
     """
     Actualiza una celda específica en Google Sheets.
@@ -3200,33 +3179,11 @@ def update_gsheet_cell(worksheet, headers, row_index, col_name, value):
     col_name es el nombre de la columna.
     headers es la lista de encabezados obtenida previamente.
     """
-    def _normalize_header_name(name: Any) -> str:
-        return str(name or "").strip().lower()
-
-    col_index = None
-    col_name_norm = _normalize_header_name(col_name)
-
-    # 1) Preferir lectura directa de encabezados en vivo para resolver por nombre de columna
-    #    y no por posición precargada.
-    try:
-        live_headers = _get_live_headers_preserving_positions(worksheet, headers)
-        for idx, header in enumerate(live_headers, start=1):
-            if _normalize_header_name(header) == col_name_norm:
-                col_index = idx
-                break
-    except Exception:
-        pass
-
-    # 2) Fallback con los headers en memoria.
-    if col_index is None:
-        for idx, header in enumerate(headers or [], start=1):
-            if _normalize_header_name(header) == col_name_norm:
-                col_index = idx
-                break
-
-    if col_index is None:
+    if col_name not in headers:
         st.error(f"❌ Error: La columna '{col_name}' no se encontró en Google Sheets para la actualización. Verifica los encabezados.")
         return False
+
+    col_index = headers.index(col_name) + 1  # Convertir a índice base 1 de gspread
 
     max_attempts = 3
     base_delay = 1
@@ -4237,28 +4194,14 @@ def confirmar_modificacion_surtido(
     """Confirma modificación de surtido priorizando batch y con fallback seguro."""
     live_headers = list(headers or [])
     try:
-        fetched_headers = _get_live_headers_preserving_positions(worksheet, headers)
+        fetched_headers = worksheet.row_values(1)
         if fetched_headers:
             live_headers = fetched_headers
     except Exception:
         # Si falla la lectura de encabezados, usamos los que ya traíamos en memoria.
         live_headers = list(headers or [])
 
-    def _normalize_header_name(name: Any) -> str:
-        return str(name or "").strip().lower()
-
-    def _find_col_index_by_name(header_name: str) -> Optional[int]:
-        target = _normalize_header_name(header_name)
-        for idx, header in enumerate(live_headers, start=1):
-            if _normalize_header_name(header) == target:
-                return idx
-        return None
-
-    col_mod = _find_col_index_by_name("Modificacion_Surtido")
-    col_estado = _find_col_index_by_name("Estado")
-    col_hora = _find_col_index_by_name("Hora_Proceso")
-
-    if col_mod is None:
+    if "Modificacion_Surtido" not in live_headers:
         st.error("❌ No existe la columna 'Modificacion_Surtido' para confirmar el cambio.")
         return False
 
@@ -4268,29 +4211,29 @@ def confirmar_modificacion_surtido(
         {
             "range": gspread.utils.rowcol_to_a1(
                 gsheet_row_index,
-                col_mod,
+                live_headers.index("Modificacion_Surtido") + 1,
             ),
             "values": [[texto_confirmado]],
         }
     ]
 
-    if col_estado is not None:
+    if "Estado" in live_headers:
         updates.append(
             {
                 "range": gspread.utils.rowcol_to_a1(
                     gsheet_row_index,
-                    col_estado,
+                    live_headers.index("Estado") + 1,
                 ),
                 "values": [["🔵 En Proceso"]],
             }
         )
 
-    if col_hora is not None:
+    if "Hora_Proceso" in live_headers:
         updates.append(
             {
                 "range": gspread.utils.rowcol_to_a1(
                     gsheet_row_index,
-                    col_hora,
+                    live_headers.index("Hora_Proceso") + 1,
                 ),
                 "values": [[mx_now_str()]],
             }
@@ -4307,7 +4250,7 @@ def confirmar_modificacion_surtido(
         "Modificacion_Surtido",
         texto_confirmado,
     )
-    if ok and col_estado is not None:
+    if ok and "Estado" in live_headers:
         ok = update_gsheet_cell(
             worksheet,
             live_headers,
@@ -4315,7 +4258,7 @@ def confirmar_modificacion_surtido(
             "Estado",
             "🔵 En Proceso",
         )
-    if ok and col_hora is not None:
+    if ok and "Hora_Proceso" in live_headers:
         ok = update_gsheet_cell(
             worksheet,
             live_headers,
