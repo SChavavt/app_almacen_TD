@@ -4238,6 +4238,15 @@ def confirmar_modificacion_surtido(
     mod_texto,
 ):
     """Confirma modificación de surtido priorizando batch y con fallback seguro."""
+    debug_steps: list[str] = []
+
+    def _dbg(msg: str):
+        debug_steps.append(msg)
+        try:
+            st.info(f"🧪 DEBUG surtido: {msg}")
+        except Exception:
+            pass
+
     live_headers = list(headers or [])
     try:
         fetched_headers = _get_live_headers_preserving_positions(worksheet, headers)
@@ -4253,12 +4262,16 @@ def confirmar_modificacion_surtido(
     col_mod = _find_header_col_in_row1(worksheet, "Modificacion_Surtido", live_headers)
     col_estado = _find_header_col_in_row1(worksheet, "Estado", live_headers)
     col_hora = _find_header_col_in_row1(worksheet, "Hora_Proceso", live_headers)
+    _dbg(
+        f"fila_objetivo={gsheet_row_index} | col_mod={col_mod} col_estado={col_estado} col_hora={col_hora}"
+    )
 
     if col_mod is None:
         st.error("❌ No existe la columna 'Modificacion_Surtido' para confirmar el cambio.")
         return False
 
     texto_confirmado = f"{str(mod_texto or '').strip()} [✔CONFIRMADO]".strip()
+    _dbg(f"texto_original='{str(mod_texto or '').strip()}' | texto_confirmado='{texto_confirmado}'")
 
     updates = [
         {
@@ -4291,9 +4304,23 @@ def confirmar_modificacion_surtido(
                 "values": [[mx_now_str()]],
             }
         )
+    _dbg(f"updates_batch={updates}")
+
+    try:
+        before_row = get_sheet_row_values_cached(worksheet, int(gsheet_row_index))
+        before_mod = before_row[col_mod - 1] if col_mod and len(before_row) >= col_mod else ""
+        before_estado = before_row[col_estado - 1] if col_estado and len(before_row) >= col_estado else ""
+        before_hora = before_row[col_hora - 1] if col_hora and len(before_row) >= col_hora else ""
+        _dbg(
+            f"antes | Modificacion_Surtido='{before_mod}' | Estado='{before_estado}' | Hora_Proceso='{before_hora}'"
+        )
+    except Exception as e:
+        _dbg(f"no_se_pudo_leer_estado_previo: {e}")
 
     if batch_update_gsheet_cells(worksheet, updates, headers=live_headers):
+        _dbg("batch_update=OK")
         return True
+    _dbg("batch_update=FALLÓ -> usando fallback update_gsheet_cell")
 
     # Fallback resiliente: conservar funcionalidad aunque falle la operación batch.
     ok = update_gsheet_cell(
@@ -4319,6 +4346,7 @@ def confirmar_modificacion_surtido(
             "Hora_Proceso",
             mx_now_str(),
         )
+    _dbg(f"fallback_resultado_final={ok}")
 
     return ok
 
@@ -4352,6 +4380,15 @@ def resolve_caso_gsheet_row_index(df_casos, row, id_pedido, folio, cliente, df_i
         matches = df_casos.index[filt] if hasattr(filt, "any") else []
         if len(matches) > 0:
             gsheet_row_idx = int(matches[0]) + 2
+
+    try:
+        st.info(
+            "🧪 DEBUG fila caso: "
+            f"df_index={df_index} _gsheet_row_index={row.get('_gsheet_row_index', row.get('gsheet_row_index'))} "
+            f"id_pedido='{id_pedido}' folio='{folio}' cliente='{cliente}' -> fila_objetivo={gsheet_row_idx}"
+        )
+    except Exception:
+        pass
 
     return gsheet_row_idx
 
