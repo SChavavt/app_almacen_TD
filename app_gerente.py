@@ -3464,6 +3464,23 @@ def render_cobranza_tab_gerente():
             key="ger_cob_dia",
         )
 
+        meses_pago_opciones = sorted({
+            m for m in (meses_disponibles + [mes_actual])
+            if re.match(r"^\d{4}-\d{2}$", str(m))
+        })
+        if not meses_pago_opciones:
+            meses_pago_opciones = [mes_actual]
+        mes_pago_default = mes_com if mes_com != "TODOS" and mes_com in meses_pago_opciones else mes_actual
+        if mes_pago_default not in meses_pago_opciones:
+            mes_pago_default = meses_pago_opciones[-1]
+        mes_pago_sel = st.selectbox(
+            "Mes del pago",
+            options=meses_pago_opciones,
+            index=meses_pago_opciones.index(mes_pago_default),
+            key="ger_cob_mes_pago",
+            help="Selecciona el mes real en el que corresponde registrar el pago/comentario.",
+        )
+
         dia_sel_int = int(dia_sel)
         comentario_existente = ""
         fecha_pago_existente_txt = ""
@@ -3477,7 +3494,7 @@ def render_cobranza_tab_gerente():
             existentes = com_df[
                 (com_codigo == str(codigo))
                 & (com_folio.isin(folios_sel) if folios_sel else False)
-                & ((com_mes == str(mes_com)) if mes_com != "TODOS" else True)
+                & (com_mes == str(mes_pago_sel))
                 & (com_dia == dia_sel_int)
             ].copy()
             if not existentes.empty:
@@ -3496,7 +3513,7 @@ def render_cobranza_tab_gerente():
                     except Exception:
                         fecha_pago_existente_txt = ""
 
-        prefill_ctx = (str(mes_com), str(codigo), tuple(sorted(folios_sel_set)), dia_sel_int)
+        prefill_ctx = (str(mes_pago_sel), str(codigo), tuple(sorted(folios_sel_set)), dia_sel_int)
         if st.session_state.get("ger_cob_prefill_ctx") != prefill_ctx:
             accion_pref, respuesta_pref, comentario_pref = _parse_cobranza_comentario_guardado(comentario_existente)
             seguimiento_activo_pref = bool(fecha_pago_existente_txt or recordatorio_existente or estatus_existente)
@@ -3595,7 +3612,7 @@ def render_cobranza_tab_gerente():
 
                 com_df = pd.DataFrame([
                     {
-                        "Mes": mes_com if mes_com != "TODOS" else mes_actual,
+                        "Mes": mes_pago_sel,
                         "Codigo": codigo,
                         "Folio": folio,
                         "Dia": str(dia_guardado),
@@ -3606,11 +3623,7 @@ def render_cobranza_tab_gerente():
                         "Recordatorio_Activo": recordatorio_guardado,
                         "Estatus_Seguimiento": estatus_guardado,
                         "Fecha_Cierre": fecha_cierre,
-                        "Mes_Operativo": _cobranza_mes_operativo(
-                            mes_com if mes_com != "TODOS" else mes_actual,
-                            estatus_guardado,
-                            fecha_proximo_pago,
-                        ),
+                        "Mes_Operativo": _cobranza_mes_operativo(mes_pago_sel, estatus_guardado, fecha_proximo_pago),
                     }
                     for folio in folios_sel
                 ])
