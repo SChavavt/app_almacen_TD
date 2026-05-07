@@ -143,11 +143,10 @@ VENDEDOR_CREDENTIALS = {
     "SANT1460": "SANTIAGO",
     "SCHAVA": "SCHAVA",
     "SINAI": "SINAI",
-    "DISSURTIDOR": "DISSURTIDOR",
 }
 
 
-NON_VENDOR_USERS = {"SINAI", "DISSURTIDOR"}
+NON_VENDOR_USERS = {"SINAI"}
 
 
 def is_non_vendor_user(user_key: str) -> bool:
@@ -199,56 +198,37 @@ st.markdown(
 )
 
 # --- Encabezado ---
-layout_user = str(st.session_state.get("auth_user", "") or "").strip().upper()
-if not layout_user:
-    usuario_qp_layout = st.query_params.get("usuario", "")
-    if isinstance(usuario_qp_layout, list):
-        usuario_qp_layout = usuario_qp_layout[0] if usuario_qp_layout else ""
-    layout_user = str(usuario_qp_layout or "").strip().upper()
-
-is_dissurtidor_view = layout_user == "DISSURTIDOR"
-
 current_time = datetime.now(TZ).strftime("%d/%m %H:%M:%S")
-
-if not is_dissurtidor_view:
-    col_title, col_update, col_actions = st.columns([0.6, 0.2, 0.2])
-    with col_title:
-        st.markdown(
-            """
-            <div class="header-compact">
-                <h2 style="color: white;">
-                    <span style="font-size: 1.8rem;">🏷️</span> Flujo de Pedidos en Tiempo Real
-                </h2>
-            </div>
-        """,
-            unsafe_allow_html=True,
-        )
-        st.markdown(
-            """
-            <style>
-            /* 🔢 Ajuste compacto para métricas */
-            div[data-testid="metric-container"] { padding: 0.1rem 0.5rem; }
-            div[data-testid="metric-container"] > div { font-size: 1.1rem !important; }
-            div[data-testid="metric-container"] > label { font-size: 0.85rem !important; }
-            </style>
-        """,
-            unsafe_allow_html=True,
-        )
-    with col_update:
-        st.markdown(f'<div class="header-meta">🕒 Última actualización: {current_time}</div>', unsafe_allow_html=True)
-    with col_actions:
-        if st.button("🔄 Refrescar ahora", use_container_width=True):
-            # Se ejecuta más adelante cuando ya están definidas las funciones de carga.
-            st.session_state["_pending_full_refresh"] = True
-            st.rerun()
-else:
-    col_update_only, col_action_only, _ = st.columns([0.22, 0.16, 0.62])
-    with col_update_only:
-        st.markdown(f'<div class="header-meta">🕒 Última actualización: {current_time}</div>', unsafe_allow_html=True)
-    with col_action_only:
-        if st.button("🔄 Refrescar ahora", use_container_width=True):
-            st.session_state["_pending_full_refresh"] = True
-            st.rerun()
+col_title, col_update, col_actions = st.columns([0.6, 0.2, 0.2])
+with col_title:
+    st.markdown(
+        """
+        <div class="header-compact">
+            <h2 style="color: white;">
+                <span style="font-size: 1.8rem;">🏷️</span> Flujo de Pedidos en Tiempo Real
+            </h2>
+        </div>
+    """,
+        unsafe_allow_html=True,
+    )
+    st.markdown(
+        """
+        <style>
+        /* 🔢 Ajuste compacto para métricas */
+        div[data-testid="metric-container"] { padding: 0.1rem 0.5rem; }
+        div[data-testid="metric-container"] > div { font-size: 1.1rem !important; }
+        div[data-testid="metric-container"] > label { font-size: 0.85rem !important; }
+        </style>
+    """,
+        unsafe_allow_html=True,
+    )
+with col_update:
+    st.markdown(f'<div class="header-meta">🕒 Última actualización: {current_time}</div>', unsafe_allow_html=True)
+with col_actions:
+    if st.button("🔄 Refrescar ahora", use_container_width=True):
+        # Se ejecuta más adelante cuando ya están definidas las funciones de carga.
+        st.session_state["_pending_full_refresh"] = True
+        st.rerun()
 
 # CSS tabla compacta
 st.markdown(
@@ -4475,8 +4455,6 @@ if not get_logged_user():
 logged_user = get_logged_user().upper()
 if logged_user == "SINAI":
     visible_tab_keys = ["auto_foraneo", "auto_local", "assistant"]
-elif logged_user == "DISSURTIDOR":
-    visible_tab_keys = ["surtidores"]
 else:
     visible_tab_keys = [tab_key for tab_key, _ in TAB_DEFINITIONS]
 
