@@ -2204,7 +2204,7 @@ def sort_entries_by_delivery(entries):
 
 
 def sort_entries_by_flow_number_desc(entries):
-    """Ordena por número de flujo descendente (más reciente arriba)."""
+    """Ordena por número de flujo ascendente (menor arriba)."""
 
     def _num(entry):
         raw = sanitize_text(entry.get("numero", ""))
@@ -2213,7 +2213,7 @@ def sort_entries_by_flow_number_desc(entries):
         except Exception:
             return -1
 
-    return sorted(entries, key=lambda e: (_num(e), e.get("sort_key", pd.Timestamp.min)), reverse=True)
+    return sorted(entries, key=lambda e: (_num(e), e.get("sort_key", pd.Timestamp.max)))
 
 
 def _normalize_match_value(value: str) -> str:
@@ -4846,11 +4846,11 @@ if selected_tab_key == "auto_foraneo":
     # 2) Layout: izquierda/derecha
     col_left, col_right = st.columns(2, gap="large")
 
-    # --- IZQUIERDA: HOY (CONTINUACIÓN) + ANTERIORES ---
+    # --- IZQUIERDA: HOY (PRINCIPALES) + ANTERIORES ---
     with col_left:
-        if hoy_continuacion:
+        if hoy_primarios:
             next_number = render_auto_list(
-                hoy_continuacion,
+                hoy_primarios,
                 title=f"🚚 FORÁNEOS • HOY ({hoy.strftime('%d/%m')})",
                 subtitle="Todos los de hoy y fechas futuras",
                 max_rows=140,
@@ -4870,10 +4870,10 @@ if selected_tab_key == "auto_foraneo":
             mode="foraneo",
         )
 
-    # --- DERECHA: HOY + FUTUROS + SIN Fecha_Entrega ---
+    # --- DERECHA: CONTINUACIÓN DE HOY + FUTUROS ---
     with col_right:
         render_auto_list(
-            hoy_primarios,
+            hoy_continuacion,
             title=f"🚚 FORÁNEOS • HOY ({hoy.strftime('%d/%m')})",
             subtitle="Todos los de hoy y fechas futuras",
             max_rows=140,
