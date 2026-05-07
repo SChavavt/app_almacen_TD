@@ -75,31 +75,9 @@ def _send_mail_sendgrid(*, from_email: str, to_emails: list[str], subject: str, 
         headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
     )
     with urllib.request.urlopen(req, timeout=20) as resp:
-        message_id = resp.headers.get("X-Message-Id", "")
-        return resp.status, message_id
+        return resp.status
 
 
-
-
-def _send_mail_sendgrid_per_recipient(*, from_email: str, to_emails: list[str], subject: str, html_content: str, attachment_name: str, attachment_bytes: bytes, api_key: str):
-    """Envía 1 correo por destinatario para identificar fallos individuales."""
-    enviados = []
-    fallidos = []
-    for email in to_emails:
-        try:
-            status_code, message_id = _send_mail_sendgrid(
-                from_email=from_email,
-                to_emails=[email],
-                subject=subject,
-                html_content=html_content,
-                attachment_name=attachment_name,
-                attachment_bytes=attachment_bytes,
-                api_key=api_key,
-            )
-            enviados.append({"email": email, "status": status_code, "message_id": message_id})
-        except Exception as exc:
-            fallidos.append((email, _mail_error_hint(exc)))
-    return enviados, fallidos
 def _mail_error_hint(exc: Exception) -> str:
     """Devuelve mensaje de error más claro para fallos comunes de SendGrid."""
     if isinstance(exc, urllib.error.HTTPError):
@@ -4371,17 +4349,12 @@ def render_seguimiento_cobranza_tab_gerente(usuario_actual: str | None):
                 tz_send = MEXICO_CITY_TZ
             now_send_tz = datetime.now(tz_send)
             stamp_key = f"{now_send_tz.date().isoformat()}|{','.join(to_emails)}|{subject}"
-            should_autosend = bool(
-                schedule_hhmm
-                and tz_ok
-                and now_send_tz.hour == schedule_hhmm[0]
-                and now_send_tz.minute == schedule_hhmm[1]
-            )
+            should_autosend = bool(schedule_hhmm and tz_ok and now_send_tz.hour == schedule_hhmm[0] and now_send_tz.minute >= schedule_hhmm[1])
             sent_today = _COBRANZA_MAIL_LAST_SENT.get(stamp_key)
 
             if should_autosend and not sent_today:
                 try:
-                    enviados, fallidos = _send_mail_sendgrid_per_recipient(
+                    _send_mail_sendgrid(
                         from_email=from_email,
                         to_emails=to_emails,
                         subject=subject,
@@ -4390,20 +4363,14 @@ def render_seguimiento_cobranza_tab_gerente(usuario_actual: str | None):
                         attachment_bytes=excel_bytes,
                         api_key=sendgrid_api_key,
                     )
-                    if enviados:
-                        _COBRANZA_MAIL_LAST_SENT[stamp_key] = now_send_tz.isoformat()
-                        enviados_txt = ", ".join([f"{x['email']} (id: {x['message_id'] or 'sin-id'})" for x in enviados])
-                        st.success(f"📧 SendGrid aceptó el envío automático para: {enviados_txt}")
-                        st.caption("Nota: aceptado por SendGrid (202) no garantiza entrega final; valida Activity/Suppressions en SendGrid.")
-                    if fallidos:
-                        for email, motivo in fallidos:
-                            st.warning(f"No se pudo enviar a {email}: {motivo}")
+                    _COBRANZA_MAIL_LAST_SENT[stamp_key] = now_send_tz.isoformat()
+                    st.success("📧 Correo automático enviado con el Excel del día.")
                 except Exception as e:
                     st.warning(f"No se pudo enviar el correo automático: {_mail_error_hint(e)}")
 
             if st.button("📧 Enviar ahora por correo", use_container_width=True, key="ger_seg_cob_mail_hoy"):
                 try:
-                    enviados, fallidos = _send_mail_sendgrid_per_recipient(
+                    _send_mail_sendgrid(
                         from_email=from_email,
                         to_emails=to_emails,
                         subject=subject,
@@ -4412,14 +4379,8 @@ def render_seguimiento_cobranza_tab_gerente(usuario_actual: str | None):
                         attachment_bytes=excel_bytes,
                         api_key=sendgrid_api_key,
                     )
-                    if enviados:
-                        _COBRANZA_MAIL_LAST_SENT[stamp_key] = now_send_tz.isoformat()
-                        enviados_txt = ", ".join([f"{x['email']} (id: {x['message_id'] or 'sin-id'})" for x in enviados])
-                        st.success(f"✅ SendGrid aceptó el envío para: {enviados_txt}")
-                        st.caption("Nota: aceptado por SendGrid (202) no garantiza entrega final; valida Activity/Suppressions en SendGrid.")
-                    if fallidos:
-                        for email, motivo in fallidos:
-                            st.error(f"❌ No se pudo enviar a {email}: {motivo}")
+                    _COBRANZA_MAIL_LAST_SENT[stamp_key] = now_send_tz.isoformat()
+                    st.success("✅ Correo enviado correctamente.")
                 except Exception as e:
                     st.error(f"❌ Error enviando correo: {_mail_error_hint(e)}")
                     st.info(
