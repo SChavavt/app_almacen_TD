@@ -2037,6 +2037,32 @@ def normalize_sheet_text(value: Any) -> str:
     return text
 
 
+def format_direccion_guia_retorno(value: Any) -> str:
+    """Normaliza y formatea direcciones de guía multi-campo para mejor lectura."""
+    text = normalize_sheet_text(value)
+    if not text:
+        return ""
+
+    text = text.replace("\\r\\n", "\n").replace("\\n", "\n")
+    text = text.replace("\r\n", "\n").replace("\r", "\n")
+
+    lines = [line.strip() for line in text.split("\n") if line.strip()]
+    if not lines:
+        return text.strip()
+
+    formatted_lines: list[str] = []
+    for line in lines:
+        if ":" in line:
+            key, val = line.split(":", 1)
+            key = key.strip()
+            val = val.strip()
+            formatted_lines.append(f"**{key}:** {val}" if val else f"**{key}:**")
+        else:
+            formatted_lines.append(line)
+
+    return "\n".join(formatted_lines)
+
+
 def _normalize_tab_field(value: Optional[Any]) -> str:
     if value is None:
         return ""
@@ -5937,7 +5963,7 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
                     f"**{estado_entrega_valor}** en la bitácora de entrega."
                 )
 
-        direccion_retorno = str(row.get("Direccion_Guia_Retorno", "")).strip()
+        direccion_retorno = format_direccion_guia_retorno(row.get("Direccion_Guia_Retorno", ""))
 
         if (
             (row.get("Tipo_Envio") == "🚚 Pedido Foráneo" or origen_tab == "Foráneo")
@@ -8648,7 +8674,7 @@ if df_main is not None:
                 st.markdown("📦 Piezas / Material:")
                 _render_material_devuelto(material)
     
-            direccion_retorno = str(row.get("Direccion_Guia_Retorno", "")).strip()
+            direccion_retorno = format_direccion_guia_retorno(row.get("Direccion_Guia_Retorno", ""))
             st.markdown("📍 Dirección para guía de retorno:")
             st.info(direccion_retorno or "Sin dirección registrada.")
     
@@ -9581,7 +9607,7 @@ if df_main is not None:
                 )
     
                 st.markdown("**📍 Dirección para guía de retorno:**")
-                st.info(str(row.get("Direccion_Guia_Retorno", "")).strip() or "Sin dirección registrada.")
+                st.info(format_direccion_guia_retorno(row.get("Direccion_Guia_Retorno", "")) or "Sin dirección registrada.")
     
                 st.markdown("**🏠 Dirección de envío:**")
                 st.info(str(row.get("Direccion_Envio", "")).strip() or "Sin dirección registrada.")
@@ -10321,7 +10347,7 @@ if df_main is not None:
                     if piezas:
                         st.markdown("📦 Piezas afectadas:")
                         _render_material_devuelto(piezas)
-                    direccion_retorno = str(row.get("Direccion_Guia_Retorno", "")).strip()
+                    direccion_retorno = format_direccion_guia_retorno(row.get("Direccion_Guia_Retorno", ""))
                     st.markdown("📍 Dirección para guía de retorno:")
                     st.info(direccion_retorno or "Sin dirección registrada.")
                     direccion_envio = str(row.get("Direccion_Envio", "")).strip()
