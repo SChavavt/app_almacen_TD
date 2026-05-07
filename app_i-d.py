@@ -2204,7 +2204,7 @@ def sort_entries_by_delivery(entries):
 
 
 def sort_entries_by_flow_number_desc(entries):
-    """Ordena por número de flujo ascendente (menor arriba)."""
+    """Ordena por número de flujo descendente (más reciente arriba)."""
 
     def _num(entry):
         raw = sanitize_text(entry.get("numero", ""))
@@ -2213,7 +2213,7 @@ def sort_entries_by_flow_number_desc(entries):
         except Exception:
             return -1
 
-    return sorted(entries, key=lambda e: (_num(e), e.get("sort_key", pd.Timestamp.max)))
+    return sorted(entries, key=lambda e: (_num(e), e.get("sort_key", pd.Timestamp.min)), reverse=True)
 
 
 def _normalize_match_value(value: str) -> str:
@@ -4779,18 +4779,19 @@ if selected_tab_key == "auto_local":
     else:
         col_left, col_right = st.columns(2, gap="large")
         columns = [col_left, col_right]
+        next_number = 1
 
         for idx, label in enumerate(ordered_labels):
             target_col = columns[idx % 2]
             entries = sort_entries_by_flow_number_desc(grouped[label])
             date_label = local_title_date_label(entries)
             with target_col:
-                render_auto_list(
+                next_number = render_auto_list(
                     entries,
                     title=f"📍 LOCALES • {label} ({date_label})",
                     subtitle="Pedidos activos por turno",
                     max_rows=140,
-                    start_number=1,
+                    start_number=next_number,
                     panel_height=220,
                     scroll_max_height=300,
                     mode="local",
@@ -4845,34 +4846,38 @@ if selected_tab_key == "auto_foraneo":
     # 2) Layout: izquierda/derecha
     col_left, col_right = st.columns(2, gap="large")
 
-    # --- IZQUIERDA: ANTERIORES + HOY (CONTINUACIÓN) ---
+    # --- IZQUIERDA: HOY (CONTINUACIÓN) + ANTERIORES ---
     with col_left:
+        if hoy_continuacion:
+            next_number = render_auto_list(
+                hoy_continuacion,
+                title=f"🚚 FORÁNEOS • HOY ({hoy.strftime('%d/%m')})",
+                subtitle="Todos los de hoy y fechas futuras",
+                max_rows=140,
+                panel_height=160,
+                mode="foraneo",
+            )
+        else:
+            next_number = 1
+
         next_number = render_auto_list(
             anteriores,
             title="🚚 FORÁNEOS • ANTERIORES",
             subtitle=f"Fechas previas + pedidos sin Fecha_Entrega",
             max_rows=140,
+            start_number=next_number,
             panel_height=220,
             mode="foraneo",
         )
 
-        render_auto_list(
-            hoy_continuacion,
-            title=f"🚚 FORÁNEOS • HOY ({hoy.strftime('%d/%m')})",
-            subtitle="Todos los de hoy y fechas futuras",
-            max_rows=140,
-            start_number=next_number,
-            panel_height=160,
-            mode="foraneo",
-        )
-
-    # --- DERECHA: HOY + FUTUROS (BLOQUE PRINCIPAL) ---
+    # --- DERECHA: HOY + FUTUROS + SIN Fecha_Entrega ---
     with col_right:
         render_auto_list(
             hoy_primarios,
             title=f"🚚 FORÁNEOS • HOY ({hoy.strftime('%d/%m')})",
             subtitle="Todos los de hoy y fechas futuras",
             max_rows=140,
+            start_number=next_number,
             mode="foraneo",
         )
 
