@@ -4887,9 +4887,30 @@ if selected_tab_key == "auto_foraneo":
 if selected_tab_key == "surtidores":
 
     st.markdown("### 🧑‍🔧 Asignación de surtidores")
-    st.caption("Selecciona pedidos visibles y escribe tu nombre o inicial para asignarlos.")
+    st.caption("Selecciona pedidos visibles y elige un surtidor para asignarlos.")
 
-    surtidor_nombre = st.text_input("Nombre o inicial del surtidor")
+    surtidores_predefinidos = ["Baldo", "Alexis", "Enrique", "Cassandra", "Yaya", "Karen"]
+    if "selected_surtidor_nombre" not in st.session_state:
+        st.session_state.selected_surtidor_nombre = ""
+
+    st.markdown("**Surtidor seleccionado**")
+    for row_start in range(0, len(surtidores_predefinidos), 3):
+        cols_surtidor = st.columns(3, gap="small")
+        for offset in range(3):
+            idx = row_start + offset
+            if idx >= len(surtidores_predefinidos):
+                continue
+            nombre = surtidores_predefinidos[idx]
+            is_selected = st.session_state.selected_surtidor_nombre == nombre
+            with cols_surtidor[offset]:
+                if st.button(
+                    nombre,
+                    key=f"btn_surtidor_{idx}_{nombre}",
+                    use_container_width=True,
+                    type="primary" if is_selected else "secondary",
+                ):
+                    st.session_state.selected_surtidor_nombre = nombre
+                    st.rerun()
 
     seen_local = set()
     local_hoy = []
@@ -4951,9 +4972,9 @@ if selected_tab_key == "surtidores":
         )
 
     if st.button("✅ Asignar surtidor", use_container_width=True):
-        nombre = sanitize_text(surtidor_nombre)
+        nombre = sanitize_text(st.session_state.get("selected_surtidor_nombre", ""))
         if not nombre:
-            st.warning("Escribe un nombre o inicial para asignar.")
+            st.warning("Selecciona un surtidor para asignar.")
         else:
             selected_keys = selected_local + selected_foraneo
             if not selected_keys:
