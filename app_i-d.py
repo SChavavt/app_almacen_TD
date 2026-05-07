@@ -143,11 +143,10 @@ VENDEDOR_CREDENTIALS = {
     "SANT1460": "SANTIAGO",
     "SCHAVA": "SCHAVA",
     "SINAI": "SINAI",
-    "DISSURTIDOR": "DISSURTIDOR",
 }
 
 
-NON_VENDOR_USERS = {"SINAI", "DISSURTIDOR"}
+NON_VENDOR_USERS = {"SINAI"}
 
 
 def is_non_vendor_user(user_key: str) -> bool:
@@ -4456,8 +4455,6 @@ if not get_logged_user():
 logged_user = get_logged_user().upper()
 if logged_user == "SINAI":
     visible_tab_keys = ["auto_foraneo", "auto_local", "assistant"]
-elif logged_user == "DISSURTIDOR":
-    visible_tab_keys = ["surtidores"]
 else:
     visible_tab_keys = [tab_key for tab_key, _ in TAB_DEFINITIONS]
 
