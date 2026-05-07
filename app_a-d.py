@@ -2562,7 +2562,7 @@ def _get_logged_user() -> str:
 
 def _is_admin_cdmx_user(user_value: str) -> bool:
     normalized = _normalized_user_identity(user_value)
-    return normalized in {"admin cdmx", "admin_cdmx", "admincdmx"}
+    return normalized in {"admin cdmx", "admin_cdmx", "admincdmx", "schava"}
 def can_edit_brand_logo(allowed_user: str = TD_LOGO_EDITOR_USER) -> bool:
     """Valida si el usuario actual puede editar el logo del branding."""
     user_candidates = [
