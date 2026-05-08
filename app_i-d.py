@@ -4912,6 +4912,24 @@ if selected_tab_key == "surtidores":
     if "selected_surtidor_nombre" not in st.session_state:
         st.session_state.selected_surtidor_nombre = ""
 
+    st.markdown("**Surtidor seleccionado**")
+    for row_start in range(0, len(surtidores_predefinidos), 3):
+        cols_surtidor = st.columns(3, gap="small")
+        for offset in range(3):
+            idx = row_start + offset
+            if idx >= len(surtidores_predefinidos):
+                continue
+            nombre = surtidores_predefinidos[idx]
+            is_selected = st.session_state.selected_surtidor_nombre == nombre
+            with cols_surtidor[offset]:
+                if st.button(
+                    nombre,
+                    key=f"btn_surtidor_{idx}_{nombre}",
+                    use_container_width=True,
+                    type="primary" if is_selected else "secondary",
+                ):
+                    st.session_state.selected_surtidor_nombre = nombre
+
     seen_local = set()
     local_hoy = []
     for entry in auto_local_entries:
@@ -4959,24 +4977,6 @@ if selected_tab_key == "surtidores":
     foraneo_sorted_keys = sorted(
         foraneo_options.keys(), key=lambda k: foraneo_order.get(k, float("inf"))
     )
-
-    st.markdown("**Selección de surtidor**")
-    for row_start in range(0, len(surtidores_predefinidos), 3):
-        cols_surtidor = st.columns(3, gap="small")
-        for offset in range(3):
-            idx = row_start + offset
-            if idx >= len(surtidores_predefinidos):
-                continue
-            nombre = surtidores_predefinidos[idx]
-            is_selected = st.session_state.selected_surtidor_nombre == nombre
-            with cols_surtidor[offset]:
-                if st.button(
-                    nombre,
-                    key=f"btn_surtidor_{idx}_{nombre}",
-                    use_container_width=True,
-                    type="primary" if is_selected else "secondary",
-                ):
-                    st.session_state.selected_surtidor_nombre = nombre
 
     col_local, col_foraneo = st.columns(2, gap="large")
     selected_local = []
