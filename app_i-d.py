@@ -3047,9 +3047,10 @@ def _get_column_index_cached(sheet_name: str, column_name: str) -> Optional[int]
 
 
 def persist_surtidor_to_sheets(entries: list[dict], surtidor: str) -> tuple[int, int]:
-    """Persist assigned surtidor to Google Sheets by row index for pedidos/casos."""
-    updates_by_sheet: dict[str, list[tuple[int, str]]] = {}
+    """Persist assigned surtidor and assignment datetime to Google Sheets by row index for pedidos/casos."""
+    updates_by_sheet: dict[str, list[tuple[int, str, str]]] = {}
     seen_targets = set()
+    fecha_surtido = datetime.now(TZ).strftime("%Y-%m-%d %H:%M:%S")
 
     for entry in entries:
         raw_row = entry.get("gsheet_row_index")
@@ -3065,28 +3066,41 @@ def persist_surtidor_to_sheets(entries: list[dict], surtidor: str) -> tuple[int,
         if target in seen_targets:
             continue
         seen_targets.add(target)
-        updates_by_sheet.setdefault(sheet_name, []).append((row_idx, surtidor))
+        updates_by_sheet.setdefault(sheet_name, []).append((row_idx, surtidor, fecha_surtido))
 
     success_count = 0
     fail_count = 0
     for sheet_name, updates in updates_by_sheet.items():
         try:
-            col_idx = _get_column_index_cached(sheet_name, "Surtidor")
+            col_surtidor_idx = _get_column_index_cached(sheet_name, "Surtidor")
         except Exception:
-            col_idx = None
+            col_surtidor_idx = None
 
-        if not col_idx:
+        try:
+            col_fecha_surtido_idx = _get_column_index_cached(sheet_name, "Fecha_Surtido")
+        except Exception:
+            col_fecha_surtido_idx = None
+
+        if not col_surtidor_idx:
             fail_count += len(updates)
             st.warning(
                 f"No se encontró la columna 'Surtidor' en la hoja '{sheet_name}'."
             )
             continue
 
+        if not col_fecha_surtido_idx:
+            fail_count += len(updates)
+            st.warning(
+                f"No se encontró la columna 'Fecha_Surtido' en la hoja '{sheet_name}'."
+            )
+            continue
+
         ws = _worksheet_by_name(sheet_name)
         sheet_fail = 0
-        for row_idx, value in updates:
+        for row_idx, surtidor_value, fecha_value in updates:
             try:
-                ws.update_cell(row_idx, col_idx, value)
+                ws.update_cell(row_idx, col_surtidor_idx, surtidor_value)
+                ws.update_cell(row_idx, col_fecha_surtido_idx, fecha_value)
                 success_count += 1
             except gspread.exceptions.APIError:
                 fail_count += 1
