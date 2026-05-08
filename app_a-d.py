@@ -2101,6 +2101,22 @@ def derive_tab_label(tipo_envio: Optional[str], turno: Optional[str]) -> str:
     return _UNKNOWN_TAB_LABEL
 
 
+def _build_turno_cierre_state_key(origen_tab: str, fecha_label: str) -> str:
+    origen_norm = str(origen_tab or "").strip().lower().replace(" ", "_")
+    fecha_norm = str(fecha_label or "").strip().lower().replace(" ", "_")
+    return f"turno_cerrado::{origen_norm}::{fecha_norm}"
+
+
+def _render_turno_toggle_button(origen_tab: str, fecha_label: str) -> bool:
+    cierre_key = _build_turno_cierre_state_key(origen_tab, fecha_label)
+    is_closed = bool(st.session_state.get(cierre_key, False))
+    action_label = "✅ Habilitar turno" if is_closed else "🚫 Deshabilitar turno"
+    if st.button(action_label, key=f"{cierre_key}::btn"):
+        st.session_state[cierre_key] = not is_closed
+        st.rerun()
+    return bool(st.session_state.get(cierre_key, False))
+
+
 def collect_tab_locations(
     df: pd.DataFrame,
     tipo_col: str = "Tipo_Envio",
@@ -8281,6 +8297,9 @@ if df_main is not None:
                             tab_label.replace("📅 ", ""),
                             format="%d/%m/%Y",
                         )
+                        turno_cerrado = _render_turno_toggle_button(origen_tab, tab_label)
+                        if turno_cerrado:
+                            st.markdown("### CERRADA")
                         pedidos_fecha = pedidos_turno_activos[
                             pedidos_turno_activos["Fecha_Entrega_dt"]
                             == current_selected_date_dt
@@ -8461,6 +8480,9 @@ if df_main is not None:
                                     tab_label.replace("📅 ", ""),
                                     format="%d/%m/%Y",
                                 )
+                                turno_cerrado = _render_turno_toggle_button("Saltillo", tab_label)
+                                if turno_cerrado:
+                                    st.markdown("### CERRADA")
                                 pedidos_fecha = pedidos_s_activos[
                                     pedidos_s_activos["Fecha_Entrega_dt"]
                                     == current_selected_date_dt
