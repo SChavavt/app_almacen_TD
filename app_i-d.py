@@ -4936,6 +4936,8 @@ if selected_tab_key == "surtidores":
     for entry in auto_local_entries:
         if not _is_visible_auto_entry(entry):
             continue
+        if "completado" in sanitize_text(entry.get("estado", "")).lower():
+            continue
         if entry.get("display_num") is None:
             continue
         if sanitize_text(entry.get("surtidor", "")):
@@ -4949,6 +4951,8 @@ if selected_tab_key == "surtidores":
     seen_foraneo = set()
     for entry in auto_foraneo_entries:
         if not _is_visible_auto_entry(entry):
+            continue
+        if "completado" in sanitize_text(entry.get("estado", "")).lower():
             continue
         if entry.get("display_num") is None:
             continue
