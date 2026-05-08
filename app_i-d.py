@@ -4975,20 +4975,24 @@ if selected_tab_key == "surtidores":
     )
 
     col_local, col_foraneo = st.columns(2, gap="large")
+    selected_local = []
+    selected_foraneo = []
     with col_local:
         st.markdown("#### 📍 Auto Local")
-        selected_local = st.multiselect(
-            "Pedidos locales",
-            options=local_sorted_keys,
-            format_func=lambda k: local_options.get(k, k),
-        )
+        for key in local_sorted_keys:
+            if st.checkbox(
+                local_options.get(key, key),
+                key=f"surtidor_local_pick_{key}",
+            ):
+                selected_local.append(key)
     with col_foraneo:
         st.markdown("#### 🚚 Auto Foráneo")
-        selected_foraneo = st.multiselect(
-            "Pedidos foráneos",
-            options=foraneo_sorted_keys,
-            format_func=lambda k: foraneo_options.get(k, k),
-        )
+        for key in foraneo_sorted_keys:
+            if st.checkbox(
+                foraneo_options.get(key, key),
+                key=f"surtidor_foraneo_pick_{key}",
+            ):
+                selected_foraneo.append(key)
 
     if st.button("✅ Asignar surtidor", use_container_width=True):
         nombre = sanitize_text(st.session_state.get("selected_surtidor_nombre", ""))
