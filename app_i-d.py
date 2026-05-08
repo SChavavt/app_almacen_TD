@@ -5124,19 +5124,37 @@ if selected_tab_key == "surtidores":
     )
 
     with st.form("surtidores_asignacion_form"):
-        st.markdown("**Selección de surtidor**")
-        selected_surtidor_nombre = st.radio(
-            "Surtidor",
-            options=surtidores_predefinidos,
-            index=(
-                surtidores_predefinidos.index(st.session_state.selected_surtidor_nombre)
-                if st.session_state.selected_surtidor_nombre in surtidores_predefinidos
-                else 0
-            ),
-            horizontal=True,
-            label_visibility="collapsed",
-            key="selected_surtidor_nombre_form",
-        )
+        st.markdown("**Surtidor seleccionado**")
+        surtidores_grid = surtidores_predefinidos[:6]
+        if (
+            not st.session_state.selected_surtidor_nombre
+            and surtidores_grid
+        ):
+            st.session_state.selected_surtidor_nombre = surtidores_grid[0]
+
+        selected_surtidor_nombre = st.session_state.selected_surtidor_nombre
+        surtidor_button_clicked = False
+        for row_idx in range(2):
+            cols = st.columns(3, gap="small")
+            for col_idx in range(3):
+                idx = row_idx * 3 + col_idx
+                if idx >= len(surtidores_grid):
+                    continue
+                nombre_surtidor = surtidores_grid[idx]
+                with cols[col_idx]:
+                    clicked = st.form_submit_button(
+                        nombre_surtidor,
+                        type=(
+                            "primary"
+                            if selected_surtidor_nombre == nombre_surtidor
+                            else "secondary"
+                        ),
+                        use_container_width=True,
+                    )
+                if clicked:
+                    st.session_state.selected_surtidor_nombre = nombre_surtidor
+                    selected_surtidor_nombre = nombre_surtidor
+                    surtidor_button_clicked = True
 
         col_local, col_spacer, col_foraneo = st.columns([0.8, 0.02, 1.6], gap="small")
         selected_local = []
@@ -5217,7 +5235,6 @@ if selected_tab_key == "surtidores":
                             selected_foraneo.append(key_par)
 
         submit_assign = st.form_submit_button("✅ Asignar surtidor", use_container_width=True)
-
     if submit_assign:
         st.session_state.selected_surtidor_nombre = selected_surtidor_nombre
         nombre = sanitize_text(selected_surtidor_nombre)
