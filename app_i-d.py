@@ -5217,7 +5217,7 @@ if selected_tab_key == "surtidores":
                             selected_foraneo.append(key_par)
 
         st.markdown("<div style=\"height:0.75rem\"></div>", unsafe_allow_html=True)
-        st.caption("Tip: primero marca los pedidos y después toca el botón para confirmar la asignación.")
+        st.caption("")
         _, col_submit, _ = st.columns([1.2, 0.8, 1.2])
         with col_submit:
             submit_assign = st.form_submit_button("✅ Asignar surtidor", use_container_width=False)
