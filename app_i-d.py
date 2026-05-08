@@ -4938,6 +4938,8 @@ if selected_tab_key == "surtidores":
             continue
         if entry.get("display_num") is None:
             continue
+        if sanitize_text(entry.get("surtidor", "")):
+            continue
         key = build_surtidor_key(entry)
         if not key or key in seen_local:
             continue
@@ -4949,6 +4951,8 @@ if selected_tab_key == "surtidores":
         if not _is_visible_auto_entry(entry):
             continue
         if entry.get("display_num") is None:
+            continue
+        if sanitize_text(entry.get("surtidor", "")):
             continue
         key = build_surtidor_key(entry)
         if not key or key in seen_foraneo:
@@ -4963,7 +4967,8 @@ if selected_tab_key == "surtidores":
         parts = [f"#{numero}", cliente, estado]
         return " · ".join([p for p in parts if p])
 
-    local_options = {build_surtidor_key(e): _entry_label(e) for e in local_hoy}
+    local_entry_by_key = {build_surtidor_key(e): e for e in local_hoy}
+    local_options = {key: _entry_label(entry) for key, entry in local_entry_by_key.items()}
     foraneo_options = {build_surtidor_key(e): _entry_label(e) for e in foraneo_hoy}
     local_order = {build_surtidor_key(e): e.get("display_num", float("inf")) for e in local_hoy}
     foraneo_order = {
@@ -4975,20 +4980,49 @@ if selected_tab_key == "surtidores":
     )
 
     col_local, col_foraneo = st.columns(2, gap="large")
+    selected_local = []
+    selected_foraneo = []
     with col_local:
         st.markdown("#### 📍 Auto Local")
-        selected_local = st.multiselect(
-            "Pedidos locales",
-            options=local_sorted_keys,
-            format_func=lambda k: local_options.get(k, k),
-        )
+        local_groups = [
+            ("☀️ Local Mañana", "☀️ Local Mañana"),
+            ("🌙 Local Tarde", "🌙 Local Tarde"),
+            ("🌵 Saltillo", "🌵 Saltillo"),
+            ("📦 Pasa a Bodega", "📦 Pasa a Bodega"),
+        ]
+        local_grouped = {label: [] for _, label in local_groups}
+        local_grouped["Otros"] = []
+        for key in local_sorted_keys:
+            entry = local_entry_by_key.get(key)
+            turno_norm = normalize_turno_label(sanitize_text(entry.get("turno", ""))) if entry else ""
+            placed = False
+            for canonical, label in local_groups:
+                if turno_norm == canonical:
+                    local_grouped[label].append(key)
+                    placed = True
+                    break
+            if not placed:
+                local_grouped["Otros"].append(key)
+
+        for group_label in [g[1] for g in local_groups] + ["Otros"]:
+            keys = local_grouped.get(group_label, [])
+            if not keys:
+                continue
+            st.markdown(f"**{group_label}**")
+            for key in keys:
+                if st.checkbox(
+                    local_options.get(key, key),
+                    key=f"surtidor_local_pick_{key}",
+                ):
+                    selected_local.append(key)
     with col_foraneo:
         st.markdown("#### 🚚 Auto Foráneo")
-        selected_foraneo = st.multiselect(
-            "Pedidos foráneos",
-            options=foraneo_sorted_keys,
-            format_func=lambda k: foraneo_options.get(k, k),
-        )
+        for key in foraneo_sorted_keys:
+            if st.checkbox(
+                foraneo_options.get(key, key),
+                key=f"surtidor_foraneo_pick_{key}",
+            ):
+                selected_foraneo.append(key)
 
     if st.button("✅ Asignar surtidor", use_container_width=True):
         nombre = sanitize_text(st.session_state.get("selected_surtidor_nombre", ""))
