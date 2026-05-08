@@ -5269,62 +5269,14 @@ if selected_tab_key == "surtidores":
             parts = [numero_label, cliente, estado]
             return " · ".join([p for p in parts if p])
 
-        active_assignments = [(key, value) for key, value in assignments.items() if value]
-        if active_assignments:
-            col_local_assign, col_foraneo_assign = st.columns(2, gap="large")
-
-            with col_local_assign:
-                st.markdown("##### 📍 Locales (por turno)")
-                local_groups = [
-                    ("☀️ Local Mañana", "☀️ Local Mañana"),
-                    ("🌙 Local Tarde", "🌙 Local Tarde"),
-                    ("🌵 Saltillo", "🌵 Saltillo"),
-                    ("📦 Pasa a Bodega", "📦 Pasa a Bodega"),
-                    ("🎓 Cursos y Eventos", "🎓 Cursos y Eventos"),
-                    ("📍 Local (sin turno)", "📍 Local (sin turno)"),
-                ]
-                local_grouped = {label: [] for _, label in local_groups}
-                local_grouped["Otros"] = []
-
-                for key, surtidor in active_assignments:
-                    entry = entry_lookup.get(key)
-                    if envio_lookup.get(key) != "📍" or not entry:
-                        continue
-                    turno_norm = normalize_turno_label(sanitize_text(entry.get("turno", ""))) or "📍 Local (sin turno)"
-                    rendered = f"- **{surtidor}** · {_assignment_label(key)}"
-                    added = False
-                    for canonical, label in local_groups:
-                        if turno_norm == canonical:
-                            local_grouped[label].append(rendered)
-                            added = True
-                            break
-                    if not added:
-                        local_grouped["Otros"].append(rendered)
-
-                rendered_local = False
-                for group_label in [g[1] for g in local_groups] + ["Otros"]:
-                    items = local_grouped.get(group_label, [])
-                    if not items:
-                        continue
-                    rendered_local = True
-                    st.markdown(f"**{group_label}**")
-                    st.markdown("\n".join(items))
-
-                if not rendered_local:
-                    st.caption("Sin asignaciones locales.")
-
-            with col_foraneo_assign:
-                st.markdown("##### 🚚 Foráneos")
-                foraneo_items = []
-                for key, surtidor in active_assignments:
-                    if envio_lookup.get(key) != "🚚":
-                        continue
-                    foraneo_items.append(f"- **{surtidor}** · {_assignment_label(key)}")
-
-                if foraneo_items:
-                    st.markdown("\n".join(foraneo_items))
-                else:
-                    st.caption("Sin asignaciones foráneas.")
+        rows = [
+            {"Pedido": _assignment_label(key), "Surtidor": value}
+            for key, value in assignments.items()
+            if value
+        ]
+        if rows:
+            df_assign = pd.DataFrame(rows)
+            st.dataframe(df_assign, use_container_width=True, height=300)
         else:
             st.info("Sin asignaciones registradas.")
 
