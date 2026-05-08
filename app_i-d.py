@@ -1515,9 +1515,48 @@ def _build_flow_number_maps(df_all: pd.DataFrame) -> tuple[dict[str, str], dict[
                     out[key] = numero
         return out
 
-    local_map = build_map(df_local, lambda idx: str(idx + 1))
+    map_local: dict[str, str] = {}
+    if not df_local.empty:
+        df_local_base = df_local.copy()
+        mask_local_puro = df_local_base["Tipo_Envio"].astype(str).str.strip().eq("📍 Pedido Local")
+        df_local_turno_reset = df_local_base[mask_local_puro].copy()
+        df_local_otro = df_local_base[~mask_local_puro].copy()
+
+        if not df_local_turno_reset.empty:
+            df_local_turno_reset["_turno_local_norm"] = (
+                df_local_turno_reset["Turno"].astype(str).str.strip().replace({"🌤️ Local Día": "☀️ Local Mañana"})
+            )
+            df_local_turno_reset["_turno_local_norm"] = df_local_turno_reset["_turno_local_norm"].replace("", "sin_turno")
+            df_local_turno_reset["_fecha_local_norm"] = pd.to_datetime(
+                df_local_turno_reset.get("Fecha_Entrega", ""), errors="coerce"
+            ).dt.strftime("%Y-%m-%d")
+            df_local_turno_reset["_fecha_local_norm"] = df_local_turno_reset["_fecha_local_norm"].fillna("sin_fecha")
+            df_local_turno_reset["_sort_dt"] = df_local_turno_reset.apply(compute_sort_key, axis=1)
+            df_local_turno_reset = df_local_turno_reset.sort_values(
+                by=["_turno_local_norm", "_fecha_local_norm", "_sort_dt"], kind="mergesort"
+            ).reset_index(drop=True)
+
+            counters_by_bucket: dict[tuple[str, str], int] = {}
+            for _, row in df_local_turno_reset.iterrows():
+                turno = str(row.get("_turno_local_norm", "")).strip() or "sin_turno"
+                fecha = str(row.get("_fecha_local_norm", "")).strip() or "sin_fecha"
+                bucket = (turno, fecha)
+                counters_by_bucket[bucket] = counters_by_bucket.get(bucket, 0) + 1
+                numero = str(counters_by_bucket[bucket])
+                row_key = _flow_row_key_from_row(row)
+                for raw_key in (row_key, row.get("ID_Pedido", ""), row.get("Folio_Factura", "")):
+                    key = raw_key if isinstance(raw_key, str) and raw_key.startswith("row:") else _flow_match_key(raw_key)
+                    if key and key not in map_local:
+                        map_local[key] = numero
+
+        if not df_local_otro.empty:
+            map_local_fallback = build_map(df_local_otro.reset_index(drop=True), lambda idx: str(idx + 1))
+            for key, numero in map_local_fallback.items():
+                if key and key not in map_local:
+                    map_local[key] = numero
+
     foraneo_map = build_map(df_foraneo, lambda idx: f"{idx + 1:02d}")
-    return local_map, foraneo_map
+    return map_local, foraneo_map
 
 
 def assign_flow_numbers(entries_local, entries_foraneo, df_all: pd.DataFrame) -> None:
