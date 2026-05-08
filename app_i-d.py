@@ -5142,7 +5142,7 @@ if selected_tab_key == "surtidores":
         selected_local = []
         selected_foraneo = []
         with col_local:
-            st.markdown("#### 📍 Selección de pedidos Auto Local")
+            st.markdown("#### 📍 Pedidos LOCALES")
             local_groups = [
                 ("☀️ Local Mañana", "☀️ Local Mañana"),
                 ("🌙 Local Tarde", "🌙 Local Tarde"),
@@ -5185,7 +5185,7 @@ if selected_tab_key == "surtidores":
                 """,
                 unsafe_allow_html=True,
             )
-            st.markdown("#### 🚚 Selección de pedidos Auto Foráneo")
+            st.markdown("#### 🚚 Pedidos FORÁNEOS")
 
             foraneo_impares = []
             foraneo_pares = []
