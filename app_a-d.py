@@ -2101,6 +2101,70 @@ def derive_tab_label(tipo_envio: Optional[str], turno: Optional[str]) -> str:
     return _UNKNOWN_TAB_LABEL
 
 
+def _build_turno_cierre_state_key(origen_tab: str, fecha_label: str) -> str:
+    origen_norm = str(origen_tab or "").strip().lower().replace(" ", "_")
+    fecha_norm = str(fecha_label or "").strip().lower().replace(" ", "_")
+    return f"turno_cerrado::{origen_norm}::{fecha_norm}"
+
+
+def _render_turno_toggle_button(origen_tab: str, fecha_label: str) -> tuple[bool, bool]:
+    cierre_key = _build_turno_cierre_state_key(origen_tab, fecha_label)
+    is_closed = bool(st.session_state.get(cierre_key, False))
+    changed = False
+    action_label = "✅ Habilitar turno" if is_closed else "🚫 Deshabilitar turno"
+    if st.button(action_label, key=f"{cierre_key}::btn"):
+        st.session_state[cierre_key] = not is_closed
+        changed = True
+    return bool(st.session_state.get(cierre_key, False)), changed
+
+
+def _sync_turno_cierre_en_hoja_ruta(origen_tab: str, fecha_label: str, cerrar: bool) -> tuple[bool, str]:
+    fecha_text = str(fecha_label or "").replace("📅", "").strip()
+    try:
+        fecha_entrega = datetime.strptime(fecha_text, "%d/%m/%Y").date()
+    except Exception:
+        return False, "No se pudo interpretar la fecha del subtab."
+
+    reportes_almacen_id = str(
+        st.secrets.get("gsheets", {}).get(
+            "reportes_almacen_sheet_id",
+            st.secrets.get("gsheets", {}).get("reportes_sheet_id", ""),
+        )
+    ).strip()
+    if not reportes_almacen_id:
+        return False, "Falta configurar gsheets.reportes_almacen_sheet_id en secrets."
+
+    try:
+        client = get_gspread_client(_credentials_json_dict=GSHEETS_CREDENTIALS)
+        sheet_name = _resolve_hoja_ruta_sheet_name(origen_tab, origen_tab)
+        ws = client.open_by_key(reportes_almacen_id).worksheet(sheet_name)
+    except Exception as exc:
+        return False, f"No se pudo abrir la hoja de ruta: {exc}"
+
+    section_title, week_marker = _build_section_header(origen_tab, {"Turno": origen_tab}, fecha_entrega)
+    values = _hoja_ruta_get_all_values(ws)
+    title_row = _find_section_title_row(values, section_title, week_marker=week_marker)
+    if title_row is None:
+        return False, "No se encontró la sección en Hoja_Ruta para esa fecha/turno."
+
+    cierre_row = max(1, title_row - 1)
+    cierre_cells = values[cierre_row - 1] if cierre_row - 1 < len(values) else []
+    cierre_actual = _normalize_plain_text(cierre_cells[2] if len(cierre_cells) > 2 else "").upper()
+
+    if cerrar:
+        if cierre_row == title_row or cierre_actual:
+            inserted = _insert_blank_rows(ws, start_row=title_row, count=1)
+            if not inserted:
+                return False, "No se pudo insertar una fila para marcar CERRADA."
+            title_row += 1
+            cierre_row = title_row - 1
+        _write_row_values(ws, cierre_row, ["", "", "CERRADA"], start_col=1)
+    else:
+        if cierre_actual == "CERRADA":
+            _write_row_values(ws, cierre_row, ["", "", ""], start_col=1)
+    return True, ""
+
+
 def collect_tab_locations(
     df: pd.DataFrame,
     tipo_col: str = "Tipo_Envio",
@@ -8281,6 +8345,18 @@ if df_main is not None:
                             tab_label.replace("📅 ", ""),
                             format="%d/%m/%Y",
                         )
+                        turno_cerrado, cambio_cierre = _render_turno_toggle_button(origen_tab, tab_label)
+                        if cambio_cierre:
+                            ok_sync, err_sync = _sync_turno_cierre_en_hoja_ruta(
+                                origen_tab=origen_tab,
+                                fecha_label=tab_label,
+                                cerrar=turno_cerrado,
+                            )
+                            if not ok_sync:
+                                st.warning(f"⚠️ No se pudo reflejar en Hoja_Ruta: {err_sync}")
+                            st.rerun()
+                        if turno_cerrado:
+                            st.markdown("### CERRADA")
                         pedidos_fecha = pedidos_turno_activos[
                             pedidos_turno_activos["Fecha_Entrega_dt"]
                             == current_selected_date_dt
@@ -8461,6 +8537,18 @@ if df_main is not None:
                                     tab_label.replace("📅 ", ""),
                                     format="%d/%m/%Y",
                                 )
+                                turno_cerrado, cambio_cierre = _render_turno_toggle_button("Saltillo", tab_label)
+                                if cambio_cierre:
+                                    ok_sync, err_sync = _sync_turno_cierre_en_hoja_ruta(
+                                        origen_tab="Saltillo",
+                                        fecha_label=tab_label,
+                                        cerrar=turno_cerrado,
+                                    )
+                                    if not ok_sync:
+                                        st.warning(f"⚠️ No se pudo reflejar en Hoja_Ruta: {err_sync}")
+                                    st.rerun()
+                                if turno_cerrado:
+                                    st.markdown("### CERRADA")
                                 pedidos_fecha = pedidos_s_activos[
                                     pedidos_s_activos["Fecha_Entrega_dt"]
                                     == current_selected_date_dt
