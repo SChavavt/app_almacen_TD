@@ -4270,159 +4270,179 @@ def render_seguimiento_cobranza_tab_gerente(usuario_actual: str | None):
         st.info("Aún no hay seguimientos capturados.")
         return
 
-    st.markdown("#### 📤 Exportar comentarios del día")
-    ts_today = pd.to_datetime(com_df.get("Timestamp", ""), errors="coerce")
-    hoy_cdmx = pd.Timestamp(now_cdmx().date())
-    com_hoy = com_df[ts_today.dt.normalize() == hoy_cdmx].copy()
-    if com_hoy.empty:
-        st.caption("Hoy no hay comentarios en `cobranza_comentarios` para exportar.")
-    else:
-        com_hoy["_ts"] = ts_today.loc[com_hoy.index]
-        com_hoy = com_hoy.sort_values(["Codigo", "Folio", "_ts"]).drop_duplicates(subset=["Codigo", "Folio"], keep="last")
-
-        base_nom = base_df[["Codigo", "Razon_Social"]].drop_duplicates() if not base_df.empty else pd.DataFrame(columns=["Codigo", "Razon_Social"])
-        venc_cols = ["Codigo", "Folio", "Saldo_Vence", "Fecha_Factura", "Fecha_Vencimiento", "Condicion"]
-        venc_local = venc_df[[c for c in venc_cols if c in venc_df.columns]].copy() if not venc_df.empty else pd.DataFrame(columns=venc_cols)
-        if not venc_local.empty:
-            venc_local = venc_local.sort_values(["Codigo", "Folio"]).drop_duplicates(subset=["Codigo", "Folio"], keep="last")
-
-        export_df = com_hoy.merge(base_nom, on="Codigo", how="left")
-        export_df = export_df.merge(venc_local, on=["Codigo", "Folio"], how="left")
-        export_df["Término_Crédito"] = export_df.get("Condicion", "")
-        export_df["Factura"] = export_df.get("Folio", "")
-        export_df["Monto"] = export_df.get("Saldo_Vence", "")
-        export_df["Fecha_Emisión"] = export_df.get("Fecha_Factura", "")
-        export_df["Fecha_Vencimiento"] = export_df.get("Fecha_Vencimiento", "")
-        export_df["Comentario"] = export_df.get("Comentario", "")
-        export_df["Hecho Por"] = export_df.get("Actualizado_por", "")
-        export_df = export_df.rename(columns={"Razon_Social": "Cliente"})
-
-        export_df["Hora de Acción Realizada"] = pd.to_datetime(export_df.get("Timestamp", ""), errors="coerce").dt.strftime("%H:%M:%S")
-        export_df["Monto"] = pd.to_numeric(export_df.get("Monto", ""), errors="coerce")
-        cols_export = ["Cliente", "Factura", "Monto", "Fecha_Emisión", "Fecha_Vencimiento", "Término_Crédito", "Comentario", "Hecho Por", "Hora de Acción Realizada"]
-        export_df = export_df[[c for c in cols_export if c in export_df.columns]].copy()
-
-        bio = BytesIO()
-        with pd.ExcelWriter(bio, engine="xlsxwriter") as writer:
-            export_df.to_excel(writer, sheet_name="Cobros_Del_Dia", index=False)
-            worksheet = writer.sheets.get("Cobros_Del_Dia")
-            if worksheet is not None and not export_df.empty:
-                header_fmt = writer.book.add_format({
-                    "bold": True,
-                    "bg_color": "#D9EAF7",
-                    "border": 1,
-                    "align": "center",
-                    "valign": "vcenter",
-                })
-                money_fmt = writer.book.add_format({"num_format": '"$"#,##0.00'})
-                border_fmt = writer.book.add_format({"border": 1})
-
-                # Encabezados con fondo azul claro y borde
-                for idx_col, col_name in enumerate(export_df.columns):
-                    worksheet.write(0, idx_col, col_name, header_fmt)
-
-                # Bordes para celdas con contenido (sin tocar celdas vacías)
-                total_rows = len(export_df)
-                total_cols = len(export_df.columns)
-                worksheet.conditional_format(
-                    1, 0, total_rows, total_cols - 1,
-                    {"type": "no_blanks", "format": border_fmt}
-                )
-
-                # Congela encabezado y primeras 2 columnas (Cliente, Factura)
-                worksheet.freeze_panes(1, 2)
-
-                for idx_col, col_name in enumerate(export_df.columns):
-                    col_values = export_df[col_name].astype(str).fillna("")
-                    max_len_data = int(col_values.map(len).max()) if not col_values.empty else 0
-                    max_len = max(max_len_data, len(str(col_name))) + 2
-                    max_len = min(max_len, 80)
-                    if col_name == "Monto":
-                        worksheet.set_column(idx_col, idx_col, max_len, money_fmt)
-                    else:
-                        worksheet.set_column(idx_col, idx_col, max_len)
-        st.download_button(
-            "⬇️ Descargar Excel de cobros del día",
-            data=bio.getvalue(),
-            file_name=f"cobros_{hoy_cdmx.strftime('%Y-%m-%d')}.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            use_container_width=True,
-            key="ger_seg_cob_download_hoy",
-        )
-        mail_cfg = _mail_config()
-        provider = str(mail_cfg.get("provider", "")).strip().lower()
-        to_emails = [str(e).strip() for e in (mail_cfg.get("to_emails", []) or []) if str(e).strip()]
-        from_email = str(mail_cfg.get("from_email", "")).strip()
-        subject = str(mail_cfg.get("subject", "Cobranza - Comentarios del día")).strip()
-        send_time = str(mail_cfg.get("send_time", "")).strip()
-        timezone_name = str(mail_cfg.get("timezone", "America/Mexico_City")).strip() or "America/Mexico_City"
-        sendgrid_api_key = str(st.secrets.get("sendgrid", {}).get("api_key", "")).strip()
-        excel_bytes = bio.getvalue()
-
-        if provider == "sendgrid" and from_email and to_emails and sendgrid_api_key:
-            st.caption(f"Correo automático configurado vía SendGrid a las {send_time or 'hora no definida'} ({timezone_name}).")
-            schedule_hhmm = _parse_hhmm(send_time)
-            tz_ok = True
-            try:
-                tz_send = ZoneInfo(timezone_name)
-            except Exception:
-                tz_ok = False
-                tz_send = MEXICO_CITY_TZ
-            now_send_tz = datetime.now(tz_send)
-            stamp_key = f"{now_send_tz.date().isoformat()}|{','.join(to_emails)}|{subject}"
-            should_autosend = bool(
-                schedule_hhmm
-                and tz_ok
-                and now_send_tz.hour == schedule_hhmm[0]
-                and now_send_tz.minute == schedule_hhmm[1]
-            )
-            sent_today = _COBRANZA_MAIL_LAST_SENT.get(stamp_key)
-
-            if should_autosend and not sent_today:
-                try:
-                    enviados, fallidos = _send_mail_sendgrid_per_recipient(
-                        from_email=from_email,
-                        to_emails=to_emails,
-                        subject=subject,
-                        html_content="<p>Adjunto encontrarás el Excel de comentarios del día de cobranza.</p>",
-                        attachment_name=f"cobros_{hoy_cdmx.strftime('%Y-%m-%d')}.xlsx",
-                        attachment_bytes=excel_bytes,
-                        api_key=sendgrid_api_key,
-                    )
-                    if enviados:
-                        _COBRANZA_MAIL_LAST_SENT[stamp_key] = now_send_tz.isoformat()
-                        st.success(f"📧 Correo automático enviado a: {', '.join(enviados)}")
-                    if fallidos:
-                        for email, motivo in fallidos:
-                            st.warning(f"No se pudo enviar a {email}: {motivo}")
-                except Exception as e:
-                    st.warning(f"No se pudo enviar el correo automático: {_mail_error_hint(e)}")
-
-            if st.button("📧 Enviar ahora por correo", use_container_width=True, key="ger_seg_cob_mail_hoy"):
-                try:
-                    enviados, fallidos = _send_mail_sendgrid_per_recipient(
-                        from_email=from_email,
-                        to_emails=to_emails,
-                        subject=subject,
-                        html_content="<p>Adjunto encontrarás el Excel de comentarios del día de cobranza.</p>",
-                        attachment_name=f"cobros_{hoy_cdmx.strftime('%Y-%m-%d')}.xlsx",
-                        attachment_bytes=excel_bytes,
-                        api_key=sendgrid_api_key,
-                    )
-                    if enviados:
-                        _COBRANZA_MAIL_LAST_SENT[stamp_key] = now_send_tz.isoformat()
-                        st.success(f"✅ Correo enviado a: {', '.join(enviados)}")
-                    if fallidos:
-                        for email, motivo in fallidos:
-                            st.error(f"❌ No se pudo enviar a {email}: {motivo}")
-                except Exception as e:
-                    st.error(f"❌ Error enviando correo: {_mail_error_hint(e)}")
-                    st.info(
-                        "Tip: en SendGrid valida que el remitente esté autenticado (Single Sender o Domain Authentication) "
-                        "y que la API key tenga permiso **Mail Send**."
-                    )
+    if usuario_actual == "SChava":
+        st.markdown("#### 📤 Exportar comentarios del día")
+        ts_today = pd.to_datetime(com_df.get("Timestamp", ""), errors="coerce")
+        hoy_cdmx = pd.Timestamp(now_cdmx().date())
+        com_hoy = com_df[ts_today.dt.normalize() == hoy_cdmx].copy()
+        if com_hoy.empty:
+            st.caption("Hoy no hay comentarios en `cobranza_comentarios` para exportar.")
         else:
-            st.caption("Para habilitar envío por correo, configura [mail] y [sendgrid] en secrets.")
+            com_hoy["_ts"] = ts_today.loc[com_hoy.index]
+            com_hoy = com_hoy.sort_values(["Codigo", "Folio", "_ts"]).drop_duplicates(subset=["Codigo", "Folio"], keep="last")
+
+            base_nom = base_df[["Codigo", "Razon_Social"]].drop_duplicates() if not base_df.empty else pd.DataFrame(columns=["Codigo", "Razon_Social"])
+            venc_cols = ["Codigo", "Folio", "Saldo_Vence", "Fecha_Factura", "Fecha_Vencimiento", "Condicion"]
+            venc_local = venc_df[[c for c in venc_cols if c in venc_df.columns]].copy() if not venc_df.empty else pd.DataFrame(columns=venc_cols)
+            if not venc_local.empty:
+                venc_local = venc_local.sort_values(["Codigo", "Folio"]).drop_duplicates(subset=["Codigo", "Folio"], keep="last")
+
+            export_df = com_hoy.merge(base_nom, on="Codigo", how="left")
+            export_df = export_df.merge(venc_local, on=["Codigo", "Folio"], how="left")
+            export_df["Término_Crédito"] = export_df.get("Condicion", "")
+            export_df["Factura"] = export_df.get("Folio", "")
+            export_df["Monto"] = export_df.get("Saldo_Vence", "")
+            export_df["Fecha_Emisión"] = export_df.get("Fecha_Factura", "")
+            export_df["Fecha_Vencimiento"] = export_df.get("Fecha_Vencimiento", "")
+            export_df["Comentario"] = export_df.get("Comentario", "")
+            export_df["Fecha_Proximo_Pago"] = export_df.get("Fecha_Proximo_Pago", "")
+            export_df["Estatus_Seguimiento"] = export_df.get("Estatus_Seguimiento", "")
+            export_df["Hecho Por"] = export_df.get("Actualizado_por", "")
+            export_df = export_df.rename(columns={"Razon_Social": "Cliente"})
+
+            export_df["_hora_accion_dt"] = pd.to_datetime(export_df.get("Timestamp", ""), errors="coerce")
+            export_df["Hora de Acción Realizada"] = export_df["_hora_accion_dt"].dt.strftime("%H:%M:%S")
+            export_df["Monto"] = pd.to_numeric(export_df.get("Monto", ""), errors="coerce")
+            export_df = export_df.sort_values(["_hora_accion_dt", "Cliente", "Factura"], ascending=[True, True, True], na_position="last")
+            cols_export = [
+                "Cliente", "Factura", "Monto", "Fecha_Emisión", "Fecha_Vencimiento", "Término_Crédito",
+                "Fecha_Proximo_Pago", "Estatus_Seguimiento", "Comentario", "Hecho Por", "Hora de Acción Realizada"
+            ]
+            export_df = export_df[[c for c in cols_export if c in export_df.columns]].copy()
+
+            bio = BytesIO()
+            with pd.ExcelWriter(bio, engine="xlsxwriter") as writer:
+                export_df.to_excel(writer, sheet_name="Cobros_Del_Dia", index=False)
+                worksheet = writer.sheets.get("Cobros_Del_Dia")
+                if worksheet is not None and not export_df.empty:
+                    header_fmt = writer.book.add_format({
+                        "bold": True,
+                        "bg_color": "#D9EAF7",
+                        "border": 1,
+                        "align": "center",
+                        "valign": "vcenter",
+                    })
+                    money_fmt = writer.book.add_format({"num_format": '"$"#,##0.00'})
+                    border_fmt = writer.book.add_format({"border": 1})
+
+                    # Encabezados con fondo azul claro y borde
+                    for idx_col, col_name in enumerate(export_df.columns):
+                        worksheet.write(0, idx_col, col_name, header_fmt)
+
+                    # Bordes para celdas con contenido (sin tocar celdas vacías)
+                    total_rows = len(export_df)
+                    total_cols = len(export_df.columns)
+                    worksheet.conditional_format(
+                        1, 0, total_rows, total_cols - 1,
+                        {"type": "no_blanks", "format": border_fmt}
+                    )
+
+                    liquidado_idx = export_df.columns.get_loc("Estatus_Seguimiento") if "Estatus_Seguimiento" in export_df.columns else None
+                    if liquidado_idx is not None:
+                        liquidado_fmt = writer.book.add_format({"bg_color": "#D9F2D9", "border": 1})
+                        worksheet.conditional_format(
+                            1, 0, total_rows, total_cols - 1,
+                            {
+                                "type": "formula",
+                                "criteria": f'=UPPER(${chr(65 + liquidado_idx)}2)="LIQUIDADO"',
+                                "format": liquidado_fmt,
+                            },
+                        )
+
+                    # Congela encabezado y primeras 2 columnas (Cliente, Factura)
+                    worksheet.freeze_panes(1, 2)
+
+                    for idx_col, col_name in enumerate(export_df.columns):
+                        col_values = export_df[col_name].astype(str).fillna("")
+                        max_len_data = int(col_values.map(len).max()) if not col_values.empty else 0
+                        max_len = max(max_len_data, len(str(col_name))) + 2
+                        max_len = min(max_len, 80)
+                        if col_name == "Monto":
+                            worksheet.set_column(idx_col, idx_col, max_len, money_fmt)
+                        else:
+                            worksheet.set_column(idx_col, idx_col, max_len)
+            st.download_button(
+                "⬇️ Descargar Excel de cobros del día",
+                data=bio.getvalue(),
+                file_name=f"cobros_{hoy_cdmx.strftime('%Y-%m-%d')}.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                use_container_width=True,
+                key="ger_seg_cob_download_hoy",
+            )
+            mail_cfg = _mail_config()
+            provider = str(mail_cfg.get("provider", "")).strip().lower()
+            to_emails = [str(e).strip() for e in (mail_cfg.get("to_emails", []) or []) if str(e).strip()]
+            from_email = str(mail_cfg.get("from_email", "")).strip()
+            subject = str(mail_cfg.get("subject", "Cobranza - Comentarios del día")).strip()
+            send_time = str(mail_cfg.get("send_time", "")).strip()
+            timezone_name = str(mail_cfg.get("timezone", "America/Mexico_City")).strip() or "America/Mexico_City"
+            sendgrid_api_key = str(st.secrets.get("sendgrid", {}).get("api_key", "")).strip()
+            excel_bytes = bio.getvalue()
+
+            if provider == "sendgrid" and from_email and to_emails and sendgrid_api_key:
+                st.caption(f"Correo automático configurado vía SendGrid a las {send_time or 'hora no definida'} ({timezone_name}).")
+                schedule_hhmm = _parse_hhmm(send_time)
+                tz_ok = True
+                try:
+                    tz_send = ZoneInfo(timezone_name)
+                except Exception:
+                    tz_ok = False
+                    tz_send = MEXICO_CITY_TZ
+                now_send_tz = datetime.now(tz_send)
+                stamp_key = f"{now_send_tz.date().isoformat()}|{','.join(to_emails)}|{subject}"
+                should_autosend = bool(
+                    schedule_hhmm
+                    and tz_ok
+                    and now_send_tz.hour == schedule_hhmm[0]
+                    and now_send_tz.minute == schedule_hhmm[1]
+                )
+                sent_today = _COBRANZA_MAIL_LAST_SENT.get(stamp_key)
+
+                if should_autosend and not sent_today:
+                    try:
+                        enviados, fallidos = _send_mail_sendgrid_per_recipient(
+                            from_email=from_email,
+                            to_emails=to_emails,
+                            subject=subject,
+                            html_content="<p>Adjunto encontrarás el Excel de comentarios del día de cobranza.</p>",
+                            attachment_name=f"cobros_{hoy_cdmx.strftime('%Y-%m-%d')}.xlsx",
+                            attachment_bytes=excel_bytes,
+                            api_key=sendgrid_api_key,
+                        )
+                        if enviados:
+                            _COBRANZA_MAIL_LAST_SENT[stamp_key] = now_send_tz.isoformat()
+                            st.success(f"📧 Correo automático enviado a: {', '.join(enviados)}")
+                        if fallidos:
+                            for email, motivo in fallidos:
+                                st.warning(f"No se pudo enviar a {email}: {motivo}")
+                    except Exception as e:
+                        st.warning(f"No se pudo enviar el correo automático: {_mail_error_hint(e)}")
+
+                if st.button("📧 Enviar ahora por correo", use_container_width=True, key="ger_seg_cob_mail_hoy"):
+                    try:
+                        enviados, fallidos = _send_mail_sendgrid_per_recipient(
+                            from_email=from_email,
+                            to_emails=to_emails,
+                            subject=subject,
+                            html_content="<p>Adjunto encontrarás el Excel de comentarios del día de cobranza.</p>",
+                            attachment_name=f"cobros_{hoy_cdmx.strftime('%Y-%m-%d')}.xlsx",
+                            attachment_bytes=excel_bytes,
+                            api_key=sendgrid_api_key,
+                        )
+                        if enviados:
+                            _COBRANZA_MAIL_LAST_SENT[stamp_key] = now_send_tz.isoformat()
+                            st.success(f"✅ Correo enviado a: {', '.join(enviados)}")
+                        if fallidos:
+                            for email, motivo in fallidos:
+                                st.error(f"❌ No se pudo enviar a {email}: {motivo}")
+                    except Exception as e:
+                        st.error(f"❌ Error enviando correo: {_mail_error_hint(e)}")
+                        st.info(
+                            "Tip: en SendGrid valida que el remitente esté autenticado (Single Sender o Domain Authentication) "
+                            "y que la API key tenga permiso **Mail Send**."
+                        )
+            else:
+                st.caption("Para habilitar envío por correo, configura [mail] y [sendgrid] en secrets.")
 
     cliente_nom = base_df[["Codigo", "Razon_Social"]].drop_duplicates() if not base_df.empty else pd.DataFrame(columns=["Codigo", "Razon_Social"])
 
