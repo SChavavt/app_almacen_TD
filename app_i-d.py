@@ -5123,21 +5123,37 @@ if selected_tab_key == "surtidores":
         foraneo_options.keys(), key=lambda k: foraneo_order.get(k, float("inf"))
     )
 
-    with st.form("surtidores_asignacion_form"):
-        st.markdown("**Selección de surtidor**")
-        selected_surtidor_nombre = st.radio(
-            "Surtidor",
-            options=surtidores_predefinidos,
-            index=(
-                surtidores_predefinidos.index(st.session_state.selected_surtidor_nombre)
-                if st.session_state.selected_surtidor_nombre in surtidores_predefinidos
-                else 0
-            ),
-            horizontal=True,
-            label_visibility="collapsed",
-            key="selected_surtidor_nombre_form",
-        )
+    st.markdown("**Surtidor seleccionado**")
+    surtidores_grid = surtidores_predefinidos[:6]
+    if (
+        not st.session_state.selected_surtidor_nombre
+        and surtidores_grid
+    ):
+        st.session_state.selected_surtidor_nombre = surtidores_grid[0]
 
+    for row_idx in range(2):
+        cols = st.columns(3, gap="small")
+        for col_idx in range(3):
+            idx = row_idx * 3 + col_idx
+            if idx >= len(surtidores_grid):
+                continue
+            nombre_surtidor = surtidores_grid[idx]
+            with cols[col_idx]:
+                if st.button(
+                    nombre_surtidor,
+                    key=f"surtidor_grid_btn_{idx}",
+                    type=(
+                        "primary"
+                        if st.session_state.selected_surtidor_nombre == nombre_surtidor
+                        else "secondary"
+                    ),
+                    use_container_width=True,
+                ):
+                    st.session_state.selected_surtidor_nombre = nombre_surtidor
+
+    selected_surtidor_nombre = st.session_state.selected_surtidor_nombre
+
+    with st.form("surtidores_asignacion_form"):
         col_local, col_spacer, col_foraneo = st.columns([0.8, 0.02, 1.6], gap="small")
         selected_local = []
         selected_foraneo = []
