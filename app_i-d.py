@@ -5159,7 +5159,7 @@ if selected_tab_key == "surtidores":
         st.markdown(
             """
             <style>
-            div[data-testid="stCheckbox"] label {
+            div[data-testid="stToggle"] label {
                 width: 100%;
                 border: 1px solid rgba(128, 128, 128, 0.35);
                 border-radius: 10px;
@@ -5167,11 +5167,11 @@ if selected_tab_key == "surtidores":
                 margin-bottom: 0.3rem;
                 background: rgba(255, 255, 255, 0.02);
             }
-            div[data-testid="stCheckbox"] label:hover {
+            div[data-testid="stToggle"] label:hover {
                 border-color: rgba(255, 255, 255, 0.55);
                 background: rgba(255, 255, 255, 0.05);
             }
-            div[data-testid="stCheckbox"] label p {
+            div[data-testid="stToggle"] label p {
                 font-size: 0.95rem;
                 line-height: 1.25rem;
             }
@@ -5211,7 +5211,7 @@ if selected_tab_key == "surtidores":
                     continue
                 st.markdown(f"**{group_label}**")
                 for key in keys:
-                    if st.checkbox(
+                    if st.toggle(
                         local_options.get(key, key),
                         key=f"surtidor_local_pick_{key}",
                     ):
@@ -5234,7 +5234,7 @@ if selected_tab_key == "surtidores":
                 with col_foraneo_impares:
                     if i < len(foraneo_impares):
                         key_impar = foraneo_impares[i]
-                        if st.checkbox(
+                        if st.toggle(
                             foraneo_options.get(key_impar, key_impar),
                             key=f"surtidor_foraneo_pick_{key_impar}",
                         ):
@@ -5242,7 +5242,7 @@ if selected_tab_key == "surtidores":
                 with col_foraneo_pares:
                     if i < len(foraneo_pares):
                         key_par = foraneo_pares[i]
-                        if st.checkbox(
+                        if st.toggle(
                             foraneo_options.get(key_par, key_par),
                             key=f"surtidor_foraneo_pick_{key_par}",
                         ):
