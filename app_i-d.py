@@ -5124,97 +5124,117 @@ if selected_tab_key == "surtidores":
     )
 
     with st.form("surtidores_asignacion_form"):
-        st.markdown("**Selección de surtidor**")
-        selected_surtidor_nombre = st.radio(
-            "Surtidor",
-            options=surtidores_predefinidos,
-            index=(
-                surtidores_predefinidos.index(st.session_state.selected_surtidor_nombre)
-                if st.session_state.selected_surtidor_nombre in surtidores_predefinidos
-                else 0
-            ),
-            horizontal=True,
-            label_visibility="collapsed",
-            key="selected_surtidor_nombre_form",
-        )
+        selected_surtidor_nombre = sanitize_text(st.session_state.get("selected_surtidor_nombre", ""))
+        st.markdown("**Surtidor seleccionado**")
+
+        selected_row_1 = st.columns(3, gap="small")
+        selected_row_2 = st.columns(3, gap="small")
+        surtidor_buttons = list(zip(surtidores_predefinidos[:3], selected_row_1)) + list(zip(surtidores_predefinidos[3:], selected_row_2))
+        for surtidor_nombre, col_surtidor in surtidor_buttons:
+            with col_surtidor:
+                button_type = "primary" if selected_surtidor_nombre == surtidor_nombre else "secondary"
+                if st.form_submit_button(
+                    surtidor_nombre,
+                    type=button_type,
+                    use_container_width=True,
+                    help=f"Seleccionar surtidor {surtidor_nombre}",
+                ):
+                    st.session_state.selected_surtidor_nombre = surtidor_nombre
+                    selected_surtidor_nombre = surtidor_nombre
+
+        st.markdown('<div style="height:0.65rem"></div>', unsafe_allow_html=True)
+        st.markdown("**Selección de pedidos**")
+        col_modo_local, col_modo_foraneo = st.columns(2, gap="small")
+        with col_modo_local:
+            with st.container(border=True):
+                mostrar_local = st.toggle("📍 Auto Local", value=True, key="surtidor_show_auto_local")
+        with col_modo_foraneo:
+            with st.container(border=True):
+                mostrar_foraneo = st.toggle("🚚 Auto Foráneo", value=True, key="surtidor_show_auto_foraneo")
 
         col_local, col_spacer, col_foraneo = st.columns([0.8, 0.02, 1.6], gap="small")
         selected_local = []
         selected_foraneo = []
         with col_local:
             st.markdown("#### 📍 Selección de pedidos Auto Local")
-            local_groups = [
-                ("☀️ Local Mañana", "☀️ Local Mañana"),
-                ("🌙 Local Tarde", "🌙 Local Tarde"),
-                ("🌵 Saltillo", "🌵 Saltillo"),
-                ("📦 Pasa a Bodega", "📦 Pasa a Bodega"),
-            ]
-            local_grouped = {label: [] for _, label in local_groups}
-            local_grouped["Otros"] = []
-            for key in local_sorted_keys:
-                entry = local_entry_by_key.get(key)
-                turno_norm = normalize_turno_label(sanitize_text(entry.get("turno", ""))) if entry else ""
-                placed = False
-                for canonical, label in local_groups:
-                    if turno_norm == canonical:
-                        local_grouped[label].append(key)
-                        placed = True
-                        break
-                if not placed:
-                    local_grouped["Otros"].append(key)
+            if not mostrar_local:
+                st.caption("Activa **Auto Local** para seleccionar pedidos.")
+            else:
+                local_groups = [
+                    ("☀️ Local Mañana", "☀️ Local Mañana"),
+                    ("🌙 Local Tarde", "🌙 Local Tarde"),
+                    ("🌵 Saltillo", "🌵 Saltillo"),
+                    ("📦 Pasa a Bodega", "📦 Pasa a Bodega"),
+                ]
+                local_grouped = {label: [] for _, label in local_groups}
+                local_grouped["Otros"] = []
+                for key in local_sorted_keys:
+                    entry = local_entry_by_key.get(key)
+                    turno_norm = normalize_turno_label(sanitize_text(entry.get("turno", ""))) if entry else ""
+                    placed = False
+                    for canonical, label in local_groups:
+                        if turno_norm == canonical:
+                            local_grouped[label].append(key)
+                            placed = True
+                            break
+                    if not placed:
+                        local_grouped["Otros"].append(key)
 
-            for group_label in [g[1] for g in local_groups] + ["Otros"]:
-                keys = local_grouped.get(group_label, [])
-                if not keys:
-                    continue
-                st.markdown(f"**{group_label}**")
-                for key in keys:
-                    if st.checkbox(
-                        local_options.get(key, key),
-                        key=f"surtidor_local_pick_{key}",
-                    ):
-                        selected_local.append(key)
+                for group_label in [g[1] for g in local_groups] + ["Otros"]:
+                    keys = local_grouped.get(group_label, [])
+                    if not keys:
+                        continue
+                    st.markdown(f"**{group_label}**")
+                    for key in keys:
+                        if st.checkbox(
+                            local_options.get(key, key),
+                            key=f"surtidor_local_pick_{key}",
+                        ):
+                            selected_local.append(key)
         with col_foraneo:
-            st.markdown(
-                """
-                <style>
-                div[data-testid="stCheckbox"] label p {
-                    white-space: nowrap;
-                }
-                </style>
-                """,
-                unsafe_allow_html=True,
-            )
-            st.markdown("#### 🚚 Selección de pedidos Auto Foráneo")
+            if not mostrar_foraneo:
+                st.caption("Activa **Auto Foráneo** para seleccionar pedidos.")
+            else:
+                st.markdown("#### 🚚 Selección de pedidos Auto Foráneo")
+                st.markdown(
+                    """
+                    <style>
+                    div[data-testid="stCheckbox"] label p {
+                        white-space: nowrap;
+                    }
+                    </style>
+                    """,
+                    unsafe_allow_html=True,
+                )
 
-            foraneo_impares = []
-            foraneo_pares = []
-            for key in foraneo_sorted_keys:
-                numero = foraneo_order.get(key, float("inf"))
-                if isinstance(numero, int) and numero % 2 == 0:
-                    foraneo_pares.append(key)
-                else:
-                    foraneo_impares.append(key)
+                foraneo_impares = []
+                foraneo_pares = []
+                for key in foraneo_sorted_keys:
+                    numero = foraneo_order.get(key, float("inf"))
+                    if isinstance(numero, int) and numero % 2 == 0:
+                        foraneo_pares.append(key)
+                    else:
+                        foraneo_impares.append(key)
 
-            max_rows = max(len(foraneo_impares), len(foraneo_pares))
-            for i in range(max_rows):
-                col_foraneo_impares, col_foraneo_pares = st.columns(2, gap="large")
-                with col_foraneo_impares:
-                    if i < len(foraneo_impares):
-                        key_impar = foraneo_impares[i]
-                        if st.checkbox(
-                            foraneo_options.get(key_impar, key_impar),
-                            key=f"surtidor_foraneo_pick_{key_impar}",
-                        ):
-                            selected_foraneo.append(key_impar)
-                with col_foraneo_pares:
-                    if i < len(foraneo_pares):
-                        key_par = foraneo_pares[i]
-                        if st.checkbox(
-                            foraneo_options.get(key_par, key_par),
-                            key=f"surtidor_foraneo_pick_{key_par}",
-                        ):
-                            selected_foraneo.append(key_par)
+                max_rows = max(len(foraneo_impares), len(foraneo_pares))
+                for i in range(max_rows):
+                    col_foraneo_impares, col_foraneo_pares = st.columns(2, gap="large")
+                    with col_foraneo_impares:
+                        if i < len(foraneo_impares):
+                            key_impar = foraneo_impares[i]
+                            if st.checkbox(
+                                foraneo_options.get(key_impar, key_impar),
+                                key=f"surtidor_foraneo_pick_{key_impar}",
+                            ):
+                                selected_foraneo.append(key_impar)
+                    with col_foraneo_pares:
+                        if i < len(foraneo_pares):
+                            key_par = foraneo_pares[i]
+                            if st.checkbox(
+                                foraneo_options.get(key_par, key_par),
+                                key=f"surtidor_foraneo_pick_{key_par}",
+                            ):
+                                selected_foraneo.append(key_par)
 
         st.markdown("<div style=\"height:0.75rem\"></div>", unsafe_allow_html=True)
         st.caption("Tip: primero marca los pedidos y después toca el botón para confirmar la asignación.")
@@ -5223,8 +5243,7 @@ if selected_tab_key == "surtidores":
             submit_assign = st.form_submit_button("✅ Asignar surtidor", use_container_width=False)
 
     if submit_assign:
-        st.session_state.selected_surtidor_nombre = selected_surtidor_nombre
-        nombre = sanitize_text(selected_surtidor_nombre)
+        nombre = sanitize_text(st.session_state.get("selected_surtidor_nombre", selected_surtidor_nombre))
         if not nombre:
             st.warning("Selecciona un surtidor para asignar.")
         else:
