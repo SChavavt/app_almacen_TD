@@ -4912,25 +4912,6 @@ if selected_tab_key == "surtidores":
     if "selected_surtidor_nombre" not in st.session_state:
         st.session_state.selected_surtidor_nombre = ""
 
-    st.markdown("**Surtidor seleccionado**")
-    for row_start in range(0, len(surtidores_predefinidos), 3):
-        cols_surtidor = st.columns(3, gap="small")
-        for offset in range(3):
-            idx = row_start + offset
-            if idx >= len(surtidores_predefinidos):
-                continue
-            nombre = surtidores_predefinidos[idx]
-            is_selected = st.session_state.selected_surtidor_nombre == nombre
-            with cols_surtidor[offset]:
-                if st.button(
-                    nombre,
-                    key=f"btn_surtidor_{idx}_{nombre}",
-                    use_container_width=True,
-                    type="primary" if is_selected else "secondary",
-                ):
-                    st.session_state.selected_surtidor_nombre = nombre
-                    st.rerun()
-
     seen_local = set()
     local_hoy = []
     for entry in auto_local_entries:
@@ -4979,53 +4960,71 @@ if selected_tab_key == "surtidores":
         foraneo_options.keys(), key=lambda k: foraneo_order.get(k, float("inf"))
     )
 
-    col_local, col_foraneo = st.columns(2, gap="large")
-    selected_local = []
-    selected_foraneo = []
-    with col_local:
-        st.markdown("#### 📍 Auto Local")
-        local_groups = [
-            ("☀️ Local Mañana", "☀️ Local Mañana"),
-            ("🌙 Local Tarde", "🌙 Local Tarde"),
-            ("🌵 Saltillo", "🌵 Saltillo"),
-            ("📦 Pasa a Bodega", "📦 Pasa a Bodega"),
-        ]
-        local_grouped = {label: [] for _, label in local_groups}
-        local_grouped["Otros"] = []
-        for key in local_sorted_keys:
-            entry = local_entry_by_key.get(key)
-            turno_norm = normalize_turno_label(sanitize_text(entry.get("turno", ""))) if entry else ""
-            placed = False
-            for canonical, label in local_groups:
-                if turno_norm == canonical:
-                    local_grouped[label].append(key)
-                    placed = True
-                    break
-            if not placed:
-                local_grouped["Otros"].append(key)
+    with st.form("surtidores_asignacion_form"):
+        st.markdown("**Selección de surtidor**")
+        selected_surtidor_nombre = st.radio(
+            "Surtidor",
+            options=surtidores_predefinidos,
+            index=(
+                surtidores_predefinidos.index(st.session_state.selected_surtidor_nombre)
+                if st.session_state.selected_surtidor_nombre in surtidores_predefinidos
+                else 0
+            ),
+            horizontal=True,
+            label_visibility="collapsed",
+            key="selected_surtidor_nombre_form",
+        )
 
-        for group_label in [g[1] for g in local_groups] + ["Otros"]:
-            keys = local_grouped.get(group_label, [])
-            if not keys:
-                continue
-            st.markdown(f"**{group_label}**")
-            for key in keys:
+        col_local, col_foraneo = st.columns(2, gap="large")
+        selected_local = []
+        selected_foraneo = []
+        with col_local:
+            st.markdown("#### 📍 Selección de pedidos Auto Local")
+            local_groups = [
+                ("☀️ Local Mañana", "☀️ Local Mañana"),
+                ("🌙 Local Tarde", "🌙 Local Tarde"),
+                ("🌵 Saltillo", "🌵 Saltillo"),
+                ("📦 Pasa a Bodega", "📦 Pasa a Bodega"),
+            ]
+            local_grouped = {label: [] for _, label in local_groups}
+            local_grouped["Otros"] = []
+            for key in local_sorted_keys:
+                entry = local_entry_by_key.get(key)
+                turno_norm = normalize_turno_label(sanitize_text(entry.get("turno", ""))) if entry else ""
+                placed = False
+                for canonical, label in local_groups:
+                    if turno_norm == canonical:
+                        local_grouped[label].append(key)
+                        placed = True
+                        break
+                if not placed:
+                    local_grouped["Otros"].append(key)
+
+            for group_label in [g[1] for g in local_groups] + ["Otros"]:
+                keys = local_grouped.get(group_label, [])
+                if not keys:
+                    continue
+                st.markdown(f"**{group_label}**")
+                for key in keys:
+                    if st.checkbox(
+                        local_options.get(key, key),
+                        key=f"surtidor_local_pick_{key}",
+                    ):
+                        selected_local.append(key)
+        with col_foraneo:
+            st.markdown("#### 🚚 Selección de pedidos Auto Foráneo")
+            for key in foraneo_sorted_keys:
                 if st.checkbox(
-                    local_options.get(key, key),
-                    key=f"surtidor_local_pick_{key}",
+                    foraneo_options.get(key, key),
+                    key=f"surtidor_foraneo_pick_{key}",
                 ):
-                    selected_local.append(key)
-    with col_foraneo:
-        st.markdown("#### 🚚 Auto Foráneo")
-        for key in foraneo_sorted_keys:
-            if st.checkbox(
-                foraneo_options.get(key, key),
-                key=f"surtidor_foraneo_pick_{key}",
-            ):
-                selected_foraneo.append(key)
+                    selected_foraneo.append(key)
 
-    if st.button("✅ Asignar surtidor", use_container_width=True):
-        nombre = sanitize_text(st.session_state.get("selected_surtidor_nombre", ""))
+        submit_assign = st.form_submit_button("✅ Asignar surtidor", use_container_width=True)
+
+    if submit_assign:
+        st.session_state.selected_surtidor_nombre = selected_surtidor_nombre
+        nombre = sanitize_text(selected_surtidor_nombre)
         if not nombre:
             st.warning("Selecciona un surtidor para asignar.")
         else:
