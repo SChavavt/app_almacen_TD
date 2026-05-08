@@ -4966,19 +4966,6 @@ if selected_tab_key == "surtidores":
 
     with st.form("surtidores_asignacion_form"):
         st.markdown("**Selección de surtidor**")
-        st.markdown(
-            """
-            <style>
-            div[data-testid="stRadio"] div[role="radiogroup"] {
-                justify-content: center;
-            }
-            div[data-testid="stRadio"] label p {
-                text-transform: uppercase;
-            }
-            </style>
-            """,
-            unsafe_allow_html=True,
-        )
         selected_surtidor_nombre = st.radio(
             "Surtidor",
             options=surtidores_predefinidos,
@@ -5030,32 +5017,12 @@ if selected_tab_key == "surtidores":
                         selected_local.append(key)
         with col_foraneo:
             st.markdown("#### 🚚 Selección de pedidos Auto Foráneo")
-
-            foraneo_impares = []
-            foraneo_pares = []
             for key in foraneo_sorted_keys:
-                numero = foraneo_order.get(key, float("inf"))
-                if isinstance(numero, int) and numero % 2 == 0:
-                    foraneo_pares.append(key)
-                else:
-                    foraneo_impares.append(key)
-
-            col_foraneo_impares, col_foraneo_pares = st.columns(2, gap="medium")
-            with col_foraneo_impares:
-                for key in foraneo_impares:
-                    if st.checkbox(
-                        foraneo_options.get(key, key),
-                        key=f"surtidor_foraneo_pick_{key}",
-                    ):
-                        selected_foraneo.append(key)
-
-            with col_foraneo_pares:
-                for key in foraneo_pares:
-                    if st.checkbox(
-                        foraneo_options.get(key, key),
-                        key=f"surtidor_foraneo_pick_{key}",
-                    ):
-                        selected_foraneo.append(key)
+                if st.checkbox(
+                    foraneo_options.get(key, key),
+                    key=f"surtidor_foraneo_pick_{key}",
+                ):
+                    selected_foraneo.append(key)
 
         submit_assign = st.form_submit_button("✅ Asignar surtidor", use_container_width=True)
 
