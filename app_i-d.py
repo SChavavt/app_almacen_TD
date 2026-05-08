@@ -5156,6 +5156,30 @@ if selected_tab_key == "surtidores":
                     selected_surtidor_nombre = nombre_surtidor
                     surtidor_button_clicked = True
 
+        st.markdown(
+            """
+            <style>
+            div[data-testid="stCheckbox"] label {
+                width: 100%;
+                border: 1px solid rgba(128, 128, 128, 0.35);
+                border-radius: 10px;
+                padding: 0.55rem 0.65rem;
+                margin-bottom: 0.3rem;
+                background: rgba(255, 255, 255, 0.02);
+            }
+            div[data-testid="stCheckbox"] label:hover {
+                border-color: rgba(255, 255, 255, 0.55);
+                background: rgba(255, 255, 255, 0.05);
+            }
+            div[data-testid="stCheckbox"] label p {
+                font-size: 0.95rem;
+                line-height: 1.25rem;
+            }
+            </style>
+            """,
+            unsafe_allow_html=True,
+        )
+
         col_local, col_spacer, col_foraneo = st.columns([0.8, 0.02, 1.6], gap="small")
         selected_local = []
         selected_foraneo = []
@@ -5193,16 +5217,6 @@ if selected_tab_key == "surtidores":
                     ):
                         selected_local.append(key)
         with col_foraneo:
-            st.markdown(
-                """
-                <style>
-                div[data-testid="stCheckbox"] label p {
-                    white-space: nowrap;
-                }
-                </style>
-                """,
-                unsafe_allow_html=True,
-            )
             st.markdown("#### 🚚 Selección de pedidos Auto Foráneo")
 
             foraneo_impares = []
