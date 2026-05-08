@@ -5269,14 +5269,65 @@ if selected_tab_key == "surtidores":
             parts = [numero_label, cliente, estado]
             return " · ".join([p for p in parts if p])
 
-        rows = [
-            {"Pedido": _assignment_label(key), "Surtidor": value}
-            for key, value in assignments.items()
-            if value
-        ]
-        if rows:
-            df_assign = pd.DataFrame(rows)
-            st.dataframe(df_assign, use_container_width=True, height=300)
+        active_assignments = [(key, value) for key, value in assignments.items() if value]
+        if active_assignments:
+            st.markdown("##### 🚚 Foráneos")
+            foraneo_rows = []
+            for key, surtidor in active_assignments:
+                if envio_lookup.get(key) != "🚚":
+                    continue
+                foraneo_rows.append({"Pedido": _assignment_label(key), "Surtidor": surtidor})
+
+            if foraneo_rows:
+                midpoint = (len(foraneo_rows) + 1) // 2
+                col_foraneo_1, col_foraneo_2 = st.columns(2, gap="small")
+                with col_foraneo_1:
+                    st.dataframe(pd.DataFrame(foraneo_rows[:midpoint]), use_container_width=True, hide_index=True)
+                with col_foraneo_2:
+                    st.dataframe(pd.DataFrame(foraneo_rows[midpoint:]), use_container_width=True, hide_index=True)
+            else:
+                st.caption("Sin asignaciones foráneas.")
+
+            st.markdown("##### 📍 Locales (por turno)")
+            local_groups = [
+                "☀️ Local Mañana",
+                "🌙 Local Tarde",
+                "🌵 Saltillo",
+                "📦 Pasa a Bodega",
+                "🎓 Cursos y Eventos",
+                "📍 Local (sin turno)",
+            ]
+            local_rows_by_group = {label: [] for label in local_groups}
+            local_rows_by_group["Otros"] = []
+
+            for key, surtidor in active_assignments:
+                entry = entry_lookup.get(key)
+                if envio_lookup.get(key) != "📍" or not entry:
+                    continue
+                turno_norm = normalize_turno_label(sanitize_text(entry.get("turno", ""))) or "📍 Local (sin turno)"
+                row = {
+                    "Turno": turno_norm,
+                    "Pedido": _assignment_label(key),
+                    "Surtidor": surtidor,
+                }
+                if turno_norm in local_rows_by_group:
+                    local_rows_by_group[turno_norm].append(row)
+                else:
+                    local_rows_by_group["Otros"].append(row)
+
+            ordered_local_rows = []
+            for group_label in local_groups + ["Otros"]:
+                group_rows = local_rows_by_group.get(group_label, [])
+                if not group_rows:
+                    continue
+                for row in group_rows:
+                    ordered_local_rows.append(row)
+
+            if ordered_local_rows:
+                df_local_assign = pd.DataFrame(ordered_local_rows)
+                st.dataframe(df_local_assign, use_container_width=True, hide_index=True, height=320)
+            else:
+                st.caption("Sin asignaciones locales.")
         else:
             st.info("Sin asignaciones registradas.")
 
