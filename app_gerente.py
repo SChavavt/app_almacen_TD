@@ -4281,6 +4281,18 @@ def render_seguimiento_cobranza_tab_gerente(usuario_actual: str | None):
         com_hist = com_hist.dropna(subset=["_ts_hist"]).sort_values(["Codigo", "_ts_hist"])
         com_hist["_ts_anterior_cliente"] = com_hist.groupby("Codigo")["_ts_hist"].shift(1)
 
+        # Última gestión previa de un día distinto (evita confundir con el mismo comentario del día).
+        com_hist["_ts_anterior_no_hoy"] = pd.NaT
+        for cod, idx in com_hist.groupby("Codigo").groups.items():
+            idx_list = list(idx)
+            prev_any = com_hist.loc[idx_list, "_ts_anterior_cliente"]
+            curr_day = com_hist.loc[idx_list, "_ts_hist"].dt.normalize()
+            prev_any_day = pd.to_datetime(prev_any, errors="coerce").dt.normalize()
+            prev_same_day = prev_any.where(prev_any_day == curr_day)
+            prev_diff_day = prev_any.where(prev_any_day != curr_day)
+            prev_diff_day = prev_diff_day.ffill()
+            com_hist.loc[idx_list, "_ts_anterior_no_hoy"] = prev_diff_day.where(prev_same_day.notna(), prev_any)
+
         com_hoy = com_df[ts_today.dt.normalize() == hoy_cdmx].copy()
         if com_hoy.empty:
             st.caption("Hoy no hay comentarios en `cobranza_comentarios` para exportar.")
@@ -4288,7 +4300,7 @@ def render_seguimiento_cobranza_tab_gerente(usuario_actual: str | None):
             com_hoy["_ts"] = ts_today.loc[com_hoy.index]
             com_hoy = com_hoy.sort_values(["Codigo", "Folio", "_ts"]).drop_duplicates(subset=["Codigo", "Folio"], keep="last")
             com_hoy = com_hoy.merge(
-                com_hist[["Codigo", "Folio", "_ts_hist", "_ts_anterior_cliente"]],
+                com_hist[["Codigo", "Folio", "_ts_hist", "_ts_anterior_cliente", "_ts_anterior_no_hoy"]],
                 left_on=["Codigo", "Folio", "_ts"],
                 right_on=["Codigo", "Folio", "_ts_hist"],
                 how="left",
@@ -4316,8 +4328,11 @@ def render_seguimiento_cobranza_tab_gerente(usuario_actual: str | None):
             export_df["_hora_accion_dt"] = pd.to_datetime(export_df.get("Timestamp", ""), errors="coerce")
             export_df["Hora de Acción Realizada"] = export_df["_hora_accion_dt"].dt.strftime("%H:%M:%S")
 
-            prev_dt = pd.to_datetime(export_df.get("_ts_anterior_cliente", ""), errors="coerce")
+            prev_dt_raw = pd.to_datetime(export_df.get("_ts_anterior_cliente", ""), errors="coerce")
+            prev_dt = pd.to_datetime(export_df.get("_ts_anterior_no_hoy", ""), errors="coerce")
             curr_dt = pd.to_datetime(export_df.get("_hora_accion_dt", ""), errors="coerce")
+            mask_mismo_ts = prev_dt_raw.notna() & curr_dt.notna() & prev_dt_raw.eq(curr_dt)
+            prev_dt = prev_dt.mask(mask_mismo_ts, pd.NaT)
             delta_days = (curr_dt.dt.normalize() - prev_dt.dt.normalize()).dt.days
 
             ultima_txt = pd.Series("", index=export_df.index, dtype="object")
@@ -4334,7 +4349,7 @@ def render_seguimiento_cobranza_tab_gerente(usuario_actual: str | None):
             ultima_txt.loc[mask_antier] = "Antier " + hora_prev.loc[mask_antier].fillna("")
             ultima_txt.loc[mask_mas] = prev_dt.loc[mask_mas].dt.strftime("%Y-%m-%d %H:%M:%S")
 
-            # Sin gestión previa: este cobro fue la primera vez registrada hoy.
+            # Sin gestión previa fuera del mismo comentario: este cobro fue la primera vez registrada hoy.
             mask_primera = ~mask_prev_ok & curr_dt.notna()
             ultima_txt.loc[mask_primera] = "Hoy primera vez " + curr_dt.loc[mask_primera].dt.strftime("%H:%M:%S")
 
