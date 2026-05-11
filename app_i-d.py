@@ -5109,9 +5109,37 @@ if selected_tab_key == "reportes_surtidores":
                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                     key="download_reportes_surtidores_excel",
                 )
+                resumen_surtidores = rank.copy()
+                resumen_surtidores["Total_Pedidos_Periodo"] = total
+                resumen_surtidores["Pedidos_Surtidos"] = resumen_surtidores["Pedidos"]
+                resumen_surtidores["Pedidos_No_Surtidos"] = total - resumen_surtidores["Pedidos"]
+                resumen_surtidores["% Participación"] = resumen_surtidores["% Participación"].round(2)
+                resumen_surtidores = resumen_surtidores[
+                    [
+                        "Surtidor",
+                        "Pedidos_Surtidos",
+                        "Total_Pedidos_Periodo",
+                        "Pedidos_No_Surtidos",
+                        "% Participación",
+                    ]
+                ]
+                st.download_button(
+                    "⬇️ Descargar resumen surtidores (Excel)",
+                    data=build_inactivos_excel_export(
+                        resumen_surtidores.rename(columns={"% Participación": "Porcentaje_Participacion"})
+                    ),
+                    file_name=f"resumen_surtidores_{periodo.lower()}.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    key="download_resumen_surtidores_excel",
+                    help="Resumen por surtidor del filtro actual (máximo 6 filas, una por surtidor).",
+                )
 
                 st.markdown("##### 📄 Detalle de pedidos filtrados")
-                cols_show = [c for c in ["_origen", "_fecha", "Surtidor", "Folio_Factura", "Cliente", "Tipo_Envio", "Estado", "Turno", "Fecha_Surtido"] if c in df_f.columns]
+                cols_show = [
+                    c
+                    for c in ["Surtidor", "Folio_Factura", "Cliente", "Tipo_Envio", "Estado", "Turno", "Fecha_Surtido"]
+                    if c in df_f.columns
+                ]
                 detail = df_f[cols_show].copy().sort_values(["_fecha", "Surtidor"], ascending=[False, True])
                 st.dataframe(detail, use_container_width=True, hide_index=True, height=260)
 
