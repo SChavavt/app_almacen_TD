@@ -5126,6 +5126,10 @@ if selected_tab_key == "reportes_surtidores":
                     key="download_resumen_surtidores_excel",
                     help="Resumen por surtidor del filtro actual (máximo 6 filas, una por surtidor).",
                 )
+                st.markdown("##### 📋 Resumen de surtidores filtrados")
+                resumen_show = resumen_surtidores.copy()
+                resumen_show["% Participación"] = resumen_show["% Participación"].map(lambda x: f"{x:.2f}%")
+                st.dataframe(resumen_show, use_container_width=True, hide_index=True, height=230)
 
                 st.markdown("##### 📄 Detalle de pedidos filtrados")
                 cols_show = [
