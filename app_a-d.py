@@ -10444,7 +10444,7 @@ if df_main is not None:
                     _render_foraneo_column(foraneos_col_b, col_b)
 
                 submit_complete = st.form_submit_button(
-                    f"🟢 Completar seleccionados ({len(selected_ids)})",
+                    f"🟢 Completar seleccionados",
                     use_container_width=True,
                 )
 
