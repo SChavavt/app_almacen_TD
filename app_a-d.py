@@ -2148,10 +2148,23 @@ def _sync_turno_cierre_en_hoja_ruta(origen_tab: str, fecha_label: str, cerrar: b
         return False, "No se encontró la sección en Hoja_Ruta para esa fecha/turno."
 
     cierre_row = max(1, title_row - 1)
-    cierre_cells = values[cierre_row - 1] if cierre_row - 1 < len(values) else []
-    cierre_actual = _normalize_plain_text(cierre_cells[2] if len(cierre_cells) > 2 else "").upper()
+    title_prev_row = values[cierre_row - 1] if cierre_row - 1 < len(values) else []
+    cierre_actual = _normalize_plain_text(title_prev_row[2] if len(title_prev_row) > 2 else "").upper()
+
+    # Fallback defensivo: algunas hojas antiguas pudieron dejar "CERRADA"
+    # dos filas arriba del título. Si existe ahí, reutilizamos esa fila para
+    # evitar insertar duplicados o cerrar otra sección por desplazamientos.
+    if cierre_actual != "CERRADA" and title_row > 2:
+        alt_row = title_row - 2
+        alt_cells = values[alt_row - 1] if alt_row - 1 < len(values) else []
+        alt_cierre = _normalize_plain_text(alt_cells[2] if len(alt_cells) > 2 else "").upper()
+        if alt_cierre == "CERRADA":
+            cierre_row = alt_row
+            cierre_actual = alt_cierre
 
     if cerrar:
+        if cierre_actual == "CERRADA":
+            return True, ""
         if cierre_row == title_row or cierre_actual:
             inserted = _insert_blank_rows(ws, start_row=title_row, count=1)
             if not inserted:
@@ -2163,6 +2176,48 @@ def _sync_turno_cierre_en_hoja_ruta(origen_tab: str, fecha_label: str, cerrar: b
         if cierre_actual == "CERRADA":
             _write_row_values(ws, cierre_row, ["", "", ""], start_col=1)
     return True, ""
+
+
+def _is_turno_cerrado_en_hoja_ruta(origen_tab: str, fecha_label: str) -> tuple[bool, str]:
+    """Consulta Reportes_Almacen para detectar si la sección está marcada como CERRADA."""
+    fecha_text = str(fecha_label or "").replace("📅", "").strip()
+    try:
+        fecha_entrega = datetime.strptime(fecha_text, "%d/%m/%Y").date()
+    except Exception:
+        return False, "No se pudo interpretar la fecha del subtab."
+
+    reportes_almacen_id = str(
+        st.secrets.get("gsheets", {}).get(
+            "reportes_almacen_sheet_id",
+            st.secrets.get("gsheets", {}).get("reportes_sheet_id", ""),
+        )
+    ).strip()
+    if not reportes_almacen_id:
+        return False, "Falta configurar gsheets.reportes_almacen_sheet_id en secrets."
+
+    try:
+        client = get_gspread_client(_credentials_json_dict=GSHEETS_CREDENTIALS)
+        sheet_name = _resolve_hoja_ruta_sheet_name(origen_tab, origen_tab)
+        ws = client.open_by_key(reportes_almacen_id).worksheet(sheet_name)
+    except Exception as exc:
+        return False, f"No se pudo abrir la hoja de ruta: {exc}"
+
+    section_title, week_marker = _build_section_header(origen_tab, {"Turno": origen_tab}, fecha_entrega)
+    values = _hoja_ruta_get_all_values(ws)
+    title_row = _find_section_title_row(values, section_title, week_marker=week_marker)
+    if title_row is None:
+        return False, "No se encontró la sección en Hoja_Ruta para esa fecha/turno."
+
+    cierre_row = max(1, title_row - 1)
+    cierre_cells = values[cierre_row - 1] if cierre_row - 1 < len(values) else []
+    cierre_actual = _normalize_plain_text(cierre_cells[2] if len(cierre_cells) > 2 else "").upper()
+    if cierre_actual != "CERRADA" and title_row > 2:
+        alt_row = title_row - 2
+        alt_cells = values[alt_row - 1] if alt_row - 1 < len(values) else []
+        alt_cierre = _normalize_plain_text(alt_cells[2] if len(alt_cells) > 2 else "").upper()
+        if alt_cierre == "CERRADA":
+            cierre_actual = alt_cierre
+    return cierre_actual == "CERRADA", ""
 
 
 def collect_tab_locations(
@@ -8345,6 +8400,10 @@ if df_main is not None:
                             tab_label.replace("📅 ", ""),
                             format="%d/%m/%Y",
                         )
+                        cierre_key = _build_turno_cierre_state_key(origen_tab, tab_label)
+                        cerrado_en_hoja, err_cierre = _is_turno_cerrado_en_hoja_ruta(origen_tab, tab_label)
+                        if not err_cierre:
+                            st.session_state[cierre_key] = cerrado_en_hoja
                         turno_cerrado, cambio_cierre = _render_turno_toggle_button(origen_tab, tab_label)
                         if cambio_cierre:
                             ok_sync, err_sync = _sync_turno_cierre_en_hoja_ruta(
@@ -8537,6 +8596,10 @@ if df_main is not None:
                                     tab_label.replace("📅 ", ""),
                                     format="%d/%m/%Y",
                                 )
+                                cierre_key = _build_turno_cierre_state_key("Saltillo", tab_label)
+                                cerrado_en_hoja, err_cierre = _is_turno_cerrado_en_hoja_ruta("Saltillo", tab_label)
+                                if not err_cierre:
+                                    st.session_state[cierre_key] = cerrado_en_hoja
                                 turno_cerrado, cambio_cierre = _render_turno_toggle_button("Saltillo", tab_label)
                                 if cambio_cierre:
                                     ok_sync, err_sync = _sync_turno_cierre_en_hoja_ruta(
