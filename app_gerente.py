@@ -4274,12 +4274,25 @@ def render_seguimiento_cobranza_tab_gerente(usuario_actual: str | None):
         st.markdown("#### 📤 Exportar comentarios del día")
         ts_today = pd.to_datetime(com_df.get("Timestamp", ""), errors="coerce")
         hoy_cdmx = pd.Timestamp(now_cdmx().date())
+
+        # Última gestión previa por cliente (Codigo) para medir frecuencia de cobro.
+        com_hist = com_df.copy()
+        com_hist["_ts_hist"] = ts_today
+        com_hist = com_hist.dropna(subset=["_ts_hist"]).sort_values(["Codigo", "_ts_hist"])
+        com_hist["_ts_anterior_cliente"] = com_hist.groupby("Codigo")["_ts_hist"].shift(1)
+
         com_hoy = com_df[ts_today.dt.normalize() == hoy_cdmx].copy()
         if com_hoy.empty:
             st.caption("Hoy no hay comentarios en `cobranza_comentarios` para exportar.")
         else:
             com_hoy["_ts"] = ts_today.loc[com_hoy.index]
             com_hoy = com_hoy.sort_values(["Codigo", "Folio", "_ts"]).drop_duplicates(subset=["Codigo", "Folio"], keep="last")
+            com_hoy = com_hoy.merge(
+                com_hist[["Codigo", "Folio", "_ts_hist", "_ts_anterior_cliente"]],
+                left_on=["Codigo", "Folio", "_ts"],
+                right_on=["Codigo", "Folio", "_ts_hist"],
+                how="left",
+            )
 
             base_nom = base_df[["Codigo", "Razon_Social"]].drop_duplicates() if not base_df.empty else pd.DataFrame(columns=["Codigo", "Razon_Social"])
             venc_cols = ["Codigo", "Folio", "Saldo_Vence", "Fecha_Factura", "Fecha_Vencimiento", "Condicion"]
@@ -4302,11 +4315,35 @@ def render_seguimiento_cobranza_tab_gerente(usuario_actual: str | None):
 
             export_df["_hora_accion_dt"] = pd.to_datetime(export_df.get("Timestamp", ""), errors="coerce")
             export_df["Hora de Acción Realizada"] = export_df["_hora_accion_dt"].dt.strftime("%H:%M:%S")
+
+            prev_dt = pd.to_datetime(export_df.get("_ts_anterior_cliente", ""), errors="coerce")
+            curr_dt = pd.to_datetime(export_df.get("_hora_accion_dt", ""), errors="coerce")
+            delta_days = (curr_dt.dt.normalize() - prev_dt.dt.normalize()).dt.days
+
+            ultima_txt = pd.Series("", index=export_df.index, dtype="object")
+            hora_prev = prev_dt.dt.strftime("%H:%M:%S")
+
+            mask_prev_ok = prev_dt.notna()
+            mask_hoy = mask_prev_ok & delta_days.eq(0)
+            mask_ayer = mask_prev_ok & delta_days.eq(1)
+            mask_antier = mask_prev_ok & delta_days.eq(2)
+            mask_mas = mask_prev_ok & delta_days.gt(2)
+
+            ultima_txt.loc[mask_hoy] = "Hoy " + hora_prev.loc[mask_hoy].fillna("")
+            ultima_txt.loc[mask_ayer] = "Ayer " + hora_prev.loc[mask_ayer].fillna("")
+            ultima_txt.loc[mask_antier] = "Antier " + hora_prev.loc[mask_antier].fillna("")
+            ultima_txt.loc[mask_mas] = prev_dt.loc[mask_mas].dt.strftime("%Y-%m-%d %H:%M:%S")
+
+            # Sin gestión previa: este cobro fue la primera vez registrada hoy.
+            mask_primera = ~mask_prev_ok & curr_dt.notna()
+            ultima_txt.loc[mask_primera] = "Hoy primera vez " + curr_dt.loc[mask_primera].dt.strftime("%H:%M:%S")
+
+            export_df["Última vez cobrado"] = ultima_txt.fillna("")
             export_df["Monto"] = pd.to_numeric(export_df.get("Monto", ""), errors="coerce")
             export_df = export_df.sort_values(["_hora_accion_dt", "Cliente", "Factura"], ascending=[True, True, True], na_position="last")
             cols_export = [
                 "Cliente", "Factura", "Monto", "Fecha_Emisión", "Fecha_Vencimiento", "Término_Crédito",
-                "Comentario", "Hecho Por", "Fecha_Proximo_Pago", "Estatus_Seguimiento", "Hora de Acción Realizada"
+                "Comentario", "Hecho Por", "Fecha_Proximo_Pago", "Estatus_Seguimiento", "Hora de Acción Realizada", "Última vez cobrado"
             ]
             export_df = export_df[[c for c in cols_export if c in export_df.columns]].copy()
 
