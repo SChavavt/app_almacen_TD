@@ -8180,7 +8180,6 @@ if df_main is not None:
         "🎓 Cursos y Eventos",
         "🔁 Devoluciones",
         "🛠 Garantías",
-        "✅ Completar Rápido",
         "✅ Historial Completados",
     ]
 
@@ -10338,80 +10337,7 @@ if df_main is not None:
                                 del st.session_state[flag_key]
                                 
     
-    with main_tabs[6]:  # ✅ Completar Rápido
-        st.markdown("### ✅ Completar pedidos (rápido)")
-        st.caption("Vista móvil para seleccionar y completar pedidos en proceso por bloques organizados.")
-
-        pedidos_en_proceso = df_pendientes_proceso_demorado[
-            df_pendientes_proceso_demorado.get("Estado", pd.Series(dtype=str)).astype(str).str.strip() == "🔵 En Proceso"
-        ].copy()
-
-        if pedidos_en_proceso.empty:
-            st.info("No hay pedidos en proceso para completar.")
-        else:
-            pedidos_en_proceso["tipo_norm"] = pedidos_en_proceso.get("Tipo_Envio", pd.Series(dtype=str)).astype(str).str.strip()
-            pedidos_en_proceso["turno_norm"] = pedidos_en_proceso.get("Turno", pd.Series(dtype=str)).astype(str).str.strip()
-            pedidos_en_proceso["fecha_norm"] = pd.to_datetime(
-                pedidos_en_proceso.get("Fecha_Entrega", pd.Series(dtype=str)),
-                errors="coerce",
-            )
-            pedidos_en_proceso["fecha_lbl"] = pedidos_en_proceso["fecha_norm"].dt.strftime("%d/%m/%Y").fillna("Sin fecha")
-
-            selected_ids = _get_bulk_selected_ids()
-            total_rows = len(pedidos_en_proceso)
-            selected_visible = int(
-                pedidos_en_proceso.get("ID_Pedido", pd.Series(dtype=str))
-                .astype(str)
-                .str.strip()
-                .isin(selected_ids)
-                .sum()
-            )
-            st.caption(f"Seleccionados: {selected_visible}/{total_rows}")
-
-            for tipo_label, tipo_df in (
-                ("📍 LOCALES", pedidos_en_proceso[pedidos_en_proceso["tipo_norm"] == "📍 Pedido Local"].copy()),
-                ("🚚 FORÁNEOS", pedidos_en_proceso[pedidos_en_proceso["tipo_norm"] != "📍 Pedido Local"].copy()),
-            ):
-                if tipo_df.empty:
-                    continue
-                st.markdown(f"#### {tipo_label}")
-                tipo_df = tipo_df.sort_values(by=["turno_norm", "fecha_norm"], kind="mergesort")
-                for (turno, fecha_lbl), bloque in tipo_df.groupby(["turno_norm", "fecha_lbl"], dropna=False, sort=False):
-                    turno_show = str(turno).strip() or "Sin turno"
-                    st.markdown(f"**{turno_show} • {fecha_lbl}**")
-                    for _, row_fast in bloque.iterrows():
-                        pedido_id = str(row_fast.get("ID_Pedido", "")).strip()
-                        if not pedido_id:
-                            continue
-                        cliente = str(row_fast.get("Cliente", "")).strip() or "Sin cliente"
-                        surtidor = str(row_fast.get("Surtidor", "")).strip() or "—"
-                        folio = str(row_fast.get("Folio_Factura", "")).strip() or "Sin folio"
-                        key_chk = f"fast_complete_chk_{pedido_id}"
-                        initial_checked = pedido_id in selected_ids
-                        if key_chk not in st.session_state:
-                            st.session_state[key_chk] = initial_checked
-                        checked = st.checkbox(
-                            f"#{folio} · {cliente}",
-                            key=key_chk,
-                            help=f"Surtidor: {surtidor} · ID: {pedido_id}",
-                        )
-                        if checked:
-                            selected_ids.add(pedido_id)
-                        else:
-                            selected_ids.discard(pedido_id)
-
-            st.session_state["bulk_selected_pedidos"] = selected_ids
-            selected_count = len(selected_ids)
-            if st.button(
-                f"🟢 Completar seleccionados ({selected_count})",
-                key="btn_fast_complete_execute",
-                disabled=selected_count < 1,
-                use_container_width=True,
-            ):
-                st.session_state["bulk_complete_execute_requested"] = True
-                st.rerun()
-
-    with main_tabs[7]:  # ✅ Historial Completados/Cancelados
+    with main_tabs[6]:  # ✅ Historial Completados/Cancelados
         df_completados_historial = df_main[
             (df_main["Estado"].isin(["🟢 Completado", "🟣 Cancelado"])) &
             (df_main.get("Completados_Limpiado", "").astype(str).str.lower() != "sí")
@@ -10515,7 +10441,7 @@ if df_main is not None:
                             st.success(f"📊 Total de pedidos archivados: {total_archivados}")
                             get_raw_sheet_data.clear()
                             get_filtered_sheet_dataframe.clear()
-                            set_active_main_tab(7)
+                            set_active_main_tab(6)
                             st.rerun()
                         else:
                             st.error("❌ Error durante la limpieza. No se eliminaron pedidos.")
@@ -10674,7 +10600,7 @@ if df_main is not None:
                             st.success(f"✅ {len(updates)} devoluciones marcadas como limpiadas.")
                             get_raw_sheet_data.clear()
                             get_filtered_sheet_dataframe.clear()
-                            set_active_main_tab(7)
+                            set_active_main_tab(6)
                             st.rerun()
                     comp_dev = comp_dev.sort_values(by="Fecha_Completado", ascending=False)
                     for orden_dev_comp, (_, row) in enumerate(comp_dev.iterrows(), start=1):
