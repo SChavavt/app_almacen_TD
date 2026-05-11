@@ -8180,7 +8180,6 @@ if df_main is not None:
         "🎓 Cursos y Eventos",
         "🔁 Devoluciones",
         "🛠 Garantías",
-        "✅ Completar Rápido",
         "✅ Historial Completados",
     ]
 
@@ -10338,129 +10337,7 @@ if df_main is not None:
                                 del st.session_state[flag_key]
                                 
     
-    with main_tabs[6]:  # ✅ Completar Rápido
-        st.markdown("### ✅ Completar pedidos (rápido)")
-        st.caption("Selecciona pedidos sin recargar en cada check; se aplica al presionar completar.")
-
-        surtidor_colors = {
-            "baldo": "#ff5a5f",
-            "alexis": "#4da3ff",
-            "enrique": "#58d68d",
-            "cassandra": "#bb8fce",
-            "yaya": "#f5b041",
-            "karen": "#f1948a",
-        }
-
-        def _badge_surtidor(name: str) -> str:
-            raw = str(name or "").strip()
-            color = surtidor_colors.get(raw.lower(), "#95a5a6")
-            return f"<span style='background:{color};padding:2px 8px;border-radius:999px;color:#0b1020;font-weight:700;'>{raw or '—'}</span>"
-
-        pedidos_en_proceso = df_pendientes_proceso_demorado[
-            df_pendientes_proceso_demorado.get("Estado", pd.Series(dtype=str)).astype(str).str.strip() == "🔵 En Proceso"
-        ].copy()
-
-        if pedidos_en_proceso.empty:
-            st.info("No hay pedidos en proceso para completar.")
-        else:
-            pedidos_en_proceso["tipo_norm"] = pedidos_en_proceso.get("Tipo_Envio", pd.Series(dtype=str)).astype(str).str.strip()
-            pedidos_en_proceso["turno_norm"] = pedidos_en_proceso.get("Turno", pd.Series(dtype=str)).astype(str).str.strip()
-            pedidos_en_proceso["fecha_norm"] = pd.to_datetime(
-                pedidos_en_proceso.get("Fecha_Entrega", pd.Series(dtype=str)),
-                errors="coerce",
-            )
-            pedidos_en_proceso["fecha_lbl"] = pedidos_en_proceso["fecha_norm"].dt.strftime("%d/%m/%Y").fillna("Sin fecha")
-
-            st.markdown("**Colores de surtidor:**")
-            st.markdown(
-                " · ".join([f"{_badge_surtidor(n.title())}" for n in ["baldo", "alexis", "enrique", "cassandra", "yaya", "karen"]]),
-                unsafe_allow_html=True,
-            )
-
-            selected_ids = set(st.session_state.get("bulk_selected_pedidos", set()))
-            with st.form("form_completar_rapido", clear_on_submit=False):
-                st.markdown("#### 📍 LOCALES")
-                locales_df = pedidos_en_proceso[pedidos_en_proceso["tipo_norm"] == "📍 Pedido Local"].copy()
-                if locales_df.empty:
-                    st.caption("Sin locales en proceso.")
-                else:
-                    locales_df = locales_df.sort_values(by=["turno_norm", "fecha_norm"], kind="mergesort")
-                    for (turno, fecha_lbl), bloque in locales_df.groupby(["turno_norm", "fecha_lbl"], dropna=False, sort=False):
-                        st.markdown(f"**{(str(turno).strip() or 'Sin turno')} • {fecha_lbl}**")
-                        for _, row_fast in bloque.iterrows():
-                            pedido_id = str(row_fast.get("ID_Pedido", "")).strip()
-                            if not pedido_id:
-                                continue
-                            orden = resolve_flow_display_number(row_fast, row_fast.get("_gsheet_row_index", ""))
-                            folio = str(row_fast.get("Folio_Factura", "")).strip() or "Sin folio"
-                            cliente = str(row_fast.get("Cliente", "")).strip() or "Sin cliente"
-                            surtidor = str(row_fast.get("Surtidor", "")).strip()
-                            estado = str(row_fast.get("Estado", "")).strip() or "Sin estado"
-                            key_chk = f"fast_complete_chk_{pedido_id}"
-                            checked = st.checkbox(
-                                f"#{orden} · {folio} · {cliente}",
-                                key=key_chk,
-                                value=(pedido_id in selected_ids),
-                            )
-                            st.markdown(f"{_badge_surtidor(surtidor)} · {estado}", unsafe_allow_html=True)
-                            if checked:
-                                selected_ids.add(pedido_id)
-                            else:
-                                selected_ids.discard(pedido_id)
-
-                st.markdown("#### 🚚 FORÁNEOS")
-                foraneos_df = pedidos_en_proceso[pedidos_en_proceso["tipo_norm"] != "📍 Pedido Local"].copy()
-                if foraneos_df.empty:
-                    st.caption("Sin foráneos en proceso.")
-                else:
-                    foraneos_df = foraneos_df.sort_values(by=["fecha_norm"], kind="mergesort")
-                    mitad = int(np.ceil(len(foraneos_df) / 2))
-                    foraneos_col_a = foraneos_df.iloc[:mitad].copy()
-                    foraneos_col_b = foraneos_df.iloc[mitad:].copy()
-                    col_a, col_b = st.columns(2)
-                    def _render_foraneo_column(df_col: pd.DataFrame, column_container: Any) -> None:
-                        with column_container:
-                            last_fecha = None
-                            for _, row_fast in df_col.iterrows():
-                                fecha_lbl = str(row_fast.get("fecha_lbl", "")).strip() or "Sin fecha"
-                                if fecha_lbl != last_fecha:
-                                    st.markdown(f"**Fecha entrega • {fecha_lbl}**")
-                                    last_fecha = fecha_lbl
-
-                                pedido_id = str(row_fast.get("ID_Pedido", "")).strip()
-                                if not pedido_id:
-                                    continue
-                                orden = resolve_flow_display_number(row_fast, row_fast.get("_gsheet_row_index", ""))
-                                folio = str(row_fast.get("Folio_Factura", "")).strip() or "Sin folio"
-                                cliente = str(row_fast.get("Cliente", "")).strip() or "Sin cliente"
-                                surtidor = str(row_fast.get("Surtidor", "")).strip()
-                                estado = str(row_fast.get("Estado", "")).strip() or "Sin estado"
-                                key_chk = f"fast_complete_chk_{pedido_id}"
-                                checked = st.checkbox(
-                                    f"#{orden} · {folio} · {cliente}",
-                                    key=key_chk,
-                                    value=(pedido_id in selected_ids),
-                                )
-                                st.markdown(f"{_badge_surtidor(surtidor)} · {estado}", unsafe_allow_html=True)
-                                if checked:
-                                    selected_ids.add(pedido_id)
-                                else:
-                                    selected_ids.discard(pedido_id)
-
-                    _render_foraneo_column(foraneos_col_a, col_a)
-                    _render_foraneo_column(foraneos_col_b, col_b)
-
-                submit_complete = st.form_submit_button(
-                    f"🟢 Completar seleccionados ({len(selected_ids)})",
-                    use_container_width=True,
-                )
-
-            st.session_state["bulk_selected_pedidos"] = selected_ids
-            if submit_complete and len(selected_ids) > 0:
-                st.session_state["bulk_complete_execute_requested"] = True
-                st.rerun()
-
-    with main_tabs[7]:  # ✅ Historial Completados/Cancelados
+    with main_tabs[6]:  # ✅ Historial Completados/Cancelados
         df_completados_historial = df_main[
             (df_main["Estado"].isin(["🟢 Completado", "🟣 Cancelado"])) &
             (df_main.get("Completados_Limpiado", "").astype(str).str.lower() != "sí")
@@ -10491,7 +10368,7 @@ if df_main is not None:
                     st.success(f"📊 Total de pedidos archivados: {total_archivados}")
                     get_raw_sheet_data.clear()
                     get_filtered_sheet_dataframe.clear()
-                    set_active_main_tab(7)
+                    set_active_main_tab(6)
                     st.rerun()
                 else:
                     st.error("❌ Error durante la limpieza. No se eliminaron pedidos.")
@@ -10564,7 +10441,7 @@ if df_main is not None:
                             st.success(f"📊 Total de pedidos archivados: {total_archivados}")
                             get_raw_sheet_data.clear()
                             get_filtered_sheet_dataframe.clear()
-                            set_active_main_tab(7)
+                            set_active_main_tab(6)
                             st.rerun()
                         else:
                             st.error("❌ Error durante la limpieza. No se eliminaron pedidos.")
@@ -10723,7 +10600,7 @@ if df_main is not None:
                             st.success(f"✅ {len(updates)} devoluciones marcadas como limpiadas.")
                             get_raw_sheet_data.clear()
                             get_filtered_sheet_dataframe.clear()
-                            set_active_main_tab(7)
+                            set_active_main_tab(6)
                             st.rerun()
                     comp_dev = comp_dev.sort_values(by="Fecha_Completado", ascending=False)
                     for orden_dev_comp, (_, row) in enumerate(comp_dev.iterrows(), start=1):
