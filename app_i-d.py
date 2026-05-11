@@ -4997,7 +4997,7 @@ if selected_tab_key == "auto_foraneo":
 # ---------------------------
 if selected_tab_key == "reportes_surtidores":
     st.markdown("### 📊 Reportes de surtidores")
-    st.caption("Métricas por día, semana y mes tomando como base `Fecha_Surtido` (cuando existe) y respaldo con fechas del pedido.")
+    st.caption("Métricas por día, semana y mes usando únicamente pedidos con `Surtidor` y `Fecha_Surtido` válidos.")
 
     df_hist_report = load_historicos_from_gsheets()
     frames = []
@@ -5005,7 +5005,6 @@ if selected_tab_key == "reportes_surtidores":
         if df_src is None or df_src.empty:
             continue
         df_tmp = df_src.copy()
-        # Evita errores de concat cuando una hoja trae columnas repetidas.
         if df_tmp.columns.duplicated().any():
             df_tmp = df_tmp.loc[:, ~df_tmp.columns.duplicated()].copy()
         df_tmp["_origen"] = src_name
@@ -5015,60 +5014,58 @@ if selected_tab_key == "reportes_surtidores":
         st.info("No hay datos disponibles para generar reportes.")
     else:
         df_rep = pd.concat(frames, ignore_index=True)
-        for c in ["Surtidor", "Hora_Registro", "Fecha_Entrega", "ID_Pedido", "Folio_Factura"]:
+        for c in ["Surtidor", "Fecha_Surtido", "ID_Pedido", "Folio_Factura"]:
             if c not in df_rep.columns:
                 df_rep[c] = ""
 
         df_rep["Surtidor"] = df_rep["Surtidor"].map(sanitize_text)
-        df_rep = df_rep[df_rep["Surtidor"] != ""].copy()
+        df_rep["Fecha_Surtido"] = df_rep["Fecha_Surtido"].map(sanitize_text)
+        df_rep = df_rep[(df_rep["Surtidor"] != "") & (df_rep["Fecha_Surtido"] != "")].copy()
+
+        df_rep["_dt_registro"] = pd.to_datetime(df_rep["Fecha_Surtido"], errors="coerce")
+        df_rep = df_rep[df_rep["_dt_registro"].notna()].copy()
+
         if df_rep.empty:
-            st.info("No hay pedidos con surtidor asignado todavía.")
+            st.info("No hay pedidos con Surtidor y Fecha_Surtido válidos.")
         else:
-            if "Fecha_Surtido" not in df_rep.columns:
-                df_rep["Fecha_Surtido"] = ""
-            # Productividad por surtidor debe usar fecha/hora real de asignación.
-            df_rep["_dt_registro"] = pd.to_datetime(df_rep["Fecha_Surtido"], errors="coerce")
-            missing_dt = df_rep["_dt_registro"].isna()
-            if missing_dt.any():
-                df_rep.loc[missing_dt, "_dt_registro"] = pd.to_datetime(
-                    df_rep.loc[missing_dt, "Hora_Registro"], errors="coerce"
-                )
-            missing_dt = df_rep["_dt_registro"].isna()
-            if missing_dt.any():
-                df_rep.loc[missing_dt, "_dt_registro"] = pd.to_datetime(
-                    df_rep.loc[missing_dt, "Fecha_Entrega"], errors="coerce"
-                )
-            df_rep = df_rep[df_rep["_dt_registro"].notna()].copy()
             df_rep["_fecha"] = df_rep["_dt_registro"].dt.date
-            df_rep["_anio"] = df_rep["_dt_registro"].dt.year
+            iso_cal = df_rep["_dt_registro"].dt.isocalendar()
+            df_rep["_iso_year"] = iso_cal.year
+            df_rep["_iso_week"] = iso_cal.week
             df_rep["_mes"] = df_rep["_dt_registro"].dt.to_period("M").astype(str)
-            df_rep["_semana"] = df_rep["_dt_registro"].dt.strftime("%G-W%V")
+            df_rep["_week_month"] = ((df_rep["_dt_registro"].dt.day - 1) // 7 + 1).clip(upper=5)
+            df_rep["_semana_label"] = (
+                df_rep["_iso_year"].astype(str)
+                + "-"
+                + df_rep["_dt_registro"].dt.strftime("%m")
+                + " | Sem ISO "
+                + df_rep["_iso_week"].astype(str).str.zfill(2)
+            )
             df_rep["_id_unico"] = df_rep["ID_Pedido"].map(sanitize_text)
             df_rep.loc[df_rep["_id_unico"] == "", "_id_unico"] = df_rep["Folio_Factura"].map(sanitize_text)
             df_rep = df_rep.drop_duplicates(subset=["_id_unico", "Surtidor", "_origen"], keep="last")
 
             hoy_mx = datetime.now(TZ).date()
             periodo = st.radio("Periodo", options=["Día", "Semana", "Mes"], horizontal=True)
-            c1, c2, c3 = st.columns(3)
-            with c1:
-                if periodo == "Día":
-                    fecha_sel = st.date_input("Fecha", value=hoy_mx, key="rep_surt_fecha")
-                else:
-                    fecha_sel = hoy_mx
-            with c2:
-                semanas = sorted(df_rep["_semana"].dropna().unique().tolist(), reverse=True)
-                semana_sel = st.selectbox("Semana ISO", options=semanas, index=0 if semanas else None) if semanas else ""
-            with c3:
-                meses = sorted(df_rep["_mes"].dropna().unique().tolist(), reverse=True)
-                mes_sel = st.selectbox("Mes", options=meses, index=0 if meses else None) if meses else ""
 
-            df_f = df_rep.copy()
             if periodo == "Día":
-                df_f = df_f[df_f["_fecha"] == fecha_sel]
-            elif periodo == "Semana" and semana_sel:
-                df_f = df_f[df_f["_semana"] == semana_sel]
-            elif periodo == "Mes" and mes_sel:
-                df_f = df_f[df_f["_mes"] == mes_sel]
+                fechas = sorted(df_rep["_fecha"].dropna().unique().tolist(), reverse=True)
+                fecha_default = hoy_mx if hoy_mx in fechas else (fechas[0] if fechas else hoy_mx)
+                fecha_sel = st.date_input("Fecha", value=fecha_default, key="rep_surt_fecha")
+                df_f = df_rep[df_rep["_fecha"] == fecha_sel].copy()
+            elif periodo == "Semana":
+                semanas_df = (
+                    df_rep.groupby(["_semana_label", "_iso_year", "_iso_week"], as_index=False)
+                    .size()
+                    .sort_values(["_iso_year", "_iso_week"], ascending=[False, False])
+                )
+                semanas_opts = semanas_df["_semana_label"].tolist()
+                semana_sel = st.selectbox("Semana (Año-Mes + Semana ISO)", options=semanas_opts) if semanas_opts else ""
+                df_f = df_rep[df_rep["_semana_label"] == semana_sel].copy() if semana_sel else df_rep.iloc[0:0].copy()
+            else:
+                meses = sorted(df_rep["_mes"].dropna().unique().tolist(), reverse=True)
+                mes_sel = st.selectbox("Mes", options=meses) if meses else ""
+                df_f = df_rep[df_rep["_mes"] == mes_sel].copy() if mes_sel else df_rep.iloc[0:0].copy()
 
             total = len(df_f)
             st.markdown(f"#### Total pedidos en periodo: **{total}**")
@@ -5079,26 +5076,42 @@ if selected_tab_key == "reportes_surtidores":
                 rank["% Participación"] = (rank["Pedidos"] / total * 100).round(2)
 
                 top_name = rank.iloc[0]["Surtidor"]
-                top_pct = rank.iloc[0]["% Participación"]
-                m1,m2,m3 = st.columns(3)
+                top_pedidos = int(rank.iloc[0]["Pedidos"])
+                top_pct = float(rank.iloc[0]["% Participación"])
+                contexto = "del día" if periodo == "Día" else ("de la semana" if periodo == "Semana" else "del mes")
+
+                m1, m2, m3 = st.columns(3)
                 m1.metric("👥 Surtidores activos", f"{rank['Surtidor'].nunique()}")
-                m2.metric("🥇 Líder del periodo", top_name)
+                m2.metric("🥇 Líder del periodo", f"{top_name} ({top_pedidos} de {total} {contexto})")
                 m3.metric("📌 Participación líder", f"{top_pct:.2f}%")
 
                 st.markdown("##### 🏆 Ranking de surtidores")
-                st.dataframe(rank, use_container_width=True, hide_index=True)
-                st.bar_chart(rank.set_index("Surtidor")["Pedidos"], use_container_width=True)
+                rank_show = rank.copy()
+                rank_show["% Participación"] = rank_show["% Participación"].map(lambda x: f"{x:.2f}%")
+                st.dataframe(rank_show, use_container_width=True, hide_index=True)
+
+                serie_tiempo = df_f.copy()
+                if periodo == "Día":
+                    serie_tiempo["_bucket"] = serie_tiempo["_dt_registro"].dt.hour.astype(str).str.zfill(2) + ":00"
+                elif periodo == "Semana":
+                    dias_sem = {0: "Lun", 1: "Mar", 2: "Mié", 3: "Jue", 4: "Vie", 5: "Sáb", 6: "Dom"}
+                    serie_tiempo["_bucket"] = serie_tiempo["_dt_registro"].dt.weekday.map(dias_sem)
+                else:
+                    serie_tiempo["_bucket"] = "Semana " + serie_tiempo["_week_month"].astype(int).astype(str)
+                timeline = serie_tiempo.groupby(["_bucket", "Surtidor"]).size().unstack(fill_value=0)
+                st.markdown("##### 📈 Tendencia temporal por surtidor")
+                st.line_chart(timeline, use_container_width=True)
 
                 st.download_button(
                     "⬇️ Descargar ranking (Excel)",
-                    data=build_inactivos_excel_export(rank.rename(columns={"% Participación":"Porcentaje"})),
+                    data=build_inactivos_excel_export(rank.rename(columns={"% Participación": "Porcentaje"})),
                     file_name=f"reportes_surtidores_{periodo.lower()}.xlsx",
                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                     key="download_reportes_surtidores_excel",
                 )
 
                 st.markdown("##### 📄 Detalle de pedidos filtrados")
-                cols_show = [c for c in ["_origen", "_fecha", "Surtidor", "Folio_Factura", "Cliente", "Tipo_Envio", "Estado", "Turno", "Fecha_Surtido", "Hora_Registro"] if c in df_f.columns]
+                cols_show = [c for c in ["_origen", "_fecha", "Surtidor", "Folio_Factura", "Cliente", "Tipo_Envio", "Estado", "Turno", "Fecha_Surtido"] if c in df_f.columns]
                 detail = df_f[cols_show].copy().sort_values(["_fecha", "Surtidor"], ascending=[False, True])
                 st.dataframe(detail, use_container_width=True, hide_index=True, height=260)
 
