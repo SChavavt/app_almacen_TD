@@ -8927,6 +8927,10 @@ if "organizador" in tab_map:
                         st.session_state[detalle_key] = detalle_prefill
 
                     st.markdown("**🧩 Frase base**")
+                    st.caption(
+                        "ℹ️ Las opciones 'Pendiente de recolección', 'Material en tránsito' y "
+                        "'Pendiente de retorno de guía' mantienen el caso visible en esta bandeja para seguimiento."
+                    )
                     opciones_frases = ["— Sin frase base —"] + frases_base
                     frase_guardada = str(st.session_state.get(base_key, "")).strip()
                     frase_inicial = (
