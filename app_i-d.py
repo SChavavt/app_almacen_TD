@@ -4997,7 +4997,7 @@ if selected_tab_key == "auto_foraneo":
 # ---------------------------
 if selected_tab_key == "reportes_surtidores":
     st.markdown("### 📊 Reportes de surtidores")
-    st.caption("Métricas por día, semana y mes usando únicamente pedidos con `Surtidor` y `Fecha_Surtido` válidos.")
+    st.caption("Total del periodo por `Hora_Registro`; participación de surtidores sobre ese total.")
 
     df_hist_report = load_historicos_from_gsheets()
     frames = []
@@ -5014,19 +5014,17 @@ if selected_tab_key == "reportes_surtidores":
         st.info("No hay datos disponibles para generar reportes.")
     else:
         df_rep = pd.concat(frames, ignore_index=True)
-        for c in ["Surtidor", "Fecha_Surtido", "ID_Pedido", "Folio_Factura"]:
+        for c in ["Surtidor", "Fecha_Surtido", "Hora_Registro", "ID_Pedido", "Folio_Factura"]:
             if c not in df_rep.columns:
                 df_rep[c] = ""
 
         df_rep["Surtidor"] = df_rep["Surtidor"].map(sanitize_text)
         df_rep["Fecha_Surtido"] = df_rep["Fecha_Surtido"].map(sanitize_text)
-        df_rep = df_rep[(df_rep["Surtidor"] != "") & (df_rep["Fecha_Surtido"] != "")].copy()
-
-        df_rep["_dt_registro"] = pd.to_datetime(df_rep["Fecha_Surtido"], errors="coerce")
+        df_rep["_dt_registro"] = pd.to_datetime(df_rep["Hora_Registro"], errors="coerce")
         df_rep = df_rep[df_rep["_dt_registro"].notna()].copy()
 
         if df_rep.empty:
-            st.info("No hay pedidos con Surtidor y Fecha_Surtido válidos.")
+            st.info("No hay pedidos con Hora_Registro válida.")
         else:
             df_rep["_fecha"] = df_rep["_dt_registro"].dt.date
             iso_cal = df_rep["_dt_registro"].dt.isocalendar()
@@ -5043,7 +5041,7 @@ if selected_tab_key == "reportes_surtidores":
             )
             df_rep["_id_unico"] = df_rep["ID_Pedido"].map(sanitize_text)
             df_rep.loc[df_rep["_id_unico"] == "", "_id_unico"] = df_rep["Folio_Factura"].map(sanitize_text)
-            df_rep = df_rep.drop_duplicates(subset=["_id_unico", "Surtidor", "_origen"], keep="last")
+            df_rep = df_rep.drop_duplicates(subset=["_id_unico", "_origen"], keep="last")
 
             hoy_mx = datetime.now(TZ).date()
             periodo = st.radio("Periodo", options=["Día", "Semana", "Mes"], horizontal=True)
@@ -5072,19 +5070,32 @@ if selected_tab_key == "reportes_surtidores":
             if total == 0:
                 st.warning("No hay pedidos para el filtro seleccionado.")
             else:
-                rank = (df_f.groupby("Surtidor").size().reset_index(name="Pedidos").sort_values("Pedidos", ascending=False))
-                rank["% Participación"] = (rank["Pedidos"] / total * 100).round(2)
+                df_asig = df_f[(df_f["Surtidor"] != "") & (df_f["Fecha_Surtido"] != "")].copy()
+                surtidos = len(df_asig)
+                no_surtidos = total - surtidos
+                pct_surtidos = (surtidos / total * 100) if total else 0.0
 
-                top_name = rank.iloc[0]["Surtidor"]
-                top_pedidos = int(rank.iloc[0]["Pedidos"])
-                top_pct = float(rank.iloc[0]["% Participación"])
+                if df_asig.empty:
+                    st.info("En el periodo hay pedidos, pero ninguno tiene surtidor asignado todavía.")
+                    rank = pd.DataFrame(columns=["Surtidor", "Pedidos", "% Participación"])
+                else:
+                    rank = (df_asig.groupby("Surtidor").size().reset_index(name="Pedidos").sort_values("Pedidos", ascending=False))
+                    rank["% Participación"] = (rank["Pedidos"] / total * 100).round(2)
+
                 contexto = "del día" if periodo == "Día" else ("de la semana" if periodo == "Semana" else "del mes")
-
                 m1, m2, m3 = st.columns(3)
-                m1.metric("👥 Surtidores activos", f"{rank['Surtidor'].nunique()}")
-                m2.metric("🥇 Líder del periodo", f"{top_name} ({top_pedidos} de {total} {contexto})")
-                m3.metric("📌 Participación líder", f"{top_pct:.2f}%")
+                m1.metric("📦 Pedidos surtidos", f"{surtidos} / {total}")
+                if not rank.empty:
+                    top_name = rank.iloc[0]["Surtidor"]
+                    top_pedidos = int(rank.iloc[0]["Pedidos"])
+                    m2.metric("🥇 Líder del periodo", f"{top_name} ({top_pedidos} de {total} {contexto})")
+                    top_pct = float(rank.iloc[0]["% Participación"])
+                    m3.metric("📌 Participación líder", f"{top_pct:.2f}%")
+                else:
+                    m2.metric("🥇 Líder del periodo", "Sin asignaciones")
+                    m3.metric("📌 Participación líder", "0.00%")
 
+                st.caption(f"Pendientes sin surtidor: {no_surtidos} ({100 - pct_surtidos:.2f}%).")
                 st.markdown("##### 🏆 Ranking de surtidores")
                 rank_show = rank.copy()
                 rank_show["% Participación"] = rank_show["% Participación"].map(lambda x: f"{x:.2f}%")
