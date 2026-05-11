@@ -5102,18 +5102,67 @@ if selected_tab_key == "reportes_surtidores":
                 st.markdown("##### 📈 Tendencia temporal por surtidor")
                 st.line_chart(timeline, use_container_width=True)
 
+                resumen_surtidores = rank.copy()
+                resumen_surtidores["Total_Pedidos_Periodo"] = total
+                resumen_surtidores["Pedidos_Surtidos"] = resumen_surtidores["Pedidos"]
+                resumen_surtidores["Pedidos_No_Surtidos"] = total - resumen_surtidores["Pedidos"]
+                resumen_surtidores["% Participación"] = resumen_surtidores["% Participación"].round(2)
+                resumen_surtidores = resumen_surtidores[
+                    [
+                        "Surtidor",
+                        "Pedidos_Surtidos",
+                        "Total_Pedidos_Periodo",
+                        "Pedidos_No_Surtidos",
+                        "% Participación",
+                    ]
+                ]
                 st.download_button(
-                    "⬇️ Descargar ranking (Excel)",
-                    data=build_inactivos_excel_export(rank.rename(columns={"% Participación": "Porcentaje"})),
-                    file_name=f"reportes_surtidores_{periodo.lower()}.xlsx",
+                    "⬇️ Descargar resumen surtidores (Excel)",
+                    data=build_inactivos_excel_export(
+                        resumen_surtidores.rename(columns={"% Participación": "Porcentaje_Participacion"})
+                    ),
+                    file_name=f"resumen_surtidores_{periodo.lower()}.xlsx",
                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                    key="download_reportes_surtidores_excel",
+                    key="download_resumen_surtidores_excel",
+                    help="Resumen por surtidor del filtro actual (máximo 6 filas, una por surtidor).",
                 )
 
                 st.markdown("##### 📄 Detalle de pedidos filtrados")
-                cols_show = [c for c in ["_origen", "_fecha", "Surtidor", "Folio_Factura", "Cliente", "Tipo_Envio", "Estado", "Turno", "Fecha_Surtido"] if c in df_f.columns]
-                detail = df_f[cols_show].copy().sort_values(["_fecha", "Surtidor"], ascending=[False, True])
+                cols_show = [
+                    c
+                    for c in ["Surtidor", "Folio_Factura", "Cliente", "Tipo_Envio", "Estado", "Turno", "Fecha_Surtido"]
+                    if c in df_f.columns
+                ]
+                detail = df_f[cols_show].copy()
+                detail_sort_cols = [c for c in ["Fecha_Surtido", "Surtidor"] if c in detail.columns]
+                if detail_sort_cols:
+                    detail = detail.sort_values(
+                        detail_sort_cols,
+                        ascending=[False if c == "Fecha_Surtido" else True for c in detail_sort_cols],
+                    )
                 st.dataframe(detail, use_container_width=True, hide_index=True, height=260)
+                st.download_button(
+                    "⬇️ Descargar detalle filtrado (Excel)",
+                    data=build_inactivos_excel_export(detail),
+                    file_name=f"detalle_surtidores_{periodo.lower()}.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    key="download_detalle_surtidores_excel",
+                )
+
+                resumen_export = resumen_surtidores.rename(columns={"% Participación": "Porcentaje_Participacion"})
+                unified_buffer = BytesIO()
+                with pd.ExcelWriter(unified_buffer, engine="xlsxwriter", datetime_format="dd/mm/yyyy") as writer:
+                    resumen_export.to_excel(writer, index=False, sheet_name="Resumen_Surtidores")
+                    detail.to_excel(writer, index=False, sheet_name="Detalle_Filtrado")
+                unified_buffer.seek(0)
+                st.download_button(
+                    "⬇️ Descargar reporte unificado (2 hojas)",
+                    data=unified_buffer.getvalue(),
+                    file_name=f"reporte_surtidores_unificado_{periodo.lower()}.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    key="download_unificado_surtidores_excel",
+                    help="Incluye dos hojas: Resumen_Surtidores y Detalle_Filtrado.",
+                )
 
 # ---------------------------
 # TAB 3: Surtidores (Asignación)
