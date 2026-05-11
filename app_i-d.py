@@ -5126,6 +5126,30 @@ if selected_tab_key == "reportes_surtidores":
                     key="download_resumen_surtidores_excel",
                     help="Resumen por surtidor del filtro actual (máximo 6 filas, una por surtidor).",
                 )
+                resumen_surtidores = rank.copy()
+                resumen_surtidores["Total_Pedidos_Periodo"] = total
+                resumen_surtidores["Pedidos_Surtidos"] = resumen_surtidores["Pedidos"]
+                resumen_surtidores["Pedidos_No_Surtidos"] = total - resumen_surtidores["Pedidos"]
+                resumen_surtidores["% Participación"] = resumen_surtidores["% Participación"].round(2)
+                resumen_surtidores = resumen_surtidores[
+                    [
+                        "Surtidor",
+                        "Pedidos_Surtidos",
+                        "Total_Pedidos_Periodo",
+                        "Pedidos_No_Surtidos",
+                        "% Participación",
+                    ]
+                ]
+                st.download_button(
+                    "⬇️ Descargar resumen surtidores (Excel)",
+                    data=build_inactivos_excel_export(
+                        resumen_surtidores.rename(columns={"% Participación": "Porcentaje_Participacion"})
+                    ),
+                    file_name=f"resumen_surtidores_{periodo.lower()}.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    key="download_resumen_surtidores_excel",
+                    help="Resumen por surtidor del filtro actual (máximo 6 filas, una por surtidor).",
+                )
 
                 st.markdown("##### 📄 Detalle de pedidos filtrados")
                 cols_show = [
