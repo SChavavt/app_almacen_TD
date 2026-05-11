@@ -8606,7 +8606,7 @@ if "organizador" in tab_map:
                 filtro_tipo_envio = st.selectbox(
                     "Filtrar por tipo de envío",
                     options=["📦 Todos", "🔁 Devolución", "🛠 Garantía"],
-                    index=0,
+                    index=1,
                     key="organizador_casos_tipo_envio",
                 )
             with col_filtros_izq:
