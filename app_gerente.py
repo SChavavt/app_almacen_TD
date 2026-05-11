@@ -8927,23 +8927,32 @@ if "organizador" in tab_map:
                         st.session_state[detalle_key] = detalle_prefill
 
                     st.markdown("**🧩 Frase base**")
-                    st.caption(
-                        "ℹ️ Las opciones 'Pendiente de recolección', 'Material en tránsito' y "
-                        "'Pendiente de retorno de guía' mantienen el caso visible en esta bandeja para seguimiento."
-                    )
-                    opciones_frases = ["— Sin frase base —"] + frases_base
+                    frases_seguimiento_visible = {
+                        "Pendiente de recolección",
+                        "Material en tránsito",
+                        "Pendiente de retorno de guía",
+                    }
+                    opciones_frases_valor = [""] + frases_base
                     frase_guardada = str(st.session_state.get(base_key, "")).strip()
                     frase_inicial = (
-                        opciones_frases.index(frase_guardada)
-                        if frase_guardada in opciones_frases
+                        opciones_frases_valor.index(frase_guardada)
+                        if frase_guardada in opciones_frases_valor
                         else 0
                     )
+
+                    def _formatear_opcion_frase_base(opcion: str) -> str:
+                        if not opcion:
+                            return "— Sin frase base —"
+                        if opcion in frases_seguimiento_visible:
+                            return f"🔄 {opcion}"
+                        return opcion
 
                     with st.form(f"form_comentario_gerente_{idx_caso}", clear_on_submit=False):
                         frase_base_sel = st.selectbox(
                             "Frase base",
-                            options=opciones_frases,
+                            options=opciones_frases_valor,
                             index=frase_inicial,
+                            format_func=_formatear_opcion_frase_base,
                             key=f"{base_key}_select",
                         )
                         detalle_manual = st.text_input(
@@ -8953,7 +8962,6 @@ if "organizador" in tab_map:
                         )
                         guardar_comentario = st.form_submit_button("💾 Guardar comentario gerente")
 
-                    frase_base_sel = "" if frase_base_sel == "— Sin frase base —" else frase_base_sel
                     st.session_state[base_key] = frase_base_sel
 
                     comentario_gerente = frase_base_sel.strip()
