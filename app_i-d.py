@@ -190,9 +190,6 @@ st.markdown(
         color: #fff;
         box-shadow: inset 0 -2px 0 rgba(255,255,255,.45);
     }
-    div[data-testid="stRadio"] div[role="radiogroup"] > label svg {
-        display: none !important;
-    }
     </style>
     """,
     unsafe_allow_html=True,
@@ -1942,7 +1939,9 @@ def render_auto_list(
 
         surtidor = sanitize_text(e.get("surtidor", ""))
         surtidor_html = (
-            f"<span class='surtidor-tag'>{surtidor}</span>" if surtidor else ""
+            f"<span class='surtidor-tag' style=\"{surtidor_badge_style(surtidor)}\">{surtidor}</span>"
+            if surtidor
+            else ""
         )
         cliente_base = sanitize_text(e.get("cliente_nombre", "")) or "—"
         cliente_html = cliente_base
@@ -2057,6 +2056,39 @@ def _is_surtidor_visible_estado(estado: str) -> bool:
     if any(term in cleaned for term in ("pendiente", "demorado", "modificacion")):
         return False
     return "en proceso" in cleaned or "completado" in cleaned
+
+
+SURTIDOR_COLOR_MAP = {
+    "Baldo": "#ff5a5f",
+    "Alexis": "#4da3ff",
+    "Enrique": "#58d68d",
+    "Cassandra": "#bb8fce",
+    "Yaya": "#f5b041",
+    "Karen": "#f1948a",
+}
+
+
+def surtidor_badge_style(nombre: str) -> str:
+    color = SURTIDOR_COLOR_MAP.get(sanitize_text(nombre), "rgba(114,190,255,0.18)")
+    return (
+        f"background:{color};color:#111827;font-weight:800;"
+        "border-radius:0.7rem;padding:0.09rem 0.4rem;display:inline-block;"
+    )
+
+
+def render_surtidor_legend():
+    chips = []
+    for nombre, color in SURTIDOR_COLOR_MAP.items():
+        chips.append(
+            f"<span style='background:{color};color:#111827;font-weight:800;"
+            f"padding:0.22rem 0.48rem;border-radius:0.7rem;font-size:0.76rem;'>{nombre}</span>"
+        )
+    st.markdown(
+        "<div style='display:flex;gap:0.42rem;flex-wrap:wrap;margin:0.15rem 0 0.6rem 0;'>"
+        + "".join(chips)
+        + "</div>",
+        unsafe_allow_html=True,
+    )
 
 
 def last_3_days_previous_range(today_date):
@@ -4821,6 +4853,7 @@ if selected_tab_key == "assistant":
 # ---------------------------
 if selected_tab_key == "auto_local":
     st_autorefresh(interval=60000, key="auto_refresh_local_casos")
+    render_surtidor_legend()
 
     today_local = datetime.now(TZ).date()
     combined_entries = [e for e in auto_local_entries if _is_visible_auto_entry(e)]
@@ -4881,6 +4914,7 @@ if selected_tab_key == "auto_local":
 # ---------------------------
 if selected_tab_key == "auto_foraneo":
     st_autorefresh(interval=60000, key="auto_refresh_foraneo_cdmx")
+    render_surtidor_legend()
 
     hoy = datetime.now(TZ).date()
 
@@ -5136,6 +5170,28 @@ if selected_tab_key == "surtidores":
 
     with st.form("surtidores_asignacion_form"):
         st.markdown("**Selección de surtidor**")
+        st.markdown(
+            """
+            <style>
+            div[data-testid="stRadio"] div[role="radiogroup"] > label[data-baseweb="radio"]{
+                display:inline-flex;align-items:center;gap:0.18rem;
+            }
+            div[data-testid="stRadio"] div[role="radiogroup"] > label[data-baseweb="radio"] p{
+                border-radius: 0.7rem;
+                padding: 0.08rem 0.42rem;
+                font-weight: 800 !important;
+                color: #111827 !important;
+            }
+            div[data-testid="stRadio"] div[role="radiogroup"] > label[data-baseweb="radio"]:nth-child(1) p{background:#ff5a5f;}
+            div[data-testid="stRadio"] div[role="radiogroup"] > label[data-baseweb="radio"]:nth-child(2) p{background:#4da3ff;}
+            div[data-testid="stRadio"] div[role="radiogroup"] > label[data-baseweb="radio"]:nth-child(3) p{background:#58d68d;}
+            div[data-testid="stRadio"] div[role="radiogroup"] > label[data-baseweb="radio"]:nth-child(4) p{background:#bb8fce;}
+            div[data-testid="stRadio"] div[role="radiogroup"] > label[data-baseweb="radio"]:nth-child(5) p{background:#f5b041;}
+            div[data-testid="stRadio"] div[role="radiogroup"] > label[data-baseweb="radio"]:nth-child(6) p{background:#f1948a;}
+            </style>
+            """,
+            unsafe_allow_html=True,
+        )
         selected_surtidor_nombre = st.radio(
             "Surtidor",
             options=surtidores_predefinidos,
