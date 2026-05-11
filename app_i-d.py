@@ -4515,6 +4515,7 @@ TAB_DEFINITIONS = [
     ("auto_local", "⚙️ Auto Local"),
     ("auto_foraneo", "🚚 Auto Foráneo"),
     ("surtidores", "🧑‍🔧 Surtidores"),
+    ("reportes_surtidores", "📊 Reportes surtidores"),
 ]
 
 init_login_state()
@@ -4532,6 +4533,10 @@ elif logged_user == "DISSURTIDOR":
     visible_tab_keys = ["surtidores"]
 else:
     visible_tab_keys = [tab_key for tab_key, _ in TAB_DEFINITIONS]
+
+allowed_report_users = {"CECILIA94", "SCHAVA"}
+if logged_user not in allowed_report_users and "reportes_surtidores" in visible_tab_keys:
+    visible_tab_keys = [k for k in visible_tab_keys if k != "reportes_surtidores"]
 
 tab_map = dict(TAB_DEFINITIONS)
 visible_tabs = [(tab_key, tab_map[tab_key]) for tab_key in visible_tab_keys if tab_key in tab_map]
@@ -4952,6 +4957,118 @@ if selected_tab_key == "auto_foraneo":
             max_rows=140,
             mode="foraneo",
         )
+
+
+
+# ---------------------------
+# TAB: Reportes surtidores
+# ---------------------------
+if selected_tab_key == "reportes_surtidores":
+    st.markdown("### 📊 Reportes de surtidores")
+    st.caption("Métricas por día, semana y mes tomando como base `Fecha_Surtido` (cuando existe) y respaldo con fechas del pedido.")
+
+    df_hist_report = load_historicos_from_gsheets()
+    frames = []
+    for src_name, df_src in (("data_pedidos", df_all), ("datos_pedidos", df_hist_report)):
+        if df_src is None or df_src.empty:
+            continue
+        df_tmp = df_src.copy()
+        # Evita errores de concat cuando una hoja trae columnas repetidas.
+        if df_tmp.columns.duplicated().any():
+            df_tmp = df_tmp.loc[:, ~df_tmp.columns.duplicated()].copy()
+        df_tmp["_origen"] = src_name
+        frames.append(df_tmp)
+
+    if not frames:
+        st.info("No hay datos disponibles para generar reportes.")
+    else:
+        df_rep = pd.concat(frames, ignore_index=True)
+        for c in ["Surtidor", "Hora_Registro", "Fecha_Entrega", "ID_Pedido", "Folio_Factura"]:
+            if c not in df_rep.columns:
+                df_rep[c] = ""
+
+        df_rep["Surtidor"] = df_rep["Surtidor"].map(sanitize_text)
+        df_rep = df_rep[df_rep["Surtidor"] != ""].copy()
+        if df_rep.empty:
+            st.info("No hay pedidos con surtidor asignado todavía.")
+        else:
+            if "Fecha_Surtido" not in df_rep.columns:
+                df_rep["Fecha_Surtido"] = ""
+            # Productividad por surtidor debe usar fecha/hora real de asignación.
+            df_rep["_dt_registro"] = pd.to_datetime(df_rep["Fecha_Surtido"], errors="coerce")
+            missing_dt = df_rep["_dt_registro"].isna()
+            if missing_dt.any():
+                df_rep.loc[missing_dt, "_dt_registro"] = pd.to_datetime(
+                    df_rep.loc[missing_dt, "Hora_Registro"], errors="coerce"
+                )
+            missing_dt = df_rep["_dt_registro"].isna()
+            if missing_dt.any():
+                df_rep.loc[missing_dt, "_dt_registro"] = pd.to_datetime(
+                    df_rep.loc[missing_dt, "Fecha_Entrega"], errors="coerce"
+                )
+            df_rep = df_rep[df_rep["_dt_registro"].notna()].copy()
+            df_rep["_fecha"] = df_rep["_dt_registro"].dt.date
+            df_rep["_anio"] = df_rep["_dt_registro"].dt.year
+            df_rep["_mes"] = df_rep["_dt_registro"].dt.to_period("M").astype(str)
+            df_rep["_semana"] = df_rep["_dt_registro"].dt.strftime("%G-W%V")
+            df_rep["_id_unico"] = df_rep["ID_Pedido"].map(sanitize_text)
+            df_rep.loc[df_rep["_id_unico"] == "", "_id_unico"] = df_rep["Folio_Factura"].map(sanitize_text)
+            df_rep = df_rep.drop_duplicates(subset=["_id_unico", "Surtidor", "_origen"], keep="last")
+
+            hoy_mx = datetime.now(TZ).date()
+            periodo = st.radio("Periodo", options=["Día", "Semana", "Mes"], horizontal=True)
+            c1, c2, c3 = st.columns(3)
+            with c1:
+                if periodo == "Día":
+                    fecha_sel = st.date_input("Fecha", value=hoy_mx, key="rep_surt_fecha")
+                else:
+                    fecha_sel = hoy_mx
+            with c2:
+                semanas = sorted(df_rep["_semana"].dropna().unique().tolist(), reverse=True)
+                semana_sel = st.selectbox("Semana ISO", options=semanas, index=0 if semanas else None) if semanas else ""
+            with c3:
+                meses = sorted(df_rep["_mes"].dropna().unique().tolist(), reverse=True)
+                mes_sel = st.selectbox("Mes", options=meses, index=0 if meses else None) if meses else ""
+
+            df_f = df_rep.copy()
+            if periodo == "Día":
+                df_f = df_f[df_f["_fecha"] == fecha_sel]
+            elif periodo == "Semana" and semana_sel:
+                df_f = df_f[df_f["_semana"] == semana_sel]
+            elif periodo == "Mes" and mes_sel:
+                df_f = df_f[df_f["_mes"] == mes_sel]
+
+            total = len(df_f)
+            st.markdown(f"#### Total pedidos en periodo: **{total}**")
+            if total == 0:
+                st.warning("No hay pedidos para el filtro seleccionado.")
+            else:
+                rank = (df_f.groupby("Surtidor").size().reset_index(name="Pedidos").sort_values("Pedidos", ascending=False))
+                rank["% Participación"] = (rank["Pedidos"] / total * 100).round(2)
+
+                top_name = rank.iloc[0]["Surtidor"]
+                top_pct = rank.iloc[0]["% Participación"]
+                m1,m2,m3 = st.columns(3)
+                m1.metric("👥 Surtidores activos", f"{rank['Surtidor'].nunique()}")
+                m2.metric("🥇 Líder del periodo", top_name)
+                m3.metric("📌 Participación líder", f"{top_pct:.2f}%")
+
+                st.markdown("##### 🏆 Ranking de surtidores")
+                st.dataframe(rank, use_container_width=True, hide_index=True)
+                st.bar_chart(rank.set_index("Surtidor")["Pedidos"], use_container_width=True)
+
+                st.download_button(
+                    "⬇️ Descargar ranking (Excel)",
+                    data=build_inactivos_excel_export(rank.rename(columns={"% Participación":"Porcentaje"})),
+                    file_name=f"reportes_surtidores_{periodo.lower()}.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    key="download_reportes_surtidores_excel",
+                )
+
+                st.markdown("##### 📄 Detalle de pedidos filtrados")
+                cols_show = [c for c in ["_origen", "_fecha", "Surtidor", "Folio_Factura", "Cliente", "Tipo_Envio", "Estado", "Turno", "Fecha_Surtido", "Hora_Registro"] if c in df_f.columns]
+                detail = df_f[cols_show].copy().sort_values(["_fecha", "Surtidor"], ascending=[False, True])
+                st.dataframe(detail, use_container_width=True, hide_index=True, height=260)
 
 # ---------------------------
 # TAB 3: Surtidores (Asignación)
