@@ -8197,6 +8197,34 @@ if df_main is not None:
                     f"Hora_Proceso: {fecha_proc_txt} · **{dias_alerta} días hábiles**"
                 )
 
+    # --- Control de acceso por usuario (persistido en query param `usuario`) ---
+    allowed_users = ["SINAI", "SINAICEL", "SCHAVA"]
+    current_user_raw = str(_get_query_param_value("usuario") or st.session_state.get("app_usuario", "")).strip()
+    current_user = current_user_raw.upper()
+
+    if current_user and current_user not in allowed_users:
+        st.warning("⚠️ Usuario no válido. Selecciona uno de los usuarios permitidos.")
+        current_user = ""
+
+    if not current_user:
+        st.markdown("### 👤 Acceso de usuario")
+        selected_user = st.selectbox(
+            "Selecciona tu usuario para continuar",
+            options=allowed_users,
+            index=0,
+            key="app_usuario_selector",
+        )
+        if st.button("Entrar", key="btn_set_app_usuario"):
+            normalized_user = str(selected_user).strip().upper()
+            st.session_state["app_usuario"] = normalized_user
+            st.query_params["usuario"] = normalized_user
+            st.rerun()
+        st.stop()
+
+    st.session_state["app_usuario"] = current_user
+    st.query_params["usuario"] = current_user
+    st.caption(f"Usuario activo: **{current_user}**")
+
     # --- Implementación de Pestañas con st.tabs ---
     tab_options = [
         "📍 Pedidos Locales",
@@ -8208,6 +8236,38 @@ if df_main is not None:
         "✅ Completar Rápido",
         "✅ Historial Completados",
     ]
+
+    if current_user == "SINAI":
+        components.html(
+            """
+            <script>
+            const css = `
+              .stTabs [data-baseweb="tab-list"] button[role="tab"]:nth-child(7) { display: none !important; }
+            `;
+            const style = window.parent.document.createElement('style');
+            style.innerHTML = css;
+            window.parent.document.head.appendChild(style);
+            </script>
+            """,
+            height=0,
+        )
+    elif current_user == "SINAICEL":
+        st.session_state["active_main_tab_index"] = 6
+        st.query_params["tab"] = "6"
+        components.html(
+            """
+            <script>
+            const css = `
+              .stTabs [data-baseweb="tab-list"] button[role="tab"] { display: none !important; }
+              .stTabs [data-baseweb="tab-list"] button[role="tab"]:nth-child(7) { display: inline-flex !important; }
+            `;
+            const style = window.parent.document.createElement('style');
+            style.innerHTML = css;
+            window.parent.document.head.appendChild(style);
+            </script>
+            """,
+            height=0,
+        )
 
     if st.session_state.get("bulk_complete_mode", False):
         st.caption(
