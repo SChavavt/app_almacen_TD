@@ -2918,18 +2918,11 @@ if col_reload.button(
     st.session_state["reload_pedidos_soft"] = True
     st.session_state["refresh_data_caches_pending"] = True
 
-if "bulk_complete_mode" not in st.session_state:
-    st.session_state["bulk_complete_mode"] = False
-
-if col_bulk_mode.button(
+bulk_mode_value = col_bulk_mode.checkbox(
     "✅ Completar varios",
-    key="btn_toggle_bulk_complete_mode",
-    help="Activa o desactiva checks fuera del expander para pedidos en proceso",
-    use_container_width=True,
-):
-    st.session_state["bulk_complete_mode"] = not bool(st.session_state.get("bulk_complete_mode", False))
-
-bulk_mode_value = bool(st.session_state.get("bulk_complete_mode", False))
+    key="bulk_complete_mode",
+    help="Activa checks fuera del expander para pedidos en proceso",
+)
 
 if not bulk_mode_value:
     st.session_state["bulk_selected_pedidos"] = set()
@@ -8042,14 +8035,8 @@ if df_main is not None:
             else:
                 st.warning("⚠️ No se pudo guardar Numero_Foraneo en algunos casos foráneos.")
 
-    current_user_for_view = str(
-        st.session_state.get("app_usuario") or _get_query_param_value("usuario") or ""
-    ).strip().upper()
-    is_sinaicel_user = current_user_for_view == "SINAICEL"
-
     # 📊 Resumen de Estados combinando datos_pedidos y casos_especiales
-    if not is_sinaicel_user:
-        st.markdown("### 📊 Resumen de Estados")
+    st.markdown("### 📊 Resumen de Estados")
 
     def _count_states(df):
         completados_visible = df[
@@ -8086,10 +8073,9 @@ if df_main is not None:
         cantidad = estado_counts.get(estado, 0)
         if cantidad > 0:
             estados_a_mostrar.append((estado, cantidad))
-    if not is_sinaicel_user:
-        cols = st.columns(len(estados_a_mostrar))
-        for col, (nombre_estado, cantidad) in zip(cols, estados_a_mostrar):
-            col.metric(nombre_estado, int(cantidad))
+    cols = st.columns(len(estados_a_mostrar))
+    for col, (nombre_estado, cantidad) in zip(cols, estados_a_mostrar):
+        col.metric(nombre_estado, int(cantidad))
 
     # 🔔 Aviso de devoluciones/garantías con seguimiento pendiente
     tipo_casos_col = "Tipo_Caso" if "Tipo_Caso" in df_casos.columns else (
@@ -10543,7 +10529,7 @@ if df_main is not None:
                     _render_foraneo_column(foraneos_col_b, col_b)
 
                 submit_complete = st.form_submit_button(
-                    "🟢 Completar seleccionados",
+                    f"🟢 Completar seleccionados",
                     use_container_width=True,
                 )
 
