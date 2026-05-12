@@ -2118,6 +2118,31 @@ def _render_turno_toggle_button(origen_tab: str, fecha_label: str) -> tuple[bool
     return bool(st.session_state.get(cierre_key, False)), changed
 
 
+def _render_turno_cerrado_badge() -> None:
+    st.markdown(
+        """
+        <div style="
+            display:inline-flex;
+            align-items:center;
+            gap:8px;
+            background:#3a0f14;
+            color:#ffd8dc;
+            border:1px solid #7f1d1d;
+            border-radius:999px;
+            padding:6px 12px;
+            font-weight:600;
+            font-size:0.92rem;
+            margin:8px 0 10px 0;
+            letter-spacing:0.2px;
+        ">
+            <span aria-hidden="true">🔒</span>
+            <span>Turno cerrado</span>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
 def _sync_turno_cierre_en_hoja_ruta(origen_tab: str, fecha_label: str, cerrar: bool) -> tuple[bool, str]:
     fecha_text = str(fecha_label or "").replace("📅", "").strip()
     try:
@@ -8416,7 +8441,7 @@ if df_main is not None:
                                 st.warning(f"⚠️ No se pudo reflejar en Hoja_Ruta: {err_sync}")
                             st.rerun()
                         if turno_cerrado:
-                            st.markdown("### CERRADA")
+                            _render_turno_cerrado_badge()
                         pedidos_fecha = pedidos_turno_activos[
                             pedidos_turno_activos["Fecha_Entrega_dt"]
                             == current_selected_date_dt
@@ -8612,7 +8637,7 @@ if df_main is not None:
                                         st.warning(f"⚠️ No se pudo reflejar en Hoja_Ruta: {err_sync}")
                                     st.rerun()
                                 if turno_cerrado:
-                                    st.markdown("### CERRADA")
+                                    _render_turno_cerrado_badge()
                                 pedidos_fecha = pedidos_s_activos[
                                     pedidos_s_activos["Fecha_Entrega_dt"]
                                     == current_selected_date_dt
