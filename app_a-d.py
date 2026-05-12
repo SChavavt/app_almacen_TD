@@ -10483,6 +10483,37 @@ if df_main is not None:
 
             selected_ids = set(st.session_state.get("bulk_selected_pedidos", set()))
             with st.form("form_completar_rapido", clear_on_submit=False):
+                st.markdown("""
+                <style>
+                div[data-testid="stForm"] div[data-testid="stCheckbox"] label {
+                    background: rgba(146, 196, 255, 0.16);
+                    border: 1px solid rgba(126, 181, 244, 0.75);
+                    border-radius: 0.68rem;
+                    padding: 0.36rem 0.62rem;
+                    margin-bottom: 0.35rem;
+                }
+                div[data-testid="stForm"] div[data-testid="stCheckbox"] label p {
+                    font-weight: 700;
+                    color: #f5f9ff;
+                    font-size: 0.9rem;
+                }
+                div[data-testid="stForm"] div[data-testid="stCheckbox"] label[data-checked="true"] {
+                    background: rgba(89, 166, 255, 0.26);
+                    border-color: rgba(145, 204, 255, 0.95);
+                    box-shadow: 0 0 0 1px rgba(145, 204, 255, 0.25) inset;
+                }
+                div[data-testid="stForm"] button[kind="secondaryFormSubmit"] {
+                    background: linear-gradient(180deg, #2fa455, #248542) !important;
+                    border: 1px solid rgba(120, 220, 146, 0.75) !important;
+                    color: #ecfff1 !important;
+                    font-weight: 800 !important;
+                    border-radius: 0.78rem !important;
+                    min-height: 3rem !important;
+                }
+                </style>
+                """,
+                unsafe_allow_html=True,
+                )
                 st.markdown("#### 📍 LOCALES")
                 locales_df = pedidos_en_proceso[pedidos_en_proceso["tipo_norm"] == "📍 Pedido Local"].copy()
                 if locales_df.empty:
@@ -10501,12 +10532,12 @@ if df_main is not None:
                             surtidor = str(row_fast.get("Surtidor", "")).strip()
                             estado = str(row_fast.get("Estado", "")).strip() or "Sin estado"
                             key_chk = f"fast_complete_chk_{pedido_id}"
+                            estado_txt = "🟡 Pendiente" if "Pendiente" in estado else "🔵 En Proceso"
                             checked = st.checkbox(
-                                f"#{orden} · {folio} · {cliente}",
+                                f"#{orden} · {cliente} · {estado_txt}",
                                 key=key_chk,
                                 value=(pedido_id in selected_ids),
                             )
-                            st.markdown(f"{_badge_surtidor(surtidor)} · {estado}", unsafe_allow_html=True)
                             if checked:
                                 selected_ids.add(pedido_id)
                             else:
@@ -10540,12 +10571,12 @@ if df_main is not None:
                                 surtidor = str(row_fast.get("Surtidor", "")).strip()
                                 estado = str(row_fast.get("Estado", "")).strip() or "Sin estado"
                                 key_chk = f"fast_complete_chk_{pedido_id}"
+                                estado_txt = "🟡 Pendiente" if "Pendiente" in estado else "🔵 En Proceso"
                                 checked = st.checkbox(
-                                    f"#{orden} · {folio} · {cliente}",
+                                    f"#{orden} · {cliente} · {estado_txt}",
                                     key=key_chk,
                                     value=(pedido_id in selected_ids),
                                 )
-                                st.markdown(f"{_badge_surtidor(surtidor)} · {estado}", unsafe_allow_html=True)
                                 if checked:
                                     selected_ids.add(pedido_id)
                                 else:
