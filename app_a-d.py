@@ -2890,9 +2890,15 @@ st.query_params["local_tab"] = str(
     st.session_state.get("active_subtab_local_index", 0)
 )
 
-render_brand_title()
-if can_edit_brand_logo():
-    render_logo_uploader()
+current_user_topbar = str(
+    st.session_state.get("app_usuario") or _get_query_param_value("usuario") or ""
+).strip().upper()
+is_sinaicel_topbar = current_user_topbar == "SINAICEL"
+
+if not is_sinaicel_topbar:
+    render_brand_title()
+    if can_edit_brand_logo():
+        render_logo_uploader()
 
 # Flash message tras refresh
 if "flash_msg" in st.session_state and st.session_state["flash_msg"]:
@@ -2904,7 +2910,10 @@ _ensure_visual_state_defaults()
 if st.session_state.pop("bulk_mode_reset_requested", False):
     st.session_state["bulk_complete_mode"] = False
 
-col_reload, col_bulk_mode, col_bulk_action, col_bulk_search = st.columns([1.25, 1.0, 1.35, 1.8])
+if is_sinaicel_topbar:
+    col_reload = st.columns([1.0])[0]
+else:
+    col_reload, col_bulk_mode, col_bulk_action, col_bulk_search = st.columns([1.25, 1.0, 1.35, 1.8])
 
 if col_reload.button(
     "🔄 Recargar Pedidos",
@@ -2918,11 +2927,19 @@ if col_reload.button(
     st.session_state["reload_pedidos_soft"] = True
     st.session_state["refresh_data_caches_pending"] = True
 
-bulk_mode_value = col_bulk_mode.checkbox(
-    "✅ Completar varios",
-    key="bulk_complete_mode",
-    help="Activa checks fuera del expander para pedidos en proceso",
-)
+if "bulk_complete_mode" not in st.session_state:
+    st.session_state["bulk_complete_mode"] = False
+
+if not is_sinaicel_topbar:
+    if col_bulk_mode.button(
+        "✅ Completar varios",
+        key="btn_toggle_bulk_complete_mode",
+        help="Activa o desactiva checks fuera del expander para pedidos en proceso",
+        use_container_width=True,
+    ):
+        st.session_state["bulk_complete_mode"] = not bool(st.session_state.get("bulk_complete_mode", False))
+
+bulk_mode_value = bool(st.session_state.get("bulk_complete_mode", False)) and (not is_sinaicel_topbar)
 
 if not bulk_mode_value:
     st.session_state["bulk_selected_pedidos"] = set()
@@ -2930,23 +2947,27 @@ if not bulk_mode_value:
         if _k.startswith("bulk_chk_"):
             del st.session_state[_k]
 
-if bulk_mode_value:
-    col_bulk_search.text_input(
-        "🔎 Buscar pedido para seleccionar",
-        key="bulk_search_query",
-        placeholder="Ej. F196697, ID o nombre del cliente",
-    )
+if not is_sinaicel_topbar:
+    if bulk_mode_value:
+        col_bulk_search.text_input(
+            "🔎 Buscar pedido para seleccionar",
+            key="bulk_search_query",
+            placeholder="Ej. F196697, ID o nombre del cliente",
+        )
+    else:
+        st.session_state["bulk_search_query"] = ""
 else:
     st.session_state["bulk_search_query"] = ""
 
-selected_bulk_count = len(_get_bulk_selected_ids())
-execute_disabled = (not bulk_mode_value) or (selected_bulk_count < 1)
-if col_bulk_action.button(
-    f"🟢 Completar Pedidos seleccionados ({selected_bulk_count})",
-    key="btn_bulk_complete_execute_top",
-    disabled=execute_disabled,
-):
-    st.session_state["bulk_complete_execute_requested"] = True
+if not is_sinaicel_topbar:
+    selected_bulk_count = len(_get_bulk_selected_ids())
+    execute_disabled = (not bulk_mode_value) or (selected_bulk_count < 1)
+    if col_bulk_action.button(
+        f"🟢 Completar Pedidos seleccionados ({selected_bulk_count})",
+        key="btn_bulk_complete_execute_top",
+        disabled=execute_disabled,
+    ):
+        st.session_state["bulk_complete_execute_requested"] = True
 
 
 # --- Google Sheets Constants (pueden venir de st.secrets si se prefiere) ---
@@ -8035,8 +8056,14 @@ if df_main is not None:
             else:
                 st.warning("⚠️ No se pudo guardar Numero_Foraneo en algunos casos foráneos.")
 
+    current_user_for_view = str(
+        st.session_state.get("app_usuario") or _get_query_param_value("usuario") or ""
+    ).strip().upper()
+    is_sinaicel_user = current_user_for_view == "SINAICEL"
+
     # 📊 Resumen de Estados combinando datos_pedidos y casos_especiales
-    st.markdown("### 📊 Resumen de Estados")
+    if not is_sinaicel_user:
+        st.markdown("### 📊 Resumen de Estados")
 
     def _count_states(df):
         completados_visible = df[
@@ -8073,9 +8100,10 @@ if df_main is not None:
         cantidad = estado_counts.get(estado, 0)
         if cantidad > 0:
             estados_a_mostrar.append((estado, cantidad))
-    cols = st.columns(len(estados_a_mostrar))
-    for col, (nombre_estado, cantidad) in zip(cols, estados_a_mostrar):
-        col.metric(nombre_estado, int(cantidad))
+    if not is_sinaicel_user:
+        cols = st.columns(len(estados_a_mostrar))
+        for col, (nombre_estado, cantidad) in zip(cols, estados_a_mostrar):
+            col.metric(nombre_estado, int(cantidad))
 
     # 🔔 Aviso de devoluciones/garantías con seguimiento pendiente
     tipo_casos_col = "Tipo_Caso" if "Tipo_Caso" in df_casos.columns else (
@@ -8109,7 +8137,7 @@ if df_main is not None:
     pendientes_count = len(devoluciones_pendientes) + len(garantias_pendientes)
     demorados_count = len(devoluciones_demoradas) + len(garantias_demoradas)
 
-    if pendientes_count:
+    if pendientes_count and (not is_sinaicel_user):
         partes_mensaje = []
         if len(devoluciones_pendientes):
             partes_mensaje.append(
@@ -8124,7 +8152,7 @@ if df_main is not None:
             f"⚠️ Hay {lista_casos} en estado pendiente en Casos Especiales."
         )
 
-    if demorados_count:
+    if demorados_count and (not is_sinaicel_user):
         partes_demorados = []
         if len(devoluciones_demoradas):
             partes_demorados.append(
@@ -10529,16 +10557,17 @@ if df_main is not None:
                     _render_foraneo_column(foraneos_col_b, col_b)
 
                 submit_complete = st.form_submit_button(
-                    f"🟢 Completar seleccionados",
+                    "🟢 Completar seleccionados",
                     use_container_width=True,
                 )
 
             st.session_state["bulk_selected_pedidos"] = selected_ids
-            st.caption("Colores surtidor:")
-            st.markdown(
-                " · ".join([f"{_badge_surtidor(n.title())}" for n in ["baldo", "alexis", "enrique", "cassandra", "yaya", "karen"]]),
-                unsafe_allow_html=True,
-            )
+            if not is_sinaicel_user:
+                st.caption("Colores surtidor:")
+                st.markdown(
+                    " · ".join([f"{_badge_surtidor(n.title())}" for n in ["baldo", "alexis", "enrique", "cassandra", "yaya", "karen"]]),
+                    unsafe_allow_html=True,
+                )
             if submit_complete and len(selected_ids) > 0:
                 st.session_state["bulk_complete_execute_requested"] = True
                 st.rerun()
