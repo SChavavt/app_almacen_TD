@@ -5404,32 +5404,8 @@ if selected_tab_key == "surtidores":
             st.markdown(
                 """
                 <style>
-                div[data-testid="stCheckbox"] label {
-                    min-height: 2.2rem;
-                    padding: 0.22rem 0.1rem;
-                    gap: 0.5rem;
-                    cursor: pointer;
-                }
-                div[data-testid="stCheckbox"] label > div:first-child {
-                    transform: scale(1.35);
-                    transform-origin: left center;
-                }
                 div[data-testid="stCheckbox"] label p {
                     white-space: nowrap;
-                    font-size: 1.03rem;
-                    line-height: 1.25rem;
-                }
-                @media (pointer: coarse) {
-                    div[data-testid="stCheckbox"] label {
-                        min-height: 2.6rem;
-                        padding: 0.34rem 0.12rem;
-                    }
-                    div[data-testid="stCheckbox"] label > div:first-child {
-                        transform: scale(1.55);
-                    }
-                    div[data-testid="stCheckbox"] label p {
-                        font-size: 1.08rem;
-                    }
                 }
                 </style>
                 """,
