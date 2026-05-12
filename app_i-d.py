@@ -5312,7 +5312,7 @@ if selected_tab_key == "surtidores":
         numero = entry.get("display_num", entry.get("numero", "—"))
         cliente = sanitize_text(entry.get("cliente_nombre", ""))
         estado = sanitize_text(entry.get("estado", ""))
-        parts = [f"#{numero}", cliente, estado]
+        parts = [f"**#{numero}**", cliente, estado]
         return " · ".join([p for p in parts if p])
 
     local_entry_by_key = {build_surtidor_key(e): e for e in local_hoy}
@@ -5404,8 +5404,61 @@ if selected_tab_key == "surtidores":
             st.markdown(
                 """
                 <style>
+                div[data-testid="stCheckbox"] label {
+                    min-height: 1.9rem;
+                    padding: 0.14rem 0.42rem;
+                    gap: 0.44rem;
+                    cursor: pointer;
+                    border: 1px solid rgba(147, 197, 253, 0.48);
+                    border-radius: 0.58rem;
+                    background: rgba(147, 197, 253, 0.12);
+                    box-shadow: inset 0 0 0 1px rgba(191, 219, 254, 0.18);
+                    transition: background 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
+                }
+                div[data-testid="stCheckbox"] label:hover {
+                    border-color: rgba(125, 211, 252, 0.72);
+                    background: rgba(191, 219, 254, 0.2);
+                }
+                div[data-testid="stCheckbox"] { margin-bottom: 0.24rem; }
+                div[data-testid="stCheckbox"] label:has(input:checked) {
+                    border-color: rgba(34, 197, 94, 0.95);
+                    background: rgba(22, 101, 52, 0.28);
+                    box-shadow: 0 0 0 1px rgba(74, 222, 128, 0.28);
+                }
+                div[data-testid="stCheckbox"] label > div:first-child {
+                    transform: scale(1.08);
+                    transform-origin: left center;
+                }
                 div[data-testid="stCheckbox"] label p {
                     white-space: nowrap;
+                    font-size: 0.91rem;
+                    line-height: 1.08rem;
+                }
+                @media (pointer: coarse) {
+                    div[data-testid="stCheckbox"] label {
+                        min-height: 2.15rem;
+                        padding: 0.2rem 0.44rem;
+                    }
+                    div[data-testid="stCheckbox"] label > div:first-child {
+                        transform: scale(1.2);
+                    }
+                    div[data-testid="stCheckbox"] label p {
+                        font-size: 0.95rem;
+                    }
+                }
+                div[data-testid="stFormSubmitButton"] > button {
+                    min-height: 2.8rem;
+                    border-radius: 0.72rem;
+                    border: 1px solid rgba(74, 222, 128, 0.58);
+                    background: linear-gradient(180deg, rgba(22, 163, 74, 0.92), rgba(21, 128, 61, 0.94));
+                    color: #f8fffb;
+                    font-weight: 780;
+                    font-size: 1.02rem;
+                    box-shadow: 0 8px 22px rgba(22, 163, 74, 0.32);
+                }
+                div[data-testid="stFormSubmitButton"] > button:hover {
+                    border-color: rgba(134, 239, 172, 0.9);
+                    filter: brightness(1.05);
                 }
                 </style>
                 """,
@@ -5446,7 +5499,7 @@ if selected_tab_key == "surtidores":
         st.caption("")
         _, col_submit, _ = st.columns([1.2, 0.8, 1.2])
         with col_submit:
-            submit_assign = st.form_submit_button("✅ Asignar surtidor", use_container_width=False)
+            submit_assign = st.form_submit_button("✅ Asignar surtidor", use_container_width=True)
 
     if submit_assign:
         st.session_state.selected_surtidor_nombre = selected_surtidor_nombre
