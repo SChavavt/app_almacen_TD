@@ -5152,9 +5152,21 @@ if selected_tab_key == "reportes_surtidores":
                     serie_tiempo["_bucket"] = serie_tiempo["_dt_registro"].dt.weekday.map(dias_sem)
                 else:
                     serie_tiempo["_bucket"] = "Semana " + serie_tiempo["_week_month"].astype(int).astype(str)
-                timeline = serie_tiempo.groupby(["_bucket", "Surtidor"]).size().unstack(fill_value=0)
+                serie_tiempo_valid = serie_tiempo.copy()
+                serie_tiempo_valid["Surtidor"] = serie_tiempo_valid["Surtidor"].astype(str).str.strip()
+                serie_tiempo_valid = serie_tiempo_valid[
+                    serie_tiempo_valid["Surtidor"].isin(surtidores_base)
+                ]
+
                 st.markdown("##### 📈 Tendencia temporal por surtidor")
-                st.line_chart(timeline, use_container_width=True)
+                if serie_tiempo_valid.empty:
+                    st.info("No hay datos con surtidor asignado para graficar en la tendencia temporal.")
+                else:
+                    timeline = (
+                        serie_tiempo_valid.groupby(["_bucket", "Surtidor"]).size().unstack(fill_value=0)
+                        .reindex(columns=surtidores_base, fill_value=0)
+                    )
+                    st.line_chart(timeline, use_container_width=True)
 
                 st.download_button(
                     "⬇️ Descargar ranking (Excel)",
