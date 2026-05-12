@@ -2890,9 +2890,15 @@ st.query_params["local_tab"] = str(
     st.session_state.get("active_subtab_local_index", 0)
 )
 
-render_brand_title()
-if can_edit_brand_logo():
-    render_logo_uploader()
+current_user_topbar = str(
+    st.session_state.get("app_usuario") or _get_query_param_value("usuario") or ""
+).strip().upper()
+is_sinaicel_topbar = current_user_topbar == "SINAICEL"
+
+if not is_sinaicel_topbar:
+    render_brand_title()
+    if can_edit_brand_logo():
+        render_logo_uploader()
 
 # Flash message tras refresh
 if "flash_msg" in st.session_state and st.session_state["flash_msg"]:
@@ -2904,7 +2910,10 @@ _ensure_visual_state_defaults()
 if st.session_state.pop("bulk_mode_reset_requested", False):
     st.session_state["bulk_complete_mode"] = False
 
-col_reload, col_bulk_mode, col_bulk_action, col_bulk_search = st.columns([1.25, 1.0, 1.35, 1.8])
+if is_sinaicel_topbar:
+    col_reload = st.columns([1.0])[0]
+else:
+    col_reload, col_bulk_mode, col_bulk_action, col_bulk_search = st.columns([1.25, 1.0, 1.35, 1.8])
 
 if col_reload.button(
     "🔄 Recargar Pedidos",
@@ -2921,15 +2930,16 @@ if col_reload.button(
 if "bulk_complete_mode" not in st.session_state:
     st.session_state["bulk_complete_mode"] = False
 
-if col_bulk_mode.button(
-    "✅ Completar varios",
-    key="btn_toggle_bulk_complete_mode",
-    help="Activa o desactiva checks fuera del expander para pedidos en proceso",
-    use_container_width=True,
-):
-    st.session_state["bulk_complete_mode"] = not bool(st.session_state.get("bulk_complete_mode", False))
+if not is_sinaicel_topbar:
+    if col_bulk_mode.button(
+        "✅ Completar varios",
+        key="btn_toggle_bulk_complete_mode",
+        help="Activa o desactiva checks fuera del expander para pedidos en proceso",
+        use_container_width=True,
+    ):
+        st.session_state["bulk_complete_mode"] = not bool(st.session_state.get("bulk_complete_mode", False))
 
-bulk_mode_value = bool(st.session_state.get("bulk_complete_mode", False))
+bulk_mode_value = bool(st.session_state.get("bulk_complete_mode", False)) and (not is_sinaicel_topbar)
 
 if not bulk_mode_value:
     st.session_state["bulk_selected_pedidos"] = set()
@@ -2937,23 +2947,27 @@ if not bulk_mode_value:
         if _k.startswith("bulk_chk_"):
             del st.session_state[_k]
 
-if bulk_mode_value:
-    col_bulk_search.text_input(
-        "🔎 Buscar pedido para seleccionar",
-        key="bulk_search_query",
-        placeholder="Ej. F196697, ID o nombre del cliente",
-    )
+if not is_sinaicel_topbar:
+    if bulk_mode_value:
+        col_bulk_search.text_input(
+            "🔎 Buscar pedido para seleccionar",
+            key="bulk_search_query",
+            placeholder="Ej. F196697, ID o nombre del cliente",
+        )
+    else:
+        st.session_state["bulk_search_query"] = ""
 else:
     st.session_state["bulk_search_query"] = ""
 
-selected_bulk_count = len(_get_bulk_selected_ids())
-execute_disabled = (not bulk_mode_value) or (selected_bulk_count < 1)
-if col_bulk_action.button(
-    f"🟢 Completar Pedidos seleccionados ({selected_bulk_count})",
-    key="btn_bulk_complete_execute_top",
-    disabled=execute_disabled,
-):
-    st.session_state["bulk_complete_execute_requested"] = True
+if not is_sinaicel_topbar:
+    selected_bulk_count = len(_get_bulk_selected_ids())
+    execute_disabled = (not bulk_mode_value) or (selected_bulk_count < 1)
+    if col_bulk_action.button(
+        f"🟢 Completar Pedidos seleccionados ({selected_bulk_count})",
+        key="btn_bulk_complete_execute_top",
+        disabled=execute_disabled,
+    ):
+        st.session_state["bulk_complete_execute_requested"] = True
 
 
 # --- Google Sheets Constants (pueden venir de st.secrets si se prefiere) ---
