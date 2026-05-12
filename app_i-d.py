@@ -5072,10 +5072,6 @@ if selected_tab_key == "reportes_surtidores":
                 fechas = sorted(df_rep["_fecha"].dropna().unique().tolist(), reverse=True)
                 fecha_default = hoy_mx if hoy_mx in fechas else (fechas[0] if fechas else hoy_mx)
                 fecha_sel = st.date_input("Fecha", value=fecha_default, key="rep_surt_fecha")
-                if st.button("🔄 Actualizar filtro actual", key="rep_surt_refresh_dia"):
-                    load_historicos_from_gsheets.clear()
-                    load_data_from_gsheets.clear()
-                    st.rerun()
                 df_f = df_rep[df_rep["_fecha"] == fecha_sel].copy()
             elif periodo == "Semana":
                 semanas_df = (
@@ -5085,18 +5081,10 @@ if selected_tab_key == "reportes_surtidores":
                 )
                 semanas_opts = semanas_df["_semana_label"].tolist()
                 semana_sel = st.selectbox("Semana (Año-Mes + Semana ISO)", options=semanas_opts) if semanas_opts else ""
-                if st.button("🔄 Actualizar filtro actual", key="rep_surt_refresh_semana"):
-                    load_historicos_from_gsheets.clear()
-                    load_data_from_gsheets.clear()
-                    st.rerun()
                 df_f = df_rep[df_rep["_semana_label"] == semana_sel].copy() if semana_sel else df_rep.iloc[0:0].copy()
             else:
                 meses = sorted(df_rep["_mes"].dropna().unique().tolist(), reverse=True)
                 mes_sel = st.selectbox("Mes", options=meses) if meses else ""
-                if st.button("🔄 Actualizar filtro actual", key="rep_surt_refresh_mes"):
-                    load_historicos_from_gsheets.clear()
-                    load_data_from_gsheets.clear()
-                    st.rerun()
                 df_f = df_rep[df_rep["_mes"] == mes_sel].copy() if mes_sel else df_rep.iloc[0:0].copy()
 
             total = len(df_f)
@@ -5144,64 +5132,17 @@ if selected_tab_key == "reportes_surtidores":
                 resumen_surtidores["% Participación"] = resumen_surtidores["% Participación"].fillna(0).round(2)
                 resumen_surtidores["Total_Pedidos_Periodo"] = int(total)
                 resumen_surtidores["Pedidos_Surtidos"] = resumen_surtidores["Pedidos"]
-                resumen_surtidores["Variación_vs_promedio"] = (
-                    resumen_surtidores["Pedidos"] - resumen_surtidores["Pedidos"].mean()
-                ).round(1)
+                resumen_surtidores["Pedidos_No_Surtidos"] = total - resumen_surtidores["Pedidos"]
                 resumen_surtidores = resumen_surtidores[
                     [
                         "Surtidor",
                         "Pedidos_Surtidos",
                         "Total_Pedidos_Periodo",
-                        "Variación_vs_promedio",
+                        "Pedidos_No_Surtidos",
                         "% Participación",
                     ]
                 ]
                 st.caption("Resumen enfocado a surtidores con filtros aplicados (siempre 6 filas, una por surtidor).")
-
-                st.markdown("##### 📊 Carga por surtidor (visual)")
-                chart_data = (
-                    rank.set_index("Surtidor")[["Pedidos"]]
-                    .reindex(surtidores_base, fill_value=0)
-                    .reset_index()
-                    .sort_values("Pedidos", ascending=False)
-                    .copy()
-                )
-                chart_data["Color"] = chart_data["Surtidor"].map(SURTIDOR_COLOR_MAP).fillna("#4b5563")
-                st.vega_lite_chart(
-                    chart_data,
-                    {
-                        "mark": {"type": "bar", "cornerRadiusEnd": 4},
-                        "encoding": {
-                            "x": {"field": "Surtidor", "type": "nominal", "sort": "-y", "title": ""},
-                            "y": {"field": "Pedidos", "type": "quantitative", "title": "Pedidos"},
-                            "color": {"field": "Color", "type": "nominal", "scale": None, "legend": None},
-                            "tooltip": [
-                                {"field": "Surtidor", "type": "nominal"},
-                                {"field": "Pedidos", "type": "quantitative"},
-                            ],
-                        },
-                    },
-                    use_container_width=True,
-                )
-
-                if not rank.empty:
-                    promedio_pedidos = round(float(rank["Pedidos"].mean()), 1)
-                    mediana_pedidos = round(float(rank["Pedidos"].median()), 1)
-                    dispersion = round(float(rank["Pedidos"].std(ddof=0) if len(rank) > 1 else 0), 1)
-                    leader = rank.iloc[0]
-                    trailer = rank.iloc[-1]
-                    brecha_lider = int(leader["Pedidos"] - mediana_pedidos)
-
-                    st.markdown("##### 💡 Insights rápidos")
-                    c1, c2 = st.columns(2)
-                    c1.info(
-                        f"**Carga media activa:** {promedio_pedidos} pedidos por surtidor con actividad.\n\n"
-                        f"**Mediana:** {mediana_pedidos} | **Dispersión:** {dispersion}."
-                    )
-                    c2.info(
-                        f"**Brecha del líder:** {leader['Surtidor']} está en +{brecha_lider} pedidos vs la mediana.\n\n"
-                        f"**Menor carga activa:** {trailer['Surtidor']} con {int(trailer['Pedidos'])} pedidos."
-                    )
 
                 serie_tiempo = df_f.copy()
                 if periodo == "Día":
@@ -5227,9 +5168,26 @@ if selected_tab_key == "reportes_surtidores":
                     )
                     st.line_chart(timeline, use_container_width=True)
 
+                st.download_button(
+                    "⬇️ Descargar ranking (Excel)",
+                    data=build_inactivos_excel_export(rank.rename(columns={"% Participación": "Porcentaje"})),
+                    file_name=f"reportes_surtidores_{periodo.lower()}.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    key="download_reportes_surtidores_excel",
+                )
                 st.markdown("##### 📋 Ranking de surtidores")
                 st.dataframe(rank_show, use_container_width=True, hide_index=True, height=220)
 
+                st.download_button(
+                    "⬇️ Descargar resumen surtidores (Excel)",
+                    data=build_inactivos_excel_export(
+                        resumen_surtidores.rename(columns={"% Participación": "Porcentaje_Participacion"})
+                    ),
+                    file_name=f"resumen_surtidores_{periodo.lower()}.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    key="download_resumen_surtidores_excel",
+                    help="Resumen por surtidor del filtro actual (máximo 6 filas, una por surtidor).",
+                )
                 st.markdown("##### 📋 Lista 1: Resumen de surtidores")
                 st.dataframe(resumen_surtidores, use_container_width=True, hide_index=True, height=220)
 
@@ -5239,9 +5197,8 @@ if selected_tab_key == "reportes_surtidores":
                 st.dataframe(detail, use_container_width=True, hide_index=True, height=260)
 
                 st.download_button(
-                    "⬇️ Descargar reporte unificado (Ranking + Resumen + Detalle)",
+                    "⬇️ Descargar reporte unificado (Resumen + Detalle)",
                     data=build_multi_sheet_excel({
-                        "Ranking_Surtidores": rank.rename(columns={"% Participación": "Porcentaje_Participacion"}),
                         "Resumen_Surtidores": resumen_surtidores.rename(columns={"% Participación": "Porcentaje_Participacion"}),
                         "Detalle_Filtrado": detail,
                     }),
