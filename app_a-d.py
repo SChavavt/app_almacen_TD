@@ -8035,11 +8035,8 @@ if df_main is not None:
             else:
                 st.warning("⚠️ No se pudo guardar Numero_Foraneo en algunos casos foráneos.")
 
-    is_sinaicel_user = str(current_user).strip().upper() == "SINAICEL"
-
     # 📊 Resumen de Estados combinando datos_pedidos y casos_especiales
-    if not is_sinaicel_user:
-        st.markdown("### 📊 Resumen de Estados")
+    st.markdown("### 📊 Resumen de Estados")
 
     def _count_states(df):
         completados_visible = df[
@@ -8076,10 +8073,9 @@ if df_main is not None:
         cantidad = estado_counts.get(estado, 0)
         if cantidad > 0:
             estados_a_mostrar.append((estado, cantidad))
-    if not is_sinaicel_user:
-        cols = st.columns(len(estados_a_mostrar))
-        for col, (nombre_estado, cantidad) in zip(cols, estados_a_mostrar):
-            col.metric(nombre_estado, int(cantidad))
+    cols = st.columns(len(estados_a_mostrar))
+    for col, (nombre_estado, cantidad) in zip(cols, estados_a_mostrar):
+        col.metric(nombre_estado, int(cantidad))
 
     # 🔔 Aviso de devoluciones/garantías con seguimiento pendiente
     tipo_casos_col = "Tipo_Caso" if "Tipo_Caso" in df_casos.columns else (
@@ -10479,20 +10475,16 @@ if df_main is not None:
                             surtidor = str(row_fast.get("Surtidor", "")).strip()
                             estado = str(row_fast.get("Estado", "")).strip() or "Sin estado"
                             key_chk = f"fast_complete_chk_{pedido_id}"
-                            if is_sinaicel_user:
-                                st.markdown(f"**#{orden} · {folio} · {cliente}**")
-                            else:
-                                checked = st.checkbox(
-                                    f"#{orden} · {folio} · {cliente}",
-                                    key=key_chk,
-                                    value=(pedido_id in selected_ids),
-                                )
+                            checked = st.checkbox(
+                                f"#{orden} · {folio} · {cliente}",
+                                key=key_chk,
+                                value=(pedido_id in selected_ids),
+                            )
                             st.markdown(f"{_badge_surtidor(surtidor)} · {estado}", unsafe_allow_html=True)
-                            if not is_sinaicel_user:
-                                if checked:
-                                    selected_ids.add(pedido_id)
-                                else:
-                                    selected_ids.discard(pedido_id)
+                            if checked:
+                                selected_ids.add(pedido_id)
+                            else:
+                                selected_ids.discard(pedido_id)
 
                 st.markdown("#### 🚚 FORÁNEOS")
                 foraneos_df = pedidos_en_proceso[pedidos_en_proceso["tipo_norm"] != "📍 Pedido Local"].copy()
@@ -10522,38 +10514,31 @@ if df_main is not None:
                                 surtidor = str(row_fast.get("Surtidor", "")).strip()
                                 estado = str(row_fast.get("Estado", "")).strip() or "Sin estado"
                                 key_chk = f"fast_complete_chk_{pedido_id}"
-                                if is_sinaicel_user:
-                                    st.markdown(f"**#{orden} · {folio} · {cliente}**")
-                                else:
-                                    checked = st.checkbox(
-                                        f"#{orden} · {folio} · {cliente}",
-                                        key=key_chk,
-                                        value=(pedido_id in selected_ids),
-                                    )
+                                checked = st.checkbox(
+                                    f"#{orden} · {folio} · {cliente}",
+                                    key=key_chk,
+                                    value=(pedido_id in selected_ids),
+                                )
                                 st.markdown(f"{_badge_surtidor(surtidor)} · {estado}", unsafe_allow_html=True)
-                                if not is_sinaicel_user:
-                                    if checked:
-                                        selected_ids.add(pedido_id)
-                                    else:
-                                        selected_ids.discard(pedido_id)
+                                if checked:
+                                    selected_ids.add(pedido_id)
+                                else:
+                                    selected_ids.discard(pedido_id)
 
                     _render_foraneo_column(foraneos_col_a, col_a)
                     _render_foraneo_column(foraneos_col_b, col_b)
 
-                submit_complete = False
-                if not is_sinaicel_user:
-                    submit_complete = st.form_submit_button(
-                        "🟢 Completar seleccionados",
-                        use_container_width=True,
-                    )
+                submit_complete = st.form_submit_button(
+                    f"🟢 Completar seleccionados",
+                    use_container_width=True,
+                )
 
             st.session_state["bulk_selected_pedidos"] = selected_ids
-            if not is_sinaicel_user:
-                st.caption("Colores surtidor:")
-                st.markdown(
-                    " · ".join([f"{_badge_surtidor(n.title())}" for n in ["baldo", "alexis", "enrique", "cassandra", "yaya", "karen"]]),
-                    unsafe_allow_html=True,
-                )
+            st.caption("Colores surtidor:")
+            st.markdown(
+                " · ".join([f"{_badge_surtidor(n.title())}" for n in ["baldo", "alexis", "enrique", "cassandra", "yaya", "karen"]]),
+                unsafe_allow_html=True,
+            )
             if submit_complete and len(selected_ids) > 0:
                 st.session_state["bulk_complete_execute_requested"] = True
                 st.rerun()
