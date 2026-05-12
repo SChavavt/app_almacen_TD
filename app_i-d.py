@@ -5404,8 +5404,60 @@ if selected_tab_key == "surtidores":
             st.markdown(
                 """
                 <style>
+                div[data-testid="stCheckbox"] label {
+                    min-height: 2.2rem;
+                    padding: 0.22rem 0.5rem;
+                    gap: 0.5rem;
+                    cursor: pointer;
+                    border: 1px solid rgba(148, 163, 184, 0.48);
+                    border-radius: 0.58rem;
+                    background: rgba(15, 23, 42, 0.36);
+                    box-shadow: inset 0 0 0 1px rgba(255,255,255,0.03);
+                    transition: background 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
+                }
+                div[data-testid="stCheckbox"] label:hover {
+                    border-color: rgba(125, 211, 252, 0.72);
+                    background: rgba(30, 41, 59, 0.62);
+                }
+                div[data-testid="stCheckbox"] label:has(input:checked) {
+                    border-color: rgba(34, 197, 94, 0.95);
+                    background: rgba(22, 101, 52, 0.28);
+                    box-shadow: 0 0 0 1px rgba(74, 222, 128, 0.28);
+                }
+                div[data-testid="stCheckbox"] label > div:first-child {
+                    transform: scale(1.35);
+                    transform-origin: left center;
+                }
                 div[data-testid="stCheckbox"] label p {
                     white-space: nowrap;
+                    font-size: 1.03rem;
+                    line-height: 1.25rem;
+                }
+                @media (pointer: coarse) {
+                    div[data-testid="stCheckbox"] label {
+                        min-height: 2.6rem;
+                        padding: 0.34rem 0.58rem;
+                    }
+                    div[data-testid="stCheckbox"] label > div:first-child {
+                        transform: scale(1.55);
+                    }
+                    div[data-testid="stCheckbox"] label p {
+                        font-size: 1.08rem;
+                    }
+                }
+                div[data-testid="stFormSubmitButton"] > button {
+                    min-height: 2.8rem;
+                    border-radius: 0.72rem;
+                    border: 1px solid rgba(74, 222, 128, 0.58);
+                    background: linear-gradient(180deg, rgba(22, 163, 74, 0.92), rgba(21, 128, 61, 0.94));
+                    color: #f8fffb;
+                    font-weight: 780;
+                    font-size: 1.02rem;
+                    box-shadow: 0 8px 22px rgba(22, 163, 74, 0.32);
+                }
+                div[data-testid="stFormSubmitButton"] > button:hover {
+                    border-color: rgba(134, 239, 172, 0.9);
+                    filter: brightness(1.05);
                 }
                 </style>
                 """,
@@ -5446,7 +5498,7 @@ if selected_tab_key == "surtidores":
         st.caption("")
         _, col_submit, _ = st.columns([1.2, 0.8, 1.2])
         with col_submit:
-            submit_assign = st.form_submit_button("✅ Asignar surtidor", use_container_width=False)
+            submit_assign = st.form_submit_button("✅ Asignar surtidor", use_container_width=True)
 
     if submit_assign:
         st.session_state.selected_surtidor_nombre = selected_surtidor_nombre
