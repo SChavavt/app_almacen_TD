@@ -5132,17 +5132,46 @@ if selected_tab_key == "reportes_surtidores":
                 resumen_surtidores["% Participación"] = resumen_surtidores["% Participación"].fillna(0).round(2)
                 resumen_surtidores["Total_Pedidos_Periodo"] = int(total)
                 resumen_surtidores["Pedidos_Surtidos"] = resumen_surtidores["Pedidos"]
-                resumen_surtidores["Pedidos_No_Surtidos"] = total - resumen_surtidores["Pedidos"]
+                resumen_surtidores["Variación_vs_promedio"] = (
+                    resumen_surtidores["Pedidos"] - resumen_surtidores["Pedidos"].mean()
+                ).round(1)
                 resumen_surtidores = resumen_surtidores[
                     [
                         "Surtidor",
                         "Pedidos_Surtidos",
                         "Total_Pedidos_Periodo",
-                        "Pedidos_No_Surtidos",
+                        "Variación_vs_promedio",
                         "% Participación",
                     ]
                 ]
                 st.caption("Resumen enfocado a surtidores con filtros aplicados (siempre 6 filas, una por surtidor).")
+
+                st.markdown("##### 📊 Carga por surtidor (visual)")
+                chart_data = (
+                    rank.set_index("Surtidor")[["Pedidos"]]
+                    .reindex(surtidores_base, fill_value=0)
+                    .sort_values("Pedidos", ascending=False)
+                )
+                st.bar_chart(chart_data, use_container_width=True)
+
+                if not rank.empty:
+                    promedio_pedidos = round(float(rank["Pedidos"].mean()), 1)
+                    mediana_pedidos = round(float(rank["Pedidos"].median()), 1)
+                    dispersion = round(float(rank["Pedidos"].std(ddof=0) if len(rank) > 1 else 0), 1)
+                    leader = rank.iloc[0]
+                    trailer = rank.iloc[-1]
+                    brecha_lider = int(leader["Pedidos"] - mediana_pedidos)
+
+                    st.markdown("##### 💡 Insights rápidos")
+                    c1, c2 = st.columns(2)
+                    c1.info(
+                        f"**Carga media activa:** {promedio_pedidos} pedidos por surtidor con actividad.\n\n"
+                        f"**Mediana:** {mediana_pedidos} | **Dispersión:** {dispersion}."
+                    )
+                    c2.info(
+                        f"**Brecha del líder:** {leader['Surtidor']} está en +{brecha_lider} pedidos vs la mediana.\n\n"
+                        f"**Menor carga activa:** {trailer['Surtidor']} con {int(trailer['Pedidos'])} pedidos."
+                    )
 
                 serie_tiempo = df_f.copy()
                 if periodo == "Día":
