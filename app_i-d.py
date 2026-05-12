@@ -5153,8 +5153,12 @@ if selected_tab_key == "reportes_surtidores":
                 else:
                     serie_tiempo["_bucket"] = "Semana " + serie_tiempo["_week_month"].astype(int).astype(str)
                 timeline = serie_tiempo.groupby(["_bucket", "Surtidor"]).size().unstack(fill_value=0)
+                timeline = timeline.loc[:, [c for c in timeline.columns if pd.notna(c)]]
                 st.markdown("##### 📈 Tendencia temporal por surtidor")
-                st.line_chart(timeline, use_container_width=True)
+                if timeline.empty or timeline.shape[1] == 0:
+                    st.info("No hay datos con surtidor asignado para graficar en la tendencia temporal.")
+                else:
+                    st.line_chart(timeline, use_container_width=True)
 
                 st.download_button(
                     "⬇️ Descargar ranking (Excel)",
