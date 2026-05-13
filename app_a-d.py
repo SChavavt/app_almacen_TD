@@ -1544,9 +1544,6 @@ def _ensure_visual_state_defaults():
     state.setdefault("bulk_mode_reset_requested", False)
     state.setdefault("bulk_checkbox_interaction", False)
     state.setdefault("bulk_search_query", "")
-    state.setdefault("bulk_complete_in_progress", False)
-    state.setdefault("bulk_complete_progress_current", 0)
-    state.setdefault("bulk_complete_progress_total", 0)
 
 
 def _parse_material_devuelto_table(material_text: str) -> Optional[pd.DataFrame]:
@@ -2979,13 +2976,6 @@ if not is_sinaicel_topbar:
         disabled=execute_disabled,
     ):
         st.session_state["bulk_complete_execute_requested"] = True
-
-if st.session_state.get("bulk_complete_in_progress", False):
-    progress_current = int(st.session_state.get("bulk_complete_progress_current", 0) or 0)
-    progress_total = int(st.session_state.get("bulk_complete_progress_total", 0) or 0)
-    progress_ratio = (progress_current / progress_total) if progress_total > 0 else 0
-    st.info(f"⏳ Completando pedidos... {progress_current} de {progress_total}")
-    st.progress(progress_ratio, text=f"Progreso de completado: {progress_current}/{progress_total} pedidos")
 
 
 # --- Google Sheets Constants (pueden venir de st.secrets si se prefiere) ---
@@ -7969,16 +7959,12 @@ if df_main is not None:
             _mark_skip_demorado_check_once()
 
             total_a_completar = len(pedidos_a_completar)
-            st.session_state["bulk_complete_in_progress"] = True
-            st.session_state["bulk_complete_progress_current"] = 0
-            st.session_state["bulk_complete_progress_total"] = total_a_completar
             progress_bar = st.progress(0, text=f"Completando 0 de {total_a_completar} pedidos seleccionados...")
 
             for idx, pedido_row in enumerate(pedidos_a_completar, start=1):
                 pedido_id = str(pedido_row.get("ID_Pedido", "")).strip()
                 if not pedido_id:
                     progress_ratio = idx / max(total_a_completar, 1)
-                    st.session_state["bulk_complete_progress_current"] = idx
                     progress_bar.progress(progress_ratio, text=f"Completando {idx} de {total_a_completar} pedidos seleccionados...")
                     continue
 
@@ -7987,7 +7973,6 @@ if df_main is not None:
                 if requires and not has_file:
                     fallidos.append(f"{pedido_id}: requiere guía antes de completar")
                     progress_ratio = idx / max(total_a_completar, 1)
-                    st.session_state["bulk_complete_progress_current"] = idx
                     progress_bar.progress(progress_ratio, text=f"Completando {idx} de {total_a_completar} pedidos seleccionados...")
                     continue
 
@@ -7997,7 +7982,6 @@ if df_main is not None:
                 if not row_idx_list:
                     fallidos.append(f"{pedido_id}: no se encontró en datos cargados")
                     progress_ratio = idx / max(total_a_completar, 1)
-                    st.session_state["bulk_complete_progress_current"] = idx
                     progress_bar.progress(progress_ratio, text=f"Completando {idx} de {total_a_completar} pedidos seleccionados...")
                     continue
 
@@ -8006,7 +7990,6 @@ if df_main is not None:
                 if gsheet_row_index is None or str(gsheet_row_index).strip() == "":
                     fallidos.append(f"{pedido_id}: sin índice de fila en Google Sheets")
                     progress_ratio = idx / max(total_a_completar, 1)
-                    st.session_state["bulk_complete_progress_current"] = idx
                     progress_bar.progress(progress_ratio, text=f"Completando {idx} de {total_a_completar} pedidos seleccionados...")
                     continue
 
@@ -8030,9 +8013,6 @@ if df_main is not None:
                 progress_bar.progress(progress_ratio, text=f"Completando {idx} de {total_a_completar} pedidos seleccionados...")
 
             progress_bar.empty()
-            st.session_state["bulk_complete_in_progress"] = False
-            st.session_state["bulk_complete_progress_current"] = 0
-            st.session_state["bulk_complete_progress_total"] = 0
             _set_bulk_mode(False)
 
             if completados_ok > 0:
@@ -10667,9 +10647,8 @@ if df_main is not None:
                     _render_foraneo_column(foraneos_col_b, col_b)
 
                 submit_complete = st.form_submit_button(
-                    "⏳ Completando..." if st.session_state.get("bulk_complete_in_progress", False) else "🟢 Completar seleccionados",
+                    "🟢 Completar seleccionados",
                     use_container_width=True,
-                    disabled=st.session_state.get("bulk_complete_in_progress", False),
                 )
 
             st.session_state["bulk_selected_pedidos"] = selected_ids
@@ -10696,9 +10675,6 @@ if df_main is not None:
                 if DEBUG_BULK_COMPLETE:
                     st.write("DEBUG bulk snapshot submit", snapshot)
                 if snapshot:
-                    st.session_state["bulk_complete_in_progress"] = True
-                    st.session_state["bulk_complete_progress_current"] = 0
-                    st.session_state["bulk_complete_progress_total"] = len(snapshot)
                     st.session_state["bulk_complete_execute_requested"] = True
                     st.rerun()
 
