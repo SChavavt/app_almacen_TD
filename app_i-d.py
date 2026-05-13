@@ -2335,11 +2335,11 @@ def _normalize_match_value(value: str) -> str:
     return cleaned.lower()
 
 
-def drop_orders_matching_cases(
-    df_orders: pd.DataFrame, df_casos: pd.DataFrame
+def drop_local_duplicates_for_cases(
+    df_local: pd.DataFrame, df_casos: pd.DataFrame
 ) -> pd.DataFrame:
-    if df_orders.empty or df_casos.empty:
-        return df_orders
+    if df_local.empty or df_casos.empty:
+        return df_local
 
     case_ids = set()
     case_folios = set()
@@ -2357,34 +2357,28 @@ def drop_orders_matching_cases(
         }
 
     if not case_ids and not case_folios:
-        return df_orders
+        return df_local
 
-    local_ids = pd.Series("", index=df_orders.index, dtype=str)
-    local_folios = pd.Series("", index=df_orders.index, dtype=str)
-    if "ID_Pedido" in df_orders.columns:
-        local_ids = df_orders["ID_Pedido"].astype(str).apply(_normalize_match_value)
-    if "Folio_Factura" in df_orders.columns:
-        local_folios = df_orders["Folio_Factura"].astype(str).apply(_normalize_match_value)
+    local_ids = pd.Series("", index=df_local.index, dtype=str)
+    local_folios = pd.Series("", index=df_local.index, dtype=str)
+    if "ID_Pedido" in df_local.columns:
+        local_ids = df_local["ID_Pedido"].astype(str).apply(_normalize_match_value)
+    if "Folio_Factura" in df_local.columns:
+        local_folios = df_local["Folio_Factura"].astype(str).apply(_normalize_match_value)
 
     mask_case_id = (
         local_ids.isin(case_ids)
         if case_ids
-        else pd.Series(False, index=df_orders.index)
+        else pd.Series(False, index=df_local.index)
     )
     mask_case_folio = (
         local_folios.isin(case_folios)
         if case_folios
-        else pd.Series(False, index=df_orders.index)
+        else pd.Series(False, index=df_local.index)
     )
     mask_duplicate = mask_case_id | mask_case_folio
 
-    return df_orders.loc[~mask_duplicate].copy()
-
-
-def drop_local_duplicates_for_cases(
-    df_local: pd.DataFrame, df_casos: pd.DataFrame
-) -> pd.DataFrame:
-    return drop_orders_matching_cases(df_local, df_casos)
+    return df_local.loc[~mask_duplicate].copy()
 
 
 def get_local_orders(df_all: pd.DataFrame) -> pd.DataFrame:
@@ -2445,15 +2439,11 @@ def get_foraneo_orders(df_all: pd.DataFrame) -> pd.DataFrame:
         base_foraneo = df_all[df_all["Tipo_Envio"] == "🚚 Pedido Foráneo"].copy()
 
     _, casos_foraneo = get_case_envio_assignments(df_all)
-    if not base_foraneo.empty and not casos_foraneo.empty:
-        base_foraneo = drop_orders_matching_cases(base_foraneo, casos_foraneo)
-
     frames = [df for df in [base_foraneo, casos_foraneo] if not df.empty]
     if not frames:
         return pd.DataFrame()
 
     df_for = pd.concat(frames, ignore_index=True, sort=False)
-    df_for = df_for.drop_duplicates()
 
     if "Completados_Limpiado" not in df_for.columns:
         df_for["Completados_Limpiado"] = ""
