@@ -166,10 +166,11 @@ VENDEDOR_CREDENTIALS = {
     "SCHAVA": "SCHAVA",
     "SINAI": "SINAI",
     "DISSURTIDOR": "DISSURTIDOR",
+    "PANTALLAF": "PANTALLAF",
 }
 
 
-NON_VENDOR_USERS = {"SINAI", "DISSURTIDOR"}
+NON_VENDOR_USERS = {"SINAI", "DISSURTIDOR", "PANTALLAF"}
 
 
 def is_non_vendor_user(user_key: str) -> bool:
@@ -4581,10 +4582,27 @@ if not get_logged_user():
         st.session_state.auth_vendor = resolve_vendor_for_user(usuario_qp)
 
 logged_user = get_logged_user().upper()
+is_pantalla_f_view = logged_user == "PANTALLAF"
+if is_pantalla_f_view:
+    st.markdown(
+        """
+        <style>
+        html, body, [data-testid="stAppViewContainer"] { overflow: hidden !important; }
+        [data-testid="stHeaderActionElements"] { display: none !important; }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+# Matriz de vistas por usuario:
+# - SINAI: solo operación (Auto Foráneo, Auto Local y Asistente)
+# - DISSURTIDOR: solo vista de Surtidores
+# - Resto: acceso completo a tabs base (con filtro adicional para Reportes surtidores)
 if logged_user == "SINAI":
     visible_tab_keys = ["auto_foraneo", "auto_local", "assistant"]
 elif logged_user == "DISSURTIDOR":
     visible_tab_keys = ["surtidores"]
+elif logged_user == "PANTALLAF":
+    visible_tab_keys = ["auto_local", "auto_foraneo"]
 else:
     visible_tab_keys = [tab_key for tab_key, _ in TAB_DEFINITIONS]
 
