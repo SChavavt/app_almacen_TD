@@ -184,28 +184,6 @@ def resolve_vendor_for_user(user_key: str) -> str:
 
 st.set_page_config(page_title="Panel de Almacén Integrado", layout="wide")
 
-
-# Modo compatibilidad para navegadores antiguos de Smart TV
-qp_usuario = st.query_params.get("usuario", "")
-if isinstance(qp_usuario, list):
-    qp_usuario = qp_usuario[0] if qp_usuario else ""
-is_tv_user = str(qp_usuario or "").strip().upper() == "PANTALLAF"
-
-if is_tv_user:
-    st.title("Panel de Almacén · Modo TV")
-    st.info(
-        "El navegador de esta Smart TV parece antiguo y no soporta funciones modernas de JavaScript. "
-        "Por eso la vista completa puede fallar aquí."
-    )
-    st.write("Usuario detectado: PANTALLAF")
-    st.write("Cómo intentar actualizar el navegador de la TV:")
-    st.write("1) Abre Ajustes > Sistema/Soporte > Actualización de software y actualiza la TV.")
-    st.write("2) En la tienda de apps de la TV, busca el navegador y presiona Actualizar.")
-    st.write("3) Reinicia la TV y vuelve a abrir el enlace.")
-    st.warning("Si no aparece actualización, el fabricante ya no da soporte al navegador.")
-    st.write("Alternativa recomendada: usar un TV Box o mini PC con Chrome/Edge actual para esta pantalla.")
-    st.stop()
-
 # --- Ajustes UI compactos ---
 st.markdown(
     """
