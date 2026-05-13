@@ -2074,29 +2074,6 @@ def _is_visible_auto_entry(entry: dict) -> bool:
     return sanitize_text(entry.get("completados_limpiado", "")) == ""
 
 
-def dedupe_auto_entries(entries: list[dict]) -> list[dict]:
-    """Deduplica entradas visibles por llave de pedido manteniendo el primer registro."""
-    unique_entries: list[dict] = []
-    seen_keys: set[str] = set()
-    for entry in entries:
-        key = build_auto_number_key(entry) or build_surtidor_key(entry)
-        if not key:
-            # Fallback defensivo para filas sin ID/llave.
-            key = "|".join(
-                [
-                    sanitize_text(entry.get("cliente", "")),
-                    sanitize_text(entry.get("fecha", "")),
-                    sanitize_text(entry.get("hora", "")),
-                    sanitize_text(entry.get("estado", "")),
-                ]
-            )
-        if key in seen_keys:
-            continue
-        seen_keys.add(key)
-        unique_entries.append(entry)
-    return unique_entries
-
-
 def _is_surtidor_visible_estado(estado: str) -> bool:
     cleaned = sanitize_text(estado).lower()
     if any(term in cleaned for term in ("pendiente", "demorado", "modificacion")):
@@ -2467,7 +2444,6 @@ def get_foraneo_orders(df_all: pd.DataFrame) -> pd.DataFrame:
         return pd.DataFrame()
 
     df_for = pd.concat(frames, ignore_index=True, sort=False)
-    df_for = df_for.drop_duplicates()
 
     if "Completados_Limpiado" not in df_for.columns:
         df_for["Completados_Limpiado"] = ""
@@ -5020,7 +4996,7 @@ if selected_tab_key == "auto_foraneo":
 
 
     # 1) Entradas (foráneo + casos asignados a foráneo)
-    combined_entries = dedupe_auto_entries(list(auto_foraneo_entries))
+    combined_entries = list(auto_foraneo_entries)
 
     visible_entries = [e for e in combined_entries if _is_visible_auto_entry(e)]
 
