@@ -2330,16 +2330,46 @@ def sort_entries_by_flow_number_desc(entries):
     return sorted(entries, key=lambda e: (_num(e), e.get("sort_key", pd.Timestamp.max)))
 
 
+def dedupe_entries_preserve_order(entries):
+    seen = set()
+    unique = []
+    for entry in entries:
+        key_parts = []
+        id_pedido = sanitize_text(entry.get("id_pedido", ""))
+        folio = sanitize_text(entry.get("folio", ""))
+        cliente_nombre = sanitize_text(entry.get("cliente_nombre", "")) or sanitize_text(entry.get("cliente", ""))
+        fecha = sanitize_text(entry.get("fecha", ""))
+        estado = sanitize_text(entry.get("estado", ""))
+
+        if id_pedido:
+            key_parts.append(f"id:{id_pedido.lower()}")
+        if folio:
+            key_parts.append(f"folio:{folio.lower()}")
+        if cliente_nombre:
+            key_parts.append(f"cliente:{cliente_nombre.lower()}")
+        if fecha:
+            key_parts.append(f"fecha:{fecha.lower()}")
+        if estado:
+            key_parts.append(f"estado:{estado.lower()}")
+
+        key = "|".join(key_parts)
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        unique.append(entry)
+    return unique
+
+
 def _normalize_match_value(value: str) -> str:
     cleaned = sanitize_text(value)
     return cleaned.lower()
 
 
-def drop_local_duplicates_for_cases(
-    df_local: pd.DataFrame, df_casos: pd.DataFrame
+def drop_orders_matching_cases(
+    df_orders: pd.DataFrame, df_casos: pd.DataFrame
 ) -> pd.DataFrame:
-    if df_local.empty or df_casos.empty:
-        return df_local
+    if df_orders.empty or df_casos.empty:
+        return df_orders
 
     case_ids = set()
     case_folios = set()
@@ -2357,28 +2387,34 @@ def drop_local_duplicates_for_cases(
         }
 
     if not case_ids and not case_folios:
-        return df_local
+        return df_orders
 
-    local_ids = pd.Series("", index=df_local.index, dtype=str)
-    local_folios = pd.Series("", index=df_local.index, dtype=str)
-    if "ID_Pedido" in df_local.columns:
-        local_ids = df_local["ID_Pedido"].astype(str).apply(_normalize_match_value)
-    if "Folio_Factura" in df_local.columns:
-        local_folios = df_local["Folio_Factura"].astype(str).apply(_normalize_match_value)
+    local_ids = pd.Series("", index=df_orders.index, dtype=str)
+    local_folios = pd.Series("", index=df_orders.index, dtype=str)
+    if "ID_Pedido" in df_orders.columns:
+        local_ids = df_orders["ID_Pedido"].astype(str).apply(_normalize_match_value)
+    if "Folio_Factura" in df_orders.columns:
+        local_folios = df_orders["Folio_Factura"].astype(str).apply(_normalize_match_value)
 
     mask_case_id = (
         local_ids.isin(case_ids)
         if case_ids
-        else pd.Series(False, index=df_local.index)
+        else pd.Series(False, index=df_orders.index)
     )
     mask_case_folio = (
         local_folios.isin(case_folios)
         if case_folios
-        else pd.Series(False, index=df_local.index)
+        else pd.Series(False, index=df_orders.index)
     )
     mask_duplicate = mask_case_id | mask_case_folio
 
-    return df_local.loc[~mask_duplicate].copy()
+    return df_orders.loc[~mask_duplicate].copy()
+
+
+def drop_local_duplicates_for_cases(
+    df_local: pd.DataFrame, df_casos: pd.DataFrame
+) -> pd.DataFrame:
+    return drop_orders_matching_cases(df_local, df_casos)
 
 
 def get_local_orders(df_all: pd.DataFrame) -> pd.DataFrame:
@@ -2439,11 +2475,15 @@ def get_foraneo_orders(df_all: pd.DataFrame) -> pd.DataFrame:
         base_foraneo = df_all[df_all["Tipo_Envio"] == "🚚 Pedido Foráneo"].copy()
 
     _, casos_foraneo = get_case_envio_assignments(df_all)
+    if not base_foraneo.empty and not casos_foraneo.empty:
+        base_foraneo = drop_orders_matching_cases(base_foraneo, casos_foraneo)
+
     frames = [df for df in [base_foraneo, casos_foraneo] if not df.empty]
     if not frames:
         return pd.DataFrame()
 
     df_for = pd.concat(frames, ignore_index=True, sort=False)
+    df_for = df_for.drop_duplicates()
 
     if "Completados_Limpiado" not in df_for.columns:
         df_for["Completados_Limpiado"] = ""
@@ -4999,6 +5039,7 @@ if selected_tab_key == "auto_foraneo":
     combined_entries = list(auto_foraneo_entries)
 
     visible_entries = [e for e in combined_entries if _is_visible_auto_entry(e)]
+    visible_entries = dedupe_entries_preserve_order(visible_entries)
 
     # Devoluciones/casos foráneos con Numero_Foraneo manual deben aparecer
     # junto a los de HOY/FUTUROS, ordenados por número de flujo.
@@ -5021,10 +5062,12 @@ if selected_tab_key == "auto_foraneo":
 
     # En HOY incluimos también devoluciones/casos con número manual,
     # sin depender de fecha de registro para conservar su secuencia.
-    hoy_entries = filter_entries_on_or_after(restantes, hoy) + asignados + sin_numero
+    hoy_base = filter_entries_on_or_after(restantes, hoy)
+    hoy_entries = dedupe_entries_preserve_order(hoy_base + asignados + sin_numero)
     hoy_entries = sort_entries_by_flow_number_desc(hoy_entries)
 
-    anteriores = sort_entries_by_flow_number_desc(ant + sin_fecha)
+    anteriores = dedupe_entries_preserve_order(ant + sin_fecha)
+    anteriores = sort_entries_by_flow_number_desc(anteriores)
 
     # Distribución inteligente: usar el espacio libre de "Anteriores"
     # para continuar la lista de "Hoy" y evitar columnas desbalanceadas.
