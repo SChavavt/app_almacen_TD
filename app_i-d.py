@@ -182,72 +182,6 @@ def resolve_vendor_for_user(user_key: str) -> str:
         return ""
     return sanitize_text(VENDEDOR_CREDENTIALS.get(sanitize_text(user_key).upper(), ""))
 
-
-def render_pantallaf_smart_tv_view(df_all: dict) -> None:
-    """Vista mínima y estable para Smart TV del usuario PANTALLAF."""
-    st.title("Pantalla de Pedidos")
-    st.caption(f"Actualizado: {datetime.now(TZ).strftime('%d/%m/%Y %H:%M:%S')}")
-
-    st.markdown(
-        """
-        <style>
-        div[data-testid="stMetricValue"] { font-size: 2rem; }
-        div[data-testid="stMetricLabel"] p { font-size: 1.05rem; }
-        div[data-testid="stDataFrame"] * { font-size: 1rem !important; }
-        </style>
-        """,
-        unsafe_allow_html=True,
-    )
-
-    df_local = get_local_orders(df_all)
-    casos_local, _ = get_case_envio_assignments(df_all)
-    df_local = drop_local_duplicates_for_cases(df_local, casos_local)
-    local_entries = []
-    if not df_local.empty:
-        local_entries.extend(build_entries_local(df_local))
-    if not casos_local.empty:
-        local_entries.extend(build_entries_casos(casos_local))
-    local_entries = [entry for entry in local_entries if not _is_excluded_auto_local_entry(entry)]
-
-    df_foraneo = get_foraneo_orders(df_all)
-    foraneo_entries = build_entries_foraneo(df_foraneo) if not df_foraneo.empty else []
-
-    col1, col2 = st.columns(2)
-    with col1:
-        st.metric("Auto Local", len(local_entries))
-    with col2:
-        st.metric("Auto Foráneo", len(foraneo_entries))
-
-    def _to_simple_table(entries: list[dict], view_name: str) -> pd.DataFrame:
-        rows = []
-        for item in entries:
-            rows.append(
-                {
-                    "Vista": view_name,
-                    "Pedido": sanitize_text(item.get("pedido_display", "")),
-                    "Cliente": sanitize_text(item.get("cliente", "")),
-                    "Vendedor": sanitize_text(item.get("vendedor", "")),
-                    "Estado": sanitize_text(item.get("estado", "")),
-                    "Turno": sanitize_text(item.get("turno", "")),
-                }
-            )
-        return pd.DataFrame(rows)
-
-    local_table = _to_simple_table(local_entries, "Local")
-    foraneo_table = _to_simple_table(foraneo_entries, "Foráneo")
-
-    st.subheader("Pedidos Locales")
-    if local_table.empty:
-        st.info("Sin pedidos locales activos.")
-    else:
-        st.dataframe(local_table, use_container_width=True, hide_index=True, height=420)
-
-    st.subheader("Pedidos Foráneos")
-    if foraneo_table.empty:
-        st.info("Sin pedidos foráneos activos.")
-    else:
-        st.dataframe(foraneo_table, use_container_width=True, hide_index=True, height=420)
-
 st.set_page_config(page_title="Panel de Almacén Integrado", layout="wide")
 
 # --- Ajustes UI compactos ---
@@ -4659,9 +4593,6 @@ if is_pantalla_f_view:
         """,
         unsafe_allow_html=True,
     )
-    st_autorefresh(interval=45000, key="auto_refresh_pantallaf_tv")
-    render_pantallaf_smart_tv_view(df_all)
-    st.stop()
 # Matriz de vistas por usuario:
 # - SINAI: solo operación (Auto Foráneo, Auto Local y Asistente)
 # - DISSURTIDOR: solo vista de Surtidores
