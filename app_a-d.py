@@ -68,6 +68,8 @@ TD_LOGO_ALLOWED_TYPES = ["png", "jpg", "jpeg", "webp"]
 TD_LOGO_ALLOWED_EXTENSIONS = tuple(f".{ext}" for ext in TD_LOGO_ALLOWED_TYPES)
 TD_LOGO_EDITOR_USER = "SCHAVA"
 
+DEBUG_BULK_COMPLETE = False
+
 
 def _is_recoverable_auth_error(exc: Exception) -> bool:
     err_text = str(exc)
@@ -7896,29 +7898,55 @@ if df_main is not None:
                         st.rerun()
 
     if st.session_state.pop("bulk_complete_execute_requested", False):
-        selected_bulk_ids = _get_bulk_selected_ids()
-        pedidos_lookup = pd.DataFrame()
-        if "ID_Pedido" in df_pendientes_proceso_demorado.columns:
-            pedidos_lookup = df_pendientes_proceso_demorado.copy()
-            pedidos_lookup["ID_Pedido"] = pedidos_lookup["ID_Pedido"].astype(str).str.strip()
-            pedidos_lookup = pedidos_lookup.set_index("ID_Pedido", drop=False)
+        selected_snapshot = st.session_state.get("bulk_selected_snapshot", [])
+        pedidos_lookup = df_pendientes_proceso_demorado.copy()
+        pedidos_lookup["_gsheet_row_index"] = pd.to_numeric(
+            pedidos_lookup.get("_gsheet_row_index", pd.Series(dtype=float)),
+            errors="coerce",
+        )
+        pedidos_lookup = pedidos_lookup.dropna(subset=["_gsheet_row_index"]).copy()
+        pedidos_lookup["_gsheet_row_index"] = pedidos_lookup["_gsheet_row_index"].astype(int)
+        pedidos_lookup = pedidos_lookup.set_index("_gsheet_row_index", drop=False)
 
         pedidos_a_completar = []
-        for pedido_id in sorted(selected_bulk_ids):
-            if pedido_id not in pedidos_lookup.index:
+        fallidos_pre = []
+        for item in selected_snapshot:
+            row_idx = int(item.get("_gsheet_row_index", 0) or 0)
+            pedido_id_snapshot = str(item.get("ID_Pedido", "")).strip()
+            if row_idx <= 0:
+                fallidos_pre.append(f"{pedido_id_snapshot or 'Sin ID'}: selección sin índice de fila")
                 continue
-            row_to_complete = pedidos_lookup.loc[pedido_id]
+            if row_idx not in pedidos_lookup.index:
+                fallidos_pre.append(f"{pedido_id_snapshot or 'Sin ID'}: ya no existe en vista actual")
+                continue
+
+            row_to_complete = pedidos_lookup.loc[row_idx]
             if isinstance(row_to_complete, pd.DataFrame):
                 row_to_complete = row_to_complete.iloc[0]
-            if str(row_to_complete.get("Estado", "")).strip() != "🔵 En Proceso":
+
+            estado_actual = str(row_to_complete.get("Estado", "")).strip()
+            if estado_actual != "🔵 En Proceso":
+                fallidos_pre.append(f"{pedido_id_snapshot or 'Sin ID'}: cambió de estado a {estado_actual or 'N/A'}")
                 continue
+
+            if not _pedido_es_completable_rapido(row_to_complete):
+                fallidos_pre.append(f"{pedido_id_snapshot or 'Sin ID'}: dejó de ser completable (pago/guía)")
+                continue
+
             pedidos_a_completar.append(row_to_complete)
+
+        if DEBUG_BULK_COMPLETE:
+            st.caption(f"DEBUG bulk snapshot={len(selected_snapshot)} ejecutables={len(pedidos_a_completar)}")
 
         if not pedidos_a_completar:
             st.warning("⚠️ No hay pedidos válidos seleccionados para completar.")
+            if fallidos_pre:
+                with st.expander("Ver detalle de selección no ejecutable"):
+                    for msg in fallidos_pre:
+                        st.write(f"- {msg}")
         else:
             completados_ok = 0
-            fallidos = []
+            fallidos = list(fallidos_pre)
             preserve_tab_state()
             _mark_skip_demorado_check_once()
 
@@ -10557,17 +10585,20 @@ if df_main is not None:
                             cliente = str(row_fast.get("Cliente", "")).strip() or "Sin cliente"
                             surtidor = str(row_fast.get("Surtidor", "")).strip()
                             estado = str(row_fast.get("Estado", "")).strip() or "Sin estado"
-                            key_chk = f"fast_complete_chk_{pedido_id}"
+                            row_idx_fast = int(row_fast.get("_gsheet_row_index", 0) or 0)
+                            if row_idx_fast <= 0:
+                                continue
+                            key_chk = f"fast_complete_chk_{row_idx_fast}"
                             estado_txt = "🟡 Pendiente" if "Pendiente" in estado else "🔵 En Proceso"
                             checked = st.checkbox(
                                 f"#{orden} · {cliente} · {estado_txt}",
                                 key=key_chk,
-                                value=(pedido_id in selected_ids),
+                                value=(row_idx_fast in selected_ids),
                             )
                             if checked:
-                                selected_ids.add(pedido_id)
+                                selected_ids.add(row_idx_fast)
                             else:
-                                selected_ids.discard(pedido_id)
+                                selected_ids.discard(row_idx_fast)
 
                 st.markdown("#### 🚚 FORÁNEOS")
                 foraneos_df = pedidos_en_proceso[pedidos_en_proceso["tipo_norm"] != "📍 Pedido Local"].copy()
@@ -10596,17 +10627,20 @@ if df_main is not None:
                                 cliente = str(row_fast.get("Cliente", "")).strip() or "Sin cliente"
                                 surtidor = str(row_fast.get("Surtidor", "")).strip()
                                 estado = str(row_fast.get("Estado", "")).strip() or "Sin estado"
-                                key_chk = f"fast_complete_chk_{pedido_id}"
+                                row_idx_fast = int(row_fast.get("_gsheet_row_index", 0) or 0)
+                                if row_idx_fast <= 0:
+                                    continue
+                                key_chk = f"fast_complete_chk_{row_idx_fast}"
                                 estado_txt = "🟡 Pendiente" if "Pendiente" in estado else "🔵 En Proceso"
                                 checked = st.checkbox(
                                     f"#{orden} · {cliente} · {estado_txt}",
                                     key=key_chk,
-                                    value=(pedido_id in selected_ids),
+                                    value=(row_idx_fast in selected_ids),
                                 )
                                 if checked:
-                                    selected_ids.add(pedido_id)
+                                    selected_ids.add(row_idx_fast)
                                 else:
-                                    selected_ids.discard(pedido_id)
+                                    selected_ids.discard(row_idx_fast)
 
                     _render_foraneo_column(foraneos_col_a, col_a)
                     _render_foraneo_column(foraneos_col_b, col_b)
@@ -10617,15 +10651,31 @@ if df_main is not None:
                 )
 
             st.session_state["bulk_selected_pedidos"] = selected_ids
+            if DEBUG_BULK_COMPLETE:
+                st.caption(f"DEBUG bulk selected row_idx={sorted(selected_ids)}")
             if not is_sinaicel_user:
                 st.caption("Colores surtidor:")
                 st.markdown(
                     " · ".join([f"{_badge_surtidor(n.title())}" for n in ["baldo", "alexis", "enrique", "cassandra", "yaya", "karen"]]),
                     unsafe_allow_html=True,
                 )
-            if submit_complete and len(selected_ids) > 0:
-                st.session_state["bulk_complete_execute_requested"] = True
-                st.rerun()
+            if submit_complete:
+                snapshot = []
+                if selected_ids:
+                    selected_rows_df = pedidos_en_proceso[
+                        pd.to_numeric(pedidos_en_proceso.get("_gsheet_row_index", pd.Series(dtype=float)), errors="coerce").isin(selected_ids)
+                    ].copy()
+                    for _, row_sel in selected_rows_df.iterrows():
+                        snapshot.append({
+                            "_gsheet_row_index": int(row_sel.get("_gsheet_row_index", 0) or 0),
+                            "ID_Pedido": str(row_sel.get("ID_Pedido", "")).strip(),
+                        })
+                st.session_state["bulk_selected_snapshot"] = snapshot
+                if DEBUG_BULK_COMPLETE:
+                    st.write("DEBUG bulk snapshot submit", snapshot)
+                if snapshot:
+                    st.session_state["bulk_complete_execute_requested"] = True
+                    st.rerun()
 
     with main_tabs[7]:  # ✅ Historial Completados/Cancelados
         df_completados_historial = df_main[
