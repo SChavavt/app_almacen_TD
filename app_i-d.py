@@ -5565,34 +5565,31 @@ if selected_tab_key == "surtidores":
             )
             st.markdown("#### 🚚 Pedidos FORÁNEOS")
 
-            foraneo_impares = []
-            foraneo_pares = []
-            for key in foraneo_sorted_keys:
-                numero = foraneo_order.get(key, float("inf"))
-                if isinstance(numero, int) and numero % 2 == 0:
-                    foraneo_pares.append(key)
-                else:
-                    foraneo_impares.append(key)
+            # Mostrar secuencia continua (1,2,3...) de arriba hacia abajo.
+            # Columna izquierda contiene la primera mitad; la derecha continúa.
+            mitad_foraneos = int(np.ceil(len(foraneo_sorted_keys) / 2))
+            foraneo_izquierda = foraneo_sorted_keys[:mitad_foraneos]
+            foraneo_derecha = foraneo_sorted_keys[mitad_foraneos:]
 
-            max_rows = max(len(foraneo_impares), len(foraneo_pares))
+            max_rows = max(len(foraneo_izquierda), len(foraneo_derecha))
             for i in range(max_rows):
-                col_foraneo_impares, col_foraneo_pares = st.columns(2, gap="large")
-                with col_foraneo_impares:
-                    if i < len(foraneo_impares):
-                        key_impar = foraneo_impares[i]
+                col_foraneo_izq, col_foraneo_der = st.columns(2, gap="large")
+                with col_foraneo_izq:
+                    if i < len(foraneo_izquierda):
+                        key_izq = foraneo_izquierda[i]
                         if st.checkbox(
-                            foraneo_options.get(key_impar, key_impar),
-                            key=f"surtidor_foraneo_pick_{key_impar}",
+                            foraneo_options.get(key_izq, key_izq),
+                            key=f"surtidor_foraneo_pick_{key_izq}",
                         ):
-                            selected_foraneo.append(key_impar)
-                with col_foraneo_pares:
-                    if i < len(foraneo_pares):
-                        key_par = foraneo_pares[i]
+                            selected_foraneo.append(key_izq)
+                with col_foraneo_der:
+                    if i < len(foraneo_derecha):
+                        key_der = foraneo_derecha[i]
                         if st.checkbox(
-                            foraneo_options.get(key_par, key_par),
-                            key=f"surtidor_foraneo_pick_{key_par}",
+                            foraneo_options.get(key_der, key_der),
+                            key=f"surtidor_foraneo_pick_{key_der}",
                         ):
-                            selected_foraneo.append(key_par)
+                            selected_foraneo.append(key_der)
 
         st.markdown("<div style=\"height:0.75rem\"></div>", unsafe_allow_html=True)
         st.caption("")
