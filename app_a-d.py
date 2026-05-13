@@ -7897,11 +7897,12 @@ if df_main is not None:
 
     if st.session_state.pop("bulk_complete_execute_requested", False):
         selected_bulk_ids = _get_bulk_selected_ids()
-        pedidos_lookup = pd.DataFrame()
-        if "ID_Pedido" in df_pendientes_proceso_demorado.columns:
-            pedidos_lookup = df_pendientes_proceso_demorado.copy()
-            pedidos_lookup["ID_Pedido"] = pedidos_lookup["ID_Pedido"].astype(str).str.strip()
-            pedidos_lookup = pedidos_lookup.set_index("ID_Pedido", drop=False)
+        pedidos_lookup = (
+            df_pendientes_proceso_demorado
+            .set_index("ID_Pedido", drop=False)
+            if "ID_Pedido" in df_pendientes_proceso_demorado.columns
+            else pd.DataFrame()
+        )
 
         pedidos_a_completar = []
         for pedido_id in sorted(selected_bulk_ids):
@@ -7922,22 +7923,15 @@ if df_main is not None:
             preserve_tab_state()
             _mark_skip_demorado_check_once()
 
-            total_a_completar = len(pedidos_a_completar)
-            progress_bar = st.progress(0, text=f"Completando 0 de {total_a_completar} pedidos seleccionados...")
-
-            for idx, pedido_row in enumerate(pedidos_a_completar, start=1):
+            for pedido_row in pedidos_a_completar:
                 pedido_id = str(pedido_row.get("ID_Pedido", "")).strip()
                 if not pedido_id:
-                    progress_ratio = idx / max(total_a_completar, 1)
-                    progress_bar.progress(progress_ratio, text=f"Completando {idx} de {total_a_completar} pedidos seleccionados...")
                     continue
 
                 requires = pedido_requiere_guia(pedido_row)
                 has_file = pedido_tiene_guia_adjunta(pedido_row)
                 if requires and not has_file:
                     fallidos.append(f"{pedido_id}: requiere guía antes de completar")
-                    progress_ratio = idx / max(total_a_completar, 1)
-                    progress_bar.progress(progress_ratio, text=f"Completando {idx} de {total_a_completar} pedidos seleccionados...")
                     continue
 
                 row_idx_list = df_main.index[
@@ -7945,16 +7939,12 @@ if df_main is not None:
                 ].tolist()
                 if not row_idx_list:
                     fallidos.append(f"{pedido_id}: no se encontró en datos cargados")
-                    progress_ratio = idx / max(total_a_completar, 1)
-                    progress_bar.progress(progress_ratio, text=f"Completando {idx} de {total_a_completar} pedidos seleccionados...")
                     continue
 
                 df_idx = row_idx_list[0]
                 gsheet_row_index = pedido_row.get("_gsheet_row_index")
                 if gsheet_row_index is None or str(gsheet_row_index).strip() == "":
                     fallidos.append(f"{pedido_id}: sin índice de fila en Google Sheets")
-                    progress_ratio = idx / max(total_a_completar, 1)
-                    progress_bar.progress(progress_ratio, text=f"Completando {idx} de {total_a_completar} pedidos seleccionados...")
                     continue
 
                 ok = completar_pedido(
@@ -7973,10 +7963,6 @@ if df_main is not None:
                 else:
                     fallidos.append(f"{pedido_id}: no se pudo completar")
 
-                progress_ratio = idx / max(total_a_completar, 1)
-                progress_bar.progress(progress_ratio, text=f"Completando {idx} de {total_a_completar} pedidos seleccionados...")
-
-            progress_bar.empty()
             _set_bulk_mode(False)
 
             if completados_ok > 0:
