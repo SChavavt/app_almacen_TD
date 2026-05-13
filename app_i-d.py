@@ -4640,6 +4640,44 @@ selected_tab = st.radio(
 st.session_state.active_main_tab = selected_tab
 selected_tab_key = visible_tabs[selected_tab][0]
 
+
+def _persist_page_scroll(view_key: str, user_key: str = "") -> None:
+    """Guarda/restaura scroll vertical entre auto-recargas por vista/usuario."""
+    storage_key = sanitize_text(f"td_scroll::{user_key}::{view_key}")
+    script = f"""
+    <script>
+    (function() {{
+      const key = {json.dumps(storage_key)};
+      const target = window.parent || window;
+      const doc = target.document || document;
+      const root = doc.scrollingElement || doc.documentElement || doc.body;
+      if (!root) return;
+
+      const saved = target.sessionStorage ? target.sessionStorage.getItem(key) : null;
+      if (saved !== null) {{
+        const y = parseInt(saved, 10);
+        if (!Number.isNaN(y)) {{
+          setTimeout(() => target.scrollTo(0, y), 20);
+          setTimeout(() => target.scrollTo(0, y), 220);
+        }}
+      }}
+
+      const save = () => {{
+        if (!target.sessionStorage) return;
+        target.sessionStorage.setItem(key, String(root.scrollTop || target.scrollY || 0));
+      }};
+
+      target.addEventListener('scroll', save, {{ passive: true }});
+      target.addEventListener('beforeunload', save);
+      save();
+    }})();
+    </script>
+    """
+    components.html(script, height=0, scrolling=False)
+
+
+_persist_page_scroll(selected_tab_key, logged_user)
+
 # helper para "simular" tabs
 tabs = [None] * len(visible_tabs)
 
