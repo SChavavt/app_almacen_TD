@@ -1610,6 +1610,46 @@ def _get_bulk_selected_ids() -> set[str]:
     return set()
 
 
+def _build_bulk_snapshot_from_selected(
+    selected_values: set[Any],
+    df_source: pd.DataFrame,
+) -> list[dict[str, Any]]:
+    """Construye snapshot válido desde selección mixta (ID_Pedido o _gsheet_row_index)."""
+    if not selected_values or df_source.empty:
+        return []
+
+    selected_ids = {str(v).strip() for v in selected_values if str(v).strip()}
+    selected_rows: set[int] = set()
+    for value in selected_values:
+        raw = str(value).strip()
+        if raw.isdigit():
+            selected_rows.add(int(raw))
+
+    df_work = df_source.copy()
+    df_work["_row_idx_num"] = pd.to_numeric(
+        df_work.get("_gsheet_row_index", pd.Series(dtype=float)),
+        errors="coerce",
+    )
+    df_work = df_work.dropna(subset=["_row_idx_num"]).copy()
+    if df_work.empty:
+        return []
+    df_work["_row_idx_num"] = df_work["_row_idx_num"].astype(int)
+    df_work["_pedido_id_norm"] = df_work.get("ID_Pedido", pd.Series(dtype=str)).astype(str).str.strip()
+
+    mask_selected = df_work["_pedido_id_norm"].isin(selected_ids) | df_work["_row_idx_num"].isin(selected_rows)
+    selected_rows_df = df_work[mask_selected].copy()
+
+    snapshot: list[dict[str, Any]] = []
+    for _, row_sel in selected_rows_df.iterrows():
+        snapshot.append(
+            {
+                "_gsheet_row_index": int(row_sel.get("_row_idx_num", 0) or 0),
+                "ID_Pedido": str(row_sel.get("ID_Pedido", "")).strip(),
+            }
+        )
+    return snapshot
+
+
 def _set_bulk_mode(enabled: bool) -> None:
     """Solicita cambio de modo múltiple sin mutar directamente el key del widget."""
 
@@ -7917,6 +7957,12 @@ if df_main is not None:
 
     if st.session_state.pop("bulk_complete_execute_requested", False):
         selected_snapshot = st.session_state.get("bulk_selected_snapshot", [])
+        if not selected_snapshot:
+            selected_snapshot = _build_bulk_snapshot_from_selected(
+                _get_bulk_selected_ids(),
+                df_pendientes_proceso_demorado,
+            )
+            st.session_state["bulk_selected_snapshot"] = selected_snapshot
         pedidos_lookup = df_pendientes_proceso_demorado.copy()
         pedidos_lookup["_gsheet_row_index"] = pd.to_numeric(
             pedidos_lookup.get("_gsheet_row_index", pd.Series(dtype=float)),
@@ -10699,16 +10745,7 @@ if df_main is not None:
                     unsafe_allow_html=True,
                 )
             if submit_complete:
-                snapshot = []
-                if selected_ids:
-                    selected_rows_df = pedidos_en_proceso[
-                        pd.to_numeric(pedidos_en_proceso.get("_gsheet_row_index", pd.Series(dtype=float)), errors="coerce").isin(selected_ids)
-                    ].copy()
-                    for _, row_sel in selected_rows_df.iterrows():
-                        snapshot.append({
-                            "_gsheet_row_index": int(row_sel.get("_gsheet_row_index", 0) or 0),
-                            "ID_Pedido": str(row_sel.get("ID_Pedido", "")).strip(),
-                        })
+                snapshot = _build_bulk_snapshot_from_selected(selected_ids, pedidos_en_proceso)
                 st.session_state["bulk_selected_snapshot"] = snapshot
                 if DEBUG_BULK_COMPLETE:
                     st.write("DEBUG bulk snapshot submit", snapshot)
