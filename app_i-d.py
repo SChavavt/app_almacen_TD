@@ -2444,7 +2444,6 @@ def get_foraneo_orders(df_all: pd.DataFrame) -> pd.DataFrame:
         return pd.DataFrame()
 
     df_for = pd.concat(frames, ignore_index=True, sort=False)
-    df_for = df_for.drop_duplicates()
 
     if "Completados_Limpiado" not in df_for.columns:
         df_for["Completados_Limpiado"] = ""
