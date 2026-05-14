@@ -3198,6 +3198,54 @@ def render_cobranza_tab_gerente():
                     subset=["Codigo", "Saldo_Vencido_Total", "Fecha_Vencimiento_Min", "Fecha_Vencimiento_Max"],
                     keep="first",
                 ).copy()
+                saldos_df["Condicion_Facturas"] = ""
+                if not venc_df.empty:
+                    def _resumen_condiciones(vals):
+                        condiciones = sorted({str(v).strip() for v in vals if str(v).strip()})
+                        if not condiciones:
+                            return ""
+                        if len(condiciones) == 1:
+                            return condiciones[0]
+                        return f"MIXTO ({' | '.join(condiciones)})"
+
+                    cond_por_codigo = (
+                        venc_df.assign(
+                            Codigo=venc_df.get("Codigo", pd.Series("", index=venc_df.index)).astype(str),
+                            _cond=venc_df.get("Condicion", pd.Series("", index=venc_df.index)).astype(str).str.strip(),
+                        )
+                        .loc[lambda d: d["_cond"] != ""]
+                        .groupby("Codigo")["_cond"]
+                        .agg(_resumen_condiciones)
+                        .to_dict()
+                    )
+                    saldos_df["Condicion_Facturas"] = saldos_df["Codigo"].map(cond_por_codigo).fillna("")
+
+                hoy_norm = pd.Timestamp.now().normalize()
+                semaforo_por_cliente: dict[str, str] = {}
+                if not com_df.empty:
+                    com_cli = com_df.copy()
+                    com_cli["Codigo"] = com_cli.get("Codigo", pd.Series("", index=com_cli.index)).astype(str)
+                    com_cli["_ts"] = pd.to_datetime(com_cli.get("Timestamp", ""), errors="coerce")
+                    com_cli["_row_sort"] = pd.to_numeric(
+                        com_cli.get("__row", com_cli.get("__row_number__", pd.Series(index=com_cli.index, dtype="float64"))),
+                        errors="coerce",
+                    )
+                    com_cli = com_cli.sort_values(["Codigo", "_ts", "_row_sort"], ascending=[True, True, True])
+                    ultimos_cli = com_cli.drop_duplicates(subset=["Codigo"], keep="last").copy()
+                    for _, row in ultimos_cli.iterrows():
+                        codigo = str(row.get("Codigo", "")).strip()
+                        if not codigo:
+                            continue
+                        estatus = _cobranza_clean_text(row.get("Estatus_Seguimiento", "")).upper()
+                        fecha_promesa = pd.to_datetime(row.get("Fecha_Proximo_Pago", ""), errors="coerce")
+                        fecha_com = pd.to_datetime(row.get("Timestamp", ""), errors="coerce")
+                        color = "🔴"
+                        if estatus == "PROMESA_PAGO" and pd.notna(fecha_promesa):
+                            color = "🟢" if hoy_norm < fecha_promesa.normalize() else "🔴"
+                        elif pd.notna(fecha_com):
+                            color = "🟢" if (hoy_norm - fecha_com.normalize()).days <= 7 else "🔴"
+                        semaforo_por_cliente[codigo] = color
+                saldos_df["Semaforo_Seguimiento"] = saldos_df["Codigo"].map(semaforo_por_cliente).fillna("🔴")
 
                 if orden_sel == "Vencidas más caras a más baratas":
                     saldos_df = saldos_df.sort_values(["Vencido", "Saldo_Vencido_Total", "Saldo"], ascending=[False, False, False])
@@ -3209,13 +3257,23 @@ def render_cobranza_tab_gerente():
                 saldos_df["Fecha_Vencimiento_Min"] = saldos_df["Fecha_Vencimiento_Min"].dt.strftime("%Y-%m-%d")
                 saldos_df["Fecha_Vencimiento_Max"] = saldos_df["Fecha_Vencimiento_Max"].dt.strftime("%Y-%m-%d")
                 saldos_df = saldos_df.drop(columns=[c for c in ["_mes_dt", "_ult_act_dt"] if c in saldos_df.columns])
-                cols_saldos = ["Mes", "Codigo", "Razon_Social", "Saldo", "Vencido", "No_Vencido", "Saldo_Vencido_Total", "Fecha_Vencimiento_Min", "Fecha_Vencimiento_Max", "Tipo_Pago", "Ultima_Actualizacion"]
+                cols_saldos = ["Mes", "Codigo", "Razon_Social", "Saldo", "Vencido", "No_Vencido", "Saldo_Vencido_Total", "Fecha_Vencimiento_Min", "Fecha_Vencimiento_Max", "Tipo_Pago", "Condicion_Facturas", "Ultima_Actualizacion", "Semaforo_Seguimiento"]
                 cols_saldos = [c for c in cols_saldos if c in saldos_df.columns]
                 tabla_saldos = saldos_df[cols_saldos].copy()
                 cols_mxn = [c for c in ["Saldo", "Vencido", "No_Vencido", "Saldo_Vencido_Total"] if c in tabla_saldos.columns]
                 for c in cols_mxn:
                     tabla_saldos[c] = pd.to_numeric(tabla_saldos[c], errors="coerce").fillna(0.0).map(lambda x: f"$ {x:,.2f} MXN")
-                st.dataframe(tabla_saldos, use_container_width=True, hide_index=True)
+                tabla_render = tabla_saldos.drop(columns=["Semaforo_Seguimiento"], errors="ignore").copy()
+                if "Semaforo_Seguimiento" in tabla_saldos.columns:
+                    semaforo_tmp = tabla_saldos["Semaforo_Seguimiento"].astype(str).str.strip()
+
+                    def _row_bg(_row):
+                        sem = semaforo_tmp.loc[_row.name] if _row.name in semaforo_tmp.index else "🔴"
+                        bg = "#d9f2d9" if sem == "🟢" else "#f8d7da"
+                        return [f"background-color: {bg}"] * len(_row)
+
+                    tabla_render = tabla_render.style.apply(_row_bg, axis=1)
+                st.dataframe(tabla_render, use_container_width=True, hide_index=True)
 
                 # Vista visual tipo agenda/calendario de vencimientos por cliente y folio.
                 if not venc_df.empty:
