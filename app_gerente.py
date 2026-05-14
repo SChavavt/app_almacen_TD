@@ -3259,6 +3259,12 @@ def render_cobranza_tab_gerente():
                             color = "🟢" if (hoy_norm - fecha_com.normalize()).days <= 7 else "🔴"
                         semaforo_por_cliente[codigo] = color
                 saldos_df["Semaforo_Seguimiento"] = saldos_df["Codigo"].map(semaforo_por_cliente).fillna("🔴")
+                # Azul claro: cliente con vencimiento mínimo aún no llegado.
+                mask_azul = (
+                    saldos_df["Fecha_Vencimiento_Min"].notna()
+                    & (hoy_norm < saldos_df["Fecha_Vencimiento_Min"].dt.normalize())
+                )
+                saldos_df.loc[mask_azul, "Semaforo_Seguimiento"] = "🔵"
 
                 if orden_sel == "Vencidas más caras a más baratas":
                     saldos_df = saldos_df.sort_values(["Vencido", "Saldo_Vencido_Total", "Saldo"], ascending=[False, False, False])
@@ -3278,12 +3284,24 @@ def render_cobranza_tab_gerente():
                     tabla_saldos[c] = pd.to_numeric(tabla_saldos[c], errors="coerce").fillna(0.0).map(lambda x: f"$ {x:,.2f} MXN")
                 tabla_render = tabla_saldos.drop(columns=["Semaforo_Seguimiento"], errors="ignore").copy()
                 if "Semaforo_Seguimiento" in tabla_saldos.columns:
+                    total_rojo = int((tabla_saldos["Semaforo_Seguimiento"] == "🔴").sum())
+                    total_verde = int((tabla_saldos["Semaforo_Seguimiento"] == "🟢").sum())
+                    total_azul = int((tabla_saldos["Semaforo_Seguimiento"] == "🔵").sum())
+                    c_rojo, c_verde, c_azul = st.columns(3)
+                    c_rojo.metric("🔴 En rojo", total_rojo)
+                    c_verde.metric("🟢 En verde", total_verde)
+                    c_azul.metric("🔵 En azul claro", total_azul)
                     semaforo_tmp = tabla_saldos["Semaforo_Seguimiento"].astype(str).str.strip()
 
                     def _row_bg(_row):
                         sem = semaforo_tmp.loc[_row.name] if _row.name in semaforo_tmp.index else "🔴"
                         # Colores más intensos + contorno visible por celda.
-                        bg = "#c7f9cc" if sem == "🟢" else "#ffd6d6"
+                        if sem == "🟢":
+                            bg = "#c7f9cc"
+                        elif sem == "🔵":
+                            bg = "#dbeafe"
+                        else:
+                            bg = "#ffd6d6"
                         txt = "#111827"
                         border = "1px solid #334155"
                         return [f"background-color: {bg}; color: {txt}; border: {border}"] * len(_row)
@@ -3297,6 +3315,11 @@ def render_cobranza_tab_gerente():
                             {"selector": "table", "props": [("border-collapse", "collapse")]},
                         ])
                     )
+                else:
+                    c_rojo, c_verde, c_azul = st.columns(3)
+                    c_rojo.metric("🔴 En rojo", 0)
+                    c_verde.metric("🟢 En verde", 0)
+                    c_azul.metric("🔵 En azul claro", 0)
                 if isinstance(tabla_render, pd.io.formats.style.Styler):
                     tabla_html = tabla_render.hide(axis="index").to_html()
                     st.markdown(
