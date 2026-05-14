@@ -3263,11 +3263,17 @@ def render_cobranza_tab_gerente():
                 cols_mxn = [c for c in ["Saldo", "Vencido", "No_Vencido", "Saldo_Vencido_Total"] if c in tabla_saldos.columns]
                 for c in cols_mxn:
                     tabla_saldos[c] = pd.to_numeric(tabla_saldos[c], errors="coerce").fillna(0.0).map(lambda x: f"$ {x:,.2f} MXN")
+                tabla_render = tabla_saldos.drop(columns=["Semaforo_Seguimiento"], errors="ignore").copy()
                 if "Semaforo_Seguimiento" in tabla_saldos.columns:
-                    tabla_saldos["Semaforo_Seguimiento"] = tabla_saldos["Semaforo_Seguimiento"].map(
-                        lambda v: "🟢 Vigente" if str(v).strip() == "🟢" else "🔴 Vencido"
-                    )
-                st.dataframe(tabla_saldos, use_container_width=True, hide_index=True)
+                    semaforo_tmp = tabla_saldos["Semaforo_Seguimiento"].astype(str).str.strip()
+
+                    def _row_bg(_row):
+                        sem = semaforo_tmp.loc[_row.name] if _row.name in semaforo_tmp.index else "🔴"
+                        bg = "#d9f2d9" if sem == "🟢" else "#f8d7da"
+                        return [f"background-color: {bg}"] * len(_row)
+
+                    tabla_render = tabla_render.style.apply(_row_bg, axis=1)
+                st.dataframe(tabla_render, use_container_width=True, hide_index=True)
 
                 # Vista visual tipo agenda/calendario de vencimientos por cliente y folio.
                 if not venc_df.empty:
