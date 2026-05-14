@@ -2438,19 +2438,44 @@ def parse_antiguedad_cobranza_excel(file, mes: str = "") -> pd.DataFrame:
     rows = raw.fillna("").values.tolist()
     codigo = ""
     headers_idx = None
+    vendedor_fallback = ""
+    vendedor_col_idx = None
+    vendedor_row_ref = None
+    vendedor_row_plus_two = None
     out = []
-    for row in rows:
+    for row_idx, row in enumerate(rows):
         c0 = _cobranza_clean_text(row[0] if len(row) > 0 else "")
         c1 = _cobranza_clean_text(row[1] if len(row) > 1 else "")
         try:
             if c0 and c1 and float(c0.replace(",", "")) > 0:
                 codigo = _cobranza_norm_code(c0)
                 headers_idx = None
+                vendedor_fallback = ""
+                vendedor_col_idx = None
+                vendedor_row_ref = None
+                vendedor_row_plus_two = None
                 continue
         except Exception:
             pass
 
         vals = [_cobranza_clean_text(x).lower() for x in row]
+        if "vendedor" in vals:
+            vendedor_col_idx = vals.index("vendedor")
+            vendedor_row_ref = row_idx
+            vendedor_row_plus_two = row_idx + 2
+
+        # Patrón operativo confirmado: el valor real del vendedor viene 2 filas abajo
+        # de donde aparece la etiqueta "Vendedor" dentro del bloque del cliente.
+        if (
+            vendedor_col_idx is not None
+            and vendedor_row_plus_two is not None
+            and row_idx == vendedor_row_plus_two
+        ):
+            candidato = _cobranza_clean_text(row[vendedor_col_idx]) if vendedor_col_idx < len(row) else ""
+            candidato_l = candidato.lower()
+            if candidato and candidato_l not in {"vendedor", "folio", "fecha", "fecha vencimiento", "condicion", "condición"} and "envio" not in candidato_l:
+                vendedor_fallback = candidato
+
         if "folio" in vals and any("fecha venc" in v for v in vals):
             headers_idx = {i: v for i, v in enumerate(vals)}
             continue
@@ -2480,6 +2505,8 @@ def parse_antiguedad_cobranza_excel(file, mes: str = "") -> pd.DataFrame:
         cond = _cobranza_clean_text(row[i_cond]) if i_cond is not None and i_cond < len(row) else ""
         mon = _cobranza_clean_text(row[i_mon]) if i_mon is not None and i_mon < len(row) else ""
         vendedor = _cobranza_clean_text(row[i_vendedor]) if i_vendedor is not None and i_vendedor < len(row) else ""
+        if not vendedor:
+            vendedor = vendedor_fallback
 
         if not folio or not fv or saldo <= 0:
             continue
@@ -2918,7 +2945,7 @@ def render_cobranza_tab_gerente():
         return
 
     base_headers = ["Mes", "Codigo", "Razon_Social", "Saldo", "No_Vencido", "Vencido", "Tipo_Pago", "Ultima_Actualizacion"]
-    venc_headers = ["Mes", "Codigo", "Folio", "Fecha_Factura", "Fecha_Vencimiento", "Saldo_Vence", "Condicion", "Moneda", "Ultima_Actualizacion"]
+    venc_headers = ["Mes", "Codigo", "Folio", "Fecha_Factura", "Fecha_Vencimiento", "Saldo_Vence", "Condicion", "Moneda", "Vendedor", "Ultima_Actualizacion"]
     com_headers = [
         "Mes", "Codigo", "Folio", "Dia", "Comentario", "Actualizado_por", "Timestamp",
         "Fecha_Proximo_Pago", "Recordatorio_Activo", "Estatus_Seguimiento", "Fecha_Cierre", "Mes_Operativo"
@@ -3013,7 +3040,7 @@ def render_cobranza_tab_gerente():
 
                 cobranza_upsert_rows_by_key(ws_base, df_base[base_headers], ["Mes", "Codigo"], ["Razon_Social", "Saldo", "No_Vencido", "Vencido", "Tipo_Pago", "Ultima_Actualizacion"])
                 if not df_venc.empty:
-                    cobranza_upsert_rows_by_key(ws_venc, df_venc[venc_headers], ["Codigo", "Folio", "Fecha_Vencimiento"], ["Mes", "Fecha_Factura", "Saldo_Vence", "Condicion", "Moneda", "Ultima_Actualizacion"])
+                    cobranza_upsert_rows_by_key(ws_venc, df_venc[venc_headers], ["Codigo", "Folio", "Fecha_Vencimiento"], ["Mes", "Fecha_Factura", "Saldo_Vence", "Condicion", "Moneda", "Vendedor", "Ultima_Actualizacion"])
 
                 st.session_state["ger_cob_stats"] = {
                     "clientes": int(len(df_base)),
