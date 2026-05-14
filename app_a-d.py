@@ -2676,6 +2676,39 @@ def resolve_case_foraneo_display_number(row: pd.Series, fallback_order: Any) -> 
     return str(fallback_order)
 
 
+def _reassign_case_foraneo_number(
+    worksheet_casos: Any,
+    headers_casos: Sequence[str],
+    row_idx_case: Any,
+) -> tuple[bool, Optional[str]]:
+    """Reasigna Numero_Foraneo a un caso usando el siguiente consecutivo disponible."""
+    try:
+        row_idx_int = int(float(row_idx_case)) if row_idx_case is not None and not pd.isna(row_idx_case) else None
+    except Exception:
+        row_idx_int = None
+
+    if row_idx_int is None or "Numero_Foraneo" not in headers_casos:
+        return False, None
+
+    max_actual = 0
+    for val in st.session_state.get("flow_number_map_foraneo", {}).values():
+        parsed = _parse_foraneo_number(val)
+        if parsed and parsed > max_actual:
+            max_actual = parsed
+    siguiente = f"{max_actual + 1:02d}"
+
+    ok_update = update_gsheet_cell(
+        worksheet_casos,
+        headers_casos,
+        row_idx_int,
+        "Numero_Foraneo",
+        siguiente,
+    )
+    if not ok_update:
+        return False, None
+    return True, siguiente
+
+
 _GUIDE_REQUEST_PHRASES = (
     "solicito la guia",
     "solicitamos la guia",
@@ -9136,7 +9169,6 @@ if df_main is not None:
                 if is_foraneo_case:
                     if numero_foraneo_visible:
                         st.markdown(f"**🔢 Número foráneo asignado:** `{numero_foraneo_visible}`")
-
                 if is_foraneo_case:
                     assign_col, info_col = st.columns([1, 2])
                     with assign_col:
@@ -9358,6 +9390,18 @@ if df_main is not None:
                             if gsheet_row_idx is None:
                                 st.error("❌ No se encontró el caso en 'casos_especiales'.")
                             else:
+                                if is_foraneo_case and _parse_foraneo_number(row.get("Numero_Foraneo", "")) is not None:
+                                    ok_num, nuevo_num = _reassign_case_foraneo_number(
+                                        worksheet_casos,
+                                        headers_casos,
+                                        gsheet_row_idx,
+                                    )
+                                    if ok_num and nuevo_num:
+                                        row["Numero_Foraneo"] = nuevo_num
+                                        st.toast(f"🔄 Número foráneo reasignado al procesar: {nuevo_num}", icon="✅")
+                                    else:
+                                        st.warning("⚠️ No se pudo reasignar el Número_Foraneo antes de procesar.")
+
                                 ok = True
                                 if "Estado" in headers_casos:
                                     ok &= update_gsheet_cell(worksheet_casos, headers_casos, gsheet_row_idx, "Estado", "🔵 En Proceso")
@@ -9573,6 +9617,22 @@ if df_main is not None:
                             st.error("❌ No se encontró el caso en 'casos_especiales' para actualizar.")
                         else:
                             if estado in ["🟡 Pendiente", "🔴 Demorado", "🛠 Modificación"]:
+                                if (
+                                    estado == "🛠 Modificación"
+                                    and is_foraneo_case
+                                    and _parse_foraneo_number(row.get("Numero_Foraneo", "")) is not None
+                                ):
+                                    ok_num, nuevo_num = _reassign_case_foraneo_number(
+                                        worksheet_casos,
+                                        headers_casos,
+                                        gsheet_row_idx,
+                                    )
+                                    if ok_num and nuevo_num:
+                                        row["Numero_Foraneo"] = nuevo_num
+                                        st.toast(f"🔄 Número foráneo reasignado al procesar: {nuevo_num}", icon="✅")
+                                    else:
+                                        st.warning("⚠️ No se pudo reasignar el Número_Foraneo antes de procesar.")
+
                                 now_str = mx_now_str()
                                 ok = True
                                 if "Estado" in headers_casos:
@@ -9844,7 +9904,6 @@ if df_main is not None:
                 if is_foraneo_case:
                     if numero_case_actual is not None:
                         st.markdown(f"**🔢 Número foráneo asignado:** `{numero_case_actual:02d}`")
-
                 if is_foraneo_case:
                     assign_col, info_col = st.columns([1, 2])
                     with assign_col:
@@ -10088,6 +10147,22 @@ if df_main is not None:
                             st.error("❌ No se encontró el caso en 'casos_especiales' para actualizar.")
                         else:
                             if estado in ["🟡 Pendiente", "🔴 Demorado", "🛠 Modificación"]:
+                                if (
+                                    estado == "🛠 Modificación"
+                                    and is_foraneo_case
+                                    and _parse_foraneo_number(row.get("Numero_Foraneo", "")) is not None
+                                ):
+                                    ok_num, nuevo_num = _reassign_case_foraneo_number(
+                                        worksheet_casos,
+                                        headers_casos,
+                                        gsheet_row_idx,
+                                    )
+                                    if ok_num and nuevo_num:
+                                        row["Numero_Foraneo"] = nuevo_num
+                                        st.toast(f"🔄 Número foráneo reasignado al procesar: {nuevo_num}", icon="✅")
+                                    else:
+                                        st.warning("⚠️ No se pudo reasignar el Número_Foraneo antes de procesar.")
+
                                 now_str = mx_now_str()
                                 ok = True
                                 if "Estado" in headers_casos:
@@ -10117,6 +10192,18 @@ if df_main is not None:
                             if gsheet_row_idx is None:
                                 st.error("❌ No se encontró el caso en 'casos_especiales'.")
                             else:
+                                if is_foraneo_case and _parse_foraneo_number(row.get("Numero_Foraneo", "")) is not None:
+                                    ok_num, nuevo_num = _reassign_case_foraneo_number(
+                                        worksheet_casos,
+                                        headers_casos,
+                                        gsheet_row_idx,
+                                    )
+                                    if ok_num and nuevo_num:
+                                        row["Numero_Foraneo"] = nuevo_num
+                                        st.toast(f"🔄 Número foráneo reasignado al procesar: {nuevo_num}", icon="✅")
+                                    else:
+                                        st.warning("⚠️ No se pudo reasignar el Número_Foraneo antes de procesar.")
+
                                 ok = True
                                 if "Estado" in headers_casos:
                                     ok &= update_gsheet_cell(worksheet_casos, headers_casos, gsheet_row_idx, "Estado", "🔵 En Proceso")
