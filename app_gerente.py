@@ -3102,7 +3102,7 @@ def render_cobranza_tab_gerente():
             if saldos_df.empty:
                 st.caption("No hay clientes con saldo pendiente en la base actual.")
             else:
-                col_f1, col_f2, col_f3 = st.columns(3)
+                col_f1, col_f2, col_f3, col_f4 = st.columns(4)
                 with col_f1:
                     anios_detectados = sorted({str(m).split("-")[0] for m in saldos_df.get("Mes", pd.Series(dtype='string')).astype(str) if re.match(r"^\d{4}-\d{2}$", str(m))})
                     anios_opts = ["Todos"] + anios_detectados
@@ -3117,11 +3117,17 @@ def render_cobranza_tab_gerente():
                     mes_num_sel = st.selectbox("Mes", options=mes_opts, index=mes_default_idx, key="ger_cob_saldos_mes")
                 with col_f3:
                     orden_opts = [
-                        "Fecha de vencimiento más reciente a más antigua",
+                        "Vencimiento más reciente a más antigua",
                         "Vencimientos más antiguos a más recientes",
                         "Vencidas más caras a más baratas",
                     ]
                     orden_sel = st.selectbox("Orden", options=orden_opts, index=0, key="ger_cob_saldos_orden")
+                with col_f4:
+                    ocultar_contado = st.checkbox(
+                        "Ocultar condición CONTADO",
+                        value=True,
+                        key="ger_cob_saldos_ocultar_contado",
+                    )
 
                 if anio_sel != "Todos":
                     saldos_df = saldos_df[saldos_df.get("Mes", "").astype(str).str.startswith(f"{anio_sel}-")]
@@ -3196,8 +3202,8 @@ def render_cobranza_tab_gerente():
                 saldos_df = saldos_df.merge(venc_res, on="Codigo", how="left")
                 saldos_df["Saldo_Vencido_Total"] = pd.to_numeric(saldos_df.get("Saldo_Vencido_Total", 0), errors="coerce").fillna(0.0)
                 saldos_df["Vencido"] = saldos_df["Saldo_Vencido_Total"]
-                saldos_df["Saldo"] = saldos_df["Saldo_Vencido_Total"]
-                saldos_df["No_Vencido"] = 0.0
+                saldos_df["No_Vencido"] = pd.to_numeric(saldos_df.get("No_Vencido", 0), errors="coerce").fillna(0.0)
+                saldos_df["Saldo"] = saldos_df["Saldo_Vencido_Total"] + saldos_df["No_Vencido"]
                 saldos_df = saldos_df[saldos_df["Saldo"] > 0].copy()
                 saldos_df["Fecha_Vencimiento_Min"] = pd.to_datetime(saldos_df.get("Fecha_Vencimiento_Min"), errors="coerce")
                 saldos_df["Fecha_Vencimiento_Max"] = pd.to_datetime(saldos_df.get("Fecha_Vencimiento_Max"), errors="coerce")
@@ -3233,6 +3239,11 @@ def render_cobranza_tab_gerente():
                         .to_dict()
                     )
                     saldos_df["Condicion_Facturas"] = saldos_df["Codigo"].map(cond_por_codigo).fillna("")
+                if ocultar_contado:
+                    cond_norm = saldos_df["Condicion_Facturas"].astype(str).str.strip()
+                    saldos_df = saldos_df[
+                        cond_norm != "Contado"
+                    ].copy()
 
                 semaforo_por_cliente: dict[str, str] = {}
                 if not com_df.empty:
@@ -3269,18 +3280,40 @@ def render_cobranza_tab_gerente():
 
                 if orden_sel == "Vencidas más caras a más baratas":
                     saldos_df = saldos_df.sort_values(["Vencido", "Saldo_Vencido_Total", "Saldo"], ascending=[False, False, False])
-                elif orden_sel == "Fecha de vencimiento más reciente a más antigua":
-                    saldos_df = saldos_df.sort_values(["Fecha_Vencimiento_Max", "Saldo"], ascending=[False, False], na_position="last")
+                elif orden_sel == "Vencimiento más reciente a más antigua":
+                    saldos_df = saldos_df.sort_values(["Fecha_Vencimiento_Min", "Saldo"], ascending=[False, False], na_position="last")
                 else:
                     saldos_df = saldos_df.sort_values(["Fecha_Vencimiento_Min", "Saldo"], ascending=[True, False], na_position="last")
 
                 saldos_df["Fecha_Vencimiento_Min"] = saldos_df["Fecha_Vencimiento_Min"].dt.strftime("%Y-%m-%d")
                 saldos_df["Fecha_Vencimiento_Max"] = saldos_df["Fecha_Vencimiento_Max"].dt.strftime("%Y-%m-%d")
                 saldos_df = saldos_df.drop(columns=[c for c in ["_mes_dt", "_ult_act_dt"] if c in saldos_df.columns])
-                cols_saldos = ["Mes", "Codigo", "Razon_Social", "Saldo", "Vencido", "No_Vencido", "Saldo_Vencido_Total", "Fecha_Vencimiento_Min", "Fecha_Vencimiento_Max", "Condicion_Facturas", "Ultima_Actualizacion", "Semaforo_Seguimiento"]
+                cols_saldos = ["Mes", "Codigo", "Razon_Social", "Saldo", "Vencido", "Saldo_Vencido_Total", "Fecha_Vencimiento_Min", "Fecha_Vencimiento_Max", "Condicion_Facturas", "Ultima_Actualizacion", "Semaforo_Seguimiento"]
                 cols_saldos = [c for c in cols_saldos if c in saldos_df.columns]
                 tabla_saldos = saldos_df[cols_saldos].copy()
-                cols_mxn = [c for c in ["Saldo", "Vencido", "No_Vencido", "Saldo_Vencido_Total"] if c in tabla_saldos.columns]
+                st.caption("Tip: selecciona una fila para cargar automáticamente ese cliente en la sección de Comentarios.")
+                tabla_select = tabla_saldos.drop(columns=["Semaforo_Seguimiento"], errors="ignore").copy()
+                evento_sel = st.dataframe(
+                    tabla_select,
+                    use_container_width=True,
+                    hide_index=True,
+                    on_select="rerun",
+                    selection_mode="single-row",
+                    key="ger_cob_saldos_selector",
+                )
+                try:
+                    filas_sel = (evento_sel.selection or {}).get("rows", []) if evento_sel is not None else []
+                except Exception:
+                    filas_sel = []
+                if filas_sel:
+                    idx_sel = int(filas_sel[0])
+                    if 0 <= idx_sel < len(tabla_select):
+                        codigo_sel = str(tabla_select.iloc[idx_sel].get("Codigo", "")).strip()
+                        razon_sel = str(tabla_select.iloc[idx_sel].get("Razon_Social", "")).strip()
+                        if codigo_sel:
+                            st.session_state["ger_cob_cliente_preselect_codigo"] = codigo_sel
+                            st.session_state["ger_cob_cliente_preselect_label"] = f"{codigo_sel} - {razon_sel}"
+                cols_mxn = [c for c in ["Saldo", "Vencido", "Saldo_Vencido_Total"] if c in tabla_saldos.columns]
                 for c in cols_mxn:
                     tabla_saldos[c] = pd.to_numeric(tabla_saldos[c], errors="coerce").fillna(0.0).map(lambda x: f"$ {x:,.2f} MXN")
                 tabla_render = tabla_saldos.drop(columns=["Semaforo_Seguimiento"], errors="ignore").copy()
@@ -3536,6 +3569,12 @@ def render_cobranza_tab_gerente():
     else:
         clientes_mes = clientes_mes[["Codigo", "Razon_Social"]].drop_duplicates().sort_values(["Razon_Social", "Codigo"])
         opciones = [f"{r.Codigo} - {r.Razon_Social}" for r in clientes_mes.itertuples(index=False)]
+        codigo_pre = str(st.session_state.get("ger_cob_cliente_preselect_codigo", "") or "").strip()
+        if codigo_pre:
+            opcion_pre = next((opt for opt in opciones if opt.split(" - ")[0].strip() == codigo_pre), "")
+            if opcion_pre:
+                st.session_state["ger_cob_cliente"] = opcion_pre
+            st.session_state.pop("ger_cob_cliente_preselect_codigo", None)
         cliente_sel = st.selectbox("Cliente", opciones, key="ger_cob_cliente")
 
         codigo = cliente_sel.split(" - ")[0].strip()
