@@ -1969,14 +1969,12 @@ def render_auto_list(
         cliente_base = sanitize_text(e.get("cliente_nombre", "")) or "—"
         cliente_html = cliente_base
         surtidor_col_html = surtidor_html or "—"
-        fecha = sanitize_text(e.get("fecha", "")) or "—"
         cells_html = [
             f"<td class='board-n'>{number_label}</td>",
             f"<td class='board-client'>{cliente_html}</td>",
         ]
         if mode in {"foraneo", "local"}:
             cells_html.append(f"<td class='board-surtidor'>{surtidor_col_html}</td>")
-            cells_html.append(f"<td class='board-date'>{fecha}</td>")
         cells_html.append(f"<td class='board-state'>{estado_html}</td>")
         rows_html.append(
             f"""
@@ -2028,8 +2026,7 @@ def render_auto_list(
     .board-n{{width:1.25rem;font-size:0.77rem;font-weight:700;white-space:nowrap;color:#fff;padding-left:0.08rem;padding-right:0.08rem;}}
     .board-client{{width:auto;font-weight:600;min-width:0;word-break:break-word;white-space:normal;}}
     .board-surtidor{{width:4.9rem;white-space:nowrap;text-align:left;font-weight:780;font-size:0.75rem;}}
-    .board-date{{width:4.4rem;white-space:nowrap;}}
-    .board-state{{width:6.8rem;text-align:left;}}
+    .board-state{{width:5.4rem;text-align:left;}}
     .board-status{{font-size:0.68rem;font-weight:700;white-space:nowrap;opacity:0.97;padding:0.05rem 0.36rem;border-radius:0.56rem;background:rgba(255,255,255,0.12);}}
     .surtidor-tag{{margin-left:0.1rem;padding:0.07rem 0.34rem;border-radius:0.7rem;background:rgba(114,190,255,0.18);color:#a9dcff;font-weight:650;font-size:0.66rem;white-space:nowrap;}}
     .board-surtidor .surtidor-tag{{display:inline-block;margin-left:0;padding:0.09rem 0.4rem;font-size:0.74rem;font-weight:800;}}
@@ -2040,14 +2037,13 @@ def render_auto_list(
     <div class="{scroll_class}">
         <table class="board-table">
             <colgroup>
-                {"<col style='width:5%'><col style='width:39%'><col style='width:16%'><col style='width:14%'><col style='width:26%'>" if mode in {'foraneo', 'local'} else "<col style='width:4%'><col style='width:70%'><col style='width:26%'>"}
+                {"<col style='width:6%'><col style='width:54%'><col style='width:20%'><col style='width:20%'>" if mode in {'foraneo', 'local'} else "<col style='width:4%'><col style='width:70%'><col style='width:26%'>"}
             </colgroup>
             <thead class="board-head">
                 <tr>
                     <th>#</th>
                     <th>Cliente</th>
                     {"<th>Surtidor</th>" if mode in {"foraneo", "local"} else ""}
-                    {"<th>Fecha</th>" if mode in {"foraneo", "local"} else ""}
                     <th>Estado</th>
                 </tr>
             </thead>
@@ -5069,20 +5065,24 @@ if selected_tab_key == "auto_foraneo":
     anteriores = dedupe_entries_preserve_order(ant + sin_fecha)
     anteriores = sort_entries_by_flow_number_desc(anteriores)
 
-    # Distribución inteligente: usar el espacio libre de "Anteriores"
-    # para continuar la lista de "Hoy" y evitar columnas desbalanceadas.
+    # Distribución en 3 listas:
+    # 1) Izquierda: todos los anteriores.
+    # 2) Centro: hoy/futuros (primer bloque).
+    # 3) Derecha: hoy/futuros (continuación del bloque central).
     ant_count = len(anteriores)
     hoy_count = len(hoy_entries)
-    objetivo_derecha = int(np.ceil((ant_count + hoy_count) / 2.0))
-    hoy_primarios = hoy_entries[:objetivo_derecha]
-    hoy_continuacion = hoy_entries[objetivo_derecha:]
+    midpoint_hoy = int(np.ceil(max(hoy_count, 1) / 2.0))
+    if ant_count > 0:
+        midpoint_hoy = max(midpoint_hoy, min(hoy_count, ant_count))
+    hoy_centro = hoy_entries[:midpoint_hoy]
+    hoy_derecha = hoy_entries[midpoint_hoy:]
 
-    # 2) Layout: izquierda/derecha
-    col_left, col_right = st.columns(2, gap="large")
+    # 2) Layout: tres columnas
+    col_left, col_center, col_right = st.columns(3, gap="large")
 
-    # --- IZQUIERDA: ANTERIORES + HOY (CONTINUACIÓN) ---
+    # --- IZQUIERDA: ANTERIORES ---
     with col_left:
-        next_number = render_auto_list(
+        render_auto_list(
             anteriores,
             title="🚚 FORÁNEOS • ANTERIORES",
             subtitle=f"Fechas previas + pedidos sin Fecha_Entrega",
@@ -5091,23 +5091,27 @@ if selected_tab_key == "auto_foraneo":
             mode="foraneo",
         )
 
-        render_auto_list(
-            hoy_continuacion,
-            title=f"🚚 FORÁNEOS • HOY ({hoy.strftime('%d/%m')})",
+    # --- CENTRO: HOY + FUTUROS (INICIO) ---
+    with col_center:
+        next_number = render_auto_list(
+            hoy_centro,
+            title=f"🚚 FORÁNEOS • HOY/FUTURAS ({hoy.strftime('%d/%m')})",
             subtitle="Todos los de hoy y fechas futuras",
             max_rows=140,
-            start_number=next_number,
-            panel_height=160,
+            start_number=1,
+            panel_height=220,
             mode="foraneo",
         )
 
-    # --- DERECHA: HOY + FUTUROS (BLOQUE PRINCIPAL) ---
+    # --- DERECHA: HOY + FUTUROS (CONTINUACIÓN) ---
     with col_right:
         render_auto_list(
-            hoy_primarios,
-            title=f"🚚 FORÁNEOS • HOY ({hoy.strftime('%d/%m')})",
-            subtitle="Todos los de hoy y fechas futuras",
+            hoy_derecha,
+            title=f"🚚 FORÁNEOS • HOY/FUTURAS ({hoy.strftime('%d/%m')})",
+            subtitle="Continuación del bloque central",
             max_rows=140,
+            start_number=next_number,
+            panel_height=220,
             mode="foraneo",
         )
 
