@@ -3125,6 +3125,7 @@ def render_cobranza_tab_gerente():
                 if mes_num_sel != "Todos":
                     saldos_df = saldos_df[saldos_df.get("Mes", "").astype(str).str.endswith(f"-{mes_num_sel}")]
 
+                hoy_norm = pd.Timestamp.now().normalize()
                 venc_res = pd.DataFrame(columns=["Codigo", "Fecha_Vencimiento_Min", "Fecha_Vencimiento_Max", "Saldo_Vencido_Total"])
                 if not venc_df.empty:
                     tmp_v = venc_df.copy()
@@ -3132,6 +3133,16 @@ def render_cobranza_tab_gerente():
                     tmp_v["_folio_norm"] = tmp_v.get("Folio", "").apply(_cobranza_clean_text)
                     tmp_v["Saldo_Vence"] = pd.to_numeric(tmp_v.get("Saldo_Vence", 0), errors="coerce").fillna(0.0)
                     tmp_v["Fecha_Vencimiento_dt"] = pd.to_datetime(tmp_v.get("Fecha_Vencimiento", ""), errors="coerce")
+                    tmp_v["Fecha_Factura_dt"] = pd.to_datetime(tmp_v.get("Fecha_Factura", ""), errors="coerce")
+                    vendedor_norm = tmp_v.get("Vendedor", pd.Series("", index=tmp_v.index)).astype(str).str.strip().str.upper()
+                    dias_desde_factura = (hoy_norm - tmp_v["Fecha_Factura_dt"].dt.normalize()).dt.days
+                    es_congreso = vendedor_norm.eq("CONGRESO")
+                    mask_visible = (
+                        (es_congreso & (dias_desde_factura >= 14))
+                        | (~es_congreso & (dias_desde_factura >= 3))
+                        | tmp_v["Fecha_Factura_dt"].isna()
+                    )
+                    tmp_v = tmp_v[mask_visible].copy()
                     tmp_v = tmp_v[tmp_v["_folio_norm"].astype(str).str.strip() != ""].copy()
                     if anio_sel != "Todos":
                         tmp_v = tmp_v[tmp_v.get("Mes", "").astype(str).str.startswith(f"{anio_sel}-")]
@@ -3220,7 +3231,6 @@ def render_cobranza_tab_gerente():
                     )
                     saldos_df["Condicion_Facturas"] = saldos_df["Codigo"].map(cond_por_codigo).fillna("")
 
-                hoy_norm = pd.Timestamp.now().normalize()
                 semaforo_por_cliente: dict[str, str] = {}
                 if not com_df.empty:
                     com_cli = com_df.copy()
@@ -3269,8 +3279,10 @@ def render_cobranza_tab_gerente():
 
                     def _row_bg(_row):
                         sem = semaforo_tmp.loc[_row.name] if _row.name in semaforo_tmp.index else "🔴"
-                        bg = "#d9f2d9" if sem == "🟢" else "#f8d7da"
-                        return [f"background-color: {bg}"] * len(_row)
+                        # Tonos suaves para mejorar legibilidad y reducir contraste agresivo.
+                        bg = "#eef8f1" if sem == "🟢" else "#fdf0f2"
+                        txt = "#1f2937"
+                        return [f"background-color: {bg}; color: {txt}"] * len(_row)
 
                     tabla_render = tabla_render.style.apply(_row_bg, axis=1)
                 st.dataframe(tabla_render, use_container_width=True, hide_index=True)
@@ -3304,6 +3316,16 @@ def render_cobranza_tab_gerente():
                     ).astype(str)
                     agenda_df["Saldo_Vence"] = pd.to_numeric(agenda_df.get("Saldo_Vence", 0), errors="coerce").fillna(0.0)
                     agenda_df["Fecha_Vencimiento_dt"] = pd.to_datetime(agenda_df.get("Fecha_Vencimiento", ""), errors="coerce")
+                    agenda_df["Fecha_Factura_dt"] = pd.to_datetime(agenda_df.get("Fecha_Factura", ""), errors="coerce")
+                    vendedor_norm_ag = agenda_df.get("Vendedor", pd.Series("", index=agenda_df.index)).astype(str).str.strip().str.upper()
+                    dias_factura_ag = (hoy_norm - agenda_df["Fecha_Factura_dt"].dt.normalize()).dt.days
+                    es_congreso_ag = vendedor_norm_ag.eq("CONGRESO")
+                    mask_visible_ag = (
+                        (es_congreso_ag & (dias_factura_ag >= 14))
+                        | (~es_congreso_ag & (dias_factura_ag >= 3))
+                        | agenda_df["Fecha_Factura_dt"].isna()
+                    )
+                    agenda_df = agenda_df[mask_visible_ag].copy()
                     agenda_df = agenda_df.dropna(subset=["Fecha_Vencimiento_dt"]).copy()
 
                     if anio_sel != "Todos":
