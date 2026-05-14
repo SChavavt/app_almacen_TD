@@ -1610,6 +1610,46 @@ def _get_bulk_selected_ids() -> set[str]:
     return set()
 
 
+def _build_bulk_snapshot_from_selected(
+    selected_values: set[Any],
+    df_source: pd.DataFrame,
+) -> list[dict[str, Any]]:
+    """Construye snapshot válido desde selección mixta (ID_Pedido o _gsheet_row_index)."""
+    if not selected_values or df_source.empty:
+        return []
+
+    selected_ids = {str(v).strip() for v in selected_values if str(v).strip()}
+    selected_rows: set[int] = set()
+    for value in selected_values:
+        raw = str(value).strip()
+        if raw.isdigit():
+            selected_rows.add(int(raw))
+
+    df_work = df_source.copy()
+    df_work["_row_idx_num"] = pd.to_numeric(
+        df_work.get("_gsheet_row_index", pd.Series(dtype=float)),
+        errors="coerce",
+    )
+    df_work = df_work.dropna(subset=["_row_idx_num"]).copy()
+    if df_work.empty:
+        return []
+    df_work["_row_idx_num"] = df_work["_row_idx_num"].astype(int)
+    df_work["_pedido_id_norm"] = df_work.get("ID_Pedido", pd.Series(dtype=str)).astype(str).str.strip()
+
+    mask_selected = df_work["_pedido_id_norm"].isin(selected_ids) | df_work["_row_idx_num"].isin(selected_rows)
+    selected_rows_df = df_work[mask_selected].copy()
+
+    snapshot: list[dict[str, Any]] = []
+    for _, row_sel in selected_rows_df.iterrows():
+        snapshot.append(
+            {
+                "_gsheet_row_index": int(row_sel.get("_row_idx_num", 0) or 0),
+                "ID_Pedido": str(row_sel.get("ID_Pedido", "")).strip(),
+            }
+        )
+    return snapshot
+
+
 def _set_bulk_mode(enabled: bool) -> None:
     """Solicita cambio de modo múltiple sin mutar directamente el key del widget."""
 
@@ -2919,14 +2959,11 @@ if "flash_msg" in st.session_state and st.session_state["flash_msg"]:
 
 _ensure_visual_state_defaults()
 
-# ✅ Controles superiores: recarga y completado múltiple
+# ✅ Controles superiores: recarga
 if st.session_state.pop("bulk_mode_reset_requested", False):
     st.session_state["bulk_complete_mode"] = False
 
-if is_sinaicel_topbar:
-    col_reload = st.columns([1.0])[0]
-else:
-    col_reload, col_bulk_mode, col_bulk_action, col_bulk_search = st.columns([1.25, 1.0, 1.35, 1.8])
+col_reload = st.columns([1.0])[0]
 
 if col_reload.button(
     "🔄 Recargar Pedidos",
@@ -2940,45 +2977,12 @@ if col_reload.button(
     st.session_state["reload_pedidos_soft"] = True
     st.session_state["refresh_data_caches_pending"] = True
 
-if "bulk_complete_mode" not in st.session_state:
-    st.session_state["bulk_complete_mode"] = False
-
-if not is_sinaicel_topbar:
-    bulk_mode_value = col_bulk_mode.checkbox(
-        "✅ Completar varios",
-        key="bulk_complete_mode",
-        help="Activa checks fuera del expander para pedidos en proceso",
-    )
-else:
-    bulk_mode_value = False
-
-if not bulk_mode_value:
-    st.session_state["bulk_selected_pedidos"] = set()
-    for _k in list(st.session_state.keys()):
-        if _k.startswith("bulk_chk_"):
-            del st.session_state[_k]
-
-if not is_sinaicel_topbar:
-    if bulk_mode_value:
-        col_bulk_search.text_input(
-            "🔎 Buscar pedido para seleccionar",
-            key="bulk_search_query",
-            placeholder="Ej. F196697, ID o nombre del cliente",
-        )
-    else:
-        st.session_state["bulk_search_query"] = ""
-else:
-    st.session_state["bulk_search_query"] = ""
-
-if not is_sinaicel_topbar:
-    selected_bulk_count = len(_get_bulk_selected_ids())
-    execute_disabled = (not bulk_mode_value) or (selected_bulk_count < 1)
-    if col_bulk_action.button(
-        f"🟢 Completar Pedidos seleccionados ({selected_bulk_count})",
-        key="btn_bulk_complete_execute_top",
-        disabled=execute_disabled,
-    ):
-        st.session_state["bulk_complete_execute_requested"] = True
+st.session_state["bulk_complete_mode"] = False
+st.session_state["bulk_search_query"] = ""
+st.session_state["bulk_selected_pedidos"] = set()
+for _k in list(st.session_state.keys()):
+    if _k.startswith("bulk_chk_"):
+        del st.session_state[_k]
 
 if st.session_state.get("bulk_complete_in_progress", False):
     progress_current = int(st.session_state.get("bulk_complete_progress_current", 0) or 0)
@@ -7852,71 +7856,14 @@ if df_main is not None:
     _clear_offscreen_guide_flags(st.session_state.get("pedidos_en_pantalla", set()))
     _cleanup_bulk_selection(st.session_state.get("pedidos_en_pantalla", set()))
 
-    if st.session_state.get("bulk_complete_mode", False):
-        search_query = str(st.session_state.get("bulk_search_query", "")).strip()
-        if search_query:
-            search_norm = search_query.lower()
-            estados_en_proceso = (
-                df_pendientes_proceso_demorado.get("Estado", pd.Series(dtype=str))
-                .astype(str)
-                .str.strip()
-            )
-            ids = df_pendientes_proceso_demorado.get("ID_Pedido", pd.Series(dtype=str)).astype(str)
-            folios = df_pendientes_proceso_demorado.get("Folio_Factura", pd.Series(dtype=str)).astype(str)
-            clientes = df_pendientes_proceso_demorado.get("Cliente", pd.Series(dtype=str)).astype(str)
-
-            mask_busqueda = (
-                estados_en_proceso.eq("🔵 En Proceso")
-                & (
-                    ids.str.lower().str.contains(search_norm, na=False)
-                    | folios.str.lower().str.contains(search_norm, na=False)
-                    | clientes.str.lower().str.contains(search_norm, na=False)
-                )
-            )
-            coincidencias = df_pendientes_proceso_demorado[mask_busqueda].copy()
-
-            if coincidencias.empty:
-                st.info(f"No se encontraron pedidos en proceso para '{search_query}' (folio, ID o cliente).")
-            else:
-                st.success(
-                    f"Se encontraron {len(coincidencias)} pedido(s) en proceso para '{search_query}' (folio, ID o cliente)."
-                )
-                opciones = []
-                mapa = {}
-                for _, row_match in coincidencias.iterrows():
-                    pid = str(row_match.get("ID_Pedido", "")).strip()
-                    folio = str(row_match.get("Folio_Factura", "")).strip() or "Sin folio"
-                    cliente = str(row_match.get("Cliente", "")).strip() or "Sin cliente"
-                    tipo_envio = str(row_match.get("Tipo_Envio", "")).strip()
-                    turno = str(row_match.get("Turno", "")).strip()
-
-                    tipo_text = tipo_envio if tipo_envio else "Sin tipo"
-                    turno_text = turno if turno else "Sin turno"
-
-                    label = f"{folio} · {cliente} · {tipo_text} · {turno_text}"
-                    opciones.append(label)
-                    mapa[label] = pid
-
-                selected_label = st.selectbox(
-                    "Coincidencias",
-                    options=opciones,
-                    key="bulk_search_match_label",
-                )
-
-                if st.button("📍 Ir y seleccionar pedido encontrado", key="btn_bulk_search_go_select"):
-                    selected_id = mapa.get(selected_label, "")
-                    if selected_id:
-                        st.session_state[f"bulk_chk_{selected_id}"] = True
-                        selected_ids = _get_bulk_selected_ids()
-                        selected_ids.add(selected_id)
-                        st.session_state["bulk_selected_pedidos"] = selected_ids
-                        st.session_state.setdefault("expanded_pedidos", {})[selected_id] = True
-                        marcar_contexto_pedido(selected_id, scroll=True)
-                        st.toast(f"✅ Pedido {selected_id} marcado desde buscador.", icon="✅")
-                        st.rerun()
-
     if st.session_state.pop("bulk_complete_execute_requested", False):
         selected_snapshot = st.session_state.get("bulk_selected_snapshot", [])
+        if not selected_snapshot:
+            selected_snapshot = _build_bulk_snapshot_from_selected(
+                _get_bulk_selected_ids(),
+                df_pendientes_proceso_demorado,
+            )
+            st.session_state["bulk_selected_snapshot"] = selected_snapshot
         pedidos_lookup = df_pendientes_proceso_demorado.copy()
         pedidos_lookup["_gsheet_row_index"] = pd.to_numeric(
             pedidos_lookup.get("_gsheet_row_index", pd.Series(dtype=float)),
@@ -8051,7 +7998,7 @@ if df_main is not None:
         df_pendientes_proceso_demorado["Estado"] == "🔴 Demorado"
     ].copy()
 
-    if not df_demorados_activos.empty:
+    if (not is_sinaicel_topbar) and (not df_demorados_activos.empty):
         ubicaciones_demorados = collect_tab_locations(df_demorados_activos)
         ubicaciones_text = ", ".join(ubicaciones_demorados)
         total_demorados = len(df_demorados_activos)
@@ -8333,21 +8280,7 @@ if df_main is not None:
         "✅ Historial Completados",
     ]
 
-    if current_user == "SINAI":
-        components.html(
-            """
-            <script>
-            const css = `
-              .stTabs [data-baseweb="tab-list"] button[role="tab"]:nth-child(7) { display: none !important; }
-            `;
-            const style = window.parent.document.createElement('style');
-            style.innerHTML = css;
-            window.parent.document.head.appendChild(style);
-            </script>
-            """,
-            height=0,
-        )
-    elif current_user == "SINAICEL":
+    if current_user == "SINAICEL":
         st.session_state["active_main_tab_index"] = 6
         st.query_params["tab"] = "6"
         components.html(
@@ -8363,11 +8296,6 @@ if df_main is not None:
             </script>
             """,
             height=0,
-        )
-
-    if st.session_state.get("bulk_complete_mode", False):
-        st.caption(
-            f"Modo de selección múltiple activo. Pedidos seleccionados: {len(_get_bulk_selected_ids())}."
         )
 
     main_tabs = st.tabs(tab_options)
@@ -10699,16 +10627,7 @@ if df_main is not None:
                     unsafe_allow_html=True,
                 )
             if submit_complete:
-                snapshot = []
-                if selected_ids:
-                    selected_rows_df = pedidos_en_proceso[
-                        pd.to_numeric(pedidos_en_proceso.get("_gsheet_row_index", pd.Series(dtype=float)), errors="coerce").isin(selected_ids)
-                    ].copy()
-                    for _, row_sel in selected_rows_df.iterrows():
-                        snapshot.append({
-                            "_gsheet_row_index": int(row_sel.get("_gsheet_row_index", 0) or 0),
-                            "ID_Pedido": str(row_sel.get("ID_Pedido", "")).strip(),
-                        })
+                snapshot = _build_bulk_snapshot_from_selected(selected_ids, pedidos_en_proceso)
                 st.session_state["bulk_selected_snapshot"] = snapshot
                 if DEBUG_BULK_COMPLETE:
                     st.write("DEBUG bulk snapshot submit", snapshot)
