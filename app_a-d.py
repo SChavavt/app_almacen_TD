@@ -1727,7 +1727,9 @@ def _render_bulk_selector(row: Any) -> None:
 def _pedido_es_completable_rapido(row_data: pd.Series) -> bool:
     tipo_envio = str(row_data.get("Tipo_Envio", "")).strip()
     es_local = tipo_envio == "📍 Pedido Local"
-    pago_ok = (not es_local) or _estado_pago_es_pagado(row_data.get("Estado_Pago", ""))
+    turno = str(row_data.get("Turno", "")).strip()
+    es_local_bodega = es_local and turno == "📦 Pasa a Bodega"
+    pago_ok = (not es_local_bodega) or _estado_pago_es_pagado(row_data.get("Estado_Pago", ""))
     guia_ok = (not pedido_requiere_guia(row_data)) or pedido_tiene_guia_adjunta(row_data)
     return pago_ok and guia_ok
 
@@ -8280,7 +8282,7 @@ if df_main is not None:
         "✅ Historial Completados",
     ]
 
-    if current_user == "SINAICEL":
+    if current_user in {"SINAICEL", "SINAI"}:
         st.session_state["active_main_tab_index"] = 6
         st.query_params["tab"] = "6"
         components.html(
