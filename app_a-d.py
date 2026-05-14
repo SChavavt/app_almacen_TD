@@ -2680,8 +2680,13 @@ def _reassign_case_foraneo_number(
     worksheet_casos: Any,
     headers_casos: Sequence[str],
     row_idx_case: Any,
+    numero_actual_a_ignorar: Any = None,
 ) -> tuple[bool, Optional[str]]:
-    """Reasigna Numero_Foraneo a un caso usando el siguiente consecutivo disponible."""
+    """Reasigna Numero_Foraneo a un caso usando el siguiente consecutivo disponible.
+
+    Si `numero_actual_a_ignorar` viene con valor, ese número no se considera ocupado
+    para calcular el nuevo consecutivo.
+    """
     try:
         row_idx_int = int(float(row_idx_case)) if row_idx_case is not None and not pd.isna(row_idx_case) else None
     except Exception:
@@ -2690,12 +2695,20 @@ def _reassign_case_foraneo_number(
     if row_idx_int is None or "Numero_Foraneo" not in headers_casos:
         return False, None
 
-    max_actual = 0
+    numero_ignorar = _parse_foraneo_number(numero_actual_a_ignorar)
+    ocupados: set[int] = set()
     for val in st.session_state.get("flow_number_map_foraneo", {}).values():
         parsed = _parse_foraneo_number(val)
-        if parsed and parsed > max_actual:
-            max_actual = parsed
-    siguiente = f"{max_actual + 1:02d}"
+        if parsed is None:
+            continue
+        if numero_ignorar is not None and parsed == numero_ignorar:
+            continue
+        ocupados.add(parsed)
+
+    siguiente_num = 1
+    while siguiente_num in ocupados:
+        siguiente_num += 1
+    siguiente = f"{siguiente_num:02d}"
 
     ok_update = update_gsheet_cell(
         worksheet_casos,
@@ -9395,6 +9408,7 @@ if df_main is not None:
                                         worksheet_casos,
                                         headers_casos,
                                         gsheet_row_idx,
+                                        numero_actual_a_ignorar=row.get("Numero_Foraneo", ""),
                                     )
                                     if ok_num and nuevo_num:
                                         row["Numero_Foraneo"] = nuevo_num
@@ -9626,6 +9640,7 @@ if df_main is not None:
                                         worksheet_casos,
                                         headers_casos,
                                         gsheet_row_idx,
+                                        numero_actual_a_ignorar=row.get("Numero_Foraneo", ""),
                                     )
                                     if ok_num and nuevo_num:
                                         row["Numero_Foraneo"] = nuevo_num
@@ -10156,6 +10171,7 @@ if df_main is not None:
                                         worksheet_casos,
                                         headers_casos,
                                         gsheet_row_idx,
+                                        numero_actual_a_ignorar=row.get("Numero_Foraneo", ""),
                                     )
                                     if ok_num and nuevo_num:
                                         row["Numero_Foraneo"] = nuevo_num
@@ -10197,6 +10213,7 @@ if df_main is not None:
                                         worksheet_casos,
                                         headers_casos,
                                         gsheet_row_idx,
+                                        numero_actual_a_ignorar=row.get("Numero_Foraneo", ""),
                                     )
                                     if ok_num and nuevo_num:
                                         row["Numero_Foraneo"] = nuevo_num
