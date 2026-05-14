@@ -3104,21 +3104,24 @@ def render_cobranza_tab_gerente():
             else:
                 col_f1, col_f2, col_f3 = st.columns(3)
                 with col_f1:
-                    anios_opts = ["Todos"] + sorted({str(m).split("-")[0] for m in saldos_df.get("Mes", pd.Series(dtype='string')).astype(str) if re.match(r"^\d{4}-\d{2}$", str(m))})
-                    anio_sel = st.selectbox("Año", options=anios_opts, key="ger_cob_saldos_anio")
+                    anios_detectados = sorted({str(m).split("-")[0] for m in saldos_df.get("Mes", pd.Series(dtype='string')).astype(str) if re.match(r"^\d{4}-\d{2}$", str(m))})
+                    anios_opts = ["Todos"] + anios_detectados
+                    anio_actual = str(now_cdmx().year)
+                    anio_default_idx = anios_opts.index(anio_actual) if anio_actual in anios_opts else 0
+                    anio_sel = st.selectbox("Año", options=anios_opts, index=anio_default_idx, key="ger_cob_saldos_anio")
                 with col_f2:
                     meses_nums = [f"{i:02d}" for i in range(1, 13)]
-                    mes_num_sel = st.selectbox("Mes", options=["Todos"] + meses_nums, key="ger_cob_saldos_mes")
+                    mes_actual_num = f"{now_cdmx().month:02d}"
+                    mes_opts = ["Todos"] + meses_nums
+                    mes_default_idx = mes_opts.index(mes_actual_num) if mes_actual_num in mes_opts else 0
+                    mes_num_sel = st.selectbox("Mes", options=mes_opts, index=mes_default_idx, key="ger_cob_saldos_mes")
                 with col_f3:
-                    orden_sel = st.selectbox(
-                        "Orden",
-                        options=[
-                            "Vencimientos más antiguos a más recientes",
-                            "Vencidas más caras a más baratas",
-                            "Fecha de vencimiento más reciente a más antigua",
-                        ],
-                        key="ger_cob_saldos_orden",
-                    )
+                    orden_opts = [
+                        "Fecha de vencimiento más reciente a más antigua",
+                        "Vencimientos más antiguos a más recientes",
+                        "Vencidas más caras a más baratas",
+                    ]
+                    orden_sel = st.selectbox("Orden", options=orden_opts, index=0, key="ger_cob_saldos_orden")
 
                 if anio_sel != "Todos":
                     saldos_df = saldos_df[saldos_df.get("Mes", "").astype(str).str.startswith(f"{anio_sel}-")]
@@ -3267,7 +3270,7 @@ def render_cobranza_tab_gerente():
                 saldos_df["Fecha_Vencimiento_Min"] = saldos_df["Fecha_Vencimiento_Min"].dt.strftime("%Y-%m-%d")
                 saldos_df["Fecha_Vencimiento_Max"] = saldos_df["Fecha_Vencimiento_Max"].dt.strftime("%Y-%m-%d")
                 saldos_df = saldos_df.drop(columns=[c for c in ["_mes_dt", "_ult_act_dt"] if c in saldos_df.columns])
-                cols_saldos = ["Mes", "Codigo", "Razon_Social", "Saldo", "Vencido", "No_Vencido", "Saldo_Vencido_Total", "Fecha_Vencimiento_Min", "Fecha_Vencimiento_Max", "Tipo_Pago", "Condicion_Facturas", "Ultima_Actualizacion", "Semaforo_Seguimiento"]
+                cols_saldos = ["Mes", "Codigo", "Razon_Social", "Saldo", "Vencido", "No_Vencido", "Saldo_Vencido_Total", "Fecha_Vencimiento_Min", "Fecha_Vencimiento_Max", "Condicion_Facturas", "Ultima_Actualizacion", "Semaforo_Seguimiento"]
                 cols_saldos = [c for c in cols_saldos if c in saldos_df.columns]
                 tabla_saldos = saldos_df[cols_saldos].copy()
                 cols_mxn = [c for c in ["Saldo", "Vencido", "No_Vencido", "Saldo_Vencido_Total"] if c in tabla_saldos.columns]
@@ -3279,13 +3282,31 @@ def render_cobranza_tab_gerente():
 
                     def _row_bg(_row):
                         sem = semaforo_tmp.loc[_row.name] if _row.name in semaforo_tmp.index else "🔴"
-                        # Tonos suaves para mejorar legibilidad y reducir contraste agresivo.
-                        bg = "#eef8f1" if sem == "🟢" else "#fdf0f2"
-                        txt = "#1f2937"
-                        return [f"background-color: {bg}; color: {txt}"] * len(_row)
+                        # Colores más intensos + contorno visible por celda.
+                        bg = "#c7f9cc" if sem == "🟢" else "#ffd6d6"
+                        txt = "#111827"
+                        border = "1px solid #334155"
+                        return [f"background-color: {bg}; color: {txt}; border: {border}"] * len(_row)
 
-                    tabla_render = tabla_render.style.apply(_row_bg, axis=1)
-                st.dataframe(tabla_render, use_container_width=True, hide_index=True)
+                    tabla_render = (
+                        tabla_render.style
+                        .apply(_row_bg, axis=1)
+                        .set_table_styles([
+                            {"selector": "th", "props": [("border", "1px solid #0f172a"), ("font-weight", "600")]},
+                            {"selector": "td", "props": [("border", "1px solid #0f172a")]},
+                            {"selector": "table", "props": [("border-collapse", "collapse")]},
+                        ])
+                    )
+                if isinstance(tabla_render, pd.io.formats.style.Styler):
+                    tabla_html = tabla_render.hide(axis="index").to_html()
+                    st.markdown(
+                        f"""
+                        <div style="max-height:420px;overflow:auto;border:1px solid #0f172a;border-radius:8px;">{tabla_html}</div>
+                        """,
+                        unsafe_allow_html=True,
+                    )
+                else:
+                    st.dataframe(tabla_render, use_container_width=True, hide_index=True)
 
                 # Vista visual tipo agenda/calendario de vencimientos por cliente y folio.
                 if not venc_df.empty:
@@ -3341,9 +3362,10 @@ def render_cobranza_tab_gerente():
 
                     if not agenda_df.empty:
                         agenda_df["Etiqueta_Cliente"] = agenda_df["Codigo"] + " · " + agenda_df["Cliente_Nombre"].str.slice(0, 40)
-                        agenda_df["Folio_Orden"] = (
-                            agenda_df["Folio"].fillna("").astype(str).str.strip().rank(method="dense").astype(int)
-                        )
+                        agenda_df["Dias_para_vencer"] = (
+                            agenda_df["Fecha_Vencimiento_dt"].dt.normalize() - hoy_norm
+                        ).dt.days
+                        agenda_df["Dias_para_vencer"] = agenda_df["Dias_para_vencer"].fillna(0).astype(int)
                         agenda_df["Texto_Evento"] = (
                             "Folio " + agenda_df["Folio"]
                             + "<br>Razón social: " + agenda_df["Razon_Social"]
@@ -3355,10 +3377,11 @@ def render_cobranza_tab_gerente():
                         fig_agenda = px.scatter(
                             agenda_df,
                             x="Fecha_Vencimiento_dt",
-                            y="Folio_Orden",
+                            y="Dias_para_vencer",
                             size="Saldo_Vence",
-                            color="Saldo_Vence",
-                            color_continuous_scale="OrRd",
+                            color="Dias_para_vencer",
+                            color_continuous_scale="RdYlGn",
+                            color_continuous_midpoint=0,
                             hover_name="Folio",
                             hover_data={
                                 "Cliente_Nombre": False,
@@ -3366,13 +3389,13 @@ def render_cobranza_tab_gerente():
                                 "Fecha_Vencimiento_dt": '|%Y-%m-%d',
                                 "Etiqueta_Cliente": False,
                                 "Codigo": True,
-                                "Folio_Orden": True,
+                                "Dias_para_vencer": True,
                             },
                             labels={
                                 "Fecha_Vencimiento_dt": "Fecha de vencimiento",
                                 "Saldo_Vence": "Saldo vencido",
                                 "Codigo": "Código cliente",
-                                "Folio_Orden": "Orden de folio",
+                                "Dias_para_vencer": "Días para vencer",
                             },
                             height=420,
                         )
@@ -3385,12 +3408,12 @@ def render_cobranza_tab_gerente():
                                 ],
                                 axis=-1,
                             ),
-                            hovertemplate="<b>%{hovertext}</b><br><br>Fecha de vencimiento=%{x|%Y-%m-%d}<br>Saldo vencido=%{marker.color:,.2f}<br>Codigo=%{customdata[1]}<br>Cliente=%{customdata[0]}<extra></extra>",
+                            hovertemplate="<b>%{hovertext}</b><br><br>Fecha de vencimiento=%{x|%Y-%m-%d}<br>Días para vencer=%{marker.color}<br>Saldo vencido=%{marker.size:,.2f}<br>Codigo=%{customdata[1]}<br>Cliente=%{customdata[0]}<extra></extra>",
                         )
                         fig_agenda.update_layout(
                             margin=dict(l=10, r=10, t=10, b=10),
-                            coloraxis_colorbar_title="Saldo",
-                            yaxis=dict(title="Orden de folio", showgrid=True, zeroline=False),
+                            coloraxis_colorbar_title="Días",
+                            yaxis=dict(title="Días para vencer (0 = hoy, negativos = vencido)", showgrid=True, zeroline=True, zerolinecolor="#ef4444", autorange="reversed"),
                         )
                         st.plotly_chart(fig_agenda, use_container_width=True)
 
