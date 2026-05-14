@@ -3102,7 +3102,7 @@ def render_cobranza_tab_gerente():
             if saldos_df.empty:
                 st.caption("No hay clientes con saldo pendiente en la base actual.")
             else:
-                col_f1, col_f2, col_f3 = st.columns(3)
+                col_f1, col_f2, col_f3, col_f4 = st.columns(4)
                 with col_f1:
                     anios_detectados = sorted({str(m).split("-")[0] for m in saldos_df.get("Mes", pd.Series(dtype='string')).astype(str) if re.match(r"^\d{4}-\d{2}$", str(m))})
                     anios_opts = ["Todos"] + anios_detectados
@@ -3117,11 +3117,17 @@ def render_cobranza_tab_gerente():
                     mes_num_sel = st.selectbox("Mes", options=mes_opts, index=mes_default_idx, key="ger_cob_saldos_mes")
                 with col_f3:
                     orden_opts = [
-                        "Fecha de vencimiento más reciente a más antigua",
+                        "Vencimiento más reciente a más antigua",
                         "Vencimientos más antiguos a más recientes",
                         "Vencidas más caras a más baratas",
                     ]
                     orden_sel = st.selectbox("Orden", options=orden_opts, index=0, key="ger_cob_saldos_orden")
+                with col_f4:
+                    solo_contado = st.checkbox(
+                        "Solo condición CONTADO",
+                        value=True,
+                        key="ger_cob_saldos_solo_contado",
+                    )
 
                 if anio_sel != "Todos":
                     saldos_df = saldos_df[saldos_df.get("Mes", "").astype(str).str.startswith(f"{anio_sel}-")]
@@ -3233,6 +3239,10 @@ def render_cobranza_tab_gerente():
                         .to_dict()
                     )
                     saldos_df["Condicion_Facturas"] = saldos_df["Codigo"].map(cond_por_codigo).fillna("")
+                if solo_contado:
+                    saldos_df = saldos_df[
+                        saldos_df["Condicion_Facturas"].astype(str).str.upper().str.contains("CONTADO", na=False)
+                    ].copy()
 
                 semaforo_por_cliente: dict[str, str] = {}
                 if not com_df.empty:
@@ -3269,8 +3279,8 @@ def render_cobranza_tab_gerente():
 
                 if orden_sel == "Vencidas más caras a más baratas":
                     saldos_df = saldos_df.sort_values(["Vencido", "Saldo_Vencido_Total", "Saldo"], ascending=[False, False, False])
-                elif orden_sel == "Fecha de vencimiento más reciente a más antigua":
-                    saldos_df = saldos_df.sort_values(["Fecha_Vencimiento_Max", "Saldo"], ascending=[False, False], na_position="last")
+                elif orden_sel == "Vencimiento más reciente a más antigua":
+                    saldos_df = saldos_df.sort_values(["Fecha_Vencimiento_Min", "Saldo"], ascending=[False, False], na_position="last")
                 else:
                     saldos_df = saldos_df.sort_values(["Fecha_Vencimiento_Min", "Saldo"], ascending=[True, False], na_position="last")
 
