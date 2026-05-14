@@ -3104,21 +3104,24 @@ def render_cobranza_tab_gerente():
             else:
                 col_f1, col_f2, col_f3 = st.columns(3)
                 with col_f1:
-                    anios_opts = ["Todos"] + sorted({str(m).split("-")[0] for m in saldos_df.get("Mes", pd.Series(dtype='string')).astype(str) if re.match(r"^\d{4}-\d{2}$", str(m))})
-                    anio_sel = st.selectbox("Año", options=anios_opts, key="ger_cob_saldos_anio")
+                    anios_detectados = sorted({str(m).split("-")[0] for m in saldos_df.get("Mes", pd.Series(dtype='string')).astype(str) if re.match(r"^\d{4}-\d{2}$", str(m))})
+                    anios_opts = ["Todos"] + anios_detectados
+                    anio_actual = str(now_cdmx().year)
+                    anio_default_idx = anios_opts.index(anio_actual) if anio_actual in anios_opts else 0
+                    anio_sel = st.selectbox("Año", options=anios_opts, index=anio_default_idx, key="ger_cob_saldos_anio")
                 with col_f2:
                     meses_nums = [f"{i:02d}" for i in range(1, 13)]
-                    mes_num_sel = st.selectbox("Mes", options=["Todos"] + meses_nums, key="ger_cob_saldos_mes")
+                    mes_actual_num = f"{now_cdmx().month:02d}"
+                    mes_opts = ["Todos"] + meses_nums
+                    mes_default_idx = mes_opts.index(mes_actual_num) if mes_actual_num in mes_opts else 0
+                    mes_num_sel = st.selectbox("Mes", options=mes_opts, index=mes_default_idx, key="ger_cob_saldos_mes")
                 with col_f3:
-                    orden_sel = st.selectbox(
-                        "Orden",
-                        options=[
-                            "Vencimientos más antiguos a más recientes",
-                            "Vencidas más caras a más baratas",
-                            "Fecha de vencimiento más reciente a más antigua",
-                        ],
-                        key="ger_cob_saldos_orden",
-                    )
+                    orden_opts = [
+                        "Fecha de vencimiento más reciente a más antigua",
+                        "Vencimientos más antiguos a más recientes",
+                        "Vencidas más caras a más baratas",
+                    ]
+                    orden_sel = st.selectbox("Orden", options=orden_opts, index=0, key="ger_cob_saldos_orden")
 
                 if anio_sel != "Todos":
                     saldos_df = saldos_df[saldos_df.get("Mes", "").astype(str).str.startswith(f"{anio_sel}-")]
@@ -3267,7 +3270,7 @@ def render_cobranza_tab_gerente():
                 saldos_df["Fecha_Vencimiento_Min"] = saldos_df["Fecha_Vencimiento_Min"].dt.strftime("%Y-%m-%d")
                 saldos_df["Fecha_Vencimiento_Max"] = saldos_df["Fecha_Vencimiento_Max"].dt.strftime("%Y-%m-%d")
                 saldos_df = saldos_df.drop(columns=[c for c in ["_mes_dt", "_ult_act_dt"] if c in saldos_df.columns])
-                cols_saldos = ["Mes", "Codigo", "Razon_Social", "Saldo", "Vencido", "No_Vencido", "Saldo_Vencido_Total", "Fecha_Vencimiento_Min", "Fecha_Vencimiento_Max", "Tipo_Pago", "Condicion_Facturas", "Ultima_Actualizacion", "Semaforo_Seguimiento"]
+                cols_saldos = ["Mes", "Codigo", "Razon_Social", "Saldo", "Vencido", "No_Vencido", "Saldo_Vencido_Total", "Fecha_Vencimiento_Min", "Fecha_Vencimiento_Max", "Condicion_Facturas", "Ultima_Actualizacion", "Semaforo_Seguimiento"]
                 cols_saldos = [c for c in cols_saldos if c in saldos_df.columns]
                 tabla_saldos = saldos_df[cols_saldos].copy()
                 cols_mxn = [c for c in ["Saldo", "Vencido", "No_Vencido", "Saldo_Vencido_Total"] if c in tabla_saldos.columns]
@@ -3279,10 +3282,11 @@ def render_cobranza_tab_gerente():
 
                     def _row_bg(_row):
                         sem = semaforo_tmp.loc[_row.name] if _row.name in semaforo_tmp.index else "🔴"
-                        # Tonos suaves para mejorar legibilidad y reducir contraste agresivo.
-                        bg = "#eef8f1" if sem == "🟢" else "#fdf0f2"
-                        txt = "#1f2937"
-                        return [f"background-color: {bg}; color: {txt}"] * len(_row)
+                        # Colores más intensos + contorno visible por celda.
+                        bg = "#c7f9cc" if sem == "🟢" else "#ffd6d6"
+                        txt = "#111827"
+                        border = "1px solid #334155"
+                        return [f"background-color: {bg}; color: {txt}; border: {border}"] * len(_row)
 
                     tabla_render = tabla_render.style.apply(_row_bg, axis=1)
                 st.dataframe(tabla_render, use_container_width=True, hide_index=True)
