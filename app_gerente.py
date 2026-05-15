@@ -3148,7 +3148,7 @@ def render_cobranza_tab_gerente():
                     es_congreso = vendedor_norm.eq("CONGRESO")
                     mask_visible = (
                         (es_congreso & (dias_desde_factura >= 14))
-                        | (~es_congreso & (dias_desde_factura >= 3))
+                        | (~es_congreso & (dias_desde_factura >= 1))
                         | tmp_v["Fecha_Factura_dt"].isna()
                     )
                     tmp_v = tmp_v[mask_visible].copy()
