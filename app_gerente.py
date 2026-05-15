@@ -5347,18 +5347,37 @@ def render_salida_neta_tab():
 
             proveedores = sorted([p for p in po_df["Proveedor"].astype(str).str.strip().unique() if p])
             if proveedores:
-                prov_sel = st.selectbox("Proveedor para descargar orden de compra del mes", proveedores, key="salida_neta_proveedor")
-                po_prov = po_df[po_df["Proveedor"].astype(str).str.strip() == prov_sel].copy()
-                excel_buffer = BytesIO()
-                with pd.ExcelWriter(excel_buffer, engine="xlsxwriter") as writer:
-                    po_prov[["Modelo", "Descripción", "English Description", "Quantity", "Cost", "Total"]].to_excel(writer, sheet_name="Orden_Compra", index=False)
-                st.download_button(
-                    "5) Descargar Orden de Compra (proveedor seleccionado)",
-                    data=excel_buffer.getvalue(),
-                    file_name=f"orden_compra_{prov_sel}_{fecha_desde.strftime('%Y_%m') if isinstance(fecha_desde, datetime) else 'mes'}.xlsx",
-                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                    key="salida_neta_download_prov",
-                )
+                st.markdown("### 🧾 Órdenes de compra por proveedor")
+                st.caption("Expande cada proveedor para ver la previsualización de su orden de compra y descargar su Excel.")
+                for prov in proveedores:
+                    po_prov = po_df[po_df["Proveedor"].astype(str).str.strip() == prov].copy()
+                    po_prov_export = po_prov[["Modelo", "Descripción", "English Description", "Quantity", "Cost", "Total"]].copy()
+                    total_piezas = pd.to_numeric(po_prov_export["Quantity"], errors="coerce").fillna(0).sum()
+                    total_monto = pd.to_numeric(po_prov_export["Total"], errors="coerce").fillna(0).sum()
+
+                    with st.expander(f"📦 {prov} — {len(po_prov_export)} productos — {int(total_piezas)} piezas", expanded=False):
+                        st.dataframe(po_prov_export, use_container_width=True, hide_index=True)
+                        st.markdown(f"**Total orden:** ${total_monto:,.2f}")
+
+                        excel_buffer = BytesIO()
+                        with pd.ExcelWriter(excel_buffer, engine="xlsxwriter") as writer:
+                            po_prov_export.to_excel(writer, sheet_name="Orden_Compra", index=False)
+                            ws_oc = writer.sheets["Orden_Compra"]
+                            fmt_money = writer.book.add_format({"num_format": "$#,##0.00"})
+                            if "Cost" in po_prov_export.columns:
+                                idx_cost = po_prov_export.columns.get_loc("Cost")
+                                ws_oc.set_column(idx_cost, idx_cost, 14, fmt_money)
+                            if "Total" in po_prov_export.columns:
+                                idx_total = po_prov_export.columns.get_loc("Total")
+                                ws_oc.set_column(idx_total, idx_total, 16, fmt_money)
+
+                        st.download_button(
+                            f"Descargar OC - {prov}",
+                            data=excel_buffer.getvalue(),
+                            file_name=f"orden_compra_{prov}_{fecha_desde.strftime('%Y_%m') if isinstance(fecha_desde, datetime) else 'mes'}.xlsx",
+                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                            key=f"salida_neta_download_prov_{hashlib.md5(prov.encode('utf-8')).hexdigest()[:10]}",
+                        )
 
 # --- INTERFAZ ---
 USUARIOS_VALIDOS = ["ALEJANDRO38", "CeciliaATD", "SChava", "BreydaFTD", "SaraiFTD", "JorgeLic"]
