@@ -3205,6 +3205,8 @@ def render_cobranza_tab_gerente():
                 saldos_df["No_Vencido"] = pd.to_numeric(saldos_df.get("No_Vencido", 0), errors="coerce").fillna(0.0)
                 saldos_df["Saldo"] = saldos_df["Saldo_Vencido_Total"] + saldos_df["No_Vencido"]
                 saldos_df = saldos_df[saldos_df["Saldo"] > 0].copy()
+                # Solo mostrar clientes con saldo vencido real (> 0).
+                saldos_df = saldos_df[saldos_df["Vencido"] > 0].copy()
                 saldos_df["Fecha_Vencimiento_Min"] = pd.to_datetime(saldos_df.get("Fecha_Vencimiento_Min"), errors="coerce")
                 saldos_df["Fecha_Vencimiento_Max"] = pd.to_datetime(saldos_df.get("Fecha_Vencimiento_Max"), errors="coerce")
 
@@ -3291,10 +3293,68 @@ def render_cobranza_tab_gerente():
                 cols_saldos = ["Mes", "Codigo", "Razon_Social", "Saldo", "Vencido", "Saldo_Vencido_Total", "Fecha_Vencimiento_Min", "Fecha_Vencimiento_Max", "Condicion_Facturas", "Ultima_Actualizacion", "Semaforo_Seguimiento"]
                 cols_saldos = [c for c in cols_saldos if c in saldos_df.columns]
                 tabla_saldos = saldos_df[cols_saldos].copy()
+                cols_mxn = [c for c in ["Saldo", "Vencido", "Saldo_Vencido_Total"] if c in tabla_saldos.columns]
+                for c in cols_mxn:
+                    tabla_saldos[c] = pd.to_numeric(tabla_saldos[c], errors="coerce").fillna(0.0).map(lambda x: f"$ {x:,.2f} MXN")
+
+                if "Semaforo_Seguimiento" in tabla_saldos.columns:
+                    total_rojo = int((tabla_saldos["Semaforo_Seguimiento"] == "🔴").sum())
+                    total_verde = int((tabla_saldos["Semaforo_Seguimiento"] == "🟢").sum())
+                    total_azul = int((tabla_saldos["Semaforo_Seguimiento"] == "🔵").sum())
+                    c_rojo, c_verde, c_azul = st.columns(3)
+                    c_rojo.metric("🔴 En rojo", total_rojo)
+                    c_verde.metric("🟢 En verde", total_verde)
+                    c_azul.metric("🔵 En azul claro", total_azul)
+
                 st.caption("Tip: selecciona una fila para cargar automáticamente ese cliente en la sección de Comentarios.")
-                tabla_select = tabla_saldos.drop(columns=["Semaforo_Seguimiento"], errors="ignore").copy()
+                semaforo_tmp = tabla_saldos.get("Semaforo_Seguimiento", pd.Series("🔴", index=tabla_saldos.index)).astype(str).str.strip()
+                tabla_render = tabla_saldos.drop(columns=["Semaforo_Seguimiento"], errors="ignore").copy()
+
+                def _row_bg(_row):
+                    sem = semaforo_tmp.loc[_row.name] if _row.name in semaforo_tmp.index else "🔴"
+                    if sem == "🟢":
+                        bg = "#c7f9cc"
+                    elif sem == "🔵":
+                        bg = "#dbeafe"
+                    else:
+                        bg = "#ffd6d6"
+                    txt = "#111827"
+                    border = "1px solid #334155"
+                    return [f"background-color: {bg}; color: {txt}; border: {border}"] * len(_row)
+
+                tabla_render_styled = (
+                    tabla_render.style
+                    .apply(_row_bg, axis=1)
+                    .set_table_styles([
+                        {"selector": "th", "props": [("border", "1px solid #0f172a"), ("font-weight", "600")]},
+                        {"selector": "td", "props": [("border", "1px solid #0f172a")]},
+                        {"selector": "table", "props": [("border-collapse", "collapse")]},
+                    ])
+                )
+
+                st.markdown(
+                    """
+                    <style>
+                    div[data-testid="stDataFrame"] table,
+                    div[data-testid="stDataFrame"] [role="grid"],
+                    div[data-testid="stDataFrame"] [data-testid="stDataFrameResizable"] {
+                        border-collapse: collapse !important;
+                        border: 1px solid #0f172a !important;
+                    }
+                    div[data-testid="stDataFrame"] th,
+                    div[data-testid="stDataFrame"] td,
+                    div[data-testid="stDataFrame"] [role="columnheader"],
+                    div[data-testid="stDataFrame"] [role="gridcell"] {
+                        border-right: 1px solid #0f172a !important;
+                        border-bottom: 1px solid #0f172a !important;
+                    }
+                    </style>
+                    """,
+                    unsafe_allow_html=True,
+                )
+
                 evento_sel = st.dataframe(
-                    tabla_select,
+                    tabla_render_styled,
                     use_container_width=True,
                     hide_index=True,
                     on_select="rerun",
@@ -3307,64 +3367,12 @@ def render_cobranza_tab_gerente():
                     filas_sel = []
                 if filas_sel:
                     idx_sel = int(filas_sel[0])
-                    if 0 <= idx_sel < len(tabla_select):
-                        codigo_sel = str(tabla_select.iloc[idx_sel].get("Codigo", "")).strip()
-                        razon_sel = str(tabla_select.iloc[idx_sel].get("Razon_Social", "")).strip()
+                    if 0 <= idx_sel < len(tabla_render):
+                        codigo_sel = str(tabla_render.iloc[idx_sel].get("Codigo", "")).strip()
+                        razon_sel = str(tabla_render.iloc[idx_sel].get("Razon_Social", "")).strip()
                         if codigo_sel:
                             st.session_state["ger_cob_cliente_preselect_codigo"] = codigo_sel
                             st.session_state["ger_cob_cliente_preselect_label"] = f"{codigo_sel} - {razon_sel}"
-                cols_mxn = [c for c in ["Saldo", "Vencido", "Saldo_Vencido_Total"] if c in tabla_saldos.columns]
-                for c in cols_mxn:
-                    tabla_saldos[c] = pd.to_numeric(tabla_saldos[c], errors="coerce").fillna(0.0).map(lambda x: f"$ {x:,.2f} MXN")
-                tabla_render = tabla_saldos.drop(columns=["Semaforo_Seguimiento"], errors="ignore").copy()
-                if "Semaforo_Seguimiento" in tabla_saldos.columns:
-                    total_rojo = int((tabla_saldos["Semaforo_Seguimiento"] == "🔴").sum())
-                    total_verde = int((tabla_saldos["Semaforo_Seguimiento"] == "🟢").sum())
-                    total_azul = int((tabla_saldos["Semaforo_Seguimiento"] == "🔵").sum())
-                    c_rojo, c_verde, c_azul = st.columns(3)
-                    c_rojo.metric("🔴 En rojo", total_rojo)
-                    c_verde.metric("🟢 En verde", total_verde)
-                    c_azul.metric("🔵 En azul claro", total_azul)
-                    semaforo_tmp = tabla_saldos["Semaforo_Seguimiento"].astype(str).str.strip()
-
-                    def _row_bg(_row):
-                        sem = semaforo_tmp.loc[_row.name] if _row.name in semaforo_tmp.index else "🔴"
-                        # Colores más intensos + contorno visible por celda.
-                        if sem == "🟢":
-                            bg = "#c7f9cc"
-                        elif sem == "🔵":
-                            bg = "#dbeafe"
-                        else:
-                            bg = "#ffd6d6"
-                        txt = "#111827"
-                        border = "1px solid #334155"
-                        return [f"background-color: {bg}; color: {txt}; border: {border}"] * len(_row)
-
-                    tabla_render = (
-                        tabla_render.style
-                        .apply(_row_bg, axis=1)
-                        .set_table_styles([
-                            {"selector": "th", "props": [("border", "1px solid #0f172a"), ("font-weight", "600")]},
-                            {"selector": "td", "props": [("border", "1px solid #0f172a")]},
-                            {"selector": "table", "props": [("border-collapse", "collapse")]},
-                        ])
-                    )
-                else:
-                    c_rojo, c_verde, c_azul = st.columns(3)
-                    c_rojo.metric("🔴 En rojo", 0)
-                    c_verde.metric("🟢 En verde", 0)
-                    c_azul.metric("🔵 En azul claro", 0)
-                if isinstance(tabla_render, pd.io.formats.style.Styler):
-                    tabla_html = tabla_render.hide(axis="index").to_html()
-                    st.markdown(
-                        f"""
-                        <div style="max-height:420px;overflow:auto;border:1px solid #0f172a;border-radius:8px;">{tabla_html}</div>
-                        """,
-                        unsafe_allow_html=True,
-                    )
-                else:
-                    st.dataframe(tabla_render, use_container_width=True, hide_index=True)
-
                 # Vista visual tipo agenda/calendario de vencimientos por cliente y folio.
                 if not venc_df.empty:
                     agenda_df = venc_df.copy()
