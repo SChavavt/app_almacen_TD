@@ -3297,82 +3297,6 @@ def render_cobranza_tab_gerente():
                 for c in cols_mxn:
                     tabla_saldos[c] = pd.to_numeric(tabla_saldos[c], errors="coerce").fillna(0.0).map(lambda x: f"$ {x:,.2f} MXN")
 
-                if "Semaforo_Seguimiento" in tabla_saldos.columns:
-                    total_rojo = int((tabla_saldos["Semaforo_Seguimiento"] == "🔴").sum())
-                    total_verde = int((tabla_saldos["Semaforo_Seguimiento"] == "🟢").sum())
-                    total_azul = int((tabla_saldos["Semaforo_Seguimiento"] == "🔵").sum())
-                    c_rojo, c_verde, c_azul = st.columns(3)
-                    c_rojo.metric("🔴 En rojo", total_rojo)
-                    c_verde.metric("🟢 En verde", total_verde)
-                    c_azul.metric("🔵 En azul claro", total_azul)
-
-                st.caption("Tip: selecciona una fila para cargar automáticamente ese cliente en la sección de Comentarios.")
-                semaforo_tmp = tabla_saldos.get("Semaforo_Seguimiento", pd.Series("🔴", index=tabla_saldos.index)).astype(str).str.strip()
-                tabla_render = tabla_saldos.drop(columns=["Semaforo_Seguimiento"], errors="ignore").copy()
-
-                def _row_bg(_row):
-                    sem = semaforo_tmp.loc[_row.name] if _row.name in semaforo_tmp.index else "🔴"
-                    if sem == "🟢":
-                        bg = "#c7f9cc"
-                    elif sem == "🔵":
-                        bg = "#dbeafe"
-                    else:
-                        bg = "#ffd6d6"
-                    txt = "#111827"
-                    border = "1px solid #334155"
-                    return [f"background-color: {bg}; color: {txt}; border: {border}"] * len(_row)
-
-                tabla_render_styled = (
-                    tabla_render.style
-                    .apply(_row_bg, axis=1)
-                    .set_table_styles([
-                        {"selector": "th", "props": [("border", "1px solid #0f172a"), ("font-weight", "600")]},
-                        {"selector": "td", "props": [("border", "1px solid #0f172a")]},
-                        {"selector": "table", "props": [("border-collapse", "collapse")]},
-                    ])
-                )
-
-                st.markdown(
-                    """
-                    <style>
-                    div[data-testid="stDataFrame"] table,
-                    div[data-testid="stDataFrame"] [role="grid"],
-                    div[data-testid="stDataFrame"] [data-testid="stDataFrameResizable"] {
-                        border-collapse: collapse !important;
-                        border: 1px solid #0f172a !important;
-                    }
-                    div[data-testid="stDataFrame"] th,
-                    div[data-testid="stDataFrame"] td,
-                    div[data-testid="stDataFrame"] [role="columnheader"],
-                    div[data-testid="stDataFrame"] [role="gridcell"] {
-                        border-right: 1px solid #0f172a !important;
-                        border-bottom: 1px solid #0f172a !important;
-                    }
-                    </style>
-                    """,
-                    unsafe_allow_html=True,
-                )
-
-                evento_sel = st.dataframe(
-                    tabla_render_styled,
-                    use_container_width=True,
-                    hide_index=True,
-                    on_select="rerun",
-                    selection_mode="single-row",
-                    key="ger_cob_saldos_selector",
-                )
-                try:
-                    filas_sel = (evento_sel.selection or {}).get("rows", []) if evento_sel is not None else []
-                except Exception:
-                    filas_sel = []
-                if filas_sel:
-                    idx_sel = int(filas_sel[0])
-                    if 0 <= idx_sel < len(tabla_render):
-                        codigo_sel = str(tabla_render.iloc[idx_sel].get("Codigo", "")).strip()
-                        razon_sel = str(tabla_render.iloc[idx_sel].get("Razon_Social", "")).strip()
-                        if codigo_sel:
-                            st.session_state["ger_cob_cliente_preselect_codigo"] = codigo_sel
-                            st.session_state["ger_cob_cliente_preselect_label"] = f"{codigo_sel} - {razon_sel}"
                 # Vista visual tipo agenda/calendario de vencimientos por cliente y folio.
                 if not venc_df.empty:
                     agenda_df = venc_df.copy()
@@ -3453,7 +3377,7 @@ def render_cobranza_tab_gerente():
                             hover_data={
                                 "Cliente_Nombre": False,
                                 "Saldo_Vence": ':,.2f',
-                                "Fecha_Vencimiento_dia": '|%Y-%m-%d',
+                                "Fecha_Vencimiento_dia": '|%b %d',
                                 "Etiqueta_Cliente": False,
                                 "Codigo": True,
                                 "Dias_para_vencer": True,
@@ -3475,7 +3399,7 @@ def render_cobranza_tab_gerente():
                                 ],
                                 axis=-1,
                             ),
-                            hovertemplate="<b>%{hovertext}</b><br><br>Fecha de vencimiento=%{x|%Y-%m-%d}<br>Días para vencer=%{marker.color}<br>Saldo vencido=%{marker.size:,.2f}<br>Codigo=%{customdata[1]}<br>Cliente=%{customdata[0]}<extra></extra>",
+                            hovertemplate="<b>%{hovertext}</b><br><br>Fecha de vencimiento=%{x|%b %d}<br>Días para vencer=%{marker.color}<br>Saldo vencido=%{marker.size:,.2f}<br>Codigo=%{customdata[1]}<br>Cliente=%{customdata[0]}<extra></extra>",
                         )
                         fig_agenda.update_layout(
                             margin=dict(l=10, r=10, t=10, b=10),
@@ -3483,7 +3407,7 @@ def render_cobranza_tab_gerente():
                             xaxis=dict(
                                 title="Fecha de vencimiento",
                                 type="date",
-                                tickformat="%Y-%m-%d",
+                                tickformat="%b %d",
                                 dtick="D1",
                                 fixedrange=True,
                             ),
@@ -3501,6 +3425,83 @@ def render_cobranza_tab_gerente():
                             use_container_width=True,
                             config={"scrollZoom": False, "doubleClick": False, "displayModeBar": True},
                         )
+
+                if "Semaforo_Seguimiento" in tabla_saldos.columns:
+                    total_rojo = int((tabla_saldos["Semaforo_Seguimiento"] == "🔴").sum())
+                    total_verde = int((tabla_saldos["Semaforo_Seguimiento"] == "🟢").sum())
+                    total_azul = int((tabla_saldos["Semaforo_Seguimiento"] == "🔵").sum())
+                    c_rojo, c_verde, c_azul = st.columns(3)
+                    c_rojo.metric("🔴 En rojo", total_rojo)
+                    c_verde.metric("🟢 En verde", total_verde)
+                    c_azul.metric("🔵 En azul claro", total_azul)
+
+                st.caption("Tip: selecciona una fila para cargar automáticamente ese cliente en la sección de Comentarios.")
+                semaforo_tmp = tabla_saldos.get("Semaforo_Seguimiento", pd.Series("🔴", index=tabla_saldos.index)).astype(str).str.strip()
+                tabla_render = tabla_saldos.drop(columns=["Semaforo_Seguimiento"], errors="ignore").copy()
+
+                def _row_bg(_row):
+                    sem = semaforo_tmp.loc[_row.name] if _row.name in semaforo_tmp.index else "🔴"
+                    if sem == "🟢":
+                        bg = "#c7f9cc"
+                    elif sem == "🔵":
+                        bg = "#dbeafe"
+                    else:
+                        bg = "#ffd6d6"
+                    txt = "#111827"
+                    border = "1px solid #334155"
+                    return [f"background-color: {bg}; color: {txt}; border: {border}"] * len(_row)
+
+                tabla_render_styled = (
+                    tabla_render.style
+                    .apply(_row_bg, axis=1)
+                    .set_table_styles([
+                        {"selector": "th", "props": [("border", "1px solid #0f172a"), ("font-weight", "600")]},
+                        {"selector": "td", "props": [("border", "1px solid #0f172a")]},
+                        {"selector": "table", "props": [("border-collapse", "collapse")]},
+                    ])
+                )
+
+                st.markdown(
+                    """
+                    <style>
+                    div[data-testid="stDataFrame"] table,
+                    div[data-testid="stDataFrame"] [role="grid"],
+                    div[data-testid="stDataFrame"] [data-testid="stDataFrameResizable"] {
+                        border-collapse: collapse !important;
+                        border: 1px solid #0f172a !important;
+                    }
+                    div[data-testid="stDataFrame"] th,
+                    div[data-testid="stDataFrame"] td,
+                    div[data-testid="stDataFrame"] [role="columnheader"],
+                    div[data-testid="stDataFrame"] [role="gridcell"] {
+                        border-right: 1px solid #0f172a !important;
+                        border-bottom: 1px solid #0f172a !important;
+                    }
+                    </style>
+                    """,
+                    unsafe_allow_html=True,
+                )
+
+                evento_sel = st.dataframe(
+                    tabla_render_styled,
+                    use_container_width=True,
+                    hide_index=True,
+                    on_select="rerun",
+                    selection_mode="single-row",
+                    key="ger_cob_saldos_selector",
+                )
+                try:
+                    filas_sel = (evento_sel.selection or {}).get("rows", []) if evento_sel is not None else []
+                except Exception:
+                    filas_sel = []
+                if filas_sel:
+                    idx_sel = int(filas_sel[0])
+                    if 0 <= idx_sel < len(tabla_render):
+                        codigo_sel = str(tabla_render.iloc[idx_sel].get("Codigo", "")).strip()
+                        razon_sel = str(tabla_render.iloc[idx_sel].get("Razon_Social", "")).strip()
+                        if codigo_sel:
+                            st.session_state["ger_cob_cliente_preselect_codigo"] = codigo_sel
+                            st.session_state["ger_cob_cliente_preselect_label"] = f"{codigo_sel} - {razon_sel}"
 
 
     st.markdown("### Comentarios")
