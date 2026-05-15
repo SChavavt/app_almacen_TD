@@ -3297,15 +3297,6 @@ def render_cobranza_tab_gerente():
                 for c in cols_mxn:
                     tabla_saldos[c] = pd.to_numeric(tabla_saldos[c], errors="coerce").fillna(0.0).map(lambda x: f"$ {x:,.2f} MXN")
 
-                if "Semaforo_Seguimiento" in tabla_saldos.columns:
-                    total_rojo = int((tabla_saldos["Semaforo_Seguimiento"] == "🔴").sum())
-                    total_verde = int((tabla_saldos["Semaforo_Seguimiento"] == "🟢").sum())
-                    total_azul = int((tabla_saldos["Semaforo_Seguimiento"] == "🔵").sum())
-                    c_rojo, c_verde, c_azul = st.columns(3)
-                    c_rojo.metric("🔴 En rojo", total_rojo)
-                    c_verde.metric("🟢 En verde", total_verde)
-                    c_azul.metric("🔵 En azul claro", total_azul)
-
                 st.caption("Tip: selecciona una fila para cargar automáticamente ese cliente en la sección de Comentarios.")
                 semaforo_tmp = tabla_saldos.get("Semaforo_Seguimiento", pd.Series("🔴", index=tabla_saldos.index)).astype(str).str.strip()
                 tabla_render = tabla_saldos.drop(columns=["Semaforo_Seguimiento"], errors="ignore").copy()
@@ -3475,7 +3466,7 @@ def render_cobranza_tab_gerente():
                                 ],
                                 axis=-1,
                             ),
-                            hovertemplate="<b>%{hovertext}</b><br><br>Fecha de vencimiento=%{x|%Y-%m-%d}<br>Días para vencer=%{marker.color}<br>Saldo vencido=%{marker.size:,.2f}<br>Codigo=%{customdata[1]}<br>Cliente=%{customdata[0]}<extra></extra>",
+                            hovertemplate="<b>%{hovertext}</b><br><br>Fecha de vencimiento=%{x|%b %d}<br>Días para vencer=%{marker.color}<br>Saldo vencido=%{marker.size:,.2f}<br>Codigo=%{customdata[1]}<br>Cliente=%{customdata[0]}<extra></extra>",
                         )
                         fig_agenda.update_layout(
                             margin=dict(l=10, r=10, t=10, b=10),
@@ -3483,7 +3474,7 @@ def render_cobranza_tab_gerente():
                             xaxis=dict(
                                 title="Fecha de vencimiento",
                                 type="date",
-                                tickformat="%Y-%m-%d",
+                                tickformat="%b %d",
                                 dtick="D1",
                                 fixedrange=True,
                             ),
@@ -3501,6 +3492,16 @@ def render_cobranza_tab_gerente():
                             use_container_width=True,
                             config={"scrollZoom": False, "doubleClick": False, "displayModeBar": True},
                         )
+
+                if "Semaforo_Seguimiento" in tabla_saldos.columns:
+                    total_rojo = int((tabla_saldos["Semaforo_Seguimiento"] == "🔴").sum())
+                    total_verde = int((tabla_saldos["Semaforo_Seguimiento"] == "🟢").sum())
+                    total_azul = int((tabla_saldos["Semaforo_Seguimiento"] == "🔵").sum())
+                    c_rojo, c_verde, c_azul = st.columns(3)
+                    c_rojo.metric("🔴 En rojo", total_rojo)
+                    c_verde.metric("🟢 En verde", total_verde)
+                    c_azul.metric("🔵 En azul claro", total_azul)
+
 
 
     st.markdown("### Comentarios")
