@@ -5101,8 +5101,100 @@ def render_macheo_tool_tab_gerente():
             key="ger_macheo_download",
         )
 
+
+def render_salida_neta_tab():
+    st.subheader("📦 Cálculo de salida neta por producto")
+    st.caption(
+        "Sube los archivos de **Entradas** y **Salidas** para generar un Excel final "
+        "con productos únicos por Código."
+    )
+
+    entradas_file = st.file_uploader("1) Subir archivo de Entradas.xlsx", type=["xlsx"], key="salida_neta_entradas")
+    salidas_file = st.file_uploader("2) Subir archivo de Salidas.xlsx", type=["xlsx"], key="salida_neta_salidas")
+
+    def _leer_archivo_excel(uploaded_file):
+        xls = pd.ExcelFile(uploaded_file)
+        hoja = "Auxiliar de inventario" if "Auxiliar de inventario" in xls.sheet_names else xls.sheet_names[0]
+        return pd.read_excel(uploaded_file, sheet_name=hoja, header=1)
+
+    if st.button("3) Procesar archivos", key="salida_neta_procesar"):
+        if not entradas_file or not salidas_file:
+            st.warning("⚠️ Debes subir ambos archivos (Entradas y Salidas).")
+        else:
+            try:
+                df_entradas = _leer_archivo_excel(entradas_file)
+                df_salidas = _leer_archivo_excel(salidas_file)
+
+                cols_entradas = ["Código", "Descripción", "Tipo", "Entrada"]
+                cols_salidas = ["Código", "Descripción", "Tipo", "Salida"]
+                df_entradas = df_entradas[cols_entradas].copy()
+                df_salidas = df_salidas[cols_salidas].copy()
+
+                tipos_excluir_entradas = {
+                    "TRASPASO SALIDA",
+                    "SALIDA AJUSTE",
+                    "GARANTÍA POR REPOSICIÓN",
+                    "ENSAMBLE TRASPASO SALIDA",
+                    "ENSAMBLE FABRICACION ENSAMBLE",
+                }
+                tipos_excluir_salidas = {
+                    "TRASPASO ENTRADA",
+                    "ENTRADA PEDIMENTO",
+                    "ENTRADA AJUSTE",
+                    "ENSAMBLE DEVOLUCION CLIENTE",
+                    "DEVOLUCION CLIENTE",
+                    "COMPRA",
+                    "CANCELACIÓN SALIDA AJUSTE",
+                }
+
+                df_entradas = df_entradas[~df_entradas["Tipo"].astype(str).str.strip().str.upper().isin(tipos_excluir_entradas)].copy()
+                df_salidas = df_salidas[~df_salidas["Tipo"].astype(str).str.strip().str.upper().isin(tipos_excluir_salidas)].copy()
+
+                df_entradas["Entrada"] = pd.to_numeric(df_entradas["Entrada"], errors="coerce").fillna(0)
+                df_salidas["Salida"] = pd.to_numeric(df_salidas["Salida"], errors="coerce").fillna(0)
+
+                entr_agg = (
+                    df_entradas.groupby("Código", as_index=False)
+                    .agg({"Entrada": "sum", "Descripción": "first", "Tipo": "first"})
+                    .rename(columns={"Entrada": "Entrada_Total", "Descripción": "Descripción_Entrada", "Tipo": "Tipo_Entrada"})
+                )
+                sal_agg = (
+                    df_salidas.groupby("Código", as_index=False)
+                    .agg({"Salida": "sum", "Descripción": "first", "Tipo": "first"})
+                    .rename(columns={"Salida": "Salida_Total", "Descripción": "Descripción_Salida", "Tipo": "Tipo"})
+                )
+
+                final_df = pd.merge(sal_agg, entr_agg, on="Código", how="outer")
+                final_df["Entrada_Total"] = final_df["Entrada_Total"].fillna(0)
+                final_df["Salida_Total"] = final_df["Salida_Total"].fillna(0)
+                final_df["Descripción"] = final_df["Descripción_Salida"].fillna(final_df["Descripción_Entrada"]).fillna("")
+                final_df["Tipo"] = final_df["Tipo"].fillna(final_df["Tipo_Entrada"]).fillna("")
+                final_df["Salida_Neta"] = (final_df["Salida_Total"] - final_df["Entrada_Total"]).clip(lower=0)
+
+                final_df = final_df[["Código", "Descripción", "Entrada_Total", "Tipo", "Salida_Total", "Salida_Neta"]]
+                final_df = final_df.sort_values("Código").reset_index(drop=True)
+                st.session_state["salida_neta_resultado"] = final_df
+                st.success("✅ Archivos procesados correctamente.")
+            except Exception as e:
+                st.error(f"❌ Error al procesar archivos: {e}")
+
+    resultado = st.session_state.get("salida_neta_resultado")
+    if isinstance(resultado, pd.DataFrame) and not resultado.empty:
+        st.markdown("### 4) Tabla final")
+        st.dataframe(resultado, use_container_width=True, hide_index=True)
+        excel_buffer = BytesIO()
+        with pd.ExcelWriter(excel_buffer, engine="xlsxwriter") as writer:
+            resultado.to_excel(writer, sheet_name="Salida_Neta", index=False)
+        st.download_button(
+            "5) Descargar Excel final",
+            data=excel_buffer.getvalue(),
+            file_name="salida_neta_productos.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            key="salida_neta_download",
+        )
+
 # --- INTERFAZ ---
-USUARIOS_VALIDOS = ["ALEJANDRO38", "CeciliaATD", "SChava", "BreydaFTD", "SaraiFTD"]
+USUARIOS_VALIDOS = ["ALEJANDRO38", "CeciliaATD", "SChava", "BreydaFTD", "SaraiFTD", "JorgeLic"]
 
 PERMISOS_USUARIO = {
     "ALEJANDRO38": {"organizador": True, "modificar": False, "cobranza": False},
@@ -5110,6 +5202,7 @@ PERMISOS_USUARIO = {
     "SChava": {"organizador": True, "modificar": True, "cobranza": True},
     "BreydaFTD": {"organizador": False, "modificar": False, "cobranza": True},
     "SaraiFTD": {"organizador": False, "modificar": False, "cobranza": True},
+    "JorgeLic": {"organizador": False, "modificar": False, "cobranza": False},
 }
 
 COBRANZA_ONLY_USERS = {"BreydaFTD", "SaraiFTD"}
@@ -5197,6 +5290,9 @@ else:
 
     if usuario_puede(usuario_actual, "modificar"):
         tab_specs.append(("modificar", "✏️ Modificar Pedido"))
+
+    if usuario_actual in {"SChava", "JorgeLic"}:
+        tab_specs.append(("salida_neta", "📦 Salida Neta"))
 
 tabs = st.tabs([titulo for _, titulo in tab_specs])
 tab_map = {clave: tab for (clave, _), tab in zip(tab_specs, tabs)}
@@ -9897,3 +9993,7 @@ if "seguimiento_cobranza" in tab_map:
 if "macheo_tool" in tab_map:
     with tab_map["macheo_tool"]:
         render_macheo_tool_tab_gerente()
+
+if "salida_neta" in tab_map:
+    with tab_map["salida_neta"]:
+        render_salida_neta_tab()
