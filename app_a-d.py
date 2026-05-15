@@ -754,13 +754,42 @@ def _normalize_municipio_for_hoja_ruta(value: Any) -> str:
     return normalized_tokens[0]
 
 
+def _run_gsheet_read_with_backoff(func, *, operation_name: str, max_retries: int = 4):
+    """Ejecuta una lectura de Google Sheets con reintento ante errores transitorios."""
+    wait_seconds = 0.8
+    last_error = None
+    for attempt in range(max_retries + 1):
+        try:
+            return func()
+        except Exception as exc:
+            last_error = exc
+            if attempt >= max_retries or not _is_rate_limit_error(exc):
+                raise
+            st.info(
+                f"⏳ Límite temporal de Google Sheets durante {operation_name}. "
+                f"Reintentando ({attempt + 1}/{max_retries})..."
+            )
+            time.sleep(wait_seconds)
+            wait_seconds = min(wait_seconds * 2, 10)
+    raise last_error
+
+
 def _hoja_ruta_get_all_values(ws: Any) -> list[list[str]]:
     if hasattr(ws, "get_all_values"):
-        return ws.get_all_values()
+        return _run_gsheet_read_with_backoff(
+            lambda: ws.get_all_values(),
+            operation_name="lectura de hoja de ruta",
+        )
     if hasattr(ws, "get_values"):
-        return ws.get_values()
+        return _run_gsheet_read_with_backoff(
+            lambda: ws.get_values(),
+            operation_name="lectura de hoja de ruta",
+        )
     if hasattr(ws, "get_all_records"):
-        records = ws.get_all_records()
+        records = _run_gsheet_read_with_backoff(
+            lambda: ws.get_all_records(),
+            operation_name="lectura de hoja de ruta",
+        )
         if not records:
             return []
         headers = list(records[0].keys())
