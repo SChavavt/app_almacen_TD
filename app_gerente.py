@@ -5119,6 +5119,88 @@ def render_salida_neta_tab():
         hoja = "Auxiliar de inventario" if "Auxiliar de inventario" in xls.sheet_names else xls.sheet_names[0]
         return pd.read_excel(uploaded_file, sheet_name=hoja, header=1)
 
+    def _leer_metadata_periodo(uploaded_file):
+        xls = pd.ExcelFile(uploaded_file)
+        hoja = "Auxiliar de inventario" if "Auxiliar de inventario" in xls.sheet_names else xls.sheet_names[0]
+        meta_df = pd.read_excel(uploaded_file, sheet_name=hoja, header=None, nrows=1)
+        raw = " ".join(str(v) for v in meta_df.iloc[0].tolist() if pd.notna(v))
+        m = re.search(r"Desde:\s*(\d{2}/\d{2}/\d{4})", raw)
+        if not m:
+            return None
+        return datetime.strptime(m.group(1), "%d/%m/%Y")
+
+    def _nombre_col_rotacion(fecha_desde: datetime) -> str:
+        return f"Rotación {MESES_ES[fecha_desde.month]} {fecha_desde.year}"
+
+    def _actualizar_rotacion_catalogo(df_salida_neta: pd.DataFrame, fecha_desde: datetime):
+        def _ws_update_range(worksheet, a1_range: str, values_matrix):
+            """Compatibilidad entre versiones de gspread con/sin Worksheet.update."""
+            if hasattr(worksheet, "update"):
+                return worksheet.update(a1_range, values_matrix)
+            cells = worksheet.range(a1_range)
+            flat_values = [v for row in values_matrix for v in row]
+            for idx, cell in enumerate(cells):
+                cell.value = flat_values[idx] if idx < len(flat_values) else ""
+            return worksheet.update_cells(cells)
+
+        catalogotd = st.secrets.get("catalogotd", "1CzJm9Goqs6SoeHrJkn76UQ7ofFIYmGpavG-5feqaAoA")
+        ws = gspread_client.open_by_key(catalogotd).worksheet("ROTACIONES")
+        headers = ws.row_values(1)
+        col_objetivo = _nombre_col_rotacion(fecha_desde)
+
+        if col_objetivo not in headers:
+            prev_date = (fecha_desde.replace(day=1) - timedelta(days=1))
+            col_prev = _nombre_col_rotacion(prev_date)
+            if col_prev in headers:
+                insert_at = headers.index(col_prev) + 2
+            else:
+                insert_at = len(headers) + 1
+            # Inserta físicamente una columna en la posición deseada (sin depender de auto-resize).
+            try:
+                ws.insert_cols([[""]], col=insert_at, value_input_option="USER_ENTERED")
+            except Exception:
+                # Fallback para versiones de gspread sin insert_cols estable.
+                ws.add_cols(1)
+                ws.update_cell(1, len(headers) + 1, "")
+                if insert_at <= len(headers):
+                    # Compatibilidad con versiones de gspread sin método Worksheet.get().
+                    all_values = ws.get_all_values()
+                    data_shift = []
+                    for row in all_values:
+                        segmento = row[insert_at - 1:len(headers)]
+                        if len(segmento) < (len(headers) - insert_at + 1):
+                            segmento += [""] * ((len(headers) - insert_at + 1) - len(segmento))
+                        data_shift.append(segmento)
+                    _ws_update_range(
+                        ws,
+                        f"{gspread.utils.rowcol_to_a1(1, insert_at + 1)}:{gspread.utils.rowcol_to_a1(ws.row_count, len(headers) + 1)}",
+                        data_shift,
+                    )
+            ws.update_cell(1, insert_at, col_objetivo)
+            headers = ws.row_values(1)
+
+        data = ws.get_all_records()
+        cat_df = pd.DataFrame(data)
+        if cat_df.empty:
+            return pd.DataFrame(), pd.DataFrame(), col_objetivo
+
+        cat_df["Modelo"] = cat_df["Modelo"].astype(str).str.strip()
+        tmp = df_salida_neta.copy()
+        tmp["Código"] = tmp["Código"].astype(str).str.strip()
+        salida_map = tmp.set_index("Código")["Salida_Neta"].to_dict()
+        cat_df[col_objetivo] = cat_df["Modelo"].map(salida_map).fillna(0)
+
+        col_idx = headers.index(col_objetivo) + 1
+        values_to_write = [[v] for v in cat_df[col_objetivo].tolist()]
+        _ws_update_range(
+            ws,
+            f"{gspread.utils.rowcol_to_a1(2, col_idx)}:{gspread.utils.rowcol_to_a1(len(cat_df)+1, col_idx)}",
+            values_to_write,
+        )
+
+        no_encontrados = tmp[(tmp["Salida_Neta"] > 0) & (~tmp["Código"].isin(cat_df["Modelo"]))].copy()
+        return cat_df, no_encontrados, col_objetivo
+
     if procesar:
         if not entradas_file or not salidas_file:
             st.warning("⚠️ Debes subir ambos archivos (Entradas y Salidas).")
@@ -5180,7 +5262,9 @@ def render_salida_neta_tab():
 
                     final_df = final_df[["Código", "Descripción", "Entrada_Total", "Salida_Total", "Salida_Neta"]]
                     final_df = final_df.sort_values("Código").reset_index(drop=True)
+                    fecha_desde = _leer_metadata_periodo(entradas_file)
                     st.session_state["salida_neta_resultado"] = final_df
+                    st.session_state["salida_neta_fecha_desde"] = fecha_desde
                     progress.progress(100, text="Proceso finalizado.")
                 st.success("✅ Archivos procesados correctamente.")
             except Exception as e:
@@ -5188,18 +5272,57 @@ def render_salida_neta_tab():
 
     resultado = st.session_state.get("salida_neta_resultado")
     if isinstance(resultado, pd.DataFrame) and not resultado.empty:
+        fecha_desde = st.session_state.get("salida_neta_fecha_desde")
+        catalogo_df, no_encontrados_df, col_rotacion = pd.DataFrame(), pd.DataFrame(), ""
+        if isinstance(fecha_desde, datetime):
+            try:
+                catalogo_df, no_encontrados_df, col_rotacion = _actualizar_rotacion_catalogo(resultado, fecha_desde)
+                st.info(f"Columna de rotación actualizada en catálogo: **{col_rotacion}**")
+            except Exception as e:
+                st.warning(f"No se pudo actualizar ROTACIONES en Google Sheets: {e}")
+
         st.markdown("### Tabla Final")
         st.dataframe(resultado, use_container_width=True, hide_index=True)
-        excel_buffer = BytesIO()
-        with pd.ExcelWriter(excel_buffer, engine="xlsxwriter") as writer:
-            resultado.to_excel(writer, sheet_name="Salida_Neta", index=False)
-        st.download_button(
-            "5) Descargar Excel final",
-            data=excel_buffer.getvalue(),
-            file_name="salida_neta_productos.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            key="salida_neta_download",
-        )
+        if isinstance(no_encontrados_df, pd.DataFrame) and not no_encontrados_df.empty:
+            st.markdown("### ⚠️ Productos no encontrados en Catálogo TD")
+            st.dataframe(no_encontrados_df[["Código", "Descripción", "Salida_Neta"]], use_container_width=True, hide_index=True)
+
+        if isinstance(catalogo_df, pd.DataFrame) and not catalogo_df.empty:
+            compras_base = resultado[resultado["Salida_Neta"] > 0][["Código", "Salida_Neta"]].copy()
+            compras_base["Código"] = compras_base["Código"].astype(str).str.strip()
+            cat = catalogo_df.copy()
+            for c in ["Modelo", "Descripción", "English Description", "PRECIO", "Proveedor"]:
+                if c not in cat.columns:
+                    cat[c] = ""
+            cat["Modelo"] = cat["Modelo"].astype(str).str.strip()
+            cat["PRECIO"] = pd.to_numeric(cat["PRECIO"], errors="coerce").fillna(0)
+
+            po_df = compras_base.merge(
+                cat[["Modelo", "Descripción", "English Description", "PRECIO", "Proveedor"]],
+                left_on="Código",
+                right_on="Modelo",
+                how="left",
+            )
+            po_df = po_df[po_df["Modelo"].notna() & (po_df["Modelo"].astype(str).str.strip() != "")]
+            po_df["Quantity"] = po_df["Salida_Neta"]
+            po_df["Cost"] = po_df["PRECIO"]
+            po_df["Total"] = po_df["Quantity"] * po_df["Cost"]
+            po_df = po_df[["Modelo", "Descripción", "English Description", "Quantity", "Cost", "Total", "Proveedor"]]
+
+            proveedores = sorted([p for p in po_df["Proveedor"].astype(str).str.strip().unique() if p])
+            if proveedores:
+                prov_sel = st.selectbox("Proveedor para descargar orden de compra del mes", proveedores, key="salida_neta_proveedor")
+                po_prov = po_df[po_df["Proveedor"].astype(str).str.strip() == prov_sel].copy()
+                excel_buffer = BytesIO()
+                with pd.ExcelWriter(excel_buffer, engine="xlsxwriter") as writer:
+                    po_prov[["Modelo", "Descripción", "English Description", "Quantity", "Cost", "Total"]].to_excel(writer, sheet_name="Orden_Compra", index=False)
+                st.download_button(
+                    "5) Descargar Orden de Compra (proveedor seleccionado)",
+                    data=excel_buffer.getvalue(),
+                    file_name=f"orden_compra_{prov_sel}_{fecha_desde.strftime('%Y_%m') if isinstance(fecha_desde, datetime) else 'mes'}.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    key="salida_neta_download_prov",
+                )
 
 # --- INTERFAZ ---
 USUARIOS_VALIDOS = ["ALEJANDRO38", "CeciliaATD", "SChava", "BreydaFTD", "SaraiFTD", "JorgeLic"]
