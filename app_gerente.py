@@ -3207,6 +3207,7 @@ def render_cobranza_tab_gerente():
 
                 hoy_norm = pd.Timestamp.now().normalize()
                 venc_res = pd.DataFrame(columns=["Codigo", "Fecha_Vencimiento_Min", "Fecha_Vencimiento_Max", "Saldo_Vencido_Total"])
+                venc_activos_df = pd.DataFrame(columns=["Codigo", "Condicion"])
                 if not venc_df.empty:
                     tmp_v = venc_df.copy()
                     tmp_v["Codigo"] = tmp_v.get("Codigo", "").astype(str)
@@ -3265,6 +3266,11 @@ def render_cobranza_tab_gerente():
                         key_v = tmp_v["Codigo"].astype(str) + "|" + tmp_v["_folio_norm"].astype(str)
                         tmp_v = tmp_v[~key_v.isin(folios_liquidados)].copy()
 
+                    # Las condiciones deben salir del mismo subconjunto activo/visible
+                    # que alimenta el saldo vencido. Usar todo venc_df arrastraba
+                    # condiciones históricas o de otros periodos y podía inflar los
+                    # clientes clasificados como CONTADO al apagar el switch.
+                    venc_activos_df = tmp_v.copy()
                     venc_res = tmp_v.groupby("Codigo", as_index=False).agg(
                         Fecha_Vencimiento_Min=("Fecha_Vencimiento_dt", "min"),
                         Fecha_Vencimiento_Max=("Fecha_Vencimiento_dt", "max"),
@@ -3292,7 +3298,7 @@ def render_cobranza_tab_gerente():
                     keep="first",
                 ).copy()
                 saldos_df["Condicion_Facturas"] = ""
-                if not venc_df.empty:
+                if not venc_activos_df.empty:
                     def _resumen_condiciones(vals):
                         condiciones = sorted({str(v).strip() for v in vals if str(v).strip()})
                         if not condiciones:
@@ -3302,9 +3308,9 @@ def render_cobranza_tab_gerente():
                         return f"MIXTO ({' | '.join(condiciones)})"
 
                     cond_por_codigo = (
-                        venc_df.assign(
-                            Codigo=venc_df.get("Codigo", pd.Series("", index=venc_df.index)).astype(str),
-                            _cond=venc_df.get("Condicion", pd.Series("", index=venc_df.index)).astype(str).str.strip(),
+                        venc_activos_df.assign(
+                            Codigo=venc_activos_df.get("Codigo", pd.Series("", index=venc_activos_df.index)).astype(str),
+                            _cond=venc_activos_df.get("Condicion", pd.Series("", index=venc_activos_df.index)).astype(str).str.strip(),
                         )
                         .loc[lambda d: d["_cond"] != ""]
                         .groupby("Codigo")["_cond"]
