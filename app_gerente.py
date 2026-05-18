@@ -5133,15 +5133,40 @@ def render_salida_neta_tab():
         return f"Rotación {MESES_ES[fecha_desde.month]} {fecha_desde.year}"
 
     def _actualizar_rotacion_catalogo(df_salida_neta: pd.DataFrame, fecha_desde: datetime):
+        def _ensure_column(worksheet, headers_row: list[str], col_name: str) -> tuple[list[str], int]:
+            """Garantiza que exista una columna por nombre. Devuelve headers actualizados e índice 1-based."""
+            if col_name in headers_row:
+                return headers_row, headers_row.index(col_name) + 1
+            worksheet.add_cols(1)
+            new_col_idx = len(headers_row) + 1
+            worksheet.update_cell(1, new_col_idx, col_name)
+            headers_row = worksheet.row_values(1)
+            return headers_row, new_col_idx
+
+        def _build_rotacion_formula(row_idx: int, month_col_indices: list[int]) -> str:
+            refs = "+".join(gspread.utils.rowcol_to_a1(row_idx, c) for c in month_col_indices)
+            return f"=({refs})/6"
+
         def _ws_update_range(worksheet, a1_range: str, values_matrix):
             """Compatibilidad entre versiones de gspread con/sin Worksheet.update."""
             if hasattr(worksheet, "update"):
-                return worksheet.update(a1_range, values_matrix)
+                try:
+                    return worksheet.update(
+                        a1_range,
+                        values_matrix,
+                        value_input_option="USER_ENTERED",
+                    )
+                except TypeError:
+                    # Compatibilidad con firmas antiguas de gspread.
+                    return worksheet.update(a1_range, values_matrix)
             cells = worksheet.range(a1_range)
             flat_values = [v for row in values_matrix for v in row]
             for idx, cell in enumerate(cells):
                 cell.value = flat_values[idx] if idx < len(flat_values) else ""
-            return worksheet.update_cells(cells)
+            try:
+                return worksheet.update_cells(cells, value_input_option="USER_ENTERED")
+            except TypeError:
+                return worksheet.update_cells(cells)
 
         catalogotd = st.secrets.get("catalogotd", "1CzJm9Goqs6SoeHrJkn76UQ7ofFIYmGpavG-5feqaAoA")
         ws = gspread_client.open_by_key(catalogotd).worksheet("ROTACIONES")
@@ -5219,6 +5244,68 @@ def render_salida_neta_tab():
             f"{gspread.utils.rowcol_to_a1(2, col_idx)}:{gspread.utils.rowcol_to_a1(len(cat_df)+1, col_idx)}",
             values_to_write,
         )
+
+        # Recalcular columnas derivadas usadas en catálogo:
+        # - Ventas Promedio Por Mes = promedio de las últimas 6 columnas de Rotación (incluyendo la recién creada).
+        # - Meses de Inventario = (Existencia + Tránsito) / Ventas Promedio Por Mes.
+        # - Comprar = SI(Meses de Inventario > 1.5, "OK", "COMPRAR").
+        headers, col_ventas_prom = _ensure_column(ws, headers, "Ventas Promedio Por Mes")
+        headers, col_meses_inv = _ensure_column(ws, headers, "Meses de Inventario")
+        headers, col_comprar = _ensure_column(ws, headers, "Comprar")
+
+        col_existencia = (headers.index("Existencia") + 1) if "Existencia" in headers else 7
+        col_transito = (headers.index("Transito") + 1) if "Transito" in headers else 8
+
+        rot_cols = [
+            idx + 1
+            for idx, h in enumerate(headers)
+            if re.match(r"^Rotación\s+.+\s+\d{4}$", str(h).strip())
+        ]
+        ultimas_6_rot = rot_cols[-6:] if len(rot_cols) >= 6 else rot_cols
+        if len(ultimas_6_rot) >= 1:
+            formulas_ventas = []
+            formulas_meses_inv = []
+            formulas_comprar = []
+            for i, row in cat_df.iterrows():
+                row_idx = i + 2
+                modelo = str(row.get("Modelo", "")).strip()
+                if not modelo:
+                    formulas_ventas.append([""])
+                    formulas_meses_inv.append([""])
+                    formulas_comprar.append([""])
+                    continue
+                if len(ultimas_6_rot) >= 6:
+                    formula_ventas = _build_rotacion_formula(row_idx, ultimas_6_rot)
+                else:
+                    refs = "+".join(gspread.utils.rowcol_to_a1(row_idx, c) for c in ultimas_6_rot)
+                    divisor = max(len(ultimas_6_rot), 1)
+                    formula_ventas = f"=({refs})/{divisor}"
+                cell_ventas = gspread.utils.rowcol_to_a1(row_idx, col_ventas_prom)
+                cell_meses_inv = gspread.utils.rowcol_to_a1(row_idx, col_meses_inv)
+                ref_exist = gspread.utils.rowcol_to_a1(row_idx, col_existencia)
+                ref_trans = gspread.utils.rowcol_to_a1(row_idx, col_transito)
+                formula_meses_inv = f"=({ref_exist}+{ref_trans})/{cell_ventas}"
+                formula_comprar = f'=SI({cell_meses_inv}>1.5,"OK","COMPRAR")'
+                formulas_ventas.append([formula_ventas])
+                formulas_meses_inv.append([formula_meses_inv])
+                formulas_comprar.append([formula_comprar])
+
+            _ws_update_range(
+                ws,
+                f"{gspread.utils.rowcol_to_a1(2, col_ventas_prom)}:{gspread.utils.rowcol_to_a1(len(cat_df)+1, col_ventas_prom)}",
+                formulas_ventas,
+            )
+            _ws_update_range(
+                ws,
+                f"{gspread.utils.rowcol_to_a1(2, col_meses_inv)}:{gspread.utils.rowcol_to_a1(len(cat_df)+1, col_meses_inv)}",
+                formulas_meses_inv,
+            )
+            _ws_update_range(
+                ws,
+                f"{gspread.utils.rowcol_to_a1(2, col_comprar)}:{gspread.utils.rowcol_to_a1(len(cat_df)+1, col_comprar)}",
+                formulas_comprar,
+            )
+
         # Forzar estilo visual de la columna de rotación (Calibri 11) cuando la API lo permita.
         try:
             if hasattr(ws, "format"):
@@ -5348,6 +5435,7 @@ def render_salida_neta_tab():
             col_desc_en = _pick_col("English Description", "Descripcion en ingles", "Description English")
             col_precio = _pick_col("PRECIO", "Precio", "Costo", "Cost")
             col_proveedor = _pick_col("Proveedor", "Provedor", "Supplier")
+            col_comprar = _pick_col("Comprar")
 
             cat_std = pd.DataFrame({
                 "Modelo": cat[col_modelo] if col_modelo else "",
@@ -5355,19 +5443,28 @@ def render_salida_neta_tab():
                 "English Description": cat[col_desc_en] if col_desc_en else "",
                 "PRECIO": cat[col_precio] if col_precio else "",
                 "Proveedor": cat[col_proveedor] if col_proveedor else "",
+                "Comprar": cat[col_comprar] if col_comprar else "",
             })
             cat_std["Modelo"] = cat_std["Modelo"].astype(str).str.strip()
             cat_std["PRECIO"] = pd.to_numeric(cat_std["PRECIO"], errors="coerce").fillna(0)
             cat_std["Proveedor"] = cat_std["Proveedor"].replace({None: "", np.nan: ""}).astype(str).str.strip()
             cat_std["Proveedor"] = cat_std["Proveedor"].replace({"nan": "", "None": ""})
+            cat_std["Comprar"] = cat_std["Comprar"].replace({None: "", np.nan: ""}).astype(str).str.strip().str.upper()
 
             po_df = compras_base.merge(
-                cat_std[["Modelo", "Descripción", "English Description", "PRECIO", "Proveedor"]],
+                cat_std[["Modelo", "Descripción", "English Description", "PRECIO", "Proveedor", "Comprar"]],
                 left_on="Código",
                 right_on="Modelo",
                 how="left",
             )
             po_df = po_df[po_df["Modelo"].notna() & (po_df["Modelo"].astype(str).str.strip() != "")]
+            filtrar_solo_comprar = st.checkbox(
+                "Solo incluir productos marcados como COMPRAR en las órdenes de compra",
+                value=True,
+                key="salida_neta_only_comprar",
+            )
+            if filtrar_solo_comprar:
+                po_df = po_df[po_df["Comprar"] == "COMPRAR"].copy()
             po_df["Quantity"] = po_df["Salida_Neta"]
             po_df["Cost"] = po_df["PRECIO"]
             po_df["Total"] = po_df["Quantity"] * po_df["Cost"]
@@ -5388,6 +5485,17 @@ def render_salida_neta_tab():
                 f"Coincidencias catálogo para OC: **{len(po_df)}** | "
                 f"Con proveedor: **{len(proveedores)}** | Sin proveedor asignado: **{sin_proveedor}**"
             )
+            if sin_proveedor > 0:
+                sin_proveedor_df = po_df[po_df["Proveedor"].astype(str).str.strip() == ""].copy()
+                sin_proveedor_df = sin_proveedor_df[
+                    ["Modelo", "Descripción", "English Description", "Quantity", "Cost", "Total"]
+                ].copy()
+                with st.expander(f"⚠️ Ver productos sin proveedor asignado ({sin_proveedor})", expanded=False):
+                    st.caption(
+                        "Estos productos sí tienen coincidencia en catálogo, pero no tienen valor en la columna "
+                        "**Proveedor**, por eso no se incluyen en una OC por proveedor."
+                    )
+                    st.dataframe(sin_proveedor_df, use_container_width=True, hide_index=True)
             if proveedores:
                 st.caption("Expande cada proveedor para ver la previsualización de su orden de compra y descargar su Excel.")
                 for prov in proveedores:
