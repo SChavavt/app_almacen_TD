@@ -5319,9 +5319,11 @@ def render_salida_neta_tab():
         # Recalcular columnas derivadas usadas en catálogo:
         # - Ventas Promedio Por Mes = promedio de las últimas 6 columnas de Rotación (incluyendo la recién creada).
         # - Meses de Inventario = (Existencia + Tránsito) / Ventas Promedio Por Mes.
+        # - Unidades Sugeridas = (3.5 - Meses de Inventario) * Ventas Promedio Por Mes.
         # - Comprar = SI(Meses de Inventario > 1.5, "OK", "COMPRAR").
         headers, col_ventas_prom = _ensure_column(ws, headers, "Ventas Promedio Por Mes")
         headers, col_meses_inv = _ensure_column(ws, headers, "Meses de Inventario")
+        headers, col_unidades_sugeridas = _ensure_column(ws, headers, "Unidades Sugeridas")
         headers, col_comprar = _ensure_column(ws, headers, "Comprar")
 
         col_existencia = (headers.index("Existencia") + 1) if "Existencia" in headers else 7
@@ -5336,6 +5338,7 @@ def render_salida_neta_tab():
         if len(ultimas_6_rot) >= 1:
             formulas_ventas = []
             formulas_meses_inv = []
+            formulas_unidades_sugeridas = []
             formulas_comprar = []
             for i, row in cat_df.iterrows():
                 row_idx = i + 2
@@ -5343,6 +5346,7 @@ def render_salida_neta_tab():
                 if not modelo:
                     formulas_ventas.append([""])
                     formulas_meses_inv.append([""])
+                    formulas_unidades_sugeridas.append([""])
                     formulas_comprar.append([""])
                     continue
                 if len(ultimas_6_rot) >= 6:
@@ -5356,9 +5360,11 @@ def render_salida_neta_tab():
                 ref_exist = gspread.utils.rowcol_to_a1(row_idx, col_existencia)
                 ref_trans = gspread.utils.rowcol_to_a1(row_idx, col_transito)
                 formula_meses_inv = f"=({ref_exist}+{ref_trans})/{cell_ventas}"
+                formula_unidades_sugeridas = f"=(3.5-{cell_meses_inv})*{cell_ventas}"
                 formula_comprar = f'=SI({cell_meses_inv}>1.5,"OK","COMPRAR")'
                 formulas_ventas.append([formula_ventas])
                 formulas_meses_inv.append([formula_meses_inv])
+                formulas_unidades_sugeridas.append([formula_unidades_sugeridas])
                 formulas_comprar.append([formula_comprar])
 
             _ws_update_range(
@@ -5370,6 +5376,11 @@ def render_salida_neta_tab():
                 ws,
                 f"{gspread.utils.rowcol_to_a1(2, col_meses_inv)}:{gspread.utils.rowcol_to_a1(len(cat_df)+1, col_meses_inv)}",
                 formulas_meses_inv,
+            )
+            _ws_update_range(
+                ws,
+                f"{gspread.utils.rowcol_to_a1(2, col_unidades_sugeridas)}:{gspread.utils.rowcol_to_a1(len(cat_df)+1, col_unidades_sugeridas)}",
+                formulas_unidades_sugeridas,
             )
             _ws_update_range(
                 ws,
@@ -5406,14 +5417,14 @@ def render_salida_neta_tab():
                     df_entradas = df_entradas[cols_entradas].copy()
                     df_salidas = df_salidas[cols_salidas].copy()
 
-                    tipos_excluir_entradas = {
+                    tipos_excluir_salidas = {
                         "TRASPASO SALIDA",
                         "SALIDA AJUSTE",
                         "GARANTÍA POR REPOSICIÓN",
                         "ENSAMBLE TRASPASO SALIDA",
                         "ENSAMBLE FABRICACION ENSAMBLE",
                     }
-                    tipos_excluir_salidas = {
+                    tipos_excluir_entradas = {
                         "TRASPASO ENTRADA",
                         "ENTRADA PEDIMENTO",
                         "ENTRADA AJUSTE",
@@ -5483,8 +5494,6 @@ def render_salida_neta_tab():
 
         st.markdown("### 🧾 Órdenes de compra por proveedor")
         if isinstance(catalogo_df, pd.DataFrame) and not catalogo_df.empty:
-            compras_base = resultado[resultado["Salida_Neta"] > 0][["Código", "Salida_Neta"]].copy()
-            compras_base["Código"] = compras_base["Código"].astype(str).str.strip()
             cat = catalogo_df.copy()
             # Nota: este catálogo viene de Google Sheets (valores), por lo que aquí no se conservan estilos
             # parciales de texto (ej. palabras en rojo dentro de una misma celda).
@@ -5509,6 +5518,61 @@ def render_salida_neta_tab():
             col_precio = _pick_col("PRECIO", "Precio", "Costo", "Cost")
             col_proveedor = _pick_col("Proveedor", "Provedor", "Supplier")
             col_comprar = _pick_col("Comprar")
+            col_unidades_sugeridas = _pick_col("Unidades Sugeridas")
+            col_ventas_prom = _pick_col("Ventas Promedio Por Mes")
+            col_meses_inv = _pick_col("Meses de Inventario")
+
+            proveedores_cantidad = [
+                "KND",
+                "3B",
+                "Mico",
+                "CREATIVE",
+                "HIGHLAND",
+                "Tecnident",
+                "DENRUM",
+                "VALDI/MULTIDENT",
+                "SAWHNEY",
+                "SMART",
+                "Maxflex",
+                "DTC",
+                "GARNET",
+                "ORTHOREAL",
+                "ACRIZAM",
+                "DENTONICS",
+                "BMK",
+                "OMAX",
+                "ORTOSIM",
+                "VILLA DE CORTES",
+                "A10",
+                "BIOCETEC",
+                "ORTHOFIT",
+                "FLOW JAC",
+                "GRAPHY",
+                "TIRDEN",
+                "BAYARDO",
+                "ORTHOARCH",
+                "CPMH",
+                "DANTER",
+                "ALS",
+                "TRIPOD",
+                "WUXI REMOVEEDOR DE ALINEADORES",
+                "PW",
+                "IDEAS DENTALES",
+                "UNIZ",
+                "CICADA",
+                "MULTIDENT",
+            ]
+            proveedor_cols = {prov: _pick_col(prov) for prov in proveedores_cantidad}
+            proveedor_cols = {prov: col for prov, col in proveedor_cols.items() if col}
+
+            def _to_num_series(values) -> pd.Series:
+                series = pd.Series(values, index=cat.index)
+                cleaned = (
+                    series.replace({None: "", np.nan: ""})
+                    .astype(str)
+                    .str.replace(r"[^0-9.\-]", "", regex=True)
+                )
+                return pd.to_numeric(cleaned, errors="coerce")
 
             cat_std = pd.DataFrame({
                 "Modelo": cat[col_modelo] if col_modelo else "",
@@ -5517,31 +5581,51 @@ def render_salida_neta_tab():
                 "PRECIO": cat[col_precio] if col_precio else "",
                 "Proveedor": cat[col_proveedor] if col_proveedor else "",
                 "Comprar": cat[col_comprar] if col_comprar else "",
+                "Unidades Sugeridas": cat[col_unidades_sugeridas] if col_unidades_sugeridas else "",
+                "Ventas Promedio Por Mes": cat[col_ventas_prom] if col_ventas_prom else "",
+                "Meses de Inventario": cat[col_meses_inv] if col_meses_inv else "",
             })
             cat_std["Modelo"] = cat_std["Modelo"].astype(str).str.strip()
-            cat_std["PRECIO"] = pd.to_numeric(cat_std["PRECIO"], errors="coerce").fillna(0)
+            cat_std["PRECIO"] = _to_num_series(cat_std["PRECIO"]).fillna(0)
             cat_std["Proveedor"] = cat_std["Proveedor"].replace({None: "", np.nan: ""}).astype(str).str.strip()
             cat_std["Proveedor"] = cat_std["Proveedor"].replace({"nan": "", "None": ""})
             cat_std["Comprar"] = cat_std["Comprar"].replace({None: "", np.nan: ""}).astype(str).str.strip().str.upper()
+            unidades_sugeridas = _to_num_series(cat_std["Unidades Sugeridas"])
+            ventas_prom = _to_num_series(cat_std["Ventas Promedio Por Mes"])
+            meses_inv = _to_num_series(cat_std["Meses de Inventario"])
+            cat_std["Unidades Sugeridas"] = unidades_sugeridas.fillna((3.5 - meses_inv) * ventas_prom).fillna(0)
+            for prov, col in proveedor_cols.items():
+                cat_std[prov] = _to_num_series(cat[col]).fillna(0)
 
-            po_df = compras_base.merge(
-                cat_std[["Modelo", "Descripción", "English Description", "PRECIO", "Proveedor", "Comprar"]],
-                left_on="Código",
-                right_on="Modelo",
-                how="left",
-            )
-            po_df = po_df[po_df["Modelo"].notna() & (po_df["Modelo"].astype(str).str.strip() != "")]
-            filtrar_solo_comprar = st.checkbox(
-                "Solo incluir productos marcados como COMPRAR en las órdenes de compra",
-                value=True,
-                key="salida_neta_only_comprar",
-            )
-            if filtrar_solo_comprar:
-                po_df = po_df[po_df["Comprar"] == "COMPRAR"].copy()
-            po_df["Quantity"] = po_df["Salida_Neta"]
-            po_df["Cost"] = po_df["PRECIO"]
-            po_df["Total"] = po_df["Quantity"] * po_df["Cost"]
-            po_df = po_df[["Modelo", "Descripción", "English Description", "Quantity", "Cost", "Total", "Proveedor"]]
+            po_base = cat_std[cat_std["Modelo"].notna() & (cat_std["Modelo"].astype(str).str.strip() != "")].copy()
+            po_base = po_base[po_base["Comprar"] == "COMPRAR"].copy()
+            lineas_oc = []
+            for _, item in po_base.iterrows():
+                tiene_cantidad_proveedor = False
+                for prov in proveedores_cantidad:
+                    if prov not in item.index:
+                        continue
+                    cantidad_prov = pd.to_numeric(item.get(prov), errors="coerce")
+                    if pd.notna(cantidad_prov) and cantidad_prov > 0:
+                        tiene_cantidad_proveedor = True
+                        linea = item.copy()
+                        linea["Proveedor"] = prov
+                        linea["Quantity"] = cantidad_prov
+                        lineas_oc.append(linea)
+                if not tiene_cantidad_proveedor:
+                    linea = item.copy()
+                    linea["Quantity"] = pd.to_numeric(item.get("Unidades Sugeridas"), errors="coerce")
+                    lineas_oc.append(linea)
+
+            po_df = pd.DataFrame(lineas_oc)
+            if po_df.empty:
+                po_df = pd.DataFrame(columns=["Modelo", "Descripción", "English Description", "Quantity", "Cost", "Total", "Proveedor"])
+            else:
+                po_df["Quantity"] = pd.to_numeric(po_df["Quantity"], errors="coerce").fillna(0)
+                po_df = po_df[po_df["Quantity"] > 0].copy()
+                po_df["Cost"] = po_df["PRECIO"]
+                po_df["Total"] = po_df["Quantity"] * po_df["Cost"]
+                po_df = po_df[["Modelo", "Descripción", "English Description", "Quantity", "Cost", "Total", "Proveedor"]]
 
             proveedores_validos = po_df["Proveedor"].astype(str).str.strip()
             proveedores = (
@@ -5555,7 +5639,7 @@ def render_salida_neta_tab():
             )
             sin_proveedor = int((po_df["Proveedor"].astype(str).str.strip() == "").sum()) if not po_df.empty else 0
             st.caption(
-                f"Coincidencias catálogo para OC: **{len(po_df)}** | "
+                f"Productos COMPRAR para OC: **{len(po_df)}** | "
                 f"Con proveedor: **{len(proveedores)}** | Sin proveedor asignado: **{sin_proveedor}**"
             )
             if sin_proveedor > 0:
@@ -5565,8 +5649,9 @@ def render_salida_neta_tab():
                 ].copy()
                 with st.expander(f"⚠️ Ver productos sin proveedor asignado ({sin_proveedor})", expanded=False):
                     st.caption(
-                        "Estos productos sí tienen coincidencia en catálogo, pero no tienen valor en la columna "
-                        "**Proveedor**, por eso no se incluyen en una OC por proveedor."
+                        "Estos productos están marcados como **COMPRAR**, pero no tienen cantidades en las "
+                        "columnas de proveedor ni valor en la columna **Proveedor** para usar con "
+                        "**Unidades Sugeridas**; por eso no se incluyen en una OC por proveedor."
                     )
                     st.dataframe(sin_proveedor_df, use_container_width=True, hide_index=True)
             if proveedores:
@@ -5651,7 +5736,8 @@ def render_salida_neta_tab():
             else:
                 st.warning(
                     "No hay proveedores para desplegar órdenes de compra. "
-                    "Revisa que los productos encontrados en catálogo tengan la columna **Proveedor** llena."
+                    "Revisa que los productos marcados como **COMPRAR** tengan cantidades en columnas de proveedor "
+                    "o tengan la columna **Proveedor** llena para usar **Unidades Sugeridas**."
                 )
         else:
             st.warning(
