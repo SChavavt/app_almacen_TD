@@ -5662,7 +5662,9 @@ def usuario_puede(usuario: str | None, permiso: str) -> bool:
 
 usuario_actual = ensure_user_logged_in()
 
-if usuario_actual in COBRANZA_ONLY_USERS:
+if usuario_actual == "JorgeLic":
+    tab_specs = [("salida_neta", "📦 Rotaciones")]
+elif usuario_actual in COBRANZA_ONLY_USERS:
     tab_specs = [
         ("cobranza", "📒 Cobranza"),
         ("seguimiento_cobranza", "📊 Seguimiento Cobranza"),
@@ -5687,10 +5689,15 @@ else:
         tab_specs.append(("modificar", "✏️ Modificar Pedido"))
 
     if usuario_actual in {"SChava", "JorgeLic"}:
-        tab_specs.append(("salida_neta", "📦 Salida Neta"))
+        tab_specs.append(("salida_neta", "📦 Rotaciones"))
 
 tabs = st.tabs([titulo for _, titulo in tab_specs])
 tab_map = {clave: tab for (clave, _), tab in zip(tab_specs, tabs)}
+
+if usuario_actual == "JorgeLic":
+    with tab_map["salida_neta"]:
+        render_salida_neta_tab()
+    st.stop()
 
 with tab_map["buscar"]:
     modo_busqueda = st.radio(
