@@ -2393,6 +2393,64 @@ def cobranza_upsert_rows_by_key(
     _COBRANZA_VALUES_CACHE.pop(_cobranza_cache_key(ws), None)
 
 
+def cobranza_prune_rows_by_keys(
+    ws,
+    keep_rows: pd.DataFrame,
+    key_cols: list[str],
+    scope_col: str | None = None,
+    scope_values: set[str] | None = None,
+):
+    """Elimina filas que ya no vienen en la carga más reciente dentro de un alcance."""
+    if keep_rows.empty:
+        return
+
+    values = _cobranza_get_all_values_cached(ws, use_cache=True)
+    if not values:
+        return
+
+    headers = _cobranza_headers_from_values(values)
+    if not headers:
+        return
+
+    idx = {h: i for i, h in enumerate(headers)}
+    for k in key_cols:
+        if k not in idx:
+            return
+    if scope_col and scope_col not in idx:
+        return
+
+    keep_keys = {
+        tuple(_cobranza_clean_text(r.get(k, "")) for k in key_cols)
+        for _, r in keep_rows.iterrows()
+    }
+    if not keep_keys:
+        return
+
+    scope_norm = {_cobranza_clean_text(v) for v in (scope_values or set())}
+    matrix = [headers]
+    changed = False
+    for row in values[1:]:
+        row_pad = list(row) + [""] * (len(headers) - len(row))
+        if scope_col:
+            row_scope = _cobranza_clean_text(row_pad[idx[scope_col]])
+            if row_scope not in scope_norm:
+                matrix.append(row_pad)
+                continue
+        row_key = tuple(_cobranza_clean_text(row_pad[idx[k]]) for k in key_cols)
+        if row_key in keep_keys:
+            matrix.append(row_pad)
+        else:
+            changed = True
+
+    if changed:
+        _retry_gspread_api_call(
+            lambda: cobranza_replace_matrix_values(ws, matrix),
+            retries=4,
+            base_delay=1.0,
+        )
+        _COBRANZA_VALUES_CACHE.pop(_cobranza_cache_key(ws), None)
+
+
 def parse_reporte_cobranza_excel(file, mes: str) -> pd.DataFrame:
     raw = pd.read_excel(file, header=None)
     header_idx = None
@@ -3041,6 +3099,16 @@ def render_cobranza_tab_gerente():
                 cobranza_upsert_rows_by_key(ws_base, df_base[base_headers], ["Mes", "Codigo"], ["Razon_Social", "Saldo", "No_Vencido", "Vencido", "Tipo_Pago", "Ultima_Actualizacion"])
                 if not df_venc.empty:
                     cobranza_upsert_rows_by_key(ws_venc, df_venc[venc_headers], ["Codigo", "Folio", "Fecha_Vencimiento"], ["Mes", "Fecha_Factura", "Saldo_Vence", "Condicion", "Moneda", "Vendedor", "Ultima_Actualizacion"])
+                    codigos_cargados = {
+                        _cobranza_clean_text(c) for c in df_venc["Codigo"].astype(str).tolist() if _cobranza_clean_text(c)
+                    }
+                    cobranza_prune_rows_by_keys(
+                        ws_venc,
+                        keep_rows=df_venc[["Codigo", "Folio", "Fecha_Vencimiento"]].copy(),
+                        key_cols=["Codigo", "Folio", "Fecha_Vencimiento"],
+                        scope_col="Codigo",
+                        scope_values=codigos_cargados,
+                    )
 
                 st.session_state["ger_cob_stats"] = {
                     "clientes": int(len(df_base)),
