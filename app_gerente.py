@@ -2403,9 +2403,9 @@ def cobranza_prune_rows_by_keys(
     """Elimina filas que ya no vienen en la carga más reciente dentro de un alcance.
 
     Si ``keep_rows`` viene vacío, se eliminan todas las filas existentes dentro
-    del alcance indicado por ``scope_col``/``scope_values``. Esto permite limpiar
-    folios históricos de clientes que ya no traen renglones nuevos en
-    ANTIGÜEDAD, pero sí siguen estando dentro del REPORTE cargado.
+    del alcance indicado por ``scope_col``/``scope_values``; si no se pasa
+    alcance, se limpia toda la hoja. Esto permite que la hoja de vencimientos
+    refleje exactamente los folios vigentes del último ANTIGÜEDAD cargado.
     """
     values = _cobranza_get_all_values_cached(ws, use_cache=True)
     if not values:
@@ -3101,15 +3101,14 @@ def render_cobranza_tab_gerente():
                 if not df_venc.empty:
                     cobranza_upsert_rows_by_key(ws_venc, df_venc[venc_headers], ["Codigo", "Folio", "Fecha_Vencimiento"], ["Mes", "Fecha_Factura", "Saldo_Vence", "Condicion", "Moneda", "Vendedor", "Ultima_Actualizacion"])
 
-                codigos_alcance_limpieza = {
-                    _cobranza_clean_text(c) for c in df_base["Codigo"].astype(str).tolist() if _cobranza_clean_text(c)
-                }
+                # ANTIGÜEDAD es la fuente vigente de folios abiertos: cualquier folio
+                # que ya no venga en la carga más reciente se debe quitar, incluso si
+                # el cliente tampoco viene en REPORTE. De lo contrario, esos folios
+                # viejos vuelven a aparecer en el expander como saldos pendientes.
                 cobranza_prune_rows_by_keys(
                     ws_venc,
                     keep_rows=df_venc[["Codigo", "Folio", "Fecha_Vencimiento"]].copy(),
                     key_cols=["Codigo", "Folio", "Fecha_Vencimiento"],
-                    scope_col="Codigo",
-                    scope_values=codigos_alcance_limpieza,
                 )
 
                 st.session_state["ger_cob_stats"] = {
@@ -3373,135 +3372,6 @@ def render_cobranza_tab_gerente():
                 cols_mxn = [c for c in ["Saldo", "Vencido", "Saldo_Vencido_Total"] if c in tabla_saldos.columns]
                 for c in cols_mxn:
                     tabla_saldos[c] = pd.to_numeric(tabla_saldos[c], errors="coerce").fillna(0.0).map(lambda x: f"$ {x:,.2f} MXN")
-
-                # Vista visual tipo agenda/calendario de vencimientos por cliente y folio.
-                if not venc_df.empty:
-                    agenda_df = venc_df.copy()
-                    agenda_df["Codigo"] = agenda_df.get("Codigo", pd.Series("", index=agenda_df.index)).astype(str)
-                    agenda_df["Folio"] = agenda_df.get("Folio", pd.Series("", index=agenda_df.index)).astype(str)
-                    agenda_df["Razon_Social"] = agenda_df.get("Razon_Social", pd.Series("", index=agenda_df.index)).astype(str)
-                    agenda_df["Razon Social"] = agenda_df.get("Razon Social", pd.Series("", index=agenda_df.index)).astype(str)
-                    nombre_por_codigo = {}
-                    if "saldos_df" in locals() and isinstance(saldos_df, pd.DataFrame) and not saldos_df.empty:
-                        cod_ser = saldos_df.get("Codigo", pd.Series("", index=saldos_df.index)).astype(str)
-                        nom_ser = saldos_df.get("Razon_Social", pd.Series("", index=saldos_df.index)).astype(str)
-                        nombre_por_codigo.update({c: n for c, n in zip(cod_ser.tolist(), nom_ser.tolist()) if str(c).strip() and str(n).strip()})
-                    if isinstance(base_df, pd.DataFrame) and not base_df.empty:
-                        cod_ser_b = base_df.get("Codigo", pd.Series("", index=base_df.index)).astype(str)
-                        nom_ser_b = base_df.get("Razon_Social", pd.Series("", index=base_df.index)).astype(str)
-                        for c, n in zip(cod_ser_b.tolist(), nom_ser_b.tolist()):
-                            if str(c).strip() and str(n).strip() and c not in nombre_por_codigo:
-                                nombre_por_codigo[c] = n
-                    agenda_df["Nombre_Por_Codigo"] = agenda_df["Codigo"].map(nombre_por_codigo).fillna("").astype(str)
-                    agenda_df["Cliente_Nombre"] = agenda_df["Razon_Social"].where(
-                        agenda_df["Razon_Social"].str.strip() != "",
-                        agenda_df["Razon Social"],
-                    ).astype(str)
-                    agenda_df["Cliente_Nombre"] = agenda_df["Cliente_Nombre"].where(
-                        agenda_df["Cliente_Nombre"].str.strip() != "",
-                        agenda_df["Nombre_Por_Codigo"],
-                    ).astype(str)
-                    agenda_df["Saldo_Vence"] = pd.to_numeric(agenda_df.get("Saldo_Vence", 0), errors="coerce").fillna(0.0)
-                    agenda_df["Fecha_Vencimiento_dt"] = pd.to_datetime(agenda_df.get("Fecha_Vencimiento", ""), errors="coerce")
-                    agenda_df["Fecha_Factura_dt"] = pd.to_datetime(agenda_df.get("Fecha_Factura", ""), errors="coerce")
-                    vendedor_norm_ag = agenda_df.get("Vendedor", pd.Series("", index=agenda_df.index)).astype(str).str.strip().str.upper()
-                    dias_factura_ag = (hoy_norm - agenda_df["Fecha_Factura_dt"].dt.normalize()).dt.days
-                    es_congreso_ag = vendedor_norm_ag.eq("CONGRESO")
-                    mask_visible_ag = (
-                        (es_congreso_ag & (dias_factura_ag >= 14))
-                        | (~es_congreso_ag & (dias_factura_ag >= 3))
-                        | agenda_df["Fecha_Factura_dt"].isna()
-                    )
-                    agenda_df = agenda_df[mask_visible_ag].copy()
-                    agenda_df = agenda_df.dropna(subset=["Fecha_Vencimiento_dt"]).copy()
-
-                    if anio_sel != "Todos":
-                        agenda_df = agenda_df[agenda_df.get("Mes", "").astype(str).str.startswith(f"{anio_sel}-")]
-                    if mes_num_sel != "Todos":
-                        agenda_df = agenda_df[agenda_df.get("Mes", "").astype(str).str.endswith(f"-{mes_num_sel}")]
-
-                    if folios_liquidados:
-                        agenda_keys = agenda_df["Codigo"].astype(str) + "|" + agenda_df["Folio"].apply(_cobranza_clean_text)
-                        agenda_df = agenda_df[~agenda_keys.isin(folios_liquidados)].copy()
-
-                    agenda_df = agenda_df[agenda_df["Saldo_Vence"] > 0].copy()
-
-                    if not agenda_df.empty:
-                        agenda_df["Etiqueta_Cliente"] = agenda_df["Codigo"] + " · " + agenda_df["Cliente_Nombre"].str.slice(0, 40)
-                        agenda_df["Dias_para_vencer"] = (
-                            agenda_df["Fecha_Vencimiento_dt"].dt.normalize() - hoy_norm
-                        ).dt.days
-                        agenda_df["Dias_para_vencer"] = agenda_df["Dias_para_vencer"].fillna(0).astype(int)
-                        # Forzar granularidad diaria (sin horas) para evitar zoom por hora en eje X.
-                        agenda_df["Fecha_Vencimiento_dia"] = agenda_df["Fecha_Vencimiento_dt"].dt.normalize()
-                        agenda_df["Texto_Evento"] = (
-                            "Folio " + agenda_df["Folio"]
-                            + "<br>Razón social: " + agenda_df["Razon_Social"]
-                            + "<br>Saldo: $" + agenda_df["Saldo_Vence"].map(lambda x: f"{x:,.2f}")
-                        )
-                        st.markdown("#### 🗓️ Agenda visual de vencimientos")
-                        st.caption("Cada punto representa un folio pendiente con su fecha de vencimiento y monto.")
-
-                        fig_agenda = px.scatter(
-                            agenda_df,
-                            x="Fecha_Vencimiento_dia",
-                            y="Dias_para_vencer",
-                            size="Saldo_Vence",
-                            color="Dias_para_vencer",
-                            color_continuous_scale="RdYlGn",
-                            color_continuous_midpoint=0,
-                            hover_name="Folio",
-                            hover_data={
-                                "Cliente_Nombre": False,
-                                "Saldo_Vence": ':,.2f',
-                                "Fecha_Vencimiento_dia": '|%b %d',
-                                "Etiqueta_Cliente": False,
-                                "Codigo": True,
-                                "Dias_para_vencer": True,
-                            },
-                            labels={
-                                "Fecha_Vencimiento_dia": "Fecha de vencimiento",
-                                "Saldo_Vence": "Saldo vencido",
-                                "Codigo": "Código cliente",
-                                "Dias_para_vencer": "Días para vencer",
-                            },
-                            height=420,
-                        )
-                        fig_agenda.update_traces(
-                            marker=dict(line=dict(width=0.6, color="rgba(70,70,70,0.35)"), sizemin=8, opacity=0.85),
-                            customdata=np.stack(
-                                [
-                                    agenda_df["Cliente_Nombre"].fillna("").astype(str),
-                                    agenda_df["Codigo"].fillna("").astype(str),
-                                ],
-                                axis=-1,
-                            ),
-                            hovertemplate="<b>%{hovertext}</b><br><br>Fecha de vencimiento=%{x|%b %d}<br>Días para vencer=%{marker.color}<br>Saldo vencido=%{marker.size:,.2f}<br>Codigo=%{customdata[1]}<br>Cliente=%{customdata[0]}<extra></extra>",
-                        )
-                        fig_agenda.update_layout(
-                            margin=dict(l=10, r=10, t=10, b=10),
-                            coloraxis_colorbar_title="Días",
-                            xaxis=dict(
-                                title="Fecha de vencimiento",
-                                type="date",
-                                tickformat="%b %d",
-                                dtick="D1",
-                                fixedrange=True,
-                            ),
-                            yaxis=dict(
-                                title="Días para vencer (0 = hoy, negativos = vencido)",
-                                showgrid=True,
-                                zeroline=True,
-                                zerolinecolor="#ef4444",
-                                autorange=True,
-                                fixedrange=True,
-                            ),
-                        )
-                        st.plotly_chart(
-                            fig_agenda,
-                            use_container_width=True,
-                            config={"scrollZoom": False, "doubleClick": False, "displayModeBar": True},
-                        )
 
                 if "Semaforo_Seguimiento" in tabla_saldos.columns:
                     total_rojo = int((tabla_saldos["Semaforo_Seguimiento"] == "🔴").sum())
