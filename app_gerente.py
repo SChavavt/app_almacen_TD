@@ -3123,10 +3123,11 @@ def render_cobranza_tab_gerente():
                     ]
                     orden_sel = st.selectbox("Orden", options=orden_opts, index=0, key="ger_cob_saldos_orden")
                 with col_f4:
-                    ocultar_contado = st.checkbox(
-                        "Ocultar condición CONTADO",
+                    ver_solo_credito = st.toggle(
+                        "Ver solo crédito",
                         value=True,
-                        key="ger_cob_saldos_ocultar_contado",
+                        key="ger_cob_saldos_ver_solo_credito",
+                        help="Activado: muestra clientes con condiciones distintas a CONTADO. Desactivado: muestra solo CONTADO.",
                     )
 
                 if anio_sel != "Todos":
@@ -3241,11 +3242,11 @@ def render_cobranza_tab_gerente():
                         .to_dict()
                     )
                     saldos_df["Condicion_Facturas"] = saldos_df["Codigo"].map(cond_por_codigo).fillna("")
-                if ocultar_contado:
-                    cond_norm = saldos_df["Condicion_Facturas"].astype(str).str.strip()
-                    saldos_df = saldos_df[
-                        cond_norm != "Contado"
-                    ].copy()
+                cond_norm = saldos_df["Condicion_Facturas"].astype(str).str.strip().str.lower()
+                if ver_solo_credito:
+                    saldos_df = saldos_df[cond_norm != "contado"].copy()
+                else:
+                    saldos_df = saldos_df[cond_norm == "contado"].copy()
 
                 semaforo_por_cliente: dict[str, str] = {}
                 if not com_df.empty:
