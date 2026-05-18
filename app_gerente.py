@@ -8,9 +8,11 @@ import gspread
 import pdfplumber
 import json
 import hashlib
+from openpyxl import load_workbook
 import re
 import unicodedata
 from io import BytesIO
+from openpyxl.cell.rich_text import CellRichText, TextBlock
 from oauth2client.service_account import ServiceAccountCredentials
 from urllib.parse import urlparse, unquote
 from datetime import datetime, timedelta, date
@@ -5112,6 +5114,7 @@ def render_salida_neta_tab():
     with st.form("salida_neta_form", clear_on_submit=False):
         entradas_file = st.file_uploader("1) Subir archivo de Entradas.xlsx", type=["xlsx"], key="salida_neta_entradas")
         salidas_file = st.file_uploader("2) Subir archivo de Salidas.xlsx", type=["xlsx"], key="salida_neta_salidas")
+        catalogo_rich_file = st.file_uploader("3) (Opcional) Subir Catálogo TD.xlsx con formato de colores", type=["xlsx"], key="salida_neta_catalogo_rich")
         procesar = st.form_submit_button("3) Procesar archivos")
 
     def _leer_archivo_excel(uploaded_file):
@@ -5392,6 +5395,7 @@ def render_salida_neta_tab():
     if isinstance(resultado, pd.DataFrame) and not resultado.empty:
         fecha_desde = st.session_state.get("salida_neta_fecha_desde")
         catalogo_df, no_encontrados_df, col_rotacion = pd.DataFrame(), pd.DataFrame(), ""
+        richtext_catalogo_map = _cargar_richtext_catalogo(st.session_state.get("salida_neta_catalogo_rich"))
         if isinstance(fecha_desde, datetime):
             try:
                 catalogo_df, no_encontrados_df, col_rotacion = _actualizar_rotacion_catalogo(resultado, fecha_desde)
@@ -5415,6 +5419,8 @@ def render_salida_neta_tab():
             compras_base = resultado[resultado["Salida_Neta"] > 0][["Código", "Salida_Neta"]].copy()
             compras_base["Código"] = compras_base["Código"].astype(str).str.strip()
             cat = catalogo_df.copy()
+            # Nota: este catálogo viene de Google Sheets (valores), por lo que aquí no se conservan estilos
+            # parciales de texto (ej. palabras en rojo dentro de una misma celda).
 
             def _norm_col_name(s: str) -> str:
                 s = str(s or "").strip().lower()
@@ -5512,13 +5518,78 @@ def render_salida_neta_tab():
                         with pd.ExcelWriter(excel_buffer, engine="xlsxwriter") as writer:
                             po_prov_export.to_excel(writer, sheet_name="Orden_Compra", index=False)
                             ws_oc = writer.sheets["Orden_Compra"]
-                            fmt_money = writer.book.add_format({"num_format": "$#,##0.00"})
-                            if "Cost" in po_prov_export.columns:
-                                idx_cost = po_prov_export.columns.get_loc("Cost")
-                                ws_oc.set_column(idx_cost, idx_cost, 14, fmt_money)
-                            if "Total" in po_prov_export.columns:
+                            wb_oc = writer.book
+
+                            ncols = len(po_prov_export.columns)
+                            nrows = len(po_prov_export)
+
+                            fmt_header = wb_oc.add_format({"bold": True, "border": 1, "align": "center", "valign": "vcenter"})
+                            fmt_text = wb_oc.add_format({"border": 1})
+                            fmt_num = wb_oc.add_format({"border": 1, "num_format": "#,##0"})
+                            fmt_money = wb_oc.add_format({"border": 1, "num_format": "$#,##0.00"})
+                            fmt_red = wb_oc.add_format({"font_color": "red"})
+                            fmt_total_label = wb_oc.add_format({"bold": True, "border": 1, "align": "right"})
+                            fmt_total_value = wb_oc.add_format({"bold": True, "border": 1, "num_format": "$#,##0.00"})
+
+                            # Encabezados con borde completo.
+                            for col_idx, col_name in enumerate(po_prov_export.columns):
+                                ws_oc.write(0, col_idx, col_name, fmt_header)
+
+                            # Bordes y formato para todas las celdas del cuerpo.
+                            if nrows > 0:
+                                for row_idx in range(1, nrows + 1):
+                                    for col_idx, col_name in enumerate(po_prov_export.columns):
+                                        val = po_prov_export.iloc[row_idx - 1, col_idx]
+                                        if col_name == "Quantity":
+                                            ws_oc.write_number(row_idx, col_idx, float(pd.to_numeric(val, errors="coerce") or 0), fmt_num)
+                                        elif col_name in {"Cost", "Total"}:
+                                            ws_oc.write_number(row_idx, col_idx, float(pd.to_numeric(val, errors="coerce") or 0), fmt_money)
+                                        elif col_name in {"Descripción", "English Description"}:
+                                            modelo_val = "" if pd.isna(po_prov_export.iloc[row_idx - 1, 0]) else str(po_prov_export.iloc[row_idx - 1, 0]).strip()
+                                            rich_runs = richtext_catalogo_map.get(modelo_val, {}).get(col_name, []) if isinstance(richtext_catalogo_map, dict) else []
+                                            if rich_runs:
+                                                args = []
+                                                for txt, is_red in rich_runs:
+                                                    if not txt:
+                                                        continue
+                                                    if is_red:
+                                                        args.extend([fmt_red, txt])
+                                                    else:
+                                                        args.append(txt)
+                                                if args:
+                                                    ws_oc.write_rich_string(row_idx, col_idx, *args, fmt_text)
+                                                else:
+                                                    ws_oc.write(row_idx, col_idx, "" if pd.isna(val) else str(val), fmt_text)
+                                            else:
+                                                ws_oc.write(row_idx, col_idx, "" if pd.isna(val) else str(val), fmt_text)
+                                        else:
+                                            ws_oc.write(row_idx, col_idx, "" if pd.isna(val) else str(val), fmt_text)
+
+                            # Anchos de columna (evitar columnas comprimidas).
+                            column_widths = {
+                                "Modelo": 18,
+                                "Descripción": 40,
+                                "English Description": 48,
+                                "Quantity": 12,
+                                "Cost": 14,
+                                "Total": 16,
+                            }
+                            for col_idx, col_name in enumerate(po_prov_export.columns):
+                                ws_oc.set_column(col_idx, col_idx, column_widths.get(col_name, 16))
+
+                            # Total general dos filas debajo del último registro.
+                            if "Total" in po_prov_export.columns and ncols > 0:
                                 idx_total = po_prov_export.columns.get_loc("Total")
-                                ws_oc.set_column(idx_total, idx_total, 16, fmt_money)
+                                excel_first_data_row = 2
+                                excel_last_data_row = nrows + 1
+                                excel_total_row = nrows + 3
+                                ws_oc.write(excel_total_row - 1, max(idx_total - 1, 0), "TOTAL", fmt_total_label)
+                                ws_oc.write_formula(
+                                    excel_total_row - 1,
+                                    idx_total,
+                                    f"=SUM({chr(65 + idx_total)}{excel_first_data_row}:{chr(65 + idx_total)}{excel_last_data_row})",
+                                    fmt_total_value,
+                                )
 
                         st.download_button(
                             f"Descargar OC - {prov}",
