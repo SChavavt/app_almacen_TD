@@ -2400,10 +2400,13 @@ def cobranza_prune_rows_by_keys(
     scope_col: str | None = None,
     scope_values: set[str] | None = None,
 ):
-    """Elimina filas que ya no vienen en la carga más reciente dentro de un alcance."""
-    if keep_rows.empty:
-        return
+    """Elimina filas que ya no vienen en la carga más reciente dentro de un alcance.
 
+    Si ``keep_rows`` viene vacío, se eliminan todas las filas existentes dentro
+    del alcance indicado por ``scope_col``/``scope_values``. Esto permite limpiar
+    folios históricos de clientes que ya no traen renglones nuevos en
+    ANTIGÜEDAD, pero sí siguen estando dentro del REPORTE cargado.
+    """
     values = _cobranza_get_all_values_cached(ws, use_cache=True)
     if not values:
         return
@@ -2423,8 +2426,6 @@ def cobranza_prune_rows_by_keys(
         tuple(_cobranza_clean_text(r.get(k, "")) for k in key_cols)
         for _, r in keep_rows.iterrows()
     }
-    if not keep_keys:
-        return
 
     scope_norm = {_cobranza_clean_text(v) for v in (scope_values or set())}
     matrix = [headers]
@@ -3099,16 +3100,17 @@ def render_cobranza_tab_gerente():
                 cobranza_upsert_rows_by_key(ws_base, df_base[base_headers], ["Mes", "Codigo"], ["Razon_Social", "Saldo", "No_Vencido", "Vencido", "Tipo_Pago", "Ultima_Actualizacion"])
                 if not df_venc.empty:
                     cobranza_upsert_rows_by_key(ws_venc, df_venc[venc_headers], ["Codigo", "Folio", "Fecha_Vencimiento"], ["Mes", "Fecha_Factura", "Saldo_Vence", "Condicion", "Moneda", "Vendedor", "Ultima_Actualizacion"])
-                    codigos_cargados = {
-                        _cobranza_clean_text(c) for c in df_venc["Codigo"].astype(str).tolist() if _cobranza_clean_text(c)
-                    }
-                    cobranza_prune_rows_by_keys(
-                        ws_venc,
-                        keep_rows=df_venc[["Codigo", "Folio", "Fecha_Vencimiento"]].copy(),
-                        key_cols=["Codigo", "Folio", "Fecha_Vencimiento"],
-                        scope_col="Codigo",
-                        scope_values=codigos_cargados,
-                    )
+
+                codigos_alcance_limpieza = {
+                    _cobranza_clean_text(c) for c in df_base["Codigo"].astype(str).tolist() if _cobranza_clean_text(c)
+                }
+                cobranza_prune_rows_by_keys(
+                    ws_venc,
+                    keep_rows=df_venc[["Codigo", "Folio", "Fecha_Vencimiento"]].copy(),
+                    key_cols=["Codigo", "Folio", "Fecha_Vencimiento"],
+                    scope_col="Codigo",
+                    scope_values=codigos_alcance_limpieza,
+                )
 
                 st.session_state["ger_cob_stats"] = {
                     "clientes": int(len(df_base)),
