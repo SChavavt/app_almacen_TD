@@ -5406,14 +5406,14 @@ def render_salida_neta_tab():
                     df_entradas = df_entradas[cols_entradas].copy()
                     df_salidas = df_salidas[cols_salidas].copy()
 
-                    tipos_excluir_entradas = {
+                    tipos_excluir_salidas = {
                         "TRASPASO SALIDA",
                         "SALIDA AJUSTE",
                         "GARANTÍA POR REPOSICIÓN",
                         "ENSAMBLE TRASPASO SALIDA",
                         "ENSAMBLE FABRICACION ENSAMBLE",
                     }
-                    tipos_excluir_salidas = {
+                    tipos_excluir_entradas = {
                         "TRASPASO ENTRADA",
                         "ENTRADA PEDIMENTO",
                         "ENTRADA AJUSTE",
