@@ -5325,11 +5325,9 @@ def render_salida_neta_tab():
         # Recalcular columnas derivadas usadas en catálogo:
         # - Ventas Promedio Por Mes = promedio de las últimas 6 columnas de Rotación (incluyendo la recién creada).
         # - Meses de Inventario = (Existencia + Tránsito) / Ventas Promedio Por Mes.
-        # - Unidades Sugeridas = (3.5 - Meses de Inventario) * Ventas Promedio Por Mes.
         # - Comprar = SI(Meses de Inventario > 1.5, "OK", "COMPRAR").
         headers, col_ventas_prom = _ensure_column(ws, headers, "Ventas Promedio Por Mes")
         headers, col_meses_inv = _ensure_column(ws, headers, "Meses de Inventario")
-        headers, col_unidades_sugeridas = _ensure_column(ws, headers, "Unidades Sugeridas")
         headers, col_comprar = _ensure_column(ws, headers, "Comprar")
 
         col_existencia = (headers.index("Existencia") + 1) if "Existencia" in headers else 7
@@ -5344,7 +5342,6 @@ def render_salida_neta_tab():
         if len(ultimas_6_rot) >= 1:
             formulas_ventas = []
             formulas_meses_inv = []
-            formulas_unidades_sugeridas = []
             formulas_comprar = []
             for i, row in cat_df.iterrows():
                 row_idx = i + 2
@@ -5352,7 +5349,6 @@ def render_salida_neta_tab():
                 if not modelo:
                     formulas_ventas.append([""])
                     formulas_meses_inv.append([""])
-                    formulas_unidades_sugeridas.append([""])
                     formulas_comprar.append([""])
                     continue
                 if len(ultimas_6_rot) >= 6:
@@ -5366,11 +5362,9 @@ def render_salida_neta_tab():
                 ref_exist = gspread.utils.rowcol_to_a1(row_idx, col_existencia)
                 ref_trans = gspread.utils.rowcol_to_a1(row_idx, col_transito)
                 formula_meses_inv = f"=({ref_exist}+{ref_trans})/{cell_ventas}"
-                formula_unidades_sugeridas = f"=(3.5-{cell_meses_inv})*{cell_ventas}"
                 formula_comprar = f'=SI({cell_meses_inv}>1.5,"OK","COMPRAR")'
                 formulas_ventas.append([formula_ventas])
                 formulas_meses_inv.append([formula_meses_inv])
-                formulas_unidades_sugeridas.append([formula_unidades_sugeridas])
                 formulas_comprar.append([formula_comprar])
 
             _ws_update_range(
@@ -5382,11 +5376,6 @@ def render_salida_neta_tab():
                 ws,
                 f"{gspread.utils.rowcol_to_a1(2, col_meses_inv)}:{gspread.utils.rowcol_to_a1(len(cat_df)+1, col_meses_inv)}",
                 formulas_meses_inv,
-            )
-            _ws_update_range(
-                ws,
-                f"{gspread.utils.rowcol_to_a1(2, col_unidades_sugeridas)}:{gspread.utils.rowcol_to_a1(len(cat_df)+1, col_unidades_sugeridas)}",
-                formulas_unidades_sugeridas,
             )
             _ws_update_range(
                 ws,
