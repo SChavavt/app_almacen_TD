@@ -5133,20 +5133,6 @@ def render_salida_neta_tab():
         return f"Rotación {MESES_ES[fecha_desde.month]} {fecha_desde.year}"
 
     def _actualizar_rotacion_catalogo(df_salida_neta: pd.DataFrame, fecha_desde: datetime):
-        def _ensure_column(worksheet, headers_row: list[str], col_name: str) -> tuple[list[str], int]:
-            """Garantiza que exista una columna por nombre. Devuelve headers actualizados e índice 1-based."""
-            if col_name in headers_row:
-                return headers_row, headers_row.index(col_name) + 1
-            worksheet.add_cols(1)
-            new_col_idx = len(headers_row) + 1
-            worksheet.update_cell(1, new_col_idx, col_name)
-            headers_row = worksheet.row_values(1)
-            return headers_row, new_col_idx
-
-        def _build_rotacion_formula(row_idx: int, month_col_indices: list[int]) -> str:
-            refs = "+".join(gspread.utils.rowcol_to_a1(row_idx, c) for c in month_col_indices)
-            return f"=({refs})/6"
-
         def _ws_update_range(worksheet, a1_range: str, values_matrix):
             """Compatibilidad entre versiones de gspread con/sin Worksheet.update."""
             if hasattr(worksheet, "update"):
@@ -5233,68 +5219,6 @@ def render_salida_neta_tab():
             f"{gspread.utils.rowcol_to_a1(2, col_idx)}:{gspread.utils.rowcol_to_a1(len(cat_df)+1, col_idx)}",
             values_to_write,
         )
-
-        # Recalcular columnas derivadas usadas en catálogo:
-        # - Ventas Promedio Por Mes = promedio de las últimas 6 columnas de Rotación (incluyendo la recién creada).
-        # - Meses de Inventario = (Existencia + Tránsito) / Ventas Promedio Por Mes.
-        # - Comprar = SI(Meses de Inventario > 1.5, "OK", "COMPRAR").
-        headers, col_ventas_prom = _ensure_column(ws, headers, "Ventas Promedio Por Mes")
-        headers, col_meses_inv = _ensure_column(ws, headers, "Meses de Inventario")
-        headers, col_comprar = _ensure_column(ws, headers, "Comprar")
-
-        col_existencia = (headers.index("Existencia") + 1) if "Existencia" in headers else 7
-        col_transito = (headers.index("Transito") + 1) if "Transito" in headers else 8
-
-        rot_cols = [
-            idx + 1
-            for idx, h in enumerate(headers)
-            if re.match(r"^Rotación\s+.+\s+\d{4}$", str(h).strip())
-        ]
-        ultimas_6_rot = rot_cols[-6:] if len(rot_cols) >= 6 else rot_cols
-        if len(ultimas_6_rot) >= 1:
-            formulas_ventas = []
-            formulas_meses_inv = []
-            formulas_comprar = []
-            for i, row in cat_df.iterrows():
-                row_idx = i + 2
-                modelo = str(row.get("Modelo", "")).strip()
-                if not modelo:
-                    formulas_ventas.append([""])
-                    formulas_meses_inv.append([""])
-                    formulas_comprar.append([""])
-                    continue
-                if len(ultimas_6_rot) >= 6:
-                    formula_ventas = _build_rotacion_formula(row_idx, ultimas_6_rot)
-                else:
-                    refs = "+".join(gspread.utils.rowcol_to_a1(row_idx, c) for c in ultimas_6_rot)
-                    divisor = max(len(ultimas_6_rot), 1)
-                    formula_ventas = f"=({refs})/{divisor}"
-                cell_ventas = gspread.utils.rowcol_to_a1(row_idx, col_ventas_prom)
-                cell_meses_inv = gspread.utils.rowcol_to_a1(row_idx, col_meses_inv)
-                ref_exist = gspread.utils.rowcol_to_a1(row_idx, col_existencia)
-                ref_trans = gspread.utils.rowcol_to_a1(row_idx, col_transito)
-                formula_meses_inv = f"=({ref_exist}+{ref_trans})/{cell_ventas}"
-                formula_comprar = f'=SI({cell_meses_inv}>1.5,"OK","COMPRAR")'
-                formulas_ventas.append([formula_ventas])
-                formulas_meses_inv.append([formula_meses_inv])
-                formulas_comprar.append([formula_comprar])
-
-            _ws_update_range(
-                ws,
-                f"{gspread.utils.rowcol_to_a1(2, col_ventas_prom)}:{gspread.utils.rowcol_to_a1(len(cat_df)+1, col_ventas_prom)}",
-                formulas_ventas,
-            )
-            _ws_update_range(
-                ws,
-                f"{gspread.utils.rowcol_to_a1(2, col_meses_inv)}:{gspread.utils.rowcol_to_a1(len(cat_df)+1, col_meses_inv)}",
-                formulas_meses_inv,
-            )
-            _ws_update_range(
-                ws,
-                f"{gspread.utils.rowcol_to_a1(2, col_comprar)}:{gspread.utils.rowcol_to_a1(len(cat_df)+1, col_comprar)}",
-                formulas_comprar,
-            )
-
         # Forzar estilo visual de la columna de rotación (Calibri 11) cuando la API lo permita.
         try:
             if hasattr(ws, "format"):
