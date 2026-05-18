@@ -2400,10 +2400,13 @@ def cobranza_prune_rows_by_keys(
     scope_col: str | None = None,
     scope_values: set[str] | None = None,
 ):
-    """Elimina filas que ya no vienen en la carga más reciente dentro de un alcance."""
-    if keep_rows.empty:
-        return
+    """Elimina filas que ya no vienen en la carga más reciente dentro de un alcance.
 
+    Si ``keep_rows`` viene vacío, se eliminan todas las filas existentes dentro
+    del alcance indicado por ``scope_col``/``scope_values``; si no se pasa
+    alcance, se limpia toda la hoja. Esto permite que la hoja de vencimientos
+    refleje exactamente los folios vigentes del último ANTIGÜEDAD cargado.
+    """
     values = _cobranza_get_all_values_cached(ws, use_cache=True)
     if not values:
         return
@@ -2423,8 +2426,6 @@ def cobranza_prune_rows_by_keys(
         tuple(_cobranza_clean_text(r.get(k, "")) for k in key_cols)
         for _, r in keep_rows.iterrows()
     }
-    if not keep_keys:
-        return
 
     scope_norm = {_cobranza_clean_text(v) for v in (scope_values or set())}
     matrix = [headers]
@@ -3099,16 +3100,16 @@ def render_cobranza_tab_gerente():
                 cobranza_upsert_rows_by_key(ws_base, df_base[base_headers], ["Mes", "Codigo"], ["Razon_Social", "Saldo", "No_Vencido", "Vencido", "Tipo_Pago", "Ultima_Actualizacion"])
                 if not df_venc.empty:
                     cobranza_upsert_rows_by_key(ws_venc, df_venc[venc_headers], ["Codigo", "Folio", "Fecha_Vencimiento"], ["Mes", "Fecha_Factura", "Saldo_Vence", "Condicion", "Moneda", "Vendedor", "Ultima_Actualizacion"])
-                    codigos_cargados = {
-                        _cobranza_clean_text(c) for c in df_venc["Codigo"].astype(str).tolist() if _cobranza_clean_text(c)
-                    }
-                    cobranza_prune_rows_by_keys(
-                        ws_venc,
-                        keep_rows=df_venc[["Codigo", "Folio", "Fecha_Vencimiento"]].copy(),
-                        key_cols=["Codigo", "Folio", "Fecha_Vencimiento"],
-                        scope_col="Codigo",
-                        scope_values=codigos_cargados,
-                    )
+
+                # ANTIGÜEDAD es la fuente vigente de folios abiertos: cualquier folio
+                # que ya no venga en la carga más reciente se debe quitar, incluso si
+                # el cliente tampoco viene en REPORTE. De lo contrario, esos folios
+                # viejos vuelven a aparecer en el expander como saldos pendientes.
+                cobranza_prune_rows_by_keys(
+                    ws_venc,
+                    keep_rows=df_venc[["Codigo", "Folio", "Fecha_Vencimiento"]].copy(),
+                    key_cols=["Codigo", "Folio", "Fecha_Vencimiento"],
+                )
 
                 st.session_state["ger_cob_stats"] = {
                     "clientes": int(len(df_base)),
@@ -3205,6 +3206,7 @@ def render_cobranza_tab_gerente():
 
                 hoy_norm = pd.Timestamp.now().normalize()
                 venc_res = pd.DataFrame(columns=["Codigo", "Fecha_Vencimiento_Min", "Fecha_Vencimiento_Max", "Saldo_Vencido_Total"])
+                venc_activos_df = pd.DataFrame(columns=["Codigo", "Condicion"])
                 if not venc_df.empty:
                     tmp_v = venc_df.copy()
                     tmp_v["Codigo"] = tmp_v.get("Codigo", "").astype(str)
@@ -3263,6 +3265,11 @@ def render_cobranza_tab_gerente():
                         key_v = tmp_v["Codigo"].astype(str) + "|" + tmp_v["_folio_norm"].astype(str)
                         tmp_v = tmp_v[~key_v.isin(folios_liquidados)].copy()
 
+                    # Las condiciones deben salir del mismo subconjunto activo/visible
+                    # que alimenta el saldo vencido. Usar todo venc_df arrastraba
+                    # condiciones históricas o de otros periodos y podía inflar los
+                    # clientes clasificados como CONTADO al apagar el switch.
+                    venc_activos_df = tmp_v.copy()
                     venc_res = tmp_v.groupby("Codigo", as_index=False).agg(
                         Fecha_Vencimiento_Min=("Fecha_Vencimiento_dt", "min"),
                         Fecha_Vencimiento_Max=("Fecha_Vencimiento_dt", "max"),
@@ -3290,7 +3297,7 @@ def render_cobranza_tab_gerente():
                     keep="first",
                 ).copy()
                 saldos_df["Condicion_Facturas"] = ""
-                if not venc_df.empty:
+                if not venc_activos_df.empty:
                     def _resumen_condiciones(vals):
                         condiciones = sorted({str(v).strip() for v in vals if str(v).strip()})
                         if not condiciones:
@@ -3300,9 +3307,9 @@ def render_cobranza_tab_gerente():
                         return f"MIXTO ({' | '.join(condiciones)})"
 
                     cond_por_codigo = (
-                        venc_df.assign(
-                            Codigo=venc_df.get("Codigo", pd.Series("", index=venc_df.index)).astype(str),
-                            _cond=venc_df.get("Condicion", pd.Series("", index=venc_df.index)).astype(str).str.strip(),
+                        venc_activos_df.assign(
+                            Codigo=venc_activos_df.get("Codigo", pd.Series("", index=venc_activos_df.index)).astype(str),
+                            _cond=venc_activos_df.get("Condicion", pd.Series("", index=venc_activos_df.index)).astype(str).str.strip(),
                         )
                         .loc[lambda d: d["_cond"] != ""]
                         .groupby("Codigo")["_cond"]
