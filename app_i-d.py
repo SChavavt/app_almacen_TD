@@ -272,33 +272,27 @@ else:
             st.rerun()
 
 # CSS tabla compacta
-is_pantalla_l_view = layout_user == "PANTALLAL"
-table_font_size = "0.92rem" if is_pantalla_l_view else "0.75rem"
-table_row_padding = "0.16rem 0.28rem" if is_pantalla_l_view else "0.1rem 0.2rem"
-table_row_height = "1.25rem" if is_pantalla_l_view else "1rem"
-table_line_height = "1.38rem" if is_pantalla_l_view else "1.2rem"
-
 st.markdown(
-    f"""
+    """
     <style>
-    .dataframe td {{ white-space: unset !important; word-break: break-word; }}
-    .dataframe {{
+    .dataframe td { white-space: unset !important; word-break: break-word; }
+    .dataframe {
         table-layout: fixed; width: 100%;
-    }}
-    .dataframe td {{
+    }
+    .dataframe td {
         white-space: normal !important;
         overflow-wrap: break-word;
-        font-size: {table_font_size};
-        padding: {table_row_padding};
-        height: {table_row_height};
-        line-height: {table_line_height};
+        font-size: 0.75rem;
+        padding: 0.1rem 0.2rem;
+        height: 1rem;
+        line-height: 1.2rem;
         vertical-align: top;
-    }}
-    .dataframe th {{
-        font-size: {table_font_size};
-        padding: {table_row_padding};
+    }
+    .dataframe th {
+        font-size: 0.75rem;
+        padding: 0.1rem 0.2rem;
         text-align: left;
-    }}
+    }
     </style>
 """,
     unsafe_allow_html=True,
@@ -2697,34 +2691,27 @@ def _pedido_selector_envio_emoji(tipo_envio: str) -> str:
         return "📍"
     return ""
 
-board_n_size = "1.65rem" if is_pantalla_l_view else "1.35rem"
-board_client_size = "1.2rem" if is_pantalla_l_view else "1.05rem"
-board_meta_size = "0.98rem" if is_pantalla_l_view else "0.85rem"
-board_status_size = "1.08rem" if is_pantalla_l_view else "0.95rem"
-board_client_size_xl = "1.3rem" if is_pantalla_l_view else "1.15rem"
-board_n_size_xl = "1.8rem" if is_pantalla_l_view else "1.5rem"
-
 st.markdown(
-    f"""
+    """
     <style>
-    .board-wrap{{display:flex;gap:0.8rem;width:100%;align-items:flex-start;}}
-    .board-col{{flex:1;background:rgba(18,18,20,0.92);border-radius:0.9rem;padding:0.8rem 0.9rem;box-shadow:0 2px 14px rgba(0,0,0,0.25);min-height:70vh;}}
-    .board-title{{display:flex;justify-content:space-between;align-items:center;gap:0.6rem;margin-bottom:0.6rem;font-weight:800;font-size:1.35rem;color:#fff;}}
-    .board-sub{{font-size:0.9rem;opacity:0.8;font-weight:600;}}
-    .board-table{{width:100%;border-collapse:collapse;table-layout:fixed;}}
-    .board-row{{border-top:1px solid rgba(255,255,255,0.08);}}
-    .board-row:first-child{{border-top:none;}}
-    .board-n{{width:3.2rem;font-size:{board_n_size};font-weight:900;padding:0.25rem 0.2rem;opacity:0.95;vertical-align:top;white-space:nowrap;}}
-    .board-main{{padding:0.25rem 0.2rem;vertical-align:top;}}
-    .board-client{{font-size:{board_client_size};font-weight:800;line-height:1.25rem;color:#fff;word-break:break-word;}}
-    .board-meta{{margin-top:0.18rem;display:flex;flex-wrap:wrap;gap:0.35rem;font-size:{board_meta_size};opacity:0.85;font-weight:650;align-items:center;}}
-    .chip{{padding:0.1rem 0.45rem;border-radius:0.7rem;background:rgba(255,255,255,0.10);white-space:nowrap;}}
-    .board-status{{margin-left:auto;font-size:{board_status_size};font-weight:900;white-space:nowrap;opacity:0.95;}}
-    @media (min-width: 1200px){{
-      .board-client{{font-size:{board_client_size_xl};}}
-      .board-n{{font-size:{board_n_size_xl};}}
-      .board-title{{font-size:1.5rem;}}
-    }}
+    .board-wrap{display:flex;gap:0.8rem;width:100%;align-items:flex-start;}
+    .board-col{flex:1;background:rgba(18,18,20,0.92);border-radius:0.9rem;padding:0.8rem 0.9rem;box-shadow:0 2px 14px rgba(0,0,0,0.25);min-height:70vh;}
+    .board-title{display:flex;justify-content:space-between;align-items:center;gap:0.6rem;margin-bottom:0.6rem;font-weight:800;font-size:1.35rem;color:#fff;}
+    .board-sub{font-size:0.9rem;opacity:0.8;font-weight:600;}
+    .board-table{width:100%;border-collapse:collapse;table-layout:fixed;}
+    .board-row{border-top:1px solid rgba(255,255,255,0.08);}
+    .board-row:first-child{border-top:none;}
+    .board-n{width:3.2rem;font-size:1.35rem;font-weight:900;padding:0.25rem 0.2rem;opacity:0.95;vertical-align:top;white-space:nowrap;}
+    .board-main{padding:0.25rem 0.2rem;vertical-align:top;}
+    .board-client{font-size:1.05rem;font-weight:800;line-height:1.25rem;color:#fff;word-break:break-word;}
+    .board-meta{margin-top:0.18rem;display:flex;flex-wrap:wrap;gap:0.35rem;font-size:0.85rem;opacity:0.85;font-weight:650;align-items:center;}
+    .chip{padding:0.1rem 0.45rem;border-radius:0.7rem;background:rgba(255,255,255,0.10);white-space:nowrap;}
+    .board-status{margin-left:auto;font-size:0.95rem;font-weight:900;white-space:nowrap;opacity:0.95;}
+    @media (min-width: 1200px){
+      .board-client{font-size:1.15rem;}
+      .board-n{font-size:1.5rem;}
+      .board-title{font-size:1.5rem;}
+    }
     </style>
     """,
     unsafe_allow_html=True,
