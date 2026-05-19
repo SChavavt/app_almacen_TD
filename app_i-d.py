@@ -1957,6 +1957,7 @@ def render_auto_list(
     scroll_max_height: int = 640,
     show_header: bool = True,
     mode: str = "local",
+    min_content_height: Optional[int] = None,
 ):
     if not entries:
         st.info("No hay pedidos para mostrar.")
@@ -2021,7 +2022,7 @@ def render_auto_list(
 
     row_height_px = 64 if is_pantalla_l_local_view else (56 if is_large_auto_list_view else 38)
     title_height_px = 58 if show_header else 10
-    min_content = 140 if show_header else 100
+    min_content = min_content_height if min_content_height is not None else (140 if show_header else 100)
     safety_padding_px = 24
     content_height = max(
         min_content, (len(visible) * row_height_px) + title_height_px + safety_padding_px
@@ -5132,6 +5133,20 @@ if selected_tab_key == "auto_foraneo":
     combined_entries = list(auto_foraneo_entries)
 
     visible_entries = [e for e in combined_entries if _is_visible_auto_entry(e)]
+    # Casos especiales foráneos solo se muestran cuando ya tienen
+    # Numero_Foraneo asignado (ej. "#45"). Si no tienen número, se ocultan
+    # hasta que se les asigne, manteniendo intactas las demás condiciones.
+    visible_entries = [
+        e
+        for e in visible_entries
+        if not (
+            sanitize_text(e.get("categoria", "")) == "🧰 Casos"
+            and _parse_foraneo_number(e.get("numero_foraneo", "")) is None
+        )
+    ]
+    # Nunca mostrar filas sin número visible en Auto Foráneo
+    # (evita tarjetas con "—" en la columna de número).
+    visible_entries = [e for e in visible_entries if e.get("display_num") is not None]
     visible_entries = dedupe_entries_preserve_order(visible_entries)
 
     # Devoluciones/casos foráneos con Numero_Foraneo manual deben aparecer
@@ -5162,17 +5177,16 @@ if selected_tab_key == "auto_foraneo":
     anteriores = dedupe_entries_preserve_order(ant + sin_fecha)
     anteriores = sort_entries_by_flow_number_desc(anteriores)
 
-    # Distribución en 3 listas:
-    # 1) Izquierda: todos los anteriores.
-    # 2) Centro: hoy/futuros (primer bloque).
-    # 3) Derecha: hoy/futuros (continuación del bloque central).
-    ant_count = len(anteriores)
-    hoy_count = len(hoy_entries)
-    midpoint_hoy = int(np.ceil(max(hoy_count, 1) / 2.0))
-    if ant_count > 0:
-        midpoint_hoy = max(midpoint_hoy, min(hoy_count, ant_count))
-    hoy_centro = hoy_entries[:midpoint_hoy]
-    hoy_derecha = hoy_entries[midpoint_hoy:]
+    # Distribución en 3 columnas:
+    # 1) Izquierda: anteriores + bloque extra de hoy/futuras (máximo 15),
+    #    para aprovechar el espacio cuando "anteriores" trae pocos pedidos.
+    # 2) Centro: continuación de hoy/futuras.
+    # 3) Derecha: continuación final de hoy/futuras.
+    hoy_izquierda = hoy_entries[:15]
+    hoy_restantes = hoy_entries[15:]
+    midpoint_hoy = int(np.ceil(len(hoy_restantes) / 2.0))
+    hoy_centro = hoy_restantes[:midpoint_hoy]
+    hoy_derecha = hoy_restantes[midpoint_hoy:]
 
     # 2) Layout: tres columnas
     col_left, col_center, col_right = st.columns(3, gap="large")
@@ -5186,16 +5200,27 @@ if selected_tab_key == "auto_foraneo":
             max_rows=140,
             panel_height=220,
             mode="foraneo",
+            min_content_height=40,
         )
+        if hoy_izquierda:
+            render_auto_list(
+                hoy_izquierda,
+                title=f"🚚 FORÁNEOS • HOY/FUTURAS ({hoy.strftime('%d/%m')})",
+                subtitle="Apoyo en columna izquierda (máximo 15)",
+                max_rows=140,
+                start_number=1,
+                panel_height=220,
+                mode="foraneo",
+            )
 
     # --- CENTRO: HOY + FUTUROS (INICIO) ---
     with col_center:
         next_number = render_auto_list(
             hoy_centro,
             title=f"🚚 FORÁNEOS • HOY/FUTURAS ({hoy.strftime('%d/%m')})",
-            subtitle="Todos los de hoy y fechas futuras",
+            subtitle="Continuación después del bloque izquierdo",
             max_rows=140,
-            start_number=1,
+            start_number=(len(hoy_izquierda) + 1),
             panel_height=220,
             mode="foraneo",
         )
