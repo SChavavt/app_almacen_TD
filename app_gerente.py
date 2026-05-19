@@ -5693,7 +5693,29 @@ def usuario_puede(usuario: str | None, permiso: str) -> bool:
     return PERMISOS_USUARIO.get(usuario, {}).get(permiso, False)
 
 
+def aplicar_estilo_tablas_grandes_para_pantalla() -> None:
+    """Aumenta tamaño de texto en tablas sin alterar distribución."""
+    st.markdown(
+        """
+        <style>
+        div[data-testid="stDataFrame"] th,
+        div[data-testid="stDataFrame"] td,
+        div[data-testid="stDataFrame"] [role="columnheader"],
+        div[data-testid="stDataFrame"] [role="gridcell"] {
+            font-size: 1.2rem !important;
+            line-height: 1.45 !important;
+            font-weight: 600 !important;
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
 usuario_actual = ensure_user_logged_in()
+
+if usuario_actual == "PantallaL":
+    aplicar_estilo_tablas_grandes_para_pantalla()
 
 if usuario_actual == "JorgeLic":
     tab_specs = [("salida_neta", "📦 Rotaciones")]
