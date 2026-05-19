@@ -167,10 +167,11 @@ VENDEDOR_CREDENTIALS = {
     "SINAI": "SINAI",
     "DISSURTIDOR": "DISSURTIDOR",
     "PANTALLAF": "PANTALLAF",
+    "PANTALLAL": "PANTALLAL",
 }
 
 
-NON_VENDOR_USERS = {"SINAI", "DISSURTIDOR", "PANTALLAF"}
+NON_VENDOR_USERS = {"SINAI", "DISSURTIDOR", "PANTALLAF", "PANTALLAL"}
 
 
 def is_non_vendor_user(user_key: str) -> bool:
@@ -4638,7 +4639,9 @@ if logged_user == "SINAI":
 elif logged_user == "DISSURTIDOR":
     visible_tab_keys = ["surtidores"]
 elif logged_user == "PANTALLAF":
-    visible_tab_keys = ["auto_local", "auto_foraneo"]
+    visible_tab_keys = ["auto_foraneo"]
+elif logged_user == "PANTALLAL":
+    visible_tab_keys = ["auto_local"]
 else:
     visible_tab_keys = [tab_key for tab_key, _ in TAB_DEFINITIONS]
 
@@ -4677,7 +4680,7 @@ st.session_state.active_main_tab = selected_tab
 selected_tab_key = visible_tabs[selected_tab][0]
 
 
-def _persist_page_scroll(view_key: str, user_key: str = "") -> None:
+def _persist_page_scroll(view_key: str, user_key: str = "", force_bottom: bool = False) -> None:
     """Guarda/restaura scroll vertical entre auto-recargas por vista/usuario."""
     storage_key = sanitize_text(f"td_scroll::{user_key}::{view_key}")
     script = f"""
@@ -4689,12 +4692,24 @@ def _persist_page_scroll(view_key: str, user_key: str = "") -> None:
       const root = doc.scrollingElement || doc.documentElement || doc.body;
       if (!root) return;
 
-      const saved = target.sessionStorage ? target.sessionStorage.getItem(key) : null;
-      if (saved !== null) {{
-        const y = parseInt(saved, 10);
-        if (!Number.isNaN(y)) {{
-          setTimeout(() => target.scrollTo(0, y), 20);
-          setTimeout(() => target.scrollTo(0, y), 220);
+      const forceBottom = {str(force_bottom).lower()};
+      const scrollToBottom = () => {{
+        const maxY = Math.max(root.scrollHeight - target.innerHeight, 0);
+        target.scrollTo(0, maxY);
+      }};
+
+      if (forceBottom) {{
+        setTimeout(scrollToBottom, 20);
+        setTimeout(scrollToBottom, 220);
+        setTimeout(scrollToBottom, 500);
+      }} else {{
+        const saved = target.sessionStorage ? target.sessionStorage.getItem(key) : null;
+        if (saved !== null) {{
+          const y = parseInt(saved, 10);
+          if (!Number.isNaN(y)) {{
+            setTimeout(() => target.scrollTo(0, y), 20);
+            setTimeout(() => target.scrollTo(0, y), 220);
+          }}
         }}
       }}
 
@@ -4712,7 +4727,11 @@ def _persist_page_scroll(view_key: str, user_key: str = "") -> None:
     components.html(script, height=0, scrolling=False)
 
 
-_persist_page_scroll(selected_tab_key, logged_user)
+force_bottom_scroll = (
+    selected_tab_key in {"auto_local", "auto_foraneo"}
+    and logged_user in {"PANTALLAF", "PANTALLAL"}
+)
+_persist_page_scroll(selected_tab_key, logged_user, force_bottom=force_bottom_scroll)
 
 # helper para "simular" tabs
 tabs = [None] * len(visible_tabs)
