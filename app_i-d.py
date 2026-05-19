@@ -272,27 +272,33 @@ else:
             st.rerun()
 
 # CSS tabla compacta
+is_pantalla_l_view = layout_user == "PANTALLAL"
+table_font_size = "1.15rem" if is_pantalla_l_view else "0.75rem"
+table_row_padding = "0.3rem 0.44rem" if is_pantalla_l_view else "0.1rem 0.2rem"
+table_row_height = "1.7rem" if is_pantalla_l_view else "1rem"
+table_line_height = "1.6rem" if is_pantalla_l_view else "1.2rem"
+
 st.markdown(
-    """
+    f"""
     <style>
-    .dataframe td { white-space: unset !important; word-break: break-word; }
-    .dataframe {
+    .dataframe td {{ white-space: unset !important; word-break: break-word; }}
+    .dataframe {{
         table-layout: fixed; width: 100%;
-    }
-    .dataframe td {
+    }}
+    .dataframe td {{
         white-space: normal !important;
         overflow-wrap: break-word;
-        font-size: 0.75rem;
-        padding: 0.1rem 0.2rem;
-        height: 1rem;
-        line-height: 1.2rem;
+        font-size: {table_font_size};
+        padding: {table_row_padding};
+        height: {table_row_height};
+        line-height: {table_line_height};
         vertical-align: top;
-    }
-    .dataframe th {
-        font-size: 0.75rem;
-        padding: 0.1rem 0.2rem;
+    }}
+    .dataframe th {{
+        font-size: {table_font_size};
+        padding: {table_row_padding};
         text-align: left;
-    }
+    }}
     </style>
 """,
     unsafe_allow_html=True,
@@ -2001,7 +2007,10 @@ def render_auto_list(
         else ""
     )
 
-    row_height_px = 38
+    is_pantalla_f_foraneo_view = layout_user == "PANTALLAF" and mode == "foraneo"
+    is_large_auto_list_view = is_pantalla_l_view or is_pantalla_f_foraneo_view
+
+    row_height_px = 56 if is_large_auto_list_view else 38
     title_height_px = 58 if show_header else 10
     min_content = 140 if show_header else 100
     safety_padding_px = 24
@@ -2010,27 +2019,36 @@ def render_auto_list(
     )
     component_height = content_height
 
+    compact_title_size = "1.2rem" if is_large_auto_list_view else "1.01rem"
+    compact_sub_size = "0.94rem" if is_large_auto_list_view else "0.72rem"
+    compact_head_size = "0.92rem" if is_large_auto_list_view else "0.67rem"
+    compact_td_size = "1.08rem" if is_large_auto_list_view else "0.78rem"
+    compact_n_size = "1.15rem" if is_large_auto_list_view else "0.77rem"
+    compact_surtidor_size = "1.04rem" if is_large_auto_list_view else "0.75rem"
+    compact_status_size = "0.98rem" if is_large_auto_list_view else "0.68rem"
+    compact_tag_size = "0.95rem" if is_large_auto_list_view else "0.66rem"
+
     html = f"""
     <style>
     .board-col{{flex:1;background:rgba(18,18,20,0.92);border-radius:0.9rem;padding:0.55rem 0.68rem;box-shadow:0 2px 12px rgba(0,0,0,0.25);height:100%;font-family:"Source Sans Pro", sans-serif;}}
-    .board-title{{display:flex;justify-content:space-between;align-items:center;gap:0.6rem;margin-bottom:0.4rem;font-weight:600;font-size:1.01rem;color:#fff;letter-spacing:0.01em;}}
-    .board-sub{{font-size:0.72rem;opacity:0.8;font-weight:500;}}
+    .board-title{{display:flex;justify-content:space-between;align-items:center;gap:0.6rem;margin-bottom:0.4rem;font-weight:600;font-size:{compact_title_size};color:#fff;letter-spacing:0.01em;}}
+    .board-sub{{font-size:{compact_sub_size};opacity:0.8;font-weight:500;}}
     .board-table{{width:100%;border-collapse:collapse;table-layout:fixed;}}
-    .board-head th{{font-size:0.67rem;letter-spacing:0.02em;text-transform:uppercase;color:#d7e6ff;font-weight:700;padding:0.2rem 0.2rem;border-bottom:1px solid rgba(140,180,255,0.38);text-align:left;background:rgba(65,105,180,0.16);}}
+    .board-head th{{font-size:{compact_head_size};letter-spacing:0.02em;text-transform:uppercase;color:#d7e6ff;font-weight:700;padding:0.2rem 0.2rem;border-bottom:1px solid rgba(140,180,255,0.38);text-align:left;background:rgba(65,105,180,0.16);}}
     .board-head th:first-child{{border-top-left-radius:0.45rem;}}
     .board-head th:last-child{{border-top-right-radius:0.45rem;}}
     .board-row{{border-top:1px solid rgba(255,255,255,0.09);}}
     .board-row:first-child{{border-top:none;}}
-    .board-row td{{padding:0.2rem 0.16rem;vertical-align:middle;font-size:0.78rem;color:#fff;line-height:1.12rem;}}
+    .board-row td{{padding:0.2rem 0.16rem;vertical-align:middle;font-size:{compact_td_size};color:#fff;line-height:1.12rem;}}
     .board-head th + th{{border-left:1px solid rgba(136,176,255,0.3);}}
     .board-row td + td{{border-left:1px solid rgba(255,255,255,0.08);}}
-    .board-n{{width:1.25rem;font-size:0.77rem;font-weight:700;white-space:nowrap;color:#fff;padding-left:0.08rem;padding-right:0.08rem;}}
+    .board-n{{width:1.25rem;font-size:{compact_n_size};font-weight:700;white-space:nowrap;color:#fff;padding-left:0.08rem;padding-right:0.08rem;}}
     .board-client{{width:auto;font-weight:600;min-width:0;word-break:break-word;white-space:normal;}}
-    .board-surtidor{{width:4.9rem;white-space:nowrap;text-align:left;font-weight:780;font-size:0.75rem;}}
+    .board-surtidor{{width:4.9rem;white-space:nowrap;text-align:left;font-weight:780;font-size:{compact_surtidor_size};}}
     .board-state{{width:5.4rem;text-align:left;}}
-    .board-status{{font-size:0.68rem;font-weight:700;white-space:nowrap;opacity:0.97;padding:0.05rem 0.36rem;border-radius:0.56rem;background:rgba(255,255,255,0.12);}}
-    .surtidor-tag{{margin-left:0.1rem;padding:0.07rem 0.34rem;border-radius:0.7rem;background:rgba(114,190,255,0.18);color:#a9dcff;font-weight:650;font-size:0.66rem;white-space:nowrap;}}
-    .board-surtidor .surtidor-tag{{display:inline-block;margin-left:0;padding:0.09rem 0.4rem;font-size:0.74rem;font-weight:800;}}
+    .board-status{{font-size:{compact_status_size};font-weight:700;white-space:nowrap;opacity:0.97;padding:0.05rem 0.36rem;border-radius:0.56rem;background:rgba(255,255,255,0.12);}}
+    .surtidor-tag{{margin-left:0.1rem;padding:0.07rem 0.34rem;border-radius:0.7rem;background:rgba(114,190,255,0.18);color:#a9dcff;font-weight:650;font-size:{compact_tag_size};white-space:nowrap;}}
+    .board-surtidor .surtidor-tag{{display:inline-block;margin-left:0;padding:0.09rem 0.4rem;font-size:{compact_surtidor_size};font-weight:800;}}
     #{list_id} .board-scroll{{max-height:none;overflow:visible;position:relative;}}
     </style>
     <div class="board-col" id="{list_id}">
@@ -2691,27 +2709,34 @@ def _pedido_selector_envio_emoji(tipo_envio: str) -> str:
         return "📍"
     return ""
 
+board_n_size = "2.2rem" if is_pantalla_l_view else "1.35rem"
+board_client_size = "1.45rem" if is_pantalla_l_view else "1.05rem"
+board_meta_size = "1.18rem" if is_pantalla_l_view else "0.85rem"
+board_status_size = "1.28rem" if is_pantalla_l_view else "0.95rem"
+board_client_size_xl = "1.6rem" if is_pantalla_l_view else "1.15rem"
+board_n_size_xl = "2.4rem" if is_pantalla_l_view else "1.5rem"
+
 st.markdown(
-    """
+    f"""
     <style>
-    .board-wrap{display:flex;gap:0.8rem;width:100%;align-items:flex-start;}
-    .board-col{flex:1;background:rgba(18,18,20,0.92);border-radius:0.9rem;padding:0.8rem 0.9rem;box-shadow:0 2px 14px rgba(0,0,0,0.25);min-height:70vh;}
-    .board-title{display:flex;justify-content:space-between;align-items:center;gap:0.6rem;margin-bottom:0.6rem;font-weight:800;font-size:1.35rem;color:#fff;}
-    .board-sub{font-size:0.9rem;opacity:0.8;font-weight:600;}
-    .board-table{width:100%;border-collapse:collapse;table-layout:fixed;}
-    .board-row{border-top:1px solid rgba(255,255,255,0.08);}
-    .board-row:first-child{border-top:none;}
-    .board-n{width:3.2rem;font-size:1.35rem;font-weight:900;padding:0.25rem 0.2rem;opacity:0.95;vertical-align:top;white-space:nowrap;}
-    .board-main{padding:0.25rem 0.2rem;vertical-align:top;}
-    .board-client{font-size:1.05rem;font-weight:800;line-height:1.25rem;color:#fff;word-break:break-word;}
-    .board-meta{margin-top:0.18rem;display:flex;flex-wrap:wrap;gap:0.35rem;font-size:0.85rem;opacity:0.85;font-weight:650;align-items:center;}
-    .chip{padding:0.1rem 0.45rem;border-radius:0.7rem;background:rgba(255,255,255,0.10);white-space:nowrap;}
-    .board-status{margin-left:auto;font-size:0.95rem;font-weight:900;white-space:nowrap;opacity:0.95;}
-    @media (min-width: 1200px){
-      .board-client{font-size:1.15rem;}
-      .board-n{font-size:1.5rem;}
-      .board-title{font-size:1.5rem;}
-    }
+    .board-wrap{{display:flex;gap:0.8rem;width:100%;align-items:flex-start;}}
+    .board-col{{flex:1;background:rgba(18,18,20,0.92);border-radius:0.9rem;padding:0.8rem 0.9rem;box-shadow:0 2px 14px rgba(0,0,0,0.25);min-height:70vh;}}
+    .board-title{{display:flex;justify-content:space-between;align-items:center;gap:0.6rem;margin-bottom:0.6rem;font-weight:800;font-size:1.35rem;color:#fff;}}
+    .board-sub{{font-size:0.9rem;opacity:0.8;font-weight:600;}}
+    .board-table{{width:100%;border-collapse:collapse;table-layout:fixed;}}
+    .board-row{{border-top:1px solid rgba(255,255,255,0.08);}}
+    .board-row:first-child{{border-top:none;}}
+    .board-n{{width:3.2rem;font-size:{board_n_size};font-weight:900;padding:0.25rem 0.2rem;opacity:0.95;vertical-align:top;white-space:nowrap;}}
+    .board-main{{padding:0.25rem 0.2rem;vertical-align:top;}}
+    .board-client{{font-size:{board_client_size};font-weight:800;line-height:1.25rem;color:#fff;word-break:break-word;}}
+    .board-meta{{margin-top:0.18rem;display:flex;flex-wrap:wrap;gap:0.35rem;font-size:{board_meta_size};opacity:0.85;font-weight:650;align-items:center;}}
+    .chip{{padding:0.1rem 0.45rem;border-radius:0.7rem;background:rgba(255,255,255,0.10);white-space:nowrap;}}
+    .board-status{{margin-left:auto;font-size:{board_status_size};font-weight:900;white-space:nowrap;opacity:0.95;}}
+    @media (min-width: 1200px){{
+      .board-client{{font-size:{board_client_size_xl};}}
+      .board-n{{font-size:{board_n_size_xl};}}
+      .board-title{{font-size:1.5rem;}}
+    }}
     </style>
     """,
     unsafe_allow_html=True,
