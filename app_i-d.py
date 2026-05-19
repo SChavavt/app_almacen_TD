@@ -5132,17 +5132,6 @@ if selected_tab_key == "auto_foraneo":
     combined_entries = list(auto_foraneo_entries)
 
     visible_entries = [e for e in combined_entries if _is_visible_auto_entry(e)]
-    # Casos especiales foráneos solo se muestran cuando ya tienen
-    # Numero_Foraneo asignado (ej. "#45"). Si no tienen número, se ocultan
-    # hasta que se les asigne, manteniendo intactas las demás condiciones.
-    visible_entries = [
-        e
-        for e in visible_entries
-        if not (
-            sanitize_text(e.get("categoria", "")) == "🧰 Casos"
-            and _parse_foraneo_number(e.get("numero_foraneo", "")) is None
-        )
-    ]
     visible_entries = dedupe_entries_preserve_order(visible_entries)
 
     # Devoluciones/casos foráneos con Numero_Foraneo manual deben aparecer
