@@ -190,7 +190,6 @@ st.markdown(
     """
     <style>
     section.main > div { padding-top: 0.5rem; }
-    .pantalla-l-tight section.main > div { padding-top: 0.05rem !important; }
     .header-compact h2 { margin: 0; font-size: 1.5rem; line-height: 1.6rem; }
     .header-meta { font-size: 0.8rem; color: #c9c9c9; }
     div[data-testid="stHorizontalBlock"] { gap: 0.4rem; }
@@ -229,27 +228,10 @@ if not layout_user:
     layout_user = str(usuario_qp_layout or "").strip().upper()
 
 is_dissurtidor_view = layout_user == "DISSURTIDOR"
-is_pantalla_l_view = layout_user == "PANTALLAL"
-
-if is_pantalla_l_view:
-    st.markdown("<script>document.body.classList.add('pantalla-l-tight');</script>", unsafe_allow_html=True)
 
 current_time = datetime.now(TZ).strftime("%d/%m %H:%M:%S")
 
-if is_pantalla_l_view:
-    st.markdown(
-        '<div class="header-compact" style="margin-bottom:0.15rem;"><h2 style="color:white;"><span style="font-size:1.4rem;">📦</span> Pedidos Locales en Tiempo Real</h2><div class="header-meta">🕒 Última actualización: 19/05 15:02:52</div></div>',
-        unsafe_allow_html=True,
-    )
-    components.html(
-        """
-        <script>
-        window.parent.scrollTo({ top: document.body.scrollHeight, behavior: 'auto' });
-        </script>
-        """,
-        height=0,
-    )
-elif not is_dissurtidor_view:
+if not is_dissurtidor_view:
     col_title, col_update, col_actions = st.columns([0.6, 0.2, 0.2])
     with col_title:
         st.markdown(
@@ -262,10 +244,22 @@ elif not is_dissurtidor_view:
         """,
             unsafe_allow_html=True,
         )
+        st.markdown(
+            """
+            <style>
+            /* 🔢 Ajuste compacto para métricas */
+            div[data-testid="metric-container"] { padding: 0.1rem 0.5rem; }
+            div[data-testid="metric-container"] > div { font-size: 1.1rem !important; }
+            div[data-testid="metric-container"] > label { font-size: 0.85rem !important; }
+            </style>
+        """,
+            unsafe_allow_html=True,
+        )
     with col_update:
         st.markdown(f'<div class="header-meta">🕒 Última actualización: {current_time}</div>', unsafe_allow_html=True)
     with col_actions:
         if st.button("🔄 Refrescar ahora", use_container_width=True):
+            # Se ejecuta más adelante cuando ya están definidas las funciones de carga.
             st.session_state["_pending_full_refresh"] = True
             st.rerun()
 else:
@@ -278,6 +272,7 @@ else:
             st.rerun()
 
 # CSS tabla compacta
+is_pantalla_l_view = layout_user == "PANTALLAL"
 table_font_size = "1.15rem" if is_pantalla_l_view else "0.75rem"
 table_row_padding = "0.3rem 0.44rem" if is_pantalla_l_view else "0.1rem 0.2rem"
 table_row_height = "1.7rem" if is_pantalla_l_view else "1rem"
