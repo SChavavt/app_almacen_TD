@@ -5134,11 +5134,15 @@ if selected_tab_key == "auto_foraneo":
     visible_entries = [e for e in combined_entries if _is_visible_auto_entry(e)]
     visible_entries = dedupe_entries_preserve_order(visible_entries)
 
-    # Devoluciones/casos foráneos con Numero_Foraneo manual deben aparecer
-    # junto a los de HOY/FUTUROS, ordenados por número de flujo.
-    asignados = [
+    # Regla operativa: en Auto Foráneo solo se muestran pedidos/casos
+    # que ya tengan número foráneo asignado (#).
+    visible_entries = [
         e for e in visible_entries if _parse_foraneo_number(e.get("numero_foraneo", "")) is not None
     ]
+
+    # Devoluciones/casos foráneos con Numero_Foraneo manual deben aparecer
+    # junto a los de HOY/FUTUROS, ordenados por número de flujo.
+    asignados = list(visible_entries)
     asignados = sort_entries_by_flow_number_desc(asignados)
 
     restantes = [
