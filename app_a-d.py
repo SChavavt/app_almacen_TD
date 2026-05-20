@@ -8190,8 +8190,20 @@ if df_main is not None:
             '🟢 Completado': len(completados_visible),
         }
 
-    counts_main = _count_states(_exclude_turnos_from_status_view(df_main_status_scope))
-    counts_casos = _count_states(_exclude_turnos_from_status_view(df_casos))
+    if "Turno" in df_casos.columns:
+        turno_casos_norm = df_casos["Turno"].astype(str).str.strip()
+        if is_victor_user_for_view:
+            df_casos_status_scope = df_casos[turno_casos_norm.isin(turnos_victor)].copy()
+        else:
+            df_casos_status_scope = df_casos[~turno_casos_norm.isin(turnos_victor)].copy()
+    else:
+        df_casos_status_scope = df_casos.copy()
+
+    df_main_metrics = df_main_status_scope if is_victor_user_for_view else _exclude_turnos_from_status_view(df_main_status_scope)
+    df_casos_metrics = df_casos_status_scope if is_victor_user_for_view else _exclude_turnos_from_status_view(df_casos_status_scope)
+
+    counts_main = _count_states(df_main_metrics)
+    counts_casos = _count_states(df_casos_metrics)
     estado_counts = {k: counts_main.get(k, 0) + counts_casos.get(k, 0)
                      for k in ['🟡 Pendiente', '🔵 En Proceso', '🔴 Demorado', '🛠 Modificación', '✏️ Modificación', '🟣 Cancelado', '🟢 Completado']}
 
@@ -8221,22 +8233,22 @@ if df_main is not None:
     devoluciones_demoradas = pd.DataFrame(columns=df_casos.columns)
     garantias_demoradas = pd.DataFrame(columns=df_casos.columns)
 
-    if tipo_casos_col and "Estado" in df_casos.columns:
-        estados_series = df_casos["Estado"].astype(str).str.strip()
-        tipo_series = df_casos[tipo_casos_col].astype(str)
+    if tipo_casos_col and "Estado" in df_casos_status_scope.columns:
+        estados_series = df_casos_status_scope["Estado"].astype(str).str.strip()
+        tipo_series = df_casos_status_scope[tipo_casos_col].astype(str)
         devoluciones_mask = tipo_series.str.contains("Devoluci", case=False, na=False)
         garantias_mask = tipo_series.str.contains("Garant", case=False, na=False)
 
-        devoluciones_pendientes = df_casos[
+        devoluciones_pendientes = df_casos_status_scope[
             (estados_series == "🟡 Pendiente") & devoluciones_mask
         ]
-        garantias_pendientes = df_casos[
+        garantias_pendientes = df_casos_status_scope[
             (estados_series == "🟡 Pendiente") & garantias_mask
         ]
-        devoluciones_demoradas = df_casos[
+        devoluciones_demoradas = df_casos_status_scope[
             (estados_series == "🔴 Demorado") & devoluciones_mask
         ]
-        garantias_demoradas = df_casos[
+        garantias_demoradas = df_casos_status_scope[
             (estados_series == "🔴 Demorado") & garantias_mask
         ]
 
