@@ -5059,8 +5059,7 @@ def render_salida_neta_tab():
     with st.form("salida_neta_form", clear_on_submit=False):
         entradas_file = st.file_uploader("1) Subir archivo de Entradas.xlsx", type=["xlsx"], key="salida_neta_entradas")
         salidas_file = st.file_uploader("2) Subir archivo de Salidas.xlsx", type=["xlsx"], key="salida_neta_salidas")
-        existencias_file = st.file_uploader("3) Subir archivo de Existencias.xlsx", type=["xlsx"], key="salida_neta_existencias")
-        procesar = st.form_submit_button("4) Procesar archivos")
+        procesar = st.form_submit_button("3) Procesar archivos")
 
     def _leer_archivo_excel(uploaded_file):
         xls = pd.ExcelFile(uploaded_file)
@@ -5080,7 +5079,7 @@ def render_salida_neta_tab():
     def _nombre_col_rotacion(fecha_desde: datetime) -> str:
         return f"Rotación {MESES_ES[fecha_desde.month]} {fecha_desde.year}"
 
-    def _actualizar_rotacion_catalogo(df_salida_neta: pd.DataFrame, fecha_desde: datetime, df_existencias: pd.DataFrame):
+    def _actualizar_rotacion_catalogo(df_salida_neta: pd.DataFrame, fecha_desde: datetime):
         def _ensure_column(worksheet, headers_row: list[str], col_name: str) -> tuple[list[str], int]:
             """Garantiza que exista una columna por nombre. Devuelve headers actualizados e índice 1-based."""
             if col_name in headers_row:
@@ -5162,29 +5161,6 @@ def render_salida_neta_tab():
         tmp["Código"] = tmp["Código"].astype(str).str.strip()
         salida_map = tmp.set_index("Código")["Salida_Neta"].to_dict()
         cat_df[col_objetivo] = cat_df["Modelo"].map(salida_map)
-
-        exi_tmp = df_existencias.copy()
-        exi_tmp["Código"] = exi_tmp["Código"].astype(str).str.strip()
-        exi_tmp["Disponible"] = pd.to_numeric(exi_tmp["Disponible"], errors="coerce").fillna(0)
-        existencia_map = exi_tmp.groupby("Código", as_index=False)["Disponible"].sum().set_index("Código")["Disponible"].to_dict()
-
-        headers, col_existencias = _ensure_column(ws, headers, "Existencias")
-        cat_df["Existencias"] = cat_df["Modelo"].map(existencia_map)
-        cat_df["Existencias"] = cat_df["Existencias"].apply(lambda v: "" if pd.isna(v) else str(int(v)) if float(v).is_integer() else str(float(v)).rstrip("0").rstrip("."))
-
-        valores_existencias = []
-        for _, row in cat_df.iterrows():
-            modelo = str(row.get("Modelo", "")).strip()
-            valor = row.get("Existencias", "")
-            if not modelo:
-                valores_existencias.append([""])
-            else:
-                valores_existencias.append([valor if valor is not None else ""])
-        _ws_update_range(
-            ws,
-            f"{gspread.utils.rowcol_to_a1(2, col_existencias)}:{gspread.utils.rowcol_to_a1(len(cat_df)+1, col_existencias)}",
-            valores_existencias,
-        )
 
         def _fmt_rotacion(v):
             if pd.isna(v):
@@ -5302,8 +5278,8 @@ def render_salida_neta_tab():
         return cat_df, no_encontrados, col_objetivo
 
     if procesar:
-        if not entradas_file or not salidas_file or not existencias_file:
-            st.warning("⚠️ Debes subir los 3 archivos: Entradas, Salidas y Existencias.")
+        if not entradas_file or not salidas_file:
+            st.warning("⚠️ Debes subir ambos archivos (Entradas y Salidas).")
         else:
             try:
                 progress = st.progress(0, text="Iniciando procesamiento...")
@@ -5363,15 +5339,8 @@ def render_salida_neta_tab():
                     final_df = final_df[["Código", "Descripción", "Entrada_Total", "Salida_Total", "Salida_Neta"]]
                     final_df = final_df.sort_values("Código").reset_index(drop=True)
                     fecha_desde = _leer_metadata_periodo(entradas_file)
-                    df_existencias = _leer_archivo_excel(existencias_file)
-                    cols_existencias = ["Código", "Disponible"]
-                    faltantes = [c for c in cols_existencias if c not in df_existencias.columns]
-                    if faltantes:
-                        raise ValueError(f"El archivo de existencias no contiene las columnas requeridas: {', '.join(faltantes)}")
-                    df_existencias = df_existencias[cols_existencias].copy()
                     st.session_state["salida_neta_resultado"] = final_df
                     st.session_state["salida_neta_fecha_desde"] = fecha_desde
-                    st.session_state["salida_neta_existencias_df"] = df_existencias
                     progress.progress(100, text="Proceso finalizado.")
                 st.success("✅ Archivos procesados correctamente.")
             except Exception as e:
@@ -5380,11 +5349,10 @@ def render_salida_neta_tab():
     resultado = st.session_state.get("salida_neta_resultado")
     if isinstance(resultado, pd.DataFrame) and not resultado.empty:
         fecha_desde = st.session_state.get("salida_neta_fecha_desde")
-        existencias_df = st.session_state.get("salida_neta_existencias_df")
         catalogo_df, no_encontrados_df, col_rotacion = pd.DataFrame(), pd.DataFrame(), ""
         if isinstance(fecha_desde, datetime):
             try:
-                catalogo_df, no_encontrados_df, col_rotacion = _actualizar_rotacion_catalogo(resultado, fecha_desde, existencias_df)
+                catalogo_df, no_encontrados_df, col_rotacion = _actualizar_rotacion_catalogo(resultado, fecha_desde)
                 st.info(f"Columna de rotación actualizada en catálogo: **{col_rotacion}**")
             except Exception as e:
                 st.warning(f"No se pudo actualizar ROTACIONES en Google Sheets: {e}")
