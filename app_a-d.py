@@ -3074,6 +3074,19 @@ GOOGLE_SHEET_ID = '1aWkSelodaz0nWfQx7FZAysGnIYGQFJxAN7RO3YgCiZY'
 GOOGLE_SHEET_WORKSHEET_NAME = 'data_pedidos'
 GOOGLE_SHEET_HISTORICAL_WORKSHEET_NAME = 'datos_pedidos'
 
+
+def _resolve_main_worksheet_name_for_user() -> str:
+    """Selecciona hoja principal según usuario activo en sesión/query param."""
+    usuario = str(
+        st.session_state.get("app_usuario") or _get_query_param_value("usuario") or ""
+    ).strip().upper()
+    if usuario == "VICTOR":
+        return GOOGLE_SHEET_HISTORICAL_WORKSHEET_NAME
+    return GOOGLE_SHEET_WORKSHEET_NAME
+
+
+ACTIVE_MAIN_WORKSHEET_NAME = _resolve_main_worksheet_name_for_user()
+
 # --- AWS S3 Configuration ---
 try:
     if "aws" not in st.secrets:
@@ -3225,12 +3238,12 @@ try:
     # Abrir la hoja de cálculo por ID y nombre de pestaña
     try:
         spreadsheet = g_spread_client.open_by_key(GOOGLE_SHEET_ID)
-        worksheet_main = spreadsheet.worksheet(GOOGLE_SHEET_WORKSHEET_NAME)
+        worksheet_main = spreadsheet.worksheet(ACTIVE_MAIN_WORKSHEET_NAME)
     except gspread.exceptions.SpreadsheetNotFound:
         st.error(f"❌ Error: La hoja de cálculo con ID '{GOOGLE_SHEET_ID}' no se encontró. Verifica el ID y los permisos de la cuenta de servicio.")
         st.stop()
     except gspread.exceptions.WorksheetNotFound:
-        st.error(f"❌ Error: La pestaña '{GOOGLE_SHEET_WORKSHEET_NAME}' no se encontró en la hoja de cálculo. Verifica el nombre de la pestaña y los permisos.")
+        st.error(f"❌ Error: La pestaña '{ACTIVE_MAIN_WORKSHEET_NAME}' no se encontró en la hoja de cálculo. Verifica el nombre de la pestaña y los permisos.")
         st.stop()
 
 except Exception as e:
@@ -7488,15 +7501,15 @@ def mostrar_pedido_solo_guia(df, idx, row, orden, origen_tab, current_main_tab_l
 def _load_pedidos():
     df, headers = get_filtered_sheet_dataframe(
         sheet_id=GOOGLE_SHEET_ID,
-        worksheet_name=GOOGLE_SHEET_WORKSHEET_NAME,
+        worksheet_name=ACTIVE_MAIN_WORKSHEET_NAME,
         client=g_spread_client,
         light_mode=True,
     )
-    _refresh_sheet_row_identity(df, GOOGLE_SHEET_WORKSHEET_NAME)
-    df = _apply_local_sheet_updates(df, GOOGLE_SHEET_WORKSHEET_NAME)
+    _refresh_sheet_row_identity(df, ACTIVE_MAIN_WORKSHEET_NAME)
+    df = _apply_local_sheet_updates(df, ACTIVE_MAIN_WORKSHEET_NAME)
     # Re-filtrar después de aplicar updates locales para reflejar de inmediato
     # cuando un pedido se marca como limpiado/completado en la sesión actual.
-    df = _filter_relevant_pedidos(df, headers, GOOGLE_SHEET_WORKSHEET_NAME)
+    df = _filter_relevant_pedidos(df, headers, ACTIVE_MAIN_WORKSHEET_NAME)
     return df, headers
 
 
@@ -7848,7 +7861,7 @@ else:
     st.session_state["last_pedidos_count"] = len(df_main)
     st.session_state["last_casos_count"] = len(df_casos)
 
-# --- Asegura que existan físicamente las columnas que vas a ESCRIBIR en datos_pedidos ---
+# --- Asegura que existan físicamente las columnas que vas a ESCRIBIR en la hoja principal activa ---
 required_cols_main = [
     "Estado", "Fecha_Completado", "Hora_Proceso",
     "Adjuntos_Guia", "Hoja_Ruta_Mensajero",
@@ -7889,12 +7902,23 @@ if df_main is not None:
 
 
     # --- 🔔 Alerta de Modificación de Surtido ---
-    mod_surtido_main_df = _pending_modificaciones(
-        _exclude_turnos_from_status_view(df_main)
-    )
-    mod_surtido_casos_df = _pending_modificaciones(
-        _exclude_turnos_from_status_view(df_casos)
-    )
+    current_user_for_alerts = str(
+        st.session_state.get("app_usuario") or _get_query_param_value("usuario") or ""
+    ).strip().upper()
+    is_victor_user_for_alerts = current_user_for_alerts == "VICTOR"
+    turnos_victor_alerts = {"🌆 Local CDMX", "Local CDMX", "🎓 Recoge en Aula", "Recoge en Aula"}
+
+    if is_victor_user_for_alerts:
+        turno_main_alerts = df_main.get("Turno", pd.Series(dtype=str)).astype(str).str.strip()
+        turno_casos_alerts = df_casos.get("Turno", pd.Series(dtype=str)).astype(str).str.strip()
+        df_main_alerts_scope = df_main[turno_main_alerts.isin(turnos_victor_alerts)].copy()
+        df_casos_alerts_scope = df_casos[turno_casos_alerts.isin(turnos_victor_alerts)].copy()
+    else:
+        df_main_alerts_scope = _exclude_turnos_from_status_view(df_main)
+        df_casos_alerts_scope = _exclude_turnos_from_status_view(df_casos)
+
+    mod_surtido_main_df = _pending_modificaciones(df_main_alerts_scope)
+    mod_surtido_casos_df = _pending_modificaciones(df_casos_alerts_scope)
 
     mod_surtido_count = len(mod_surtido_main_df) + len(mod_surtido_casos_df)
 
@@ -8190,8 +8214,20 @@ if df_main is not None:
             '🟢 Completado': len(completados_visible),
         }
 
-    counts_main = _count_states(_exclude_turnos_from_status_view(df_main_status_scope))
-    counts_casos = _count_states(_exclude_turnos_from_status_view(df_casos))
+    if "Turno" in df_casos.columns:
+        turno_casos_norm = df_casos["Turno"].astype(str).str.strip()
+        if is_victor_user_for_view:
+            df_casos_status_scope = df_casos[turno_casos_norm.isin(turnos_victor)].copy()
+        else:
+            df_casos_status_scope = df_casos[~turno_casos_norm.isin(turnos_victor)].copy()
+    else:
+        df_casos_status_scope = df_casos.copy()
+
+    df_main_metrics = df_main_status_scope if is_victor_user_for_view else _exclude_turnos_from_status_view(df_main_status_scope)
+    df_casos_metrics = df_casos_status_scope if is_victor_user_for_view else _exclude_turnos_from_status_view(df_casos_status_scope)
+
+    counts_main = _count_states(df_main_metrics)
+    counts_casos = _count_states(df_casos_metrics)
     estado_counts = {k: counts_main.get(k, 0) + counts_casos.get(k, 0)
                      for k in ['🟡 Pendiente', '🔵 En Proceso', '🔴 Demorado', '🛠 Modificación', '✏️ Modificación', '🟣 Cancelado', '🟢 Completado']}
 
@@ -8221,22 +8257,22 @@ if df_main is not None:
     devoluciones_demoradas = pd.DataFrame(columns=df_casos.columns)
     garantias_demoradas = pd.DataFrame(columns=df_casos.columns)
 
-    if tipo_casos_col and "Estado" in df_casos.columns:
-        estados_series = df_casos["Estado"].astype(str).str.strip()
-        tipo_series = df_casos[tipo_casos_col].astype(str)
+    if tipo_casos_col and "Estado" in df_casos_status_scope.columns:
+        estados_series = df_casos_status_scope["Estado"].astype(str).str.strip()
+        tipo_series = df_casos_status_scope[tipo_casos_col].astype(str)
         devoluciones_mask = tipo_series.str.contains("Devoluci", case=False, na=False)
         garantias_mask = tipo_series.str.contains("Garant", case=False, na=False)
 
-        devoluciones_pendientes = df_casos[
+        devoluciones_pendientes = df_casos_status_scope[
             (estados_series == "🟡 Pendiente") & devoluciones_mask
         ]
-        garantias_pendientes = df_casos[
+        garantias_pendientes = df_casos_status_scope[
             (estados_series == "🟡 Pendiente") & garantias_mask
         ]
-        devoluciones_demoradas = df_casos[
+        devoluciones_demoradas = df_casos_status_scope[
             (estados_series == "🔴 Demorado") & devoluciones_mask
         ]
-        garantias_demoradas = df_casos[
+        garantias_demoradas = df_casos_status_scope[
             (estados_series == "🔴 Demorado") & garantias_mask
         ]
 
