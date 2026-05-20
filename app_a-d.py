@@ -8318,7 +8318,7 @@ if df_main is not None:
                 )
 
     # --- Control de acceso por usuario (persistido en query param `usuario`) ---
-    allowed_users = ["SINAI", "SINAICEL", "SCHAVA", "VICTOR"]
+    allowed_users = ["SINAI", "SINAICEL", "SCHAVA"]
     current_user_raw = str(_get_query_param_value("usuario") or st.session_state.get("app_usuario", "")).strip()
     current_user = current_user_raw.upper()
 
@@ -8344,63 +8344,6 @@ if df_main is not None:
     st.session_state["app_usuario"] = current_user
     st.query_params["usuario"] = current_user
     st.caption(f"Usuario activo: **{current_user}**")
-
-    if current_user == "VICTOR":
-        victor_tabs = st.tabs(["🌆 Local CDMX", "🎓 Recoge en Aula", "✅ Completado CDMX (72h)"])
-
-        def _render_victor_tab(turnos: list[str], origen_tab: str, titulo: str) -> None:
-            df_v = df_main[
-                (df_main["Turno"].astype(str).str.strip().isin(turnos))
-                & (~df_main["Estado"].astype(str).str.strip().isin(["🟢 Completado", "✅ Viajó"]))
-            ].copy()
-            if df_v.empty:
-                st.info(f"No hay pedidos para {titulo}.")
-                return
-
-            df_v["Fecha_Entrega_dt"] = pd.to_datetime(df_v.get("Fecha_Entrega"), errors="coerce")
-            fechas = sorted([d for d in df_v["Fecha_Entrega_dt"].dropna().dt.date.unique()])
-            if not fechas:
-                fechas = [None]
-            labels = [f"📅 {d.strftime('%d/%m/%Y')}" if d else "📅 Sin fecha" for d in fechas]
-            subtabs = st.tabs(labels)
-            for i, fch in enumerate(fechas):
-                with subtabs[i]:
-                    if fch is None:
-                        df_day = df_v[df_v["Fecha_Entrega_dt"].isna()].copy()
-                    else:
-                        df_day = df_v[df_v["Fecha_Entrega_dt"].dt.date == fch].copy()
-                    if df_day.empty:
-                        st.info("Sin pedidos en esta fecha.")
-                        continue
-                    df_day = ordenar_pedidos_custom(df_day)
-                    for orden, (idx, row) in _render_paginated_iterrows(df_day, f"victor_{origen_tab}_{i}"):
-                        mostrar_pedido(df_main, idx, row, orden, titulo, origen_tab, worksheet_main, headers_main, s3_client)
-
-        with victor_tabs[0]:
-            st.markdown("### 🌆 Local CDMX")
-            _render_victor_tab(["🌆 Local CDMX", "Local CDMX"], "🌆 Local CDMX", "Local CDMX")
-
-        with victor_tabs[1]:
-            st.markdown("### 🎓 Recoge en Aula")
-            _render_victor_tab(["🎓 Recoge en Aula", "Recoge en Aula"], "🎓 Recoge en Aula", "Recoge en Aula")
-
-        with victor_tabs[2]:
-            st.markdown("### ✅ Completado CDMX (últimas 72 horas)")
-            df_comp = df_main[
-                (df_main["Turno"].astype(str).str.strip().isin(["🌆 Local CDMX", "Local CDMX", "🎓 Recoge en Aula", "Recoge en Aula"]))
-                & (df_main["Estado"].astype(str).str.strip() == "🟢 Completado")
-            ].copy()
-            df_comp["Fecha_Completado_dt"] = pd.to_datetime(df_comp.get("Fecha_Completado"), errors="coerce")
-            limite_72h = pd.Timestamp.now(tz="America/Mexico_City") - pd.Timedelta(hours=72)
-            df_comp = df_comp[df_comp["Fecha_Completado_dt"] >= limite_72h]
-            if df_comp.empty:
-                st.info("No hay pedidos completados CDMX en las últimas 72 horas.")
-            else:
-                df_comp = ordenar_pedidos_custom(df_comp)
-                for orden, (idx, row) in _render_paginated_iterrows(df_comp, "victor_completados_72h"):
-                    mostrar_pedido(df_main, idx, row, orden, "Completado CDMX", "✅ Completado CDMX (72h)", worksheet_main, headers_main, s3_client)
-
-        st.stop()
 
     # --- Implementación de Pestañas con st.tabs ---
     tab_options = [
