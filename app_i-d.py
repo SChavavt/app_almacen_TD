@@ -4854,6 +4854,10 @@ def _persist_page_scroll(view_key: str, user_key: str = "", force_bottom: bool =
     """
     components.html(script, height=0, scrolling=False)
 
+logged_vendor = get_logged_vendor()
+logged_user = get_logged_user()
+
+_inject_keepalive_media(logged_user in {"PANTALLAF", "PANTALLAL"})
 
 
 _inject_keepalive_media(logged_user in {"PANTALLAF", "PANTALLAL"})
@@ -4867,9 +4871,6 @@ _persist_page_scroll(selected_tab_key, logged_user, force_bottom=force_bottom_sc
 
 # helper para "simular" tabs
 tabs = [None] * len(visible_tabs)
-
-logged_vendor = get_logged_vendor()
-logged_user = get_logged_user()
 
 st.query_params["tab"] = str(selected_tab)
 if logged_user:
