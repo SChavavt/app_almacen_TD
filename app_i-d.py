@@ -4717,18 +4717,38 @@ selected_tab_key = visible_tabs[selected_tab][0]
 
 
 def _inject_keepalive_media(enabled: bool) -> None:
-    """Inyecta media silenciosa/invisible para mantener actividad en navegadores embebidos."""
+    """Inyecta keepalive liviano para navegadores embebidos (sin depender de red externa)."""
     if not enabled:
         return
 
     components.html(
         """
-        <audio autoplay loop muted playsinline preload="auto" style="display:none">
-          <source src="https://www.w3schools.com/html/horse.mp3" type="audio/mpeg">
-        </audio>
-        <video autoplay loop muted playsinline width="1" height="1" style="position:absolute;left:-9999px;opacity:0">
-          <source src="https://www.w3schools.com/html/mov_bbb.mp4" type="video/mp4">
-        </video>
+        <audio id="td-keepalive-audio" autoplay loop muted playsinline preload="auto" style="display:none"
+          src="data:audio/wav;base64,UklGRlQAAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YTAAAAA="></audio>
+        <script>
+        (function () {
+          const target = window.parent || window;
+          const audio = document.getElementById("td-keepalive-audio");
+          if (!audio) return;
+
+          const keepPlaying = () => {
+            const p = audio.play && audio.play();
+            if (p && typeof p.catch === "function") p.catch(() => {});
+          };
+
+          keepPlaying();
+          target.setTimeout(keepPlaying, 300);
+          target.setTimeout(keepPlaying, 1200);
+          target.setInterval(() => {
+            keepPlaying();
+            try {
+              if (target.localStorage) {
+                target.localStorage.setItem("td_keepalive_ping", String(Date.now()));
+              }
+            } catch (e) {}
+          }, 15000);
+        })();
+        </script>
         """,
         height=0,
         scrolling=False,
