@@ -3324,29 +3324,64 @@ def render_cobranza_tab_gerente():
                     saldos_df = saldos_df[cond_norm == "contado"].copy()
 
                 semaforo_por_cliente: dict[str, str] = {}
-                if not com_df.empty:
+                folios_activos_por_cliente: dict[str, set[str]] = {}
+                if not venc_activos_df.empty:
+                    tmp_folios = venc_activos_df.copy()
+                    tmp_folios["Codigo"] = tmp_folios.get("Codigo", pd.Series("", index=tmp_folios.index)).astype(str).str.strip()
+                    if "_folio_norm" not in tmp_folios.columns:
+                        tmp_folios["_folio_norm"] = tmp_folios.get("Folio", "").apply(_cobranza_clean_text)
+                    tmp_folios = tmp_folios[
+                        (tmp_folios["Codigo"] != "")
+                        & (tmp_folios["_folio_norm"].astype(str).str.strip() != "")
+                    ].copy()
+                    if not tmp_folios.empty:
+                        folios_activos_por_cliente = (
+                            tmp_folios.groupby("Codigo")["_folio_norm"]
+                            .agg(lambda vals: set(str(v).strip() for v in vals if str(v).strip()))
+                            .to_dict()
+                        )
+
+                if not com_df.empty and folios_activos_por_cliente:
                     com_cli = com_df.copy()
-                    com_cli["Codigo"] = com_cli.get("Codigo", pd.Series("", index=com_cli.index)).astype(str)
+                    com_cli["Codigo"] = com_cli.get("Codigo", pd.Series("", index=com_cli.index)).astype(str).str.strip()
+                    com_cli["_folio_norm"] = com_cli.get("Folio", "").apply(_cobranza_clean_text)
+                    com_cli = com_cli[
+                        (com_cli["Codigo"] != "")
+                        & (com_cli["_folio_norm"].astype(str).str.strip() != "")
+                    ].copy()
                     com_cli["_ts"] = pd.to_datetime(com_cli.get("Timestamp", ""), errors="coerce")
                     com_cli["_row_sort"] = pd.to_numeric(
                         com_cli.get("__row", com_cli.get("__row_number__", pd.Series(index=com_cli.index, dtype="float64"))),
                         errors="coerce",
                     )
-                    com_cli = com_cli.sort_values(["Codigo", "_ts", "_row_sort"], ascending=[True, True, True])
-                    ultimos_cli = com_cli.drop_duplicates(subset=["Codigo"], keep="last").copy()
-                    for _, row in ultimos_cli.iterrows():
+                    com_cli = com_cli.sort_values(["Codigo", "_folio_norm", "_ts", "_row_sort"], ascending=[True, True, True, True])
+                    ultimos_folio = com_cli.drop_duplicates(subset=["Codigo", "_folio_norm"], keep="last").copy()
+
+                    folios_verdes_por_cliente: dict[str, set[str]] = {}
+                    for _, row in ultimos_folio.iterrows():
                         codigo = str(row.get("Codigo", "")).strip()
-                        if not codigo:
+                        folio = str(row.get("_folio_norm", "")).strip()
+                        if not codigo or not folio:
+                            continue
+                        if folio not in folios_activos_por_cliente.get(codigo, set()):
                             continue
                         estatus = _cobranza_clean_text(row.get("Estatus_Seguimiento", "")).upper()
                         fecha_promesa = pd.to_datetime(row.get("Fecha_Proximo_Pago", ""), errors="coerce")
                         fecha_com = pd.to_datetime(row.get("Timestamp", ""), errors="coerce")
-                        color = "🔴"
+                        folio_verde = False
                         if estatus == "PROMESA_PAGO" and pd.notna(fecha_promesa):
-                            color = "🟢" if hoy_norm < fecha_promesa.normalize() else "🔴"
+                            folio_verde = bool(hoy_norm < fecha_promesa.normalize())
                         elif pd.notna(fecha_com):
-                            color = "🟢" if (hoy_norm - fecha_com.normalize()).days <= 7 else "🔴"
-                        semaforo_por_cliente[codigo] = color
+                            folio_verde = bool((hoy_norm - fecha_com.normalize()).days <= 7)
+                        if folio_verde:
+                            folios_verdes_por_cliente.setdefault(codigo, set()).add(folio)
+
+                    for codigo, folios_activos in folios_activos_por_cliente.items():
+                        if not folios_activos:
+                            continue
+                        folios_verdes = folios_verdes_por_cliente.get(codigo, set())
+                        semaforo_por_cliente[codigo] = "🟢" if folios_activos.issubset(folios_verdes) else "🔴"
+
                 saldos_df["Semaforo_Seguimiento"] = saldos_df["Codigo"].map(semaforo_por_cliente).fillna("🔴")
                 # Azul claro: cliente con vencimiento mínimo aún no llegado.
                 mask_azul = (
