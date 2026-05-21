@@ -4734,18 +4734,25 @@ if is_pantalla_f_view:
     )
 # Matriz de vistas por usuario:
 # - SINAI: solo operación (Auto Foráneo, Auto Local y Asistente)
-# - DISSURTIDOR: solo vista de Surtidores
-# - Resto: acceso completo a tabs base (con filtro adicional para Reportes surtidores)
+# - DISSURTIDOR: Surtidores + Auditores
+# - AUDITOR: solo Auditores
+# - SCHAVA y CECILIA94: acceso completo sin excepciones
+# - Sin usuario: vista operativa básica (Dashboard, Asistente, Auto Local, Auto Foráneo)
+# - Resto: acceso completo excepto Reportes surtidores
 if logged_user == "SINAI":
     visible_tab_keys = ["auto_foraneo", "auto_local", "assistant"]
 elif logged_user == "DISSURTIDOR":
-    visible_tab_keys = ["surtidores"]
+    visible_tab_keys = ["surtidores", "auditores"]
 elif logged_user == "AUDITOR":
     visible_tab_keys = ["auditores"]
 elif logged_user == "PANTALLAF":
     visible_tab_keys = ["auto_foraneo"]
 elif logged_user == "PANTALLAL":
     visible_tab_keys = ["auto_local"]
+elif logged_user in {"SCHAVA", "CECILIA94"}:
+    visible_tab_keys = [tab_key for tab_key, _ in TAB_DEFINITIONS]
+elif not logged_user:
+    visible_tab_keys = ["dashboard", "assistant", "auto_local", "auto_foraneo"]
 else:
     visible_tab_keys = [tab_key for tab_key, _ in TAB_DEFINITIONS]
 
