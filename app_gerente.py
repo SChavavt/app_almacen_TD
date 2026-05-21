@@ -2358,7 +2358,9 @@ def cobranza_upsert_rows_by_key(
             for h in headers:
                 rec.setdefault(h, "")
     else:
-        values = _cobranza_get_all_values_cached(ws, use_cache=True)
+        # Usar lectura fresca para evitar trabajar con cache desfasado
+        # justo después de un upsert en la misma ejecución.
+        values = _cobranza_get_all_values_cached(ws, use_cache=False)
         headers = _cobranza_headers_from_values(values)
         if not headers:
             return
@@ -3101,14 +3103,17 @@ def render_cobranza_tab_gerente():
                 if not df_venc.empty:
                     cobranza_upsert_rows_by_key(ws_venc, df_venc[venc_headers], ["Codigo", "Folio", "Fecha_Vencimiento"], ["Mes", "Fecha_Factura", "Saldo_Vence", "Condicion", "Moneda", "Vendedor", "Ultima_Actualizacion"])
 
-                # ANTIGÜEDAD es la fuente vigente de folios abiertos: cualquier folio
-                # que ya no venga en la carga más reciente se debe quitar, incluso si
-                # el cliente tampoco viene en REPORTE. De lo contrario, esos folios
-                # viejos vuelven a aparecer en el expander como saldos pendientes.
+                # ANTIGÜEDAD es la fuente vigente de pendientes: sincronizar tanto
+                # el detalle por folio (vencimientos) como el resumen por cliente.
                 cobranza_prune_rows_by_keys(
                     ws_venc,
                     keep_rows=df_venc[["Codigo", "Folio", "Fecha_Vencimiento"]].copy(),
                     key_cols=["Codigo", "Folio", "Fecha_Vencimiento"],
+                )
+                cobranza_prune_rows_by_keys(
+                    ws_base,
+                    keep_rows=df_base[["Mes", "Codigo"]].copy(),
+                    key_cols=["Mes", "Codigo"],
                 )
 
                 st.session_state["ger_cob_stats"] = {
