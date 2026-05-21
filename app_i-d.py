@@ -4722,6 +4722,26 @@ st.session_state.active_main_tab = selected_tab
 selected_tab_key = visible_tabs[selected_tab][0]
 
 
+
+
+def _inject_keepalive_media(enabled: bool) -> None:
+    """Inyecta media silenciosa/invisible para mantener actividad en navegadores embebidos."""
+    if not enabled:
+        return
+
+    components.html(
+        """
+        <audio autoplay loop muted playsinline preload="auto" style="display:none">
+          <source src="https://www.w3schools.com/html/horse.mp3" type="audio/mpeg">
+        </audio>
+        <video autoplay loop muted playsinline width="1" height="1" style="position:absolute;left:-9999px;opacity:0">
+          <source src="https://www.w3schools.com/html/mov_bbb.mp4" type="video/mp4">
+        </video>
+        """,
+        height=0,
+        scrolling=False,
+    )
+
 def _persist_page_scroll(view_key: str, user_key: str = "", force_bottom: bool = False) -> None:
     """Guarda/restaura scroll vertical entre auto-recargas por vista/usuario."""
     storage_key = sanitize_text(f"td_scroll::{user_key}::{view_key}")
@@ -4768,6 +4788,10 @@ def _persist_page_scroll(view_key: str, user_key: str = "", force_bottom: bool =
     """
     components.html(script, height=0, scrolling=False)
 
+logged_vendor = get_logged_vendor()
+logged_user = get_logged_user()
+
+_inject_keepalive_media(logged_user in {"PANTALLAF", "PANTALLAL"})
 
 force_bottom_scroll = (
     selected_tab_key in {"auto_local", "auto_foraneo"}
@@ -4777,9 +4801,6 @@ _persist_page_scroll(selected_tab_key, logged_user, force_bottom=force_bottom_sc
 
 # helper para "simular" tabs
 tabs = [None] * len(visible_tabs)
-
-logged_vendor = get_logged_vendor()
-logged_user = get_logged_user()
 
 st.query_params["tab"] = str(selected_tab)
 if logged_user:
