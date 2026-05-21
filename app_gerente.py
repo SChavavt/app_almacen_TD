@@ -5096,12 +5096,11 @@ def render_salida_neta_tab():
         "con productos únicos por Código."
     )
 
-    with st.expander("📤 Carga y procesamiento de archivos", expanded=False):
-        with st.form("salida_neta_form", clear_on_submit=False):
-            entradas_file = st.file_uploader("1) Subir archivo de Entradas.xlsx", type=["xlsx"], key="salida_neta_entradas")
-            salidas_file = st.file_uploader("2) Subir archivo de Salidas.xlsx", type=["xlsx"], key="salida_neta_salidas")
-            existencias_file = st.file_uploader("3) Subir archivo de Existencias.xlsx", type=["xlsx"], key="salida_neta_existencias")
-            procesar = st.form_submit_button("4) Procesar archivos")
+    with st.form("salida_neta_form", clear_on_submit=False):
+        entradas_file = st.file_uploader("1) Subir archivo de Entradas.xlsx", type=["xlsx"], key="salida_neta_entradas")
+        salidas_file = st.file_uploader("2) Subir archivo de Salidas.xlsx", type=["xlsx"], key="salida_neta_salidas")
+        existencias_file = st.file_uploader("3) Subir archivo de Existencias.xlsx", type=["xlsx"], key="salida_neta_existencias")
+        procesar = st.form_submit_button("4) Procesar archivos")
 
     def _leer_archivo_excel(uploaded_file):
         xls = pd.ExcelFile(uploaded_file)
@@ -5564,75 +5563,6 @@ def render_salida_neta_tab():
             cat_std["Unidades Sugeridas"] = unidades_sugeridas.fillna((3.5 - meses_inv) * ventas_prom).fillna(0)
             for prov, col in proveedor_cols.items():
                 cat_std[prov] = _to_num_series(cat[col]).fillna(0)
-
-            col_linea = _pick_col("Línea", "Linea")
-            col_existencias_view = _pick_col("Existencias", "Existencia")
-            col_transito_view = _pick_col("Tránsito", "Transito")
-            ultimas_rot_cols = [c for c in cat.columns if re.match(r"^Rotación\s+.+\s+\d{4}$", str(c).strip())]
-            ultimas_rot_cols = ultimas_rot_cols[-6:]
-            col_actualizar_transito = st.button("Actualizar Tránsito", key="rot_update_transito_btn")
-
-            resumen_rows = []
-            for prov in proveedores_cantidad:
-                if prov not in cat_std.columns:
-                    continue
-                serie = pd.to_numeric(cat_std[prov], errors="coerce").fillna(0)
-                total = float(serie.sum())
-                if total > 0:
-                    resumen_rows.append({"Proveedor": prov, "Productos": int((serie > 0).sum()), "Cantidad en tránsito": total})
-            if resumen_rows:
-                st.markdown("#### Resumen de material en tránsito por proveedor")
-                st.dataframe(pd.DataFrame(resumen_rows).sort_values("Cantidad en tránsito", ascending=False), hide_index=True, use_container_width=True)
-
-            if col_actualizar_transito and proveedor_cols:
-                try:
-                    transit_vals = cat_std[list(proveedor_cols.keys())].sum(axis=1)
-                    modelo_to_transit = dict(zip(cat_std["Modelo"].astype(str).str.strip(), transit_vals))
-                    headers_ws = ws.row_values(1)
-                    col_transito_ws = headers_ws.index("Transito") + 1 if "Transito" in headers_ws else headers_ws.index("Tránsito") + 1
-                    valores_transito = []
-                    for _, row in cat.iterrows():
-                        modelo = str(row.get(col_modelo, "")).strip()
-                        val = float(modelo_to_transit.get(modelo, 0))
-                        valores_transito.append([int(val) if val.is_integer() else val])
-                    _ws_update_range(ws, f"{gspread.utils.rowcol_to_a1(2, col_transito_ws)}:{gspread.utils.rowcol_to_a1(len(cat)+1, col_transito_ws)}", valores_transito)
-
-                    for prov, prov_col in proveedor_cols.items():
-                        idx = headers_ws.index(prov_col) + 1
-                        vacios = [[""] for _ in range(len(cat))]
-                        _ws_update_range(ws, f"{gspread.utils.rowcol_to_a1(2, idx)}:{gspread.utils.rowcol_to_a1(len(cat)+1, idx)}", vacios)
-                    st.success("✅ Columna Tránsito actualizada y columnas de proveedor limpiadas.")
-                except Exception as exc:
-                    st.error(f"❌ No se pudo actualizar Tránsito: {exc}")
-
-            st.markdown("#### Vista de Rotaciones")
-            tabla_rot = pd.DataFrame({
-                "Modelo": cat[col_modelo] if col_modelo else "",
-                "Descripción": cat[col_desc] if col_desc else "",
-                "English Description": cat[col_desc_en] if col_desc_en else "",
-                "PRECIO": cat[col_precio] if col_precio else "",
-                "Proveedor": cat[col_proveedor] if col_proveedor else "",
-                "Línea": cat[col_linea] if col_linea else "",
-                "Existencias": cat[col_existencias_view] if col_existencias_view else "",
-                "Tránsito": cat[col_transito_view] if col_transito_view else "",
-                "Ventas Promedio Por Mes": cat[col_ventas_prom] if col_ventas_prom else "",
-                "Meses de Inventario": cat[col_meses_inv] if col_meses_inv else "",
-                "Comprar": cat[col_comprar] if col_comprar else "",
-                "Unidades Sugeridas": cat[col_unidades_sugeridas] if col_unidades_sugeridas else "",
-            })
-            for rc in ultimas_rot_cols:
-                tabla_rot[rc] = cat[rc]
-            prov_opts = sorted([x for x in tabla_rot["Proveedor"].astype(str).str.strip().unique().tolist() if x])
-            colf1, colf2 = st.columns(2)
-            with colf1:
-                filtro_prov = st.selectbox("Filtrar por proveedor", options=["Todos"] + prov_opts, key="rot_filtro_proveedor")
-            with colf2:
-                filtro_comp = st.selectbox("Filtrar por Comprar", options=["Todos", "COMPRAR", "OK"], key="rot_filtro_comprar")
-            if filtro_prov != "Todos":
-                tabla_rot = tabla_rot[tabla_rot["Proveedor"].astype(str).str.strip() == filtro_prov]
-            if filtro_comp != "Todos":
-                tabla_rot = tabla_rot[tabla_rot["Comprar"].astype(str).str.upper().str.strip() == filtro_comp]
-            st.dataframe(tabla_rot, use_container_width=True, hide_index=True)
 
             po_base = cat_std[cat_std["Modelo"].notna() & (cat_std["Modelo"].astype(str).str.strip() != "")].copy()
             po_base = po_base[po_base["Comprar"] == "COMPRAR"].copy()
