@@ -168,11 +168,10 @@ VENDEDOR_CREDENTIALS = {
     "DISSURTIDOR": "DISSURTIDOR",
     "PANTALLAF": "PANTALLAF",
     "PANTALLAL": "PANTALLAL",
-    "AUDITOR": "AUDITOR",
 }
 
 
-NON_VENDOR_USERS = {"SINAI", "DISSURTIDOR", "PANTALLAF", "PANTALLAL", "AUDITOR"}
+NON_VENDOR_USERS = {"SINAI", "DISSURTIDOR", "PANTALLAF", "PANTALLAL"}
 
 
 def is_non_vendor_user(user_key: str) -> bool:
@@ -1800,7 +1799,6 @@ def build_base_entry(row, categoria: str):
         "folio": sanitize_text(row.get("Folio_Factura", "")),
         "fecha": format_date(row.get("Fecha_Entrega")),
         "hora": format_time(row.get("Hora_Registro")),
-        "fecha_completado_dt": parse_datetime(row.get("Fecha_Completado")),
         "fecha_entrega_dt": parse_datetime(row.get("Fecha_Entrega")),
         "id_pedido": sanitize_text(row.get("ID_Pedido", "")),
         "vendedor": sanitize_text(row.get("Vendedor_Registro", "")),
@@ -3272,54 +3270,6 @@ def persist_surtidor_to_sheets(entries: list[dict], surtidor: str) -> tuple[int,
     return success_count, fail_count
 
 
-def persist_auditor_to_sheets(entries: list[dict], auditor: str) -> tuple[int, int]:
-    """Persist assigned auditor and assignment datetime to Google Sheets by row index for pedidos/casos."""
-    updates_by_sheet: dict[str, list[tuple[int, str, str]]] = {}
-    seen_targets = set()
-    hora_auditor = datetime.now(TZ).strftime("%Y-%m-%d %H:%M:%S")
-
-    for entry in entries:
-        raw_row = entry.get("gsheet_row_index")
-        try:
-            row_idx = int(float(raw_row))
-        except Exception:
-            continue
-        if row_idx < 2:
-            continue
-        sheet_name = sanitize_text(entry.get("sheet_source", "")) or SHEET_PEDIDOS
-        target = (sheet_name, row_idx)
-        if target in seen_targets:
-            continue
-        seen_targets.add(target)
-        updates_by_sheet.setdefault(sheet_name, []).append((row_idx, auditor, hora_auditor))
-
-    success_count = 0
-    fail_count = 0
-    for sheet_name, updates in updates_by_sheet.items():
-        try:
-            col_auditor_idx = _get_column_index_cached(sheet_name, "Auditores")
-            col_hora_idx = _get_column_index_cached(sheet_name, "Hora_Auditor")
-        except Exception:
-            col_auditor_idx, col_hora_idx = None, None
-
-        if not col_auditor_idx or not col_hora_idx:
-            fail_count += len(updates)
-            st.warning(
-                f"No se encontraron columnas 'Auditores' y/o 'Hora_Auditor' en la hoja '{sheet_name}'."
-            )
-            continue
-
-        ws = _worksheet_by_name(sheet_name)
-        for row_idx, auditor_value, hora_value in updates:
-            try:
-                ws.update_cell(row_idx, col_auditor_idx, auditor_value)
-                ws.update_cell(row_idx, col_hora_idx, hora_value)
-                success_count += 1
-            except Exception:
-                fail_count += 1
-    return success_count, fail_count
-
-
 @st.cache_data(ttl=60)
 def load_data_from_gsheets():
     try:
@@ -4708,7 +4658,6 @@ TAB_DEFINITIONS = [
     ("auto_local", "⚙️ Auto Local"),
     ("auto_foraneo", "🚚 Auto Foráneo"),
     ("surtidores", "🧑‍🔧 Surtidores"),
-    ("auditores", "🕵️ Auditores"),
     ("reportes_surtidores", "📊 Reportes surtidores"),
 ]
 
@@ -4740,8 +4689,6 @@ if logged_user == "SINAI":
     visible_tab_keys = ["auto_foraneo", "auto_local", "assistant"]
 elif logged_user == "DISSURTIDOR":
     visible_tab_keys = ["surtidores"]
-elif logged_user == "AUDITOR":
-    visible_tab_keys = ["auditores"]
 elif logged_user == "PANTALLAF":
     visible_tab_keys = ["auto_foraneo"]
 elif logged_user == "PANTALLAL":
@@ -5904,59 +5851,8 @@ if selected_tab_key == "surtidores":
             else:
                 st.caption("Sin asignaciones locales.")
         else:
-                st.info("Sin asignaciones registradas.")
+            st.info("Sin asignaciones registradas.")
 
-
-if selected_tab_key == "auditores":
-    st.markdown("### 🕵️ Tab auditores y asignación de auditores")
-    st.caption("Muestra solo pedidos completados hoy (Fecha_Completado) y permite asignar auditor.")
-    auditores_disponibles = ["Baldo", "Alexis", "Enrique", "Cassandra", "Yaya", "Karen"]
-    hoy = datetime.now(TZ).date()
-    completados_hoy = []
-    seen = set()
-    for entry in (auto_local_entries + auto_foraneo_entries):
-        fecha_comp = entry.get("fecha_completado_dt")
-        if not isinstance(fecha_comp, datetime):
-            continue
-        if fecha_comp.date() != hoy:
-            continue
-        if "completado" not in sanitize_text(entry.get("estado", "")).lower():
-            continue
-        key = build_surtidor_key(entry)
-        if not key or key in seen:
-            continue
-        seen.add(key)
-        completados_hoy.append(entry)
-
-    if not completados_hoy:
-        st.info("No hay pedidos completados hoy para auditar.")
-    else:
-        completados_hoy = sorted(completados_hoy, key=lambda e: e.get("display_num", float("inf")))
-        labels = {
-            build_surtidor_key(e): f"**#{e.get('display_num', e.get('numero', '—'))}** · {sanitize_text(e.get('cliente_nombre', ''))} · {sanitize_text(e.get('estado', ''))}"
-            for e in completados_hoy
-        }
-        with st.form("auditores_asignacion_form"):
-            auditor_sel = st.radio("Auditor", options=auditores_disponibles, horizontal=True)
-            selected_keys = []
-            for e in completados_hoy:
-                key = build_surtidor_key(e)
-                if st.checkbox(labels[key], key=f"auditor_pick_{key}"):
-                    selected_keys.append(key)
-            submit_auditor = st.form_submit_button("✅ Asignar auditor")
-        if submit_auditor:
-            if not selected_keys:
-                st.warning("Selecciona al menos un pedido.")
-            else:
-                by_key = {build_surtidor_key(e): e for e in completados_hoy}
-                selected_entries = [by_key[k] for k in selected_keys if k in by_key]
-                ok_count, fail_count = persist_auditor_to_sheets(selected_entries, sanitize_text(auditor_sel))
-                if ok_count and not fail_count:
-                    st.success("Auditor asignado y guardado en Google Sheets.")
-                elif ok_count and fail_count:
-                    st.warning(f"Se guardaron {ok_count} pedidos; {fail_count} quedaron pendientes.")
-                else:
-                    st.warning("No se pudo guardar la asignación del auditor en Google Sheets.")
 
 if selected_tab_key == "dashboard":
     if st.session_state.pop("_pending_full_refresh", False):
