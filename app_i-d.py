@@ -4798,18 +4798,104 @@ selected_tab_key = visible_tabs[selected_tab][0]
 
 
 def _inject_keepalive_media(enabled: bool) -> None:
-    """Inyecta media silenciosa/invisible para mantener actividad en navegadores embebidos."""
+    """Workaround experimental para Fire TV/Silk en pantallas dashboard (PANTALLAF/PANTALLAL)."""
     if not enabled:
         return
 
     components.html(
         """
-        <audio autoplay loop muted playsinline preload="auto" style="display:none">
-          <source src="https://www.w3schools.com/html/horse.mp3" type="audio/mpeg">
+        <audio id="td-keepalive-audio" autoplay loop muted playsinline preload="auto" style="display:none"
+          src="data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAESsAACJWAAACABAAZGF0YQAAAAA=">
         </audio>
-        <video autoplay loop muted playsinline width="1" height="1" style="position:absolute;left:-9999px;opacity:0">
-          <source src="https://www.w3schools.com/html/mov_bbb.mp4" type="video/mp4">
-        </video>
+        <iframe id="td-keepalive-frame" style="display:none" srcdoc="
+          <!doctype html><html><body>
+          <script>
+          (function(){
+            try {
+              setInterval(function(){
+                try { parent.postMessage({type:'td_keepalive_iframe', ts:Date.now()}, '*'); } catch (e) {}
+              }, 10000);
+            } catch (e) {}
+          })();
+          </script>
+          </body></html>">
+        </iframe>
+        <script>
+        (function() {
+          // Workaround experimental para Fire TV/Silk Browser en pantallas tipo dashboard.
+          try {
+            const audio = document.getElementById('td-keepalive-audio');
+            if (!audio) return;
+
+            let wakeLock = null;
+            const repaintDot = document.createElement('div');
+            repaintDot.id = 'td-keepalive-dot';
+            repaintDot.style.position = 'fixed';
+            repaintDot.style.left = '0';
+            repaintDot.style.bottom = '0';
+            repaintDot.style.width = '1px';
+            repaintDot.style.height = '1px';
+            repaintDot.style.opacity = '0.01';
+            repaintDot.style.pointerEvents = 'none';
+            repaintDot.style.zIndex = '-1';
+            document.body.appendChild(repaintDot);
+
+            const requestWakeLock = async () => {
+              try {
+                if ('wakeLock' in navigator && navigator.wakeLock && navigator.wakeLock.request) {
+                  wakeLock = await navigator.wakeLock.request('screen');
+                  wakeLock.addEventListener('release', () => { wakeLock = null; });
+                }
+              } catch (e) {}
+            };
+
+            const onVisibility = () => {
+              try {
+                if (document.visibilityState === 'visible') {
+                  requestWakeLock();
+                }
+              } catch (e) {}
+            };
+
+            document.addEventListener('visibilitychange', onVisibility);
+            requestWakeLock();
+
+            let repaintFlip = false;
+            const tick = () => {
+              try { audio.play().catch(() => {}); } catch (e) {}
+              try { localStorage.setItem('td_keepalive_ts', String(Date.now())); } catch (e) {}
+              try { window.focus(); } catch (e) {}
+              try { window.dispatchEvent(new Event('focus')); } catch (e) {}
+              try { document.dispatchEvent(new Event('focus')); } catch (e) {}
+              try {
+                const mouseEv = new MouseEvent('mousemove', { bubbles: true, clientX: 1, clientY: 1 });
+                (document.body || document.documentElement || document).dispatchEvent(mouseEv);
+              } catch (e) {}
+              try {
+                const kd = new KeyboardEvent('keydown', { key: 'Shift', code: 'ShiftLeft', bubbles: true });
+                const ku = new KeyboardEvent('keyup', { key: 'Shift', code: 'ShiftLeft', bubbles: true });
+                (document.body || document.documentElement || document).dispatchEvent(kd);
+                (document.body || document.documentElement || document).dispatchEvent(ku);
+              } catch (e) {}
+              try {
+                repaintFlip = !repaintFlip;
+                repaintDot.style.transform = repaintFlip ? 'translateX(1px)' : 'translateX(0px)';
+                repaintDot.style.opacity = repaintFlip ? '0.02' : '0.01';
+              } catch (e) {}
+            };
+
+            tick();
+            setInterval(tick, 9000);
+            window.addEventListener('message', function(ev) {
+              try {
+                if (ev && ev.data && ev.data.type === 'td_keepalive_iframe') {
+                  localStorage.setItem('td_keepalive_iframe_ts', String(ev.data.ts || Date.now()));
+                }
+              } catch (e) {}
+            });
+          } catch (e) {}
+        })();
+        </script>
         """,
         height=0,
         scrolling=False,
@@ -4862,10 +4948,7 @@ def _persist_page_scroll(view_key: str, user_key: str = "", force_bottom: bool =
     components.html(script, height=0, scrolling=False)
 
 logged_vendor = get_logged_vendor()
-logged_user = get_logged_user()
-
-_inject_keepalive_media(logged_user in {"PANTALLAF", "PANTALLAL"})
-
+logged_user = get_logged_user().upper()
 
 _inject_keepalive_media(logged_user in {"PANTALLAF", "PANTALLAL"})
 
