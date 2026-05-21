@@ -1693,11 +1693,6 @@ def assign_flow_numbers(entries_local, entries_foraneo, df_all: pd.DataFrame) ->
                 entry["numero"] = ""
                 continue
 
-            if suppress_cancelled_number and sanitize_text(entry.get("tipo", "")):
-                if _parse_foraneo_number(entry.get("numero_foraneo", "")) is None:
-                    entry["numero"] = ""
-                    continue
-
             keys = [
                 _flow_row_key_from_entry(entry),
                 _flow_match_key(entry.get("id_pedido", "")),
@@ -1715,10 +1710,7 @@ def assign_flow_numbers(entries_local, entries_foraneo, df_all: pd.DataFrame) ->
                         number = fallback_map[key]
                         break
 
-            if suppress_cancelled_number and sanitize_text(entry.get("tipo", "")) and not number:
-                entry["numero"] = ""
-            else:
-                entry["numero"] = number or "?"
+            entry["numero"] = number or "?"
 
     assign(entries_local, local_map, foraneo_map)
     assign(entries_foraneo, foraneo_map, local_map, suppress_cancelled_number=True)
@@ -4854,6 +4846,10 @@ def _persist_page_scroll(view_key: str, user_key: str = "", force_bottom: bool =
     """
     components.html(script, height=0, scrolling=False)
 
+logged_vendor = get_logged_vendor()
+logged_user = get_logged_user()
+
+_inject_keepalive_media(logged_user in {"PANTALLAF", "PANTALLAL"})
 
 
 _inject_keepalive_media(logged_user in {"PANTALLAF", "PANTALLAL"})
@@ -4867,9 +4863,6 @@ _persist_page_scroll(selected_tab_key, logged_user, force_bottom=force_bottom_sc
 
 # helper para "simular" tabs
 tabs = [None] * len(visible_tabs)
-
-logged_vendor = get_logged_vendor()
-logged_user = get_logged_user()
 
 st.query_params["tab"] = str(selected_tab)
 if logged_user:
@@ -5242,6 +5235,12 @@ if selected_tab_key == "auto_foraneo":
     hoy_base = filter_entries_on_or_after(restantes, hoy)
     hoy_entries = dedupe_entries_preserve_order(hoy_base + asignados + sin_numero)
     hoy_entries = sort_entries_by_flow_number_desc(hoy_entries)
+    hoy_entries_con_numero = [
+        e for e in hoy_entries if _parse_foraneo_number(e.get("numero", "")) is not None
+    ]
+    hoy_entries_sin_numero = [
+        e for e in hoy_entries if _parse_foraneo_number(e.get("numero", "")) is None
+    ]
 
     anteriores = dedupe_entries_preserve_order(ant + sin_fecha)
     anteriores = sort_entries_by_flow_number_desc(anteriores)
@@ -5272,9 +5271,9 @@ if selected_tab_key == "auto_foraneo":
     # --- CENTRO: HOY + FUTUROS (INICIO) ---
     with col_center:
         next_number = render_auto_list(
-            hoy_centro,
+            [e for e in hoy_centro if e in hoy_entries_con_numero],
             title=f"🚚 FORÁNEOS • HOY/FUTURAS ({hoy.strftime('%d/%m')})",
-            subtitle="Todos los de hoy y fechas futuras",
+            subtitle="Con número asignado",
             max_rows=140,
             start_number=1,
             panel_height=220,
@@ -5283,15 +5282,27 @@ if selected_tab_key == "auto_foraneo":
 
     # --- DERECHA: HOY + FUTUROS (CONTINUACIÓN) ---
     with col_right:
-        render_auto_list(
-            hoy_derecha,
-            title=f"🚚 FORÁNEOS • HOY/FUTURAS ({hoy.strftime('%d/%m')})",
-            subtitle="Continuación del bloque central",
-            max_rows=140,
-            start_number=next_number,
-            panel_height=220,
-            mode="foraneo",
-        )
+        right_assigned = [e for e in hoy_derecha if e in hoy_entries_con_numero]
+        if right_assigned:
+            render_auto_list(
+                right_assigned,
+                title=f"🚚 FORÁNEOS • HOY/FUTURAS ({hoy.strftime('%d/%m')})",
+                subtitle="Con número asignado (continuación)",
+                max_rows=140,
+                start_number=next_number,
+                panel_height=220,
+                mode="foraneo",
+            )
+        if hoy_entries_sin_numero:
+            render_auto_list(
+                hoy_entries_sin_numero,
+                title=f"🚚 FORÁNEOS • SIN NÚMERO ({hoy.strftime('%d/%m')})",
+                subtitle="Pendientes de numeración",
+                max_rows=140,
+                start_number=1,
+                panel_height=220,
+                mode="foraneo",
+            )
 
 
 
