@@ -4798,31 +4798,18 @@ selected_tab_key = visible_tabs[selected_tab][0]
 
 
 def _inject_keepalive_media(enabled: bool) -> None:
-    """Inyecta keepalive liviano sin red para mantener actividad en navegadores embebidos."""
+    """Inyecta media silenciosa/invisible para mantener actividad en navegadores embebidos."""
     if not enabled:
         return
 
     components.html(
         """
-        <audio id="td-keepalive-audio" autoplay loop muted playsinline preload="auto" style="display:none"
-          src="data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAESsAACJWAAACABAAZGF0YQAAAAA=">
+        <audio autoplay loop muted playsinline preload="auto" style="display:none">
+          <source src="https://www.w3schools.com/html/horse.mp3" type="audio/mpeg">
         </audio>
-        <script>
-        (function() {
-          const audio = document.getElementById('td-keepalive-audio');
-          if (!audio) return;
-
-          const tick = () => {
-            audio.play().catch(() => {});
-            try {
-              localStorage.setItem('td_keepalive_heartbeat', String(Date.now()));
-            } catch (e) {}
-          };
-
-          tick();
-          setInterval(tick, 15000);
-        })();
-        </script>
+        <video autoplay loop muted playsinline width="1" height="1" style="position:absolute;left:-9999px;opacity:0">
+          <source src="https://www.w3schools.com/html/mov_bbb.mp4" type="video/mp4">
+        </video>
         """,
         height=0,
         scrolling=False,
