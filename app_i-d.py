@@ -168,10 +168,11 @@ VENDEDOR_CREDENTIALS = {
     "DISSURTIDOR": "DISSURTIDOR",
     "PANTALLAF": "PANTALLAF",
     "PANTALLAL": "PANTALLAL",
+    "AUDITOR": "AUDITOR",
 }
 
 
-NON_VENDOR_USERS = {"SINAI", "DISSURTIDOR", "PANTALLAF", "PANTALLAL"}
+NON_VENDOR_USERS = {"SINAI", "DISSURTIDOR", "PANTALLAF", "PANTALLAL", "AUDITOR"}
 
 
 def is_non_vendor_user(user_key: str) -> bool:
@@ -1799,6 +1800,7 @@ def build_base_entry(row, categoria: str):
         "folio": sanitize_text(row.get("Folio_Factura", "")),
         "fecha": format_date(row.get("Fecha_Entrega")),
         "hora": format_time(row.get("Hora_Registro")),
+        "fecha_completado_dt": parse_datetime(row.get("Fecha_Completado")),
         "fecha_entrega_dt": parse_datetime(row.get("Fecha_Entrega")),
         "id_pedido": sanitize_text(row.get("ID_Pedido", "")),
         "vendedor": sanitize_text(row.get("Vendedor_Registro", "")),
@@ -3270,6 +3272,54 @@ def persist_surtidor_to_sheets(entries: list[dict], surtidor: str) -> tuple[int,
     return success_count, fail_count
 
 
+def persist_auditor_to_sheets(entries: list[dict], auditor: str) -> tuple[int, int]:
+    """Persist assigned auditor and assignment datetime to Google Sheets by row index for pedidos/casos."""
+    updates_by_sheet: dict[str, list[tuple[int, str, str]]] = {}
+    seen_targets = set()
+    hora_auditor = datetime.now(TZ).strftime("%Y-%m-%d %H:%M:%S")
+
+    for entry in entries:
+        raw_row = entry.get("gsheet_row_index")
+        try:
+            row_idx = int(float(raw_row))
+        except Exception:
+            continue
+        if row_idx < 2:
+            continue
+        sheet_name = sanitize_text(entry.get("sheet_source", "")) or SHEET_PEDIDOS
+        target = (sheet_name, row_idx)
+        if target in seen_targets:
+            continue
+        seen_targets.add(target)
+        updates_by_sheet.setdefault(sheet_name, []).append((row_idx, auditor, hora_auditor))
+
+    success_count = 0
+    fail_count = 0
+    for sheet_name, updates in updates_by_sheet.items():
+        try:
+            col_auditor_idx = _get_column_index_cached(sheet_name, "Auditores")
+            col_hora_idx = _get_column_index_cached(sheet_name, "Hora_Auditor")
+        except Exception:
+            col_auditor_idx, col_hora_idx = None, None
+
+        if not col_auditor_idx or not col_hora_idx:
+            fail_count += len(updates)
+            st.warning(
+                f"No se encontraron columnas 'Auditores' y/o 'Hora_Auditor' en la hoja '{sheet_name}'."
+            )
+            continue
+
+        ws = _worksheet_by_name(sheet_name)
+        for row_idx, auditor_value, hora_value in updates:
+            try:
+                ws.update_cell(row_idx, col_auditor_idx, auditor_value)
+                ws.update_cell(row_idx, col_hora_idx, hora_value)
+                success_count += 1
+            except Exception:
+                fail_count += 1
+    return success_count, fail_count
+
+
 @st.cache_data(ttl=60)
 def load_data_from_gsheets():
     try:
@@ -4658,6 +4708,7 @@ TAB_DEFINITIONS = [
     ("auto_local", "⚙️ Auto Local"),
     ("auto_foraneo", "🚚 Auto Foráneo"),
     ("surtidores", "🧑‍🔧 Surtidores"),
+    ("auditores", "🕵️ Auditores"),
     ("reportes_surtidores", "📊 Reportes surtidores"),
 ]
 
@@ -4689,6 +4740,8 @@ if logged_user == "SINAI":
     visible_tab_keys = ["auto_foraneo", "auto_local", "assistant"]
 elif logged_user == "DISSURTIDOR":
     visible_tab_keys = ["surtidores"]
+elif logged_user == "AUDITOR":
+    visible_tab_keys = ["auditores"]
 elif logged_user == "PANTALLAF":
     visible_tab_keys = ["auto_foraneo"]
 elif logged_user == "PANTALLAL":
@@ -4865,7 +4918,7 @@ if not logged_user:
 # Entradas compartidas para numeración única entre Auto Local y Auto Foráneo
 auto_local_entries = []
 auto_foraneo_entries = []
-if selected_tab_key in {"auto_local", "auto_foraneo", "surtidores"}:
+if selected_tab_key in {"auto_local", "auto_foraneo", "surtidores", "auditores"}:
     df_local_auto = get_local_orders(df_all)
     casos_local_auto, _ = get_case_envio_assignments(df_all)
     df_local_auto = drop_local_duplicates_for_cases(df_local_auto, casos_local_auto)
@@ -5851,8 +5904,160 @@ if selected_tab_key == "surtidores":
             else:
                 st.caption("Sin asignaciones locales.")
         else:
-            st.info("Sin asignaciones registradas.")
+                st.info("Sin asignaciones registradas.")
 
+
+if selected_tab_key == "auditores":
+    st.markdown("### 🕵️ Tab auditores y asignación de auditores")
+    st.caption("Muestra solo pedidos completados hoy (Fecha_Completado) y permite asignar auditor.")
+    auditores_disponibles = ["Deya", "Oscar"]
+    hoy = datetime.now(TZ).date()
+    completados_hoy = []
+    seen = set()
+    foraneo_num_map = {}
+    for e in auto_foraneo_entries:
+        k = build_surtidor_key(e)
+        if not k:
+            continue
+        num_txt = sanitize_text(str(e.get("display_num", e.get("numero", ""))))
+        if num_txt:
+            foraneo_num_map[k] = num_txt
+    if not df_all.empty:
+        for _, row in df_all.iterrows():
+            estado_raw = sanitize_text(row.get("Estado", "")).lower()
+            if "completado" not in estado_raw:
+                continue
+            fecha_comp = parse_datetime(row.get("Fecha_Completado"))
+            if not isinstance(fecha_comp, datetime) or fecha_comp.date() != hoy:
+                continue
+            entry = build_base_entry(row, "🕵️ Auditoría")
+            key = build_surtidor_key(entry)
+            if not key or key in seen:
+                continue
+            seen.add(key)
+            completados_hoy.append(entry)
+
+    foraneo_entries = []
+    local_entries = []
+    for entry in completados_hoy:
+        tipo_envio = sanitize_text(entry.get("tipo_envio", ""))
+        if tipo_envio == "🚚 Pedido Foráneo":
+            foraneo_entries.append(entry)
+        else:
+            local_entries.append(entry)
+
+    local_entries = sorted(local_entries, key=lambda e: e.get("sort_key", pd.Timestamp.max))
+    foraneo_entries = sorted(
+        foraneo_entries,
+        key=lambda e: int(foraneo_num_map.get(build_surtidor_key(e), "9999"))
+        if foraneo_num_map.get(build_surtidor_key(e), "").isdigit()
+        else 9999,
+    )
+    local_letter_map = {}
+    alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+    for idx, entry in enumerate(local_entries):
+        key = build_surtidor_key(entry)
+        if not key:
+            continue
+        local_letter_map[key] = alphabet[idx] if idx < len(alphabet) else f"L{idx + 1}"
+
+    if not (foraneo_entries or local_entries):
+        st.info("No hay pedidos completados hoy para auditar.")
+    else:
+        labels = {}
+        for e in (foraneo_entries + local_entries):
+            key = build_surtidor_key(e)
+            tipo_envio = sanitize_text(e.get("tipo_envio", ""))
+            if tipo_envio == "🚚 Pedido Foráneo":
+                numero_foraneo_txt = foraneo_num_map.get(key, "")
+                numero_label = f"#{numero_foraneo_txt}" if numero_foraneo_txt else "#--"
+            else:
+                numero_label = local_letter_map.get(key, "L?")
+            surtidor_actual = sanitize_text(e.get("surtidor", "")) or "Sin surtidor"
+            surtidor_dot_map = {
+                "Baldo": "🔴",
+                "Alexis": "🔵",
+                "Enrique": "🟢",
+                "Cassandra": "🟣",
+                "Yaya": "🟠",
+                "Karen": "🌸",
+            }
+            surtidor_dot = surtidor_dot_map.get(surtidor_actual, "⚪")
+            labels[key] = (
+                f"**{numero_label}** · {sanitize_text(e.get('cliente_nombre', ''))} · "
+                f"{sanitize_text(e.get('estado', ''))} · 🧑‍🔧 {surtidor_dot} {surtidor_actual}"
+            )
+        with st.form("auditores_asignacion_form"):
+            st.markdown(
+                """
+                <style>
+                div[data-testid="stCheckbox"] label {
+                    min-height: 1.9rem;
+                    padding: 0.14rem 0.42rem;
+                    gap: 0.44rem;
+                    cursor: pointer;
+                    border: 1px solid rgba(147, 197, 253, 0.48);
+                    border-radius: 0.58rem;
+                    background: rgba(147, 197, 253, 0.12);
+                    box-shadow: inset 0 0 0 1px rgba(191, 219, 254, 0.18);
+                    transition: background 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
+                }
+                div[data-testid="stCheckbox"] label:hover {
+                    border-color: rgba(125, 211, 252, 0.72);
+                    background: rgba(191, 219, 254, 0.2);
+                }
+                div[data-testid="stCheckbox"] { margin-bottom: 0.24rem; }
+                div[data-testid="stCheckbox"] label:has(input:checked) {
+                    border-color: rgba(34, 197, 94, 0.95);
+                    background: rgba(22, 101, 52, 0.28);
+                    box-shadow: 0 0 0 1px rgba(74, 222, 128, 0.28);
+                }
+                div[data-testid="stCheckbox"] label p {
+                    white-space: nowrap;
+                    font-size: 0.91rem;
+                    line-height: 1.08rem;
+                }
+                </style>
+                """,
+                unsafe_allow_html=True,
+            )
+            auditor_sel = st.radio("Auditor", options=auditores_disponibles, horizontal=True)
+            selected_keys = []
+            st.markdown("#### 🚚 Foráneos")
+            mitad_foraneo = int(np.ceil(len(foraneo_entries) / 2))
+            foraneo_left = foraneo_entries[:mitad_foraneo]
+            foraneo_right = foraneo_entries[mitad_foraneo:]
+            col_left, col_right = st.columns(2, gap="large")
+            with col_left:
+                for e in foraneo_left:
+                    key = build_surtidor_key(e)
+                    if st.checkbox(labels[key], key=f"auditor_pick_for_{key}"):
+                        selected_keys.append(key)
+            with col_right:
+                for e in foraneo_right:
+                    key = build_surtidor_key(e)
+                    if st.checkbox(labels[key], key=f"auditor_pick_for_{key}"):
+                        selected_keys.append(key)
+
+            st.markdown("#### 📍 Locales")
+            for e in local_entries:
+                key = build_surtidor_key(e)
+                if st.checkbox(labels[key], key=f"auditor_pick_loc_{key}"):
+                    selected_keys.append(key)
+            submit_auditor = st.form_submit_button("✅ Asignar auditor")
+        if submit_auditor:
+            if not selected_keys:
+                st.warning("Selecciona al menos un pedido.")
+            else:
+                by_key = {build_surtidor_key(e): e for e in (foraneo_entries + local_entries)}
+                selected_entries = [by_key[k] for k in selected_keys if k in by_key]
+                ok_count, fail_count = persist_auditor_to_sheets(selected_entries, sanitize_text(auditor_sel))
+                if ok_count and not fail_count:
+                    st.success("Auditor asignado y guardado en Google Sheets.")
+                elif ok_count and fail_count:
+                    st.warning(f"Se guardaron {ok_count} pedidos; {fail_count} quedaron pendientes.")
+                else:
+                    st.warning("No se pudo guardar la asignación del auditor en Google Sheets.")
 
 if selected_tab_key == "dashboard":
     if st.session_state.pop("_pending_full_refresh", False):
