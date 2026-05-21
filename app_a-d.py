@@ -8223,38 +8223,8 @@ if df_main is not None:
     else:
         df_casos_status_scope = df_casos.copy()
 
-    if is_victor_user_for_view:
-        turnos_victor_lista = ["🌆 Local CDMX", "Local CDMX", "🎓 Recoge en Aula", "Recoge en Aula"]
-        turnos_victor_mask = df_main["Turno"].astype(str).str.strip().isin(turnos_victor_lista)
-        estados_victor = df_main["Estado"].astype(str).str.strip()
-
-        df_victor_activos = df_main[
-            turnos_victor_mask
-            & (~estados_victor.isin(["🟢 Completado", "✅ Viajó"]))
-        ].copy()
-
-        df_victor_completados = df_main[
-            turnos_victor_mask
-            & (estados_victor == "🟢 Completado")
-        ].copy()
-
-        fecha_comp_dt = pd.to_datetime(df_victor_completados.get("Fecha_Completado"), errors="coerce")
-        if hasattr(fecha_comp_dt.dt, "tz_localize"):
-            try:
-                fecha_comp_dt = fecha_comp_dt.dt.tz_localize(None)
-            except TypeError:
-                fecha_comp_dt = fecha_comp_dt.dt.tz_convert("America/Mexico_City").dt.tz_localize(None)
-        df_victor_completados["Fecha_Completado_dt"] = fecha_comp_dt
-        limite_72h = (pd.Timestamp.now(tz="America/Mexico_City") - pd.Timedelta(hours=72)).tz_localize(None)
-        df_victor_completados = df_victor_completados[
-            df_victor_completados["Fecha_Completado_dt"] >= limite_72h
-        ]
-
-        df_main_metrics = pd.concat([df_victor_activos, df_victor_completados], ignore_index=False)
-        df_casos_metrics = df_casos_status_scope.iloc[0:0].copy()
-    else:
-        df_main_metrics = _exclude_turnos_from_status_view(df_main_status_scope)
-        df_casos_metrics = _exclude_turnos_from_status_view(df_casos_status_scope)
+    df_main_metrics = df_main_status_scope if is_victor_user_for_view else _exclude_turnos_from_status_view(df_main_status_scope)
+    df_casos_metrics = df_casos_status_scope if is_victor_user_for_view else _exclude_turnos_from_status_view(df_casos_status_scope)
 
     counts_main = _count_states(df_main_metrics)
     counts_casos = _count_states(df_casos_metrics)
