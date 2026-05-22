@@ -5629,7 +5629,7 @@ def render_salida_neta_tab():
             col_existencias_view = _pick_col("Existencias", "Existencia")
             col_transito_view = _pick_col("Tránsito", "Transito")
             ultimas_rot_cols = [c for c in cat.columns if re.match(r"^Rotación\s+.+\s+\d{4}$", str(c).strip())]
-            ultimas_rot_cols = ultimas_rot_cols[-6:]
+            ultimas_rot_cols = ultimas_rot_cols[-3:]
             resumen_rows = []
             for prov in proveedores_cantidad:
                 if prov not in cat_std.columns:
@@ -5726,16 +5726,11 @@ def render_salida_neta_tab():
                 tabla_rot = pd.DataFrame({
                 "Modelo": cat[col_modelo] if col_modelo else "",
                 "Descripción": cat[col_desc] if col_desc else "",
-                "English Description": cat[col_desc_en] if col_desc_en else "",
-                "PRECIO": cat[col_precio] if col_precio else "",
                 "Proveedor": cat[col_proveedor] if col_proveedor else "",
-                "Línea": cat[col_linea] if col_linea else "",
                 "Existencias": cat[col_existencias_view] if col_existencias_view else "",
                 "Tránsito": cat[col_transito_view] if col_transito_view else "",
                 "Ventas Promedio Por Mes": cat[col_ventas_prom] if col_ventas_prom else "",
-                "Meses de Inventario": cat[col_meses_inv] if col_meses_inv else "",
                 "Comprar": cat[col_comprar] if col_comprar else "",
-                "Unidades Sugeridas": cat[col_unidades_sugeridas] if col_unidades_sugeridas else "",
             })
                 for rc in ultimas_rot_cols:
                     tabla_rot[rc] = cat[rc]
