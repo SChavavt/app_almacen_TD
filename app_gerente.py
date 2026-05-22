@@ -5096,7 +5096,6 @@ def render_salida_neta_tab():
         "con productos únicos por Código."
     )
 
-    st.markdown("#### 📤 Carga y procesamiento de archivos")
     with st.form("salida_neta_form", clear_on_submit=False):
         entradas_file = st.file_uploader("1) Subir archivo de Entradas.xlsx", type=["xlsx"], key="salida_neta_entradas")
         salidas_file = st.file_uploader("2) Subir archivo de Salidas.xlsx", type=["xlsx"], key="salida_neta_salidas")
@@ -5143,42 +5142,6 @@ def render_salida_neta_tab():
 
     def _nombre_col_rotacion(fecha_desde: datetime) -> str:
         return f"Rotación {MESES_ES[fecha_desde.month]} {fecha_desde.year}"
-
-    def _ws_update_range_safe(worksheet, a1_range: str, values_matrix):
-        """Compatibilidad entre versiones de gspread con/sin Worksheet.update."""
-        if hasattr(worksheet, "update"):
-            try:
-                return _retry_gspread_api_call(
-                    lambda: worksheet.update(
-                        a1_range,
-                        values_matrix,
-                        value_input_option="USER_ENTERED",
-                    ),
-                    retries=5,
-                    base_delay=1.0,
-                )
-            except TypeError:
-                return _retry_gspread_api_call(
-                    lambda: worksheet.update(a1_range, values_matrix),
-                    retries=5,
-                    base_delay=1.0,
-                )
-        cells = worksheet.range(a1_range)
-        flat_values = [v for row in values_matrix for v in row]
-        for idx, cell in enumerate(cells):
-            cell.value = flat_values[idx] if idx < len(flat_values) else ""
-        try:
-            return _retry_gspread_api_call(
-                lambda: worksheet.update_cells(cells, value_input_option="USER_ENTERED"),
-                retries=5,
-                base_delay=1.0,
-            )
-        except TypeError:
-            return _retry_gspread_api_call(
-                lambda: worksheet.update_cells(cells),
-                retries=5,
-                base_delay=1.0,
-            )
 
     def _actualizar_rotacion_catalogo(df_salida_neta: pd.DataFrame, fecha_desde: datetime, df_existencias: pd.DataFrame):
         def _ensure_column(worksheet, headers_row: list[str], col_name: str) -> tuple[list[str], int]:
@@ -5474,11 +5437,10 @@ def render_salida_neta_tab():
                 st.error(f"❌ Error al procesar archivos: {e}")
 
     resultado = st.session_state.get("salida_neta_resultado")
-    fecha_desde = st.session_state.get("salida_neta_fecha_desde")
-    catalogo_df, no_encontrados_df, col_rotacion = pd.DataFrame(), pd.DataFrame(), ""
-
     if isinstance(resultado, pd.DataFrame) and not resultado.empty:
+        fecha_desde = st.session_state.get("salida_neta_fecha_desde")
         existencias_df = st.session_state.get("salida_neta_existencias_df")
+        catalogo_df, no_encontrados_df, col_rotacion = pd.DataFrame(), pd.DataFrame(), ""
         if isinstance(fecha_desde, datetime):
             try:
                 catalogo_df, no_encontrados_df, col_rotacion = _actualizar_rotacion_catalogo(resultado, fecha_desde, existencias_df)
@@ -5497,15 +5459,8 @@ def render_salida_neta_tab():
             )
             st.dataframe(no_encontrados_df[["Código", "Descripción", "Salida_Neta"]], use_container_width=True, hide_index=True)
 
-    if catalogo_df.empty:
-        try:
-            catalogotd = st.secrets.get("catalogotd", "1CzJm9Goqs6SoeHrJkn76UQ7ofFIYmGpavG-5feqaAoA")
-            catalogo_df = pd.DataFrame(gspread_client.open_by_key(catalogotd).worksheet("ROTACIONES").get_all_records())
-        except Exception as e:
-            st.warning(f"No se pudo cargar ROTACIONES para vista y tránsito: {e}")
-
-    st.markdown("### 🧾 Órdenes de compra por proveedor")
-    if isinstance(catalogo_df, pd.DataFrame) and not catalogo_df.empty:
+        st.markdown("### 🧾 Órdenes de compra por proveedor")
+        if isinstance(catalogo_df, pd.DataFrame) and not catalogo_df.empty:
             cat = catalogo_df.copy()
             # Nota: este catálogo viene de Google Sheets (valores), por lo que aquí no se conservan estilos
             # parciales de texto (ej. palabras en rojo dentro de una misma celda).
@@ -5608,94 +5563,6 @@ def render_salida_neta_tab():
             cat_std["Unidades Sugeridas"] = unidades_sugeridas.fillna((3.5 - meses_inv) * ventas_prom).fillna(0)
             for prov, col in proveedor_cols.items():
                 cat_std[prov] = _to_num_series(cat[col]).fillna(0)
-
-            col_linea = _pick_col("Línea", "Linea")
-            col_existencias_view = _pick_col("Existencias", "Existencia")
-            col_transito_view = _pick_col("Tránsito", "Transito")
-            ultimas_rot_cols = [c for c in cat.columns if re.match(r"^Rotación\s+.+\s+\d{4}$", str(c).strip())]
-            ultimas_rot_cols = ultimas_rot_cols[-6:]
-            col_actualizar_transito = st.button("Actualizar Tránsito", key="rot_update_transito_btn")
-
-            resumen_rows = []
-            for prov in proveedores_cantidad:
-                if prov not in cat_std.columns:
-                    continue
-                serie = pd.to_numeric(cat_std[prov], errors="coerce").fillna(0)
-                total = float(serie.sum())
-                if total > 0:
-                    resumen_rows.append({"Proveedor": prov, "Productos": int((serie > 0).sum()), "Cantidad en tránsito": total})
-            if resumen_rows:
-                st.markdown("#### Resumen de material en tránsito por proveedor")
-                st.dataframe(pd.DataFrame(resumen_rows).sort_values("Cantidad en tránsito", ascending=False), hide_index=True, use_container_width=True)
-
-            if col_actualizar_transito and proveedor_cols:
-                try:
-                    transit_vals = cat_std[list(proveedor_cols.keys())].sum(axis=1)
-                    modelo_to_transit = dict(zip(cat_std["Modelo"].astype(str).str.strip(), transit_vals))
-                    ws = _retry_gspread_api_call(
-                        lambda: gspread_client.open_by_key(catalogotd).worksheet("ROTACIONES"),
-                        retries=5,
-                        base_delay=1.0,
-                    )
-                    headers_ws = _retry_gspread_api_call(lambda: ws.row_values(1), retries=5, base_delay=1.0)
-                    col_transito_ws = headers_ws.index("Transito") + 1 if "Transito" in headers_ws else headers_ws.index("Tránsito") + 1
-                    valores_transito = []
-                    for _, row in cat.iterrows():
-                        modelo = str(row.get(col_modelo, "")).strip()
-                        val = float(modelo_to_transit.get(modelo, 0))
-                        valores_transito.append([int(val) if val.is_integer() else val])
-                    barra_transito = st.progress(10, text="Preparando actualización de Tránsito...")
-                    _ws_update_range_safe(ws, f"{gspread.utils.rowcol_to_a1(2, col_transito_ws)}:{gspread.utils.rowcol_to_a1(len(cat)+1, col_transito_ws)}", valores_transito)
-                    barra_transito.progress(70, text="Limpiando columnas de proveedores...")
-
-                    for prov, prov_col in proveedor_cols.items():
-                        idx = headers_ws.index(prov_col) + 1
-                        vacios = [[""] for _ in range(len(cat))]
-                        _ws_update_range_safe(ws, f"{gspread.utils.rowcol_to_a1(2, idx)}:{gspread.utils.rowcol_to_a1(len(cat)+1, idx)}", vacios)
-                    barra_transito.progress(100, text="Tránsito actualizado.")
-                    st.success("✅ Columna Tránsito actualizada y columnas de proveedor limpiadas.")
-                    transito_preview = pd.DataFrame({
-                        "Modelo": cat[col_modelo] if col_modelo else "",
-                        "Descripción": cat[col_desc] if col_desc else "",
-                        "Proveedor": cat[col_proveedor] if col_proveedor else "",
-                        "Tránsito": [v[0] for v in valores_transito],
-                    })
-                    transito_preview = transito_preview[
-                        transito_preview["Modelo"].astype(str).str.strip() != ""
-                    ].copy()
-                    st.markdown("#### Resultado de columna Tránsito")
-                    st.dataframe(transito_preview, use_container_width=True, hide_index=True)
-                except Exception as exc:
-                    st.error(f"❌ No se pudo actualizar Tránsito: {exc}")
-
-            st.markdown("#### Vista de Rotaciones")
-            tabla_rot = pd.DataFrame({
-                "Modelo": cat[col_modelo] if col_modelo else "",
-                "Descripción": cat[col_desc] if col_desc else "",
-                "English Description": cat[col_desc_en] if col_desc_en else "",
-                "PRECIO": cat[col_precio] if col_precio else "",
-                "Proveedor": cat[col_proveedor] if col_proveedor else "",
-                "Línea": cat[col_linea] if col_linea else "",
-                "Existencias": cat[col_existencias_view] if col_existencias_view else "",
-                "Tránsito": cat[col_transito_view] if col_transito_view else "",
-                "Ventas Promedio Por Mes": cat[col_ventas_prom] if col_ventas_prom else "",
-                "Meses de Inventario": cat[col_meses_inv] if col_meses_inv else "",
-                "Comprar": cat[col_comprar] if col_comprar else "",
-                "Unidades Sugeridas": cat[col_unidades_sugeridas] if col_unidades_sugeridas else "",
-            })
-            for rc in ultimas_rot_cols:
-                tabla_rot[rc] = cat[rc]
-            prov_opts = sorted([x for x in tabla_rot["Proveedor"].astype(str).str.strip().unique().tolist() if x])
-            colf1, colf2 = st.columns(2)
-            with colf1:
-                filtro_prov = st.selectbox("Filtrar por proveedor", options=["Todos"] + prov_opts, key="rot_filtro_proveedor")
-            with colf2:
-                filtro_comp = st.selectbox("Filtrar por Comprar", options=["Todos", "COMPRAR", "OK"], key="rot_filtro_comprar")
-            if filtro_prov != "Todos":
-                tabla_rot = tabla_rot[tabla_rot["Proveedor"].astype(str).str.strip() == filtro_prov]
-            if filtro_comp != "Todos":
-                tabla_rot = tabla_rot[tabla_rot["Comprar"].astype(str).str.upper().str.strip() == filtro_comp]
-            st.dataframe(tabla_rot, use_container_width=True, hide_index=True)
 
             po_base = cat_std[cat_std["Modelo"].notna() & (cat_std["Modelo"].astype(str).str.strip() != "")].copy()
             po_base = po_base[po_base["Comprar"] == "COMPRAR"].copy()
@@ -5839,6 +5706,12 @@ def render_salida_neta_tab():
                     "Revisa que los productos marcados como **COMPRAR** tengan cantidades en columnas de proveedor "
                     "o tengan la columna **Proveedor** llena para usar **Unidades Sugeridas**."
                 )
+        else:
+            st.warning(
+                "No se pudo cargar el catálogo ROTACIONES para generar órdenes de compra. "
+                "Por eso solo ves la tabla de productos no encontrados."
+            )
+
 # --- INTERFAZ ---
 USUARIOS_VALIDOS = ["ALEJANDRO38", "CeciliaATD", "SChava", "BreydaFTD", "SaraiFTD", "JorgeLic"]
 
