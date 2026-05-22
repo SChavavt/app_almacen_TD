@@ -5096,12 +5096,12 @@ def render_salida_neta_tab():
         "con productos únicos por Código."
     )
 
-    st.markdown("#### 📤 Carga y procesamiento de archivos")
-    with st.form("salida_neta_form", clear_on_submit=False):
-        entradas_file = st.file_uploader("1) Subir archivo de Entradas.xlsx", type=["xlsx"], key="salida_neta_entradas")
-        salidas_file = st.file_uploader("2) Subir archivo de Salidas.xlsx", type=["xlsx"], key="salida_neta_salidas")
-        existencias_file = st.file_uploader("3) Subir archivo de Existencias.xlsx", type=["xlsx"], key="salida_neta_existencias")
-        procesar = st.form_submit_button("4) Procesar archivos")
+    with st.expander("📤 Carga y procesamiento de archivos", expanded=True):
+        with st.form("salida_neta_form", clear_on_submit=False):
+            entradas_file = st.file_uploader("1) Subir archivo de Entradas.xlsx", type=["xlsx"], key="salida_neta_entradas")
+            salidas_file = st.file_uploader("2) Subir archivo de Salidas.xlsx", type=["xlsx"], key="salida_neta_salidas")
+            existencias_file = st.file_uploader("3) Subir archivo de Existencias.xlsx", type=["xlsx"], key="salida_neta_existencias")
+            procesar = st.form_submit_button("4) Procesar archivos")
 
     def _leer_archivo_excel(uploaded_file):
         xls = pd.ExcelFile(uploaded_file)
@@ -5631,8 +5631,6 @@ def render_salida_neta_tab():
             col_transito_view = _pick_col("Tránsito", "Transito")
             ultimas_rot_cols = [c for c in cat.columns if re.match(r"^Rotación\s+.+\s+\d{4}$", str(c).strip())]
             ultimas_rot_cols = ultimas_rot_cols[-6:]
-            col_actualizar_transito = st.button("Actualizar Tránsito", key="rot_update_transito_btn")
-
             resumen_rows = []
             for prov in proveedores_cantidad:
                 if prov not in cat_std.columns:
@@ -5645,60 +5643,88 @@ def render_salida_neta_tab():
                 st.markdown("#### Resumen de material en tránsito por proveedor")
                 st.dataframe(pd.DataFrame(resumen_rows).sort_values("Cantidad en tránsito", ascending=False), hide_index=True, use_container_width=True)
 
-            if col_actualizar_transito and proveedor_cols:
-                try:
-                    transit_vals = cat_std[list(proveedor_cols.keys())].sum(axis=1)
-                    modelo_to_transit = dict(zip(cat_std["Modelo"].astype(str).str.strip(), transit_vals))
-                    if ws_rot is None:
-                        ws_rot = _retry_gspread_api_call(
-                            lambda: gspread_client.open_by_key(catalogotd).worksheet("ROTACIONES"),
-                            retries=5,
-                            base_delay=1.0,
-                        )
-                    ws = ws_rot
-                    headers_ws = list(cat.columns)
-                    col_transito_ws = headers_ws.index("Transito") + 1 if "Transito" in headers_ws else headers_ws.index("Tránsito") + 1
-                    valores_transito = []
-                    for _, row in cat.iterrows():
-                        modelo = str(row.get(col_modelo, "")).strip()
-                        val = float(modelo_to_transit.get(modelo, 0))
-                        valores_transito.append([int(val) if val.is_integer() else val])
-                    barra_transito = st.progress(10, text="Preparando actualización de Tránsito...")
-                    data_ranges = [
-                        {
-                            "range": f"{gspread.utils.rowcol_to_a1(2, col_transito_ws)}:{gspread.utils.rowcol_to_a1(len(cat)+1, col_transito_ws)}",
-                            "values": valores_transito,
-                        }
-                    ]
-                    vacios = [[""] for _ in range(len(cat))]
-                    for _, prov_col in proveedor_cols.items():
-                        idx = headers_ws.index(prov_col) + 1
-                        data_ranges.append(
-                            {
-                                "range": f"{gspread.utils.rowcol_to_a1(2, idx)}:{gspread.utils.rowcol_to_a1(len(cat)+1, idx)}",
-                                "values": vacios,
-                            }
-                        )
-                    barra_transito.progress(60, text="Aplicando actualización (1 sola escritura)...")
-                    _ws_batch_update_safe(ws, data_ranges)
-                    barra_transito.progress(100, text="Tránsito actualizado.")
-                    st.success("✅ Columna Tránsito actualizada y columnas de proveedor limpiadas (1 sola escritura).")
-                    transito_preview = pd.DataFrame({
-                        "Modelo": cat[col_modelo] if col_modelo else "",
-                        "Descripción": cat[col_desc] if col_desc else "",
-                        "Proveedor": cat[col_proveedor] if col_proveedor else "",
-                        "Tránsito": [v[0] for v in valores_transito],
-                    })
-                    transito_preview = transito_preview[
-                        transito_preview["Modelo"].astype(str).str.strip() != ""
-                    ].copy()
-                    st.markdown("#### Resultado de columna Tránsito")
-                    st.dataframe(transito_preview, use_container_width=True, hide_index=True)
-                except Exception as exc:
-                    st.error(f"❌ No se pudo actualizar Tránsito: {exc}")
+            with st.expander("🚚 Tránsito", expanded=True):
+                pending_por_proveedor = []
+                total_unidades_pendientes = 0.0
+                for prov in proveedor_cols.keys():
+                    serie_p = pd.to_numeric(cat_std[prov], errors="coerce").fillna(0)
+                    total_p = float(serie_p.sum())
+                    if total_p > 0:
+                        pending_por_proveedor.append((prov, total_p))
+                        total_unidades_pendientes += total_p
 
-            st.markdown("#### Vista de Rotaciones")
-            tabla_rot = pd.DataFrame({
+                if pending_por_proveedor:
+                    st.info(
+                        "Hay unidades pendientes por actualizar en tránsito. "
+                        f"Total pendiente: **{int(total_unidades_pendientes) if total_unidades_pendientes.is_integer() else round(total_unidades_pendientes, 2)}**."
+                    )
+                    st.caption(
+                        "Proveedores con pendientes: "
+                        + ", ".join(
+                            f"{prov} ({int(total) if float(total).is_integer() else round(total, 2)})"
+                            for prov, total in sorted(pending_por_proveedor, key=lambda x: x[1], reverse=True)
+                        )
+                    )
+                    col_actualizar_transito = st.button("Actualizar Tránsito", key="rot_update_transito_btn")
+                else:
+                    col_actualizar_transito = False
+                    st.success("✅ La columna Tránsito ya está actualizada. No hay valores pendientes en columnas por proveedor.")
+
+                if col_actualizar_transito and proveedor_cols:
+                    try:
+                        transit_vals = cat_std[list(proveedor_cols.keys())].sum(axis=1)
+                        modelo_to_transit = dict(zip(cat_std["Modelo"].astype(str).str.strip(), transit_vals))
+                        if ws_rot is None:
+                            ws_rot = _retry_gspread_api_call(
+                                lambda: gspread_client.open_by_key(catalogotd).worksheet("ROTACIONES"),
+                                retries=5,
+                                base_delay=1.0,
+                            )
+                        ws = ws_rot
+                        headers_ws = list(cat.columns)
+                        col_transito_ws = headers_ws.index("Transito") + 1 if "Transito" in headers_ws else headers_ws.index("Tránsito") + 1
+                        valores_transito = []
+                        for _, row in cat.iterrows():
+                            modelo = str(row.get(col_modelo, "")).strip()
+                            val = float(modelo_to_transit.get(modelo, 0))
+                            valores_transito.append([int(val) if val.is_integer() else val])
+                        barra_transito = st.progress(10, text="Preparando actualización de Tránsito...")
+                        data_ranges = [
+                            {
+                                "range": f"{gspread.utils.rowcol_to_a1(2, col_transito_ws)}:{gspread.utils.rowcol_to_a1(len(cat)+1, col_transito_ws)}",
+                                "values": valores_transito,
+                            }
+                        ]
+                        vacios = [[""] for _ in range(len(cat))]
+                        for _, prov_col in proveedor_cols.items():
+                            idx = headers_ws.index(prov_col) + 1
+                            data_ranges.append(
+                                {
+                                    "range": f"{gspread.utils.rowcol_to_a1(2, idx)}:{gspread.utils.rowcol_to_a1(len(cat)+1, idx)}",
+                                    "values": vacios,
+                                }
+                            )
+                        barra_transito.progress(60, text="Aplicando actualización (1 sola escritura)...")
+                        _ws_batch_update_safe(ws, data_ranges)
+                        barra_transito.progress(100, text="Tránsito actualizado.")
+                        st.success("✅ Columna Tránsito actualizada y columnas de proveedor limpiadas (1 sola escritura).")
+                    except Exception as exc:
+                        st.error(f"❌ No se pudo actualizar Tránsito: {exc}")
+
+                transito_preview = pd.DataFrame({
+                    "Modelo": cat[col_modelo] if col_modelo else "",
+                    "Descripción": cat[col_desc] if col_desc else "",
+                    "Proveedor": cat[col_proveedor] if col_proveedor else "",
+                    "Tránsito": cat[col_transito_view] if col_transito_view else "",
+                })
+                transito_preview = transito_preview[
+                    transito_preview["Modelo"].astype(str).str.strip() != ""
+                ].copy()
+                st.markdown("#### Resultado de columna Tránsito")
+                st.dataframe(transito_preview, use_container_width=True, hide_index=True)
+
+            with st.expander("📊 Vista de Rotaciones", expanded=True):
+                tabla_rot = pd.DataFrame({
                 "Modelo": cat[col_modelo] if col_modelo else "",
                 "Descripción": cat[col_desc] if col_desc else "",
                 "English Description": cat[col_desc_en] if col_desc_en else "",
@@ -5712,19 +5738,19 @@ def render_salida_neta_tab():
                 "Comprar": cat[col_comprar] if col_comprar else "",
                 "Unidades Sugeridas": cat[col_unidades_sugeridas] if col_unidades_sugeridas else "",
             })
-            for rc in ultimas_rot_cols:
-                tabla_rot[rc] = cat[rc]
-            prov_opts = sorted([x for x in tabla_rot["Proveedor"].astype(str).str.strip().unique().tolist() if x])
-            colf1, colf2 = st.columns(2)
-            with colf1:
-                filtro_prov = st.selectbox("Filtrar por proveedor", options=["Todos"] + prov_opts, key="rot_filtro_proveedor")
-            with colf2:
-                filtro_comp = st.selectbox("Filtrar por Comprar", options=["Todos", "COMPRAR", "OK"], key="rot_filtro_comprar")
-            if filtro_prov != "Todos":
-                tabla_rot = tabla_rot[tabla_rot["Proveedor"].astype(str).str.strip() == filtro_prov]
-            if filtro_comp != "Todos":
-                tabla_rot = tabla_rot[tabla_rot["Comprar"].astype(str).str.upper().str.strip() == filtro_comp]
-            st.dataframe(tabla_rot, use_container_width=True, hide_index=True)
+                for rc in ultimas_rot_cols:
+                    tabla_rot[rc] = cat[rc]
+                prov_opts = sorted([x for x in tabla_rot["Proveedor"].astype(str).str.strip().unique().tolist() if x])
+                colf1, colf2 = st.columns(2)
+                with colf1:
+                    filtro_prov = st.selectbox("Filtrar por proveedor", options=["Todos"] + prov_opts, key="rot_filtro_proveedor")
+                with colf2:
+                    filtro_comp = st.selectbox("Filtrar por Comprar", options=["Todos", "COMPRAR", "OK"], key="rot_filtro_comprar")
+                if filtro_prov != "Todos":
+                    tabla_rot = tabla_rot[tabla_rot["Proveedor"].astype(str).str.strip() == filtro_prov]
+                if filtro_comp != "Todos":
+                    tabla_rot = tabla_rot[tabla_rot["Comprar"].astype(str).str.upper().str.strip() == filtro_comp]
+                st.dataframe(tabla_rot, use_container_width=True, hide_index=True)
 
             po_base = cat_std[cat_std["Modelo"].notna() & (cat_std["Modelo"].astype(str).str.strip() != "")].copy()
             po_base = po_base[po_base["Comprar"] == "COMPRAR"].copy()
@@ -5746,128 +5772,129 @@ def render_salida_neta_tab():
                     linea["Quantity"] = pd.to_numeric(item.get("Unidades Sugeridas"), errors="coerce")
                     lineas_oc.append(linea)
 
-            po_df = pd.DataFrame(lineas_oc)
-            if po_df.empty:
-                po_df = pd.DataFrame(columns=["Modelo", "Descripción", "English Description", "Quantity", "Cost", "Total", "Proveedor"])
-            else:
-                po_df["Quantity"] = pd.to_numeric(po_df["Quantity"], errors="coerce").fillna(0)
-                po_df = po_df[po_df["Quantity"] > 0].copy()
-                po_df["Cost"] = po_df["PRECIO"]
-                po_df["Total"] = po_df["Quantity"] * po_df["Cost"]
-                po_df = po_df[["Modelo", "Descripción", "English Description", "Quantity", "Cost", "Total", "Proveedor"]]
+            with st.expander("🧾 Órdenes de compra por proveedor", expanded=True):
+                po_df = pd.DataFrame(lineas_oc)
+                if po_df.empty:
+                    po_df = pd.DataFrame(columns=["Modelo", "Descripción", "English Description", "Quantity", "Cost", "Total", "Proveedor"])
+                else:
+                    po_df["Quantity"] = pd.to_numeric(po_df["Quantity"], errors="coerce").fillna(0)
+                    po_df = po_df[po_df["Quantity"] > 0].copy()
+                    po_df["Cost"] = po_df["PRECIO"]
+                    po_df["Total"] = po_df["Quantity"] * po_df["Cost"]
+                    po_df = po_df[["Modelo", "Descripción", "English Description", "Quantity", "Cost", "Total", "Proveedor"]]
 
-            proveedores_validos = po_df["Proveedor"].astype(str).str.strip()
-            proveedores = (
-                po_df.assign(_prov=proveedores_validos)
-                .loc[lambda d: d["_prov"] != ""]
-                .groupby("_prov")
-                .size()
-                .sort_values(ascending=False)
-                .index
-                .tolist()
-            )
-            sin_proveedor = int((po_df["Proveedor"].astype(str).str.strip() == "").sum()) if not po_df.empty else 0
-            st.caption(
-                f"Productos COMPRAR para OC: **{len(po_df)}** | "
-                f"Con proveedor: **{len(proveedores)}** | Sin proveedor asignado: **{sin_proveedor}**"
-            )
-            if sin_proveedor > 0:
-                sin_proveedor_df = po_df[po_df["Proveedor"].astype(str).str.strip() == ""].copy()
-                sin_proveedor_df = sin_proveedor_df[
-                    ["Modelo", "Descripción", "English Description", "Quantity", "Cost", "Total"]
-                ].copy()
-                with st.expander(f"⚠️ Ver productos sin proveedor asignado ({sin_proveedor})", expanded=False):
-                    st.caption(
-                        "Estos productos están marcados como **COMPRAR**, pero no tienen cantidades en las "
-                        "columnas de proveedor ni valor en la columna **Proveedor** para usar con "
-                        "**Unidades Sugeridas**; por eso no se incluyen en una OC por proveedor."
-                    )
-                    st.dataframe(sin_proveedor_df, use_container_width=True, hide_index=True)
-            if proveedores:
-                st.caption("Expande cada proveedor para ver la previsualización de su orden de compra y descargar su Excel.")
-                for prov in proveedores:
-                    po_prov = po_df[po_df["Proveedor"].astype(str).str.strip() == prov].copy()
-                    po_prov_export = po_prov[["Modelo", "Descripción", "English Description", "Quantity", "Cost", "Total"]].copy()
-                    total_piezas = pd.to_numeric(po_prov_export["Quantity"], errors="coerce").fillna(0).sum()
-                    total_monto = pd.to_numeric(po_prov_export["Total"], errors="coerce").fillna(0).sum()
-
-                    with st.expander(f"📦 {prov} — {len(po_prov_export)} productos — {int(total_piezas)} piezas", expanded=False):
-                        st.dataframe(po_prov_export, use_container_width=True, hide_index=True)
-                        st.markdown(f"**Total orden:** ${total_monto:,.2f}")
-
-                        excel_buffer = BytesIO()
-                        with pd.ExcelWriter(excel_buffer, engine="xlsxwriter") as writer:
-                            po_prov_export.to_excel(writer, sheet_name="Orden_Compra", index=False)
-                            ws_oc = writer.sheets["Orden_Compra"]
-                            wb_oc = writer.book
-
-                            ncols = len(po_prov_export.columns)
-                            nrows = len(po_prov_export)
-
-                            fmt_header = wb_oc.add_format({"bold": True, "border": 1, "align": "center", "valign": "vcenter"})
-                            fmt_text = wb_oc.add_format({"border": 1})
-                            fmt_num = wb_oc.add_format({"border": 1, "num_format": "#,##0"})
-                            fmt_money = wb_oc.add_format({"border": 1, "num_format": "$#,##0.00"})
-                            fmt_total_label = wb_oc.add_format({"bold": True, "border": 1, "align": "right"})
-                            fmt_total_value = wb_oc.add_format({"bold": True, "border": 1, "num_format": "$#,##0.00"})
-
-                            # Encabezados con borde completo.
-                            for col_idx, col_name in enumerate(po_prov_export.columns):
-                                ws_oc.write(0, col_idx, col_name, fmt_header)
-
-                            # Bordes y formato para todas las celdas del cuerpo.
-                            if nrows > 0:
-                                for row_idx in range(1, nrows + 1):
-                                    for col_idx, col_name in enumerate(po_prov_export.columns):
-                                        val = po_prov_export.iloc[row_idx - 1, col_idx]
-                                        if col_name == "Quantity":
-                                            ws_oc.write_number(row_idx, col_idx, float(pd.to_numeric(val, errors="coerce") or 0), fmt_num)
-                                        elif col_name in {"Cost", "Total"}:
-                                            ws_oc.write_number(row_idx, col_idx, float(pd.to_numeric(val, errors="coerce") or 0), fmt_money)
-                                        elif col_name in {"Descripción", "English Description"}:
-                                            ws_oc.write(row_idx, col_idx, "" if pd.isna(val) else str(val), fmt_text)
-                                        else:
-                                            ws_oc.write(row_idx, col_idx, "" if pd.isna(val) else str(val), fmt_text)
-
-                            # Anchos de columna (evitar columnas comprimidas).
-                            column_widths = {
-                                "Modelo": 18,
-                                "Descripción": 40,
-                                "English Description": 48,
-                                "Quantity": 12,
-                                "Cost": 14,
-                                "Total": 16,
-                            }
-                            for col_idx, col_name in enumerate(po_prov_export.columns):
-                                ws_oc.set_column(col_idx, col_idx, column_widths.get(col_name, 16))
-
-                            # Total general dos filas debajo del último registro.
-                            if "Total" in po_prov_export.columns and ncols > 0:
-                                idx_total = po_prov_export.columns.get_loc("Total")
-                                excel_first_data_row = 2
-                                excel_last_data_row = nrows + 1
-                                excel_total_row = nrows + 3
-                                ws_oc.write(excel_total_row - 1, max(idx_total - 1, 0), "TOTAL", fmt_total_label)
-                                ws_oc.write_formula(
-                                    excel_total_row - 1,
-                                    idx_total,
-                                    f"=SUM({chr(65 + idx_total)}{excel_first_data_row}:{chr(65 + idx_total)}{excel_last_data_row})",
-                                    fmt_total_value,
-                                )
-
-                        st.download_button(
-                            f"Descargar OC - {prov}",
-                            data=excel_buffer.getvalue(),
-                            file_name=f"orden_compra_{prov}_{fecha_desde.strftime('%Y_%m') if isinstance(fecha_desde, datetime) else 'mes'}.xlsx",
-                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                            key=f"salida_neta_download_prov_{hashlib.md5(prov.encode('utf-8')).hexdigest()[:10]}",
-                        )
-            else:
-                st.warning(
-                    "No hay proveedores para desplegar órdenes de compra. "
-                    "Revisa que los productos marcados como **COMPRAR** tengan cantidades en columnas de proveedor "
-                    "o tengan la columna **Proveedor** llena para usar **Unidades Sugeridas**."
+                proveedores_validos = po_df["Proveedor"].astype(str).str.strip()
+                proveedores = (
+                    po_df.assign(_prov=proveedores_validos)
+                    .loc[lambda d: d["_prov"] != ""]
+                    .groupby("_prov")
+                    .size()
+                    .sort_values(ascending=False)
+                    .index
+                    .tolist()
                 )
+                sin_proveedor = int((po_df["Proveedor"].astype(str).str.strip() == "").sum()) if not po_df.empty else 0
+                st.caption(
+                    f"Productos COMPRAR para OC: **{len(po_df)}** | "
+                    f"Con proveedor: **{len(proveedores)}** | Sin proveedor asignado: **{sin_proveedor}**"
+                )
+                if sin_proveedor > 0:
+                    sin_proveedor_df = po_df[po_df["Proveedor"].astype(str).str.strip() == ""].copy()
+                    sin_proveedor_df = sin_proveedor_df[
+                        ["Modelo", "Descripción", "English Description", "Quantity", "Cost", "Total"]
+                    ].copy()
+                    with st.expander(f"⚠️ Ver productos sin proveedor asignado ({sin_proveedor})", expanded=False):
+                        st.caption(
+                            "Estos productos están marcados como **COMPRAR**, pero no tienen cantidades en las "
+                            "columnas de proveedor ni valor en la columna **Proveedor** para usar con "
+                            "**Unidades Sugeridas**; por eso no se incluyen en una OC por proveedor."
+                        )
+                        st.dataframe(sin_proveedor_df, use_container_width=True, hide_index=True)
+                if proveedores:
+                    st.caption("Expande cada proveedor para ver la previsualización de su orden de compra y descargar su Excel.")
+                    for prov in proveedores:
+                        po_prov = po_df[po_df["Proveedor"].astype(str).str.strip() == prov].copy()
+                        po_prov_export = po_prov[["Modelo", "Descripción", "English Description", "Quantity", "Cost", "Total"]].copy()
+                        total_piezas = pd.to_numeric(po_prov_export["Quantity"], errors="coerce").fillna(0).sum()
+                        total_monto = pd.to_numeric(po_prov_export["Total"], errors="coerce").fillna(0).sum()
+    
+                        with st.expander(f"📦 {prov} — {len(po_prov_export)} productos — {int(total_piezas)} piezas", expanded=False):
+                            st.dataframe(po_prov_export, use_container_width=True, hide_index=True)
+                            st.markdown(f"**Total orden:** ${total_monto:,.2f}")
+    
+                            excel_buffer = BytesIO()
+                            with pd.ExcelWriter(excel_buffer, engine="xlsxwriter") as writer:
+                                po_prov_export.to_excel(writer, sheet_name="Orden_Compra", index=False)
+                                ws_oc = writer.sheets["Orden_Compra"]
+                                wb_oc = writer.book
+    
+                                ncols = len(po_prov_export.columns)
+                                nrows = len(po_prov_export)
+    
+                                fmt_header = wb_oc.add_format({"bold": True, "border": 1, "align": "center", "valign": "vcenter"})
+                                fmt_text = wb_oc.add_format({"border": 1})
+                                fmt_num = wb_oc.add_format({"border": 1, "num_format": "#,##0"})
+                                fmt_money = wb_oc.add_format({"border": 1, "num_format": "$#,##0.00"})
+                                fmt_total_label = wb_oc.add_format({"bold": True, "border": 1, "align": "right"})
+                                fmt_total_value = wb_oc.add_format({"bold": True, "border": 1, "num_format": "$#,##0.00"})
+    
+                                # Encabezados con borde completo.
+                                for col_idx, col_name in enumerate(po_prov_export.columns):
+                                    ws_oc.write(0, col_idx, col_name, fmt_header)
+    
+                                # Bordes y formato para todas las celdas del cuerpo.
+                                if nrows > 0:
+                                    for row_idx in range(1, nrows + 1):
+                                        for col_idx, col_name in enumerate(po_prov_export.columns):
+                                            val = po_prov_export.iloc[row_idx - 1, col_idx]
+                                            if col_name == "Quantity":
+                                                ws_oc.write_number(row_idx, col_idx, float(pd.to_numeric(val, errors="coerce") or 0), fmt_num)
+                                            elif col_name in {"Cost", "Total"}:
+                                                ws_oc.write_number(row_idx, col_idx, float(pd.to_numeric(val, errors="coerce") or 0), fmt_money)
+                                            elif col_name in {"Descripción", "English Description"}:
+                                                ws_oc.write(row_idx, col_idx, "" if pd.isna(val) else str(val), fmt_text)
+                                            else:
+                                                ws_oc.write(row_idx, col_idx, "" if pd.isna(val) else str(val), fmt_text)
+    
+                                # Anchos de columna (evitar columnas comprimidas).
+                                column_widths = {
+                                    "Modelo": 18,
+                                    "Descripción": 40,
+                                    "English Description": 48,
+                                    "Quantity": 12,
+                                    "Cost": 14,
+                                    "Total": 16,
+                                }
+                                for col_idx, col_name in enumerate(po_prov_export.columns):
+                                    ws_oc.set_column(col_idx, col_idx, column_widths.get(col_name, 16))
+    
+                                # Total general dos filas debajo del último registro.
+                                if "Total" in po_prov_export.columns and ncols > 0:
+                                    idx_total = po_prov_export.columns.get_loc("Total")
+                                    excel_first_data_row = 2
+                                    excel_last_data_row = nrows + 1
+                                    excel_total_row = nrows + 3
+                                    ws_oc.write(excel_total_row - 1, max(idx_total - 1, 0), "TOTAL", fmt_total_label)
+                                    ws_oc.write_formula(
+                                        excel_total_row - 1,
+                                        idx_total,
+                                        f"=SUM({chr(65 + idx_total)}{excel_first_data_row}:{chr(65 + idx_total)}{excel_last_data_row})",
+                                        fmt_total_value,
+                                    )
+    
+                            st.download_button(
+                                f"Descargar OC - {prov}",
+                                data=excel_buffer.getvalue(),
+                                file_name=f"orden_compra_{prov}_{fecha_desde.strftime('%Y_%m') if isinstance(fecha_desde, datetime) else 'mes'}.xlsx",
+                                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                                key=f"salida_neta_download_prov_{hashlib.md5(prov.encode('utf-8')).hexdigest()[:10]}",
+                            )
+                    else:
+                        st.warning(
+                        "No hay proveedores para desplegar órdenes de compra. "
+                        "Revisa que los productos marcados como **COMPRAR** tengan cantidades en columnas de proveedor "
+                        "o tengan la columna **Proveedor** llena para usar **Unidades Sugeridas**."
+                    )
 # --- INTERFAZ ---
 USUARIOS_VALIDOS = ["ALEJANDRO38", "CeciliaATD", "SChava", "BreydaFTD", "SaraiFTD", "JorgeLic"]
 
