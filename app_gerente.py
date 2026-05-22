@@ -5888,8 +5888,8 @@ def render_salida_neta_tab():
                                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                                 key=f"salida_neta_download_prov_{hashlib.md5(prov.encode('utf-8')).hexdigest()[:10]}",
                             )
-                    else:
-                        st.warning(
+                else:
+                    st.warning(
                         "No hay proveedores para desplegar órdenes de compra. "
                         "Revisa que los productos marcados como **COMPRAR** tengan cantidades en columnas de proveedor "
                         "o tengan la columna **Proveedor** llena para usar **Unidades Sugeridas**."
