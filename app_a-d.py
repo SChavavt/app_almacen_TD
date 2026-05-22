@@ -4503,26 +4503,18 @@ def batch_update_gsheet_cells(worksheet, updates_list, *, headers: Optional[list
     if not updates_list:
         return False
 
-    cell_list = []
-    for update_item in updates_list:
-        range_str = update_item['range']
-        value = update_item['values'][0][0] # Asumiendo un único valor como [['valor']]
-
-        # Convertir la notación A1 (ej. 'A1') a índice de fila y columna (base 1)
-        row, col = gspread.utils.a1_to_rowcol(range_str)
-        # Crear un objeto Cell y añadirlo a la lista
-        cell_list.append(gspread.Cell(row=row, col=col, value=value))
-
-    if not cell_list:
-        return False
-
     max_attempts = 3
     base_delay = 1
 
     for attempt in range(max_attempts):
         wait_seconds = base_delay * (2 ** attempt)
         try:
-            worksheet.update_cells(cell_list)  # Este es el método correcto para batch update en el worksheet
+            # Preferimos batch_update por rangos A1 explícitos para evitar cualquier
+            # desalineación de columnas al convertir objetos Cell.
+            worksheet.batch_update(
+                updates_list,
+                value_input_option="USER_ENTERED",
+            )
             if headers:
                 worksheet_name = _get_worksheet_name_safe(worksheet)
                 if worksheet_name:
