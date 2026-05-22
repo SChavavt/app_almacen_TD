@@ -5668,7 +5668,8 @@ if selected_tab_key == "surtidores":
     for entry in auto_local_entries:
         if not _is_visible_auto_entry(entry):
             continue
-        if "completado" in sanitize_text(entry.get("estado", "")).lower():
+        estado_normalizado = sanitize_text(entry.get("estado", "")).lower()
+        if "en proceso" not in estado_normalizado:
             continue
         if entry.get("display_num") is None:
             continue
@@ -5684,7 +5685,8 @@ if selected_tab_key == "surtidores":
     for entry in auto_foraneo_entries:
         if not _is_visible_auto_entry(entry):
             continue
-        if "completado" in sanitize_text(entry.get("estado", "")).lower():
+        estado_normalizado = sanitize_text(entry.get("estado", "")).lower()
+        if "en proceso" not in estado_normalizado:
             continue
         if entry.get("display_num") is None:
             continue
