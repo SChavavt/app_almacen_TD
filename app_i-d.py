@@ -4807,23 +4807,13 @@ def _inject_keepalive_media(enabled: bool) -> None:
         <audio id="td-keepalive-audio" autoplay loop muted playsinline preload="auto" style="display:none"
           src="data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAESsAACJWAAACABAAZGF0YQAAAAA=">
         </audio>
-        <iframe id="td-keepalive-frame" style="display:none" srcdoc="
-          <!doctype html><html><body>
-          <script>
-          (function(){
-            try {
-              setInterval(function(){
-                try { parent.postMessage({type:'td_keepalive_iframe', ts:Date.now()}, '*'); } catch (e) {}
-              }, 10000);
-            } catch (e) {}
-          })();
-          </script>
-          </body></html>">
-        </iframe>
+        
         <script>
         (function() {
           // Workaround experimental para Fire TV/Silk Browser en pantallas tipo dashboard.
           try {
+            if (window.__tdKeepAliveInit) return;
+            window.__tdKeepAliveInit = true;
             const audio = document.getElementById('td-keepalive-audio');
             if (!audio) return;
 
@@ -4864,19 +4854,6 @@ def _inject_keepalive_media(enabled: bool) -> None:
             const tick = () => {
               try { audio.play().catch(() => {}); } catch (e) {}
               try { localStorage.setItem('td_keepalive_ts', String(Date.now())); } catch (e) {}
-              try { window.focus(); } catch (e) {}
-              try { window.dispatchEvent(new Event('focus')); } catch (e) {}
-              try { document.dispatchEvent(new Event('focus')); } catch (e) {}
-              try {
-                const mouseEv = new MouseEvent('mousemove', { bubbles: true, clientX: 1, clientY: 1 });
-                (document.body || document.documentElement || document).dispatchEvent(mouseEv);
-              } catch (e) {}
-              try {
-                const kd = new KeyboardEvent('keydown', { key: 'Shift', code: 'ShiftLeft', bubbles: true });
-                const ku = new KeyboardEvent('keyup', { key: 'Shift', code: 'ShiftLeft', bubbles: true });
-                (document.body || document.documentElement || document).dispatchEvent(kd);
-                (document.body || document.documentElement || document).dispatchEvent(ku);
-              } catch (e) {}
               try {
                 repaintFlip = !repaintFlip;
                 repaintDot.style.transform = repaintFlip ? 'translateX(1px)' : 'translateX(0px)';
@@ -4885,15 +4862,21 @@ def _inject_keepalive_media(enabled: bool) -> None:
             };
 
             tick();
-            setInterval(tick, 9000);
-            window.addEventListener('message', function(ev) {
+            setInterval(tick, 20000);
+
+            const SOFT_RELOAD_MS = 4 * 60 * 1000;
+            setTimeout(() => {
               try {
-                if (ev && ev.data && ev.data.type === 'td_keepalive_iframe') {
-                  localStorage.setItem('td_keepalive_iframe_ts', String(ev.data.ts || Date.now()));
-                }
-              } catch (e) {}
-            });
-          } catch (e) {}
+                const now = Date.now();
+                localStorage.setItem('td_soft_reload_ts', String(now));
+                const url = new URL(window.location.href);
+                url.searchParams.set('soft_reload', String(now));
+                window.location.replace(url.toString());
+              } catch (e) {
+                try { window.location.reload(); } catch (_) {}
+              }
+            }, SOFT_RELOAD_MS);
+                      } catch (e) {}
         })();
         </script>
         """,
@@ -4901,7 +4884,7 @@ def _inject_keepalive_media(enabled: bool) -> None:
         scrolling=False,
     )
 
-def _persist_page_scroll(view_key: str, user_key: str = "", force_bottom: bool = False) -> None:
+def _persist_page_scroll(view_key: str, user_key: str = "", force_bottom: bool = False, force_center: bool = False, force_table_top: bool = False) -> None:
     """Guarda/restaura scroll vertical entre auto-recargas por vista/usuario."""
     storage_key = sanitize_text(f"td_scroll::{user_key}::{view_key}")
     script = f"""
@@ -4914,15 +4897,39 @@ def _persist_page_scroll(view_key: str, user_key: str = "", force_bottom: bool =
       if (!root) return;
 
       const forceBottom = {str(force_bottom).lower()};
+      const forceCenter = {str(force_center).lower()};
+      const forceTableTop = {str(force_table_top).lower()};
       const scrollToBottom = () => {{
         const maxY = Math.max(root.scrollHeight - target.innerHeight, 0);
         target.scrollTo(0, maxY);
+      }};
+      const scrollToCenter = () => {{
+        const maxY = Math.max(root.scrollHeight - target.innerHeight, 0);
+        target.scrollTo(0, Math.floor(maxY * 0.5));
+      }};
+      const scrollToTableTop = () => {{
+        const board = doc.querySelector('.board-wrap, .board-scroll, [data-testid="stHorizontalBlock"]');
+        if (!board) return false;
+        const rect = board.getBoundingClientRect();
+        const absoluteY = (target.scrollY || root.scrollTop || 0) + rect.top - 8;
+        target.scrollTo(0, Math.max(absoluteY, 0));
+        return true;
       }};
 
       if (forceBottom) {{
         setTimeout(scrollToBottom, 20);
         setTimeout(scrollToBottom, 220);
         setTimeout(scrollToBottom, 500);
+      }} else if (forceTableTop) {{
+        const tryTop = () => {{ if (!scrollToTableTop()) return; }};
+        setTimeout(tryTop, 20);
+        setTimeout(tryTop, 220);
+        setTimeout(tryTop, 500);
+        setTimeout(tryTop, 900);
+      }} else if (forceCenter) {{
+        setTimeout(scrollToCenter, 20);
+        setTimeout(scrollToCenter, 220);
+        setTimeout(scrollToCenter, 500);
       }} else {{
         const saved = target.sessionStorage ? target.sessionStorage.getItem(key) : null;
         if (saved !== null) {{
@@ -4952,12 +4959,19 @@ logged_user = get_logged_user().upper()
 
 _inject_keepalive_media(logged_user in {"PANTALLAF", "PANTALLAL"})
 
-force_bottom_scroll = (
-
+force_bottom_scroll = False
+force_center_scroll = False
+force_table_top_scroll = (
     selected_tab_key in {"auto_local", "auto_foraneo"}
     and logged_user in {"PANTALLAF", "PANTALLAL"}
 )
-_persist_page_scroll(selected_tab_key, logged_user, force_bottom=force_bottom_scroll)
+_persist_page_scroll(
+    selected_tab_key,
+    logged_user,
+    force_bottom=force_bottom_scroll,
+    force_center=force_center_scroll,
+    force_table_top=force_table_top_scroll,
+)
 
 # helper para "simular" tabs
 tabs = [None] * len(visible_tabs)
