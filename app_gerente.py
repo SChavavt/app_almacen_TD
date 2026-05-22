@@ -5629,7 +5629,7 @@ def render_salida_neta_tab():
             col_existencias_view = _pick_col("Existencias", "Existencia")
             col_transito_view = _pick_col("Tránsito", "Transito")
             ultimas_rot_cols = [c for c in cat.columns if re.match(r"^Rotación\s+.+\s+\d{4}$", str(c).strip())]
-            ultimas_rot_cols = ultimas_rot_cols[-6:]
+            ultimas_rot_cols = ultimas_rot_cols[-3:]
             resumen_rows = []
             for prov in proveedores_cantidad:
                 if prov not in cat_std.columns:
@@ -5726,16 +5726,11 @@ def render_salida_neta_tab():
                 tabla_rot = pd.DataFrame({
                 "Modelo": cat[col_modelo] if col_modelo else "",
                 "Descripción": cat[col_desc] if col_desc else "",
-                "English Description": cat[col_desc_en] if col_desc_en else "",
-                "PRECIO": cat[col_precio] if col_precio else "",
                 "Proveedor": cat[col_proveedor] if col_proveedor else "",
-                "Línea": cat[col_linea] if col_linea else "",
                 "Existencias": cat[col_existencias_view] if col_existencias_view else "",
                 "Tránsito": cat[col_transito_view] if col_transito_view else "",
                 "Ventas Promedio Por Mes": cat[col_ventas_prom] if col_ventas_prom else "",
-                "Meses de Inventario": cat[col_meses_inv] if col_meses_inv else "",
                 "Comprar": cat[col_comprar] if col_comprar else "",
-                "Unidades Sugeridas": cat[col_unidades_sugeridas] if col_unidades_sugeridas else "",
             })
                 for rc in ultimas_rot_cols:
                     tabla_rot[rc] = cat[rc]
@@ -5750,6 +5745,84 @@ def render_salida_neta_tab():
                 if filtro_comp != "Todos":
                     tabla_rot = tabla_rot[tabla_rot["Comprar"].astype(str).str.upper().str.strip() == filtro_comp]
                 st.dataframe(tabla_rot, use_container_width=True, hide_index=True)
+
+                st.markdown("#### ✍️ Captura manual para guardar en catálogo")
+                st.caption(
+                    "Asigna valores por producto (estilo Excel) y guarda los cambios en ROTACIONES. "
+                    "Esta tabla usa los mismos filtros de proveedor/comprar y no incluye columnas de rotación."
+                )
+                captura_df = pd.DataFrame({
+                    "__row_idx": cat.index,
+                    "Modelo": cat[col_modelo] if col_modelo else "",
+                    "Descripción": cat[col_desc] if col_desc else "",
+                    "Proveedor": cat[col_proveedor] if col_proveedor else "",
+                    "Existencias": cat[col_existencias_view] if col_existencias_view else "",
+                    "Tránsito": cat[col_transito_view] if col_transito_view else "",
+                    "Ventas Promedio Por Mes": cat[col_ventas_prom] if col_ventas_prom else "",
+                    "Comprar": cat[col_comprar] if col_comprar else "",
+                    "Unidades Sugeridas": cat[col_unidades_sugeridas] if col_unidades_sugeridas else "",
+                })
+                if filtro_prov != "Todos":
+                    captura_df = captura_df[captura_df["Proveedor"].astype(str).str.strip() == filtro_prov]
+                if filtro_comp != "Todos":
+                    captura_df = captura_df[captura_df["Comprar"].astype(str).str.upper().str.strip() == filtro_comp]
+
+                editor_df = captura_df.copy()
+                editor_df["__sheet_row"] = editor_df["__row_idx"].astype(int) + 2
+                editor_df = editor_df.drop(columns=["__row_idx"])
+                edited_df = st.data_editor(
+                    editor_df,
+                    hide_index=True,
+                    use_container_width=True,
+                    key="rot_editor_manual",
+                    column_config={
+                        "__sheet_row": st.column_config.NumberColumn("Fila", disabled=True),
+                        "Modelo": st.column_config.TextColumn(disabled=True),
+                        "Descripción": st.column_config.TextColumn(disabled=True),
+                        "Proveedor": st.column_config.TextColumn(disabled=True),
+                        "Existencias": st.column_config.NumberColumn(disabled=True),
+                        "Tránsito": st.column_config.NumberColumn(disabled=True),
+                        "Ventas Promedio Por Mes": st.column_config.NumberColumn(disabled=True),
+                        "Comprar": st.column_config.SelectboxColumn(options=["COMPRAR", "OK", ""]),
+                        "Unidades Sugeridas": st.column_config.NumberColumn(min_value=0, step=1),
+                    },
+                )
+
+                if st.button("💾 Guardar captura manual en ROTACIONES", key="rot_guardar_captura_manual"):
+                    try:
+                        if ws_rot is None:
+                            ws_rot = _retry_gspread_api_call(
+                                lambda: gspread_client.open_by_key(catalogotd).worksheet("ROTACIONES"),
+                                retries=5,
+                                base_delay=1.0,
+                            )
+                        headers_ws = list(cat.columns)
+                        if not col_comprar or not col_unidades_sugeridas:
+                            st.error("❌ No se encontraron las columnas Comprar y/o Unidades Sugeridas en ROTACIONES.")
+                        else:
+                            col_comprar_ws = headers_ws.index(col_comprar) + 1
+                            col_unidades_ws = headers_ws.index(col_unidades_sugeridas) + 1
+                            data_ranges = []
+                            for _, row in edited_df.iterrows():
+                                sheet_row = int(row["__sheet_row"])
+                                comprar_val = str(row.get("Comprar", "")).strip().upper()
+                                unidades_val = pd.to_numeric(row.get("Unidades Sugeridas"), errors="coerce")
+                                unidades_val = "" if pd.isna(unidades_val) else (int(unidades_val) if float(unidades_val).is_integer() else float(unidades_val))
+                                data_ranges.append({
+                                    "range": gspread.utils.rowcol_to_a1(sheet_row, col_comprar_ws),
+                                    "values": [[comprar_val]],
+                                })
+                                data_ranges.append({
+                                    "range": gspread.utils.rowcol_to_a1(sheet_row, col_unidades_ws),
+                                    "values": [[unidades_val]],
+                                })
+                            if data_ranges:
+                                _ws_batch_update_safe(ws_rot, data_ranges)
+                                st.success(f"✅ Captura guardada. Se actualizaron {len(edited_df)} productos en ROTACIONES.")
+                            else:
+                                st.info("No hay filas para guardar con los filtros seleccionados.")
+                    except Exception as exc:
+                        st.error(f"❌ No se pudo guardar la captura manual: {exc}")
 
             po_base = cat_std[cat_std["Modelo"].notna() & (cat_std["Modelo"].astype(str).str.strip() != "")].copy()
             po_base = po_base[po_base["Comprar"] == "COMPRAR"].copy()
