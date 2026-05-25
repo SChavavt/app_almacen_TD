@@ -4922,6 +4922,12 @@ def _inject_keepalive_media(enabled: bool) -> None:
                   } catch (_) {}
                 });
               } catch (_) {}
+              try {
+                if (window.gc) { window.gc(); }
+              } catch (_) {}
+              try {
+                localStorage.setItem('td_last_cleanup', String(Date.now()));
+              } catch (_) {}
             };
 
             const recycleDocument = (reason) => {
@@ -4946,6 +4952,9 @@ def _inject_keepalive_media(enabled: bool) -> None:
                 persistState();
                 trackLifecycle('recycle', { reason: reason || 'timer' });
                 localStorage.setItem('td_soft_reload_ts', String(now));
+                try {
+                  document.body.innerHTML = '';
+                } catch (_) {}
                 window.location.replace(tramp.toString());
               } catch (e) {
                 try { window.location.reload(); } catch (_) {}
