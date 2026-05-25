@@ -21,6 +21,7 @@ from streamlit_autorefresh import st_autorefresh
 from textwrap import dedent
 from difflib import SequenceMatcher
 from urllib.parse import urlsplit, urlunsplit, quote
+from urllib.parse import urlparse
 
 TZ = ZoneInfo("America/Mexico_City")
 
@@ -200,6 +201,7 @@ def _render_tv_recycle_trampoline_if_needed() -> None:
         back_url = back_url[0] if back_url else "/"
     if not str(back_url or "").strip():
         back_url = "/"
+    back_url = _safe_relative_back_url(str(back_url), fallback_path="/")
 
     st.markdown(
         """
@@ -225,6 +227,19 @@ def _render_tv_recycle_trampoline_if_needed() -> None:
         scrolling=False,
     )
     st.stop()
+
+
+def _safe_relative_back_url(raw_back: str, fallback_path: str = "/") -> str:
+    """Acepta sólo destinos relativos seguros para evitar redirecciones abiertas."""
+    try:
+        parsed = urlparse(raw_back or "")
+        if parsed.scheme or parsed.netloc:
+            return fallback_path
+        if not parsed.path.startswith("/"):
+            return fallback_path
+        return raw_back
+    except Exception:
+        return fallback_path
 
 
 _render_tv_recycle_trampoline_if_needed()
@@ -4854,8 +4869,10 @@ def _inject_keepalive_media(enabled: bool) -> None:
             window.__tdKeepAliveInit = true;
 
             const url = new URL(window.location.href);
-            const storageKeyBase = 'td_tv_wall_state_v2';
+            const storageKeyBase = 'td_tv_wall_state_v3';
             const pulseKey = 'td_keepalive_ts';
+            const telemetryKey = 'td_tv_wall_telemetry';
+            const stateTTLms = 45 * 60 * 1000;
             const safeState = {
               usuario: url.searchParams.get('usuario') || '',
               tab: url.searchParams.get('tab') || '0',
@@ -4864,6 +4881,21 @@ def _inject_keepalive_media(enabled: bool) -> None:
               ts: Date.now()
             };
             try { localStorage.setItem(storageKeyBase, JSON.stringify(safeState)); } catch (e) {}
+
+            const trackLifecycle = (eventName, extra = {}) => {
+              try {
+                const current = JSON.parse(localStorage.getItem(telemetryKey) || '[]');
+                const entry = {
+                  t: Date.now(),
+                  event: eventName,
+                  path: window.location.pathname,
+                  recycle_reason: new URL(window.location.href).searchParams.get('recycle_reason') || '',
+                  ...extra
+                };
+                current.push(entry);
+                localStorage.setItem(telemetryKey, JSON.stringify(current.slice(-40)));
+              } catch (_) {}
+            };
 
             const persistState = () => {
               try {
@@ -4877,6 +4909,18 @@ def _inject_keepalive_media(enabled: bool) -> None:
                 };
                 localStorage.setItem(storageKeyBase, JSON.stringify(state));
                 localStorage.setItem(pulseKey, String(Date.now()));
+              } catch (_) {}
+            };
+
+            const cleanupBeforeRecycle = () => {
+              try {
+                document.querySelectorAll('video, audio').forEach((el) => {
+                  try {
+                    el.pause?.();
+                    el.removeAttribute('src');
+                    el.load?.();
+                  } catch (_) {}
+                });
               } catch (_) {}
             };
 
@@ -4898,7 +4942,9 @@ def _inject_keepalive_media(enabled: bool) -> None:
                 tramp.searchParams.set('__tv_recycle', '1');
                 tramp.searchParams.set('back', back);
 
+                cleanupBeforeRecycle();
                 persistState();
+                trackLifecycle('recycle', { reason: reason || 'timer' });
                 localStorage.setItem('td_soft_reload_ts', String(now));
                 window.location.replace(tramp.toString());
               } catch (e) {
@@ -4927,18 +4973,29 @@ def _inject_keepalive_media(enabled: bool) -> None:
             }, 15000);
 
             document.addEventListener('visibilitychange', () => {
-              if (document.visibilityState === 'hidden') persistState();
+              if (document.visibilityState === 'hidden') {
+                persistState();
+                trackLifecycle('hidden');
+              }
             }, { capture: true });
-            window.addEventListener('pagehide', persistState, { capture: true });
-            document.addEventListener('freeze', persistState, { capture: true });
+            window.addEventListener('pagehide', (ev) => {
+              persistState();
+              trackLifecycle('pagehide', { persisted: !!ev.persisted });
+            }, { capture: true });
+            document.addEventListener('freeze', () => {
+              persistState();
+              trackLifecycle('freeze');
+            }, { capture: true });
 
-            window.addEventListener('pageshow', () => {
+            window.addEventListener('pageshow', (ev) => {
               try {
                 const savedRaw = localStorage.getItem(storageKeyBase) || '{}';
                 const saved = JSON.parse(savedRaw || '{}');
+                const age = Date.now() - Number(saved.ts || 0);
                 const current = new URL(window.location.href);
-                const user = current.searchParams.get('usuario') || saved.usuario || safeState.usuario || '';
-                const tab = current.searchParams.get('tab') || saved.tab || safeState.tab || '0';
+                const isFresh = Number.isFinite(age) && age >= 0 && age <= stateTTLms;
+                const user = current.searchParams.get('usuario') || (isFresh ? (saved.usuario || safeState.usuario || '') : '');
+                const tab = current.searchParams.get('tab') || (isFresh ? (saved.tab || safeState.tab || '0') : '0');
                 if (!current.searchParams.get('usuario') && user) {
                   current.searchParams.set('usuario', user);
                   current.searchParams.set('tab', tab);
@@ -4946,10 +5003,17 @@ def _inject_keepalive_media(enabled: bool) -> None:
                   window.location.replace(current.toString());
                   return;
                 }
-                if (typeof saved.scrollY === 'number' && saved.scrollY > 0) {
+                if (isFresh && typeof saved.scrollY === 'number' && saved.scrollY > 0) {
                   requestAnimationFrame(() => window.scrollTo(0, saved.scrollY));
                 }
                 if ('wasDiscarded' in document && document.wasDiscarded) persistState();
+                const lastSavedPulse = Number(localStorage.getItem(pulseKey) || '0');
+                trackLifecycle('pageshow', {
+                  persisted: !!ev.persisted,
+                  wasDiscarded: !!(document.wasDiscarded),
+                  state_age_ms: Number.isFinite(age) ? age : -1,
+                  pulse_age_ms: lastSavedPulse ? (Date.now() - lastSavedPulse) : -1
+                });
               } catch (e) {}
             });
           } catch (e) {}
