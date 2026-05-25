@@ -5990,6 +5990,10 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
     pago_confirmado = _estado_pago_es_pagado(estado_pago_actual)
     pago_badge = "✅ Pagado" if pago_confirmado else "🔴 No Pagado"
     is_local_main_tab = es_main_tab_pedidos_locales(current_main_tab_label)
+    current_user_simple = str(
+        st.session_state.get("app_usuario") or _get_query_param_value("usuario") or ""
+    ).strip().upper()
+    is_victor_simple_flow = current_user_simple == "VICTOR"
     es_foraneo_contexto = (
         str(origen_tab).strip() == "Foráneo"
         or str(row.get("Tipo_Envio", "")).strip() == "🚚 Pedido Foráneo"
@@ -6322,7 +6326,7 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
 
 
 
-        if not es_local_no_entregado:
+        if not es_local_no_entregado and not is_victor_simple_flow:
             mostrar_pedido_detalle(
                 df,
                 idx,
@@ -6710,6 +6714,7 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
                             headers,
                             gsheet_row_index,
                             origen_tab,
+                            allow_from_any_status=is_victor_simple_flow,
                         )
             elif not requires:
                 if col_complete_btn.button(
@@ -6729,6 +6734,7 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
                             headers,
                             gsheet_row_index,
                             origen_tab,
+                            allow_from_any_status=is_victor_simple_flow,
                         )
             elif has_file:
                 if col_complete_btn.button(
@@ -6748,6 +6754,7 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
                             headers,
                             gsheet_row_index,
                             origen_tab,
+                            allow_from_any_status=is_victor_simple_flow,
                         )
             else:
                 flag_key = f"confirmar_completar_{row['ID_Pedido']}"
@@ -6788,6 +6795,7 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
                             headers,
                             gsheet_row_index,
                             origen_tab,
+                            allow_from_any_status=is_victor_simple_flow,
                         )
                         st.session_state[flag_key] = False
         else:
