@@ -3953,9 +3953,19 @@ def _collect_route_candidates(
 
     df_clientes = _standardize_clientes_locales_columns(df_clientes)
     lat_col, lng_col = _resolve_clientes_coord_columns(df_clientes)
-    if not lat_col or not lng_col:
-        st.warning("⚠️ La hoja Clientes_Locales no contiene columnas de coordenadas (Latitud/Longitud o Lat_Final/Lng_Final).")
-        return [], [], [], [], [], []
+    if not lat_col:
+        lat_col = "Lat_Final"
+        df_clientes[lat_col] = np.nan
+    if not lng_col:
+        lng_col = "Lng_Final"
+        df_clientes[lng_col] = np.nan
+
+    if ("Latitud" not in df_clientes.columns and "Lat_Final" not in df_clientes.columns) or (
+        "Longitud" not in df_clientes.columns and "Lng_Final" not in df_clientes.columns
+    ):
+        st.info(
+            "ℹ️ La hoja Clientes_Locales no trae columnas de coordenadas; se intentará geocodificar automáticamente y podrás guardarlas."
+        )
 
     for c in ("Cliente", "Confianza_Final", "Metodo_Final", "Direccion_Final"):
         if c not in df_clientes.columns:
@@ -3965,6 +3975,13 @@ def _collect_route_candidates(
     clientes_work["_cliente_norm"] = clientes_work["Cliente"].apply(_ruta_opt_normalize_cliente)
     clientes_work[lat_col] = pd.to_numeric(clientes_work[lat_col], errors="coerce")
     clientes_work[lng_col] = pd.to_numeric(clientes_work[lng_col], errors="coerce")
+    clientes_work["_fecha_uso_dt"] = pd.to_datetime(clientes_work.get("Fecha_Ultimo_Uso", ""), errors="coerce")
+    clientes_work["_sheet_row_sort"] = np.arange(len(clientes_work))
+    clientes_work = clientes_work.sort_values(
+        by=["_cliente_norm", "_fecha_uso_dt", "_sheet_row_sort"],
+        ascending=[True, False, False],
+        kind="mergesort",
+    )
     clientes_work = clientes_work.drop_duplicates(subset=["_cliente_norm"], keep="first")
     clientes_map = clientes_work.set_index("_cliente_norm")
     geocode_cache: dict[str, Optional[dict[str, Any]]] = {}
