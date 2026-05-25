@@ -186,6 +186,49 @@ def resolve_vendor_for_user(user_key: str) -> str:
 
 st.set_page_config(page_title="Panel de Almacén Integrado", layout="wide")
 
+
+def _render_tv_recycle_trampoline_if_needed() -> None:
+    """Vista ultraligera para reciclar documento en Silk antes de volver al dashboard."""
+    recycle_flag = st.query_params.get("__tv_recycle", "")
+    if isinstance(recycle_flag, list):
+        recycle_flag = recycle_flag[0] if recycle_flag else ""
+    if str(recycle_flag or "").strip() != "1":
+        return
+
+    back_url = st.query_params.get("back", "/")
+    if isinstance(back_url, list):
+        back_url = back_url[0] if back_url else "/"
+    if not str(back_url or "").strip():
+        back_url = "/"
+
+    st.markdown(
+        """
+        <style>
+        html, body, [data-testid="stAppViewContainer"], [data-testid="stMain"] {
+            background: #000 !important;
+        }
+        section.main > div { padding: 0 !important; }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+    components.html(
+        f"""
+        <script>
+        (function() {{
+          const back = {json.dumps(str(back_url))} || "/";
+          setTimeout(() => window.location.replace(back), 1200);
+        }})();
+        </script>
+        """,
+        height=0,
+        scrolling=False,
+    )
+    st.stop()
+
+
+_render_tv_recycle_trampoline_if_needed()
+
 # --- Ajustes UI compactos ---
 st.markdown(
     """
@@ -4811,14 +4854,33 @@ def _inject_keepalive_media(enabled: bool) -> None:
             window.__tdKeepAliveInit = true;
 
             const url = new URL(window.location.href);
-            const storageKeyBase = 'td_tv_wall_state';
+            const storageKeyBase = 'td_tv_wall_state_v2';
+            const pulseKey = 'td_keepalive_ts';
             const safeState = {
               usuario: url.searchParams.get('usuario') || '',
               tab: url.searchParams.get('tab') || '0',
+              scrollY: window.scrollY || 0,
+              href: window.location.pathname + window.location.search + window.location.hash,
+              ts: Date.now()
             };
             try { localStorage.setItem(storageKeyBase, JSON.stringify(safeState)); } catch (e) {}
 
-            const safeReload = () => {
+            const persistState = () => {
+              try {
+                const current = new URL(window.location.href);
+                const state = {
+                  usuario: current.searchParams.get('usuario') || safeState.usuario || '',
+                  tab: current.searchParams.get('tab') || safeState.tab || '0',
+                  scrollY: window.scrollY || 0,
+                  href: window.location.pathname + window.location.search + window.location.hash,
+                  ts: Date.now()
+                };
+                localStorage.setItem(storageKeyBase, JSON.stringify(state));
+                localStorage.setItem(pulseKey, String(Date.now()));
+              } catch (_) {}
+            };
+
+            const recycleDocument = (reason) => {
               try {
                 const now = Date.now();
                 const current = new URL(window.location.href);
@@ -4829,8 +4891,16 @@ def _inject_keepalive_media(enabled: bool) -> None:
                 if (user) current.searchParams.set('usuario', user);
                 if (tab) current.searchParams.set('tab', tab);
                 current.searchParams.set('soft_reload', String(now));
+                current.searchParams.set('recycle_reason', reason || 'timer');
+
+                const back = current.toString();
+                const tramp = new URL(window.location.origin + window.location.pathname);
+                tramp.searchParams.set('__tv_recycle', '1');
+                tramp.searchParams.set('back', back);
+
+                persistState();
                 localStorage.setItem('td_soft_reload_ts', String(now));
-                window.location.replace(current.toString());
+                window.location.replace(tramp.toString());
               } catch (e) {
                 try { window.location.reload(); } catch (_) {}
               }
@@ -4838,30 +4908,48 @@ def _inject_keepalive_media(enabled: bool) -> None:
 
             let lastPulse = Date.now();
             const pulse = () => {
-              try { localStorage.setItem('td_keepalive_ts', String(Date.now())); } catch (e) {}
+              try { localStorage.setItem(pulseKey, String(Date.now())); } catch (e) {}
               lastPulse = Date.now();
             };
 
             pulse();
             setInterval(pulse, 12000);
 
-            const SOFT_RELOAD_MS = 2 * 60 * 1000;
-            setInterval(safeReload, SOFT_RELOAD_MS);
+            const SOFT_RELOAD_MS = 8 * 60 * 1000;
+            setInterval(() => recycleDocument('periodic'), SOFT_RELOAD_MS);
 
             setInterval(() => {
               try {
-                if (Date.now() - lastPulse > 35000) safeReload();
+                const lastSavedPulse = Number(localStorage.getItem(pulseKey) || '0');
+                const age = Date.now() - lastSavedPulse;
+                if ((lastSavedPulse && age > 45000) || Date.now() - lastPulse > 35000) recycleDocument('watchdog');
               } catch (e) {}
             }, 15000);
 
+            document.addEventListener('visibilitychange', () => {
+              if (document.visibilityState === 'hidden') persistState();
+            }, { capture: true });
+            window.addEventListener('pagehide', persistState, { capture: true });
+            document.addEventListener('freeze', persistState, { capture: true });
+
             window.addEventListener('pageshow', () => {
               try {
+                const savedRaw = localStorage.getItem(storageKeyBase) || '{}';
+                const saved = JSON.parse(savedRaw || '{}');
                 const current = new URL(window.location.href);
-                if (!current.searchParams.get('usuario') && safeState.usuario) {
-                  current.searchParams.set('usuario', safeState.usuario);
-                  current.searchParams.set('tab', safeState.tab || '0');
+                const user = current.searchParams.get('usuario') || saved.usuario || safeState.usuario || '';
+                const tab = current.searchParams.get('tab') || saved.tab || safeState.tab || '0';
+                if (!current.searchParams.get('usuario') && user) {
+                  current.searchParams.set('usuario', user);
+                  current.searchParams.set('tab', tab);
+                  current.searchParams.set('soft_reload', String(Date.now()));
                   window.location.replace(current.toString());
+                  return;
                 }
+                if (typeof saved.scrollY === 'number' && saved.scrollY > 0) {
+                  requestAnimationFrame(() => window.scrollTo(0, saved.scrollY));
+                }
+                if ('wasDiscarded' in document && document.wasDiscarded) persistState();
               } catch (e) {}
             });
           } catch (e) {}
