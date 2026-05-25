@@ -21,6 +21,7 @@ from streamlit_autorefresh import st_autorefresh
 from textwrap import dedent
 from difflib import SequenceMatcher
 from urllib.parse import urlsplit, urlunsplit, quote
+from urllib.parse import urlparse
 
 TZ = ZoneInfo("America/Mexico_City")
 
@@ -185,6 +186,63 @@ def resolve_vendor_for_user(user_key: str) -> str:
     return sanitize_text(VENDEDOR_CREDENTIALS.get(sanitize_text(user_key).upper(), ""))
 
 st.set_page_config(page_title="Panel de Almacén Integrado", layout="wide")
+
+
+def _render_tv_recycle_trampoline_if_needed() -> None:
+    """Vista ultraligera para reciclar documento en Silk antes de volver al dashboard."""
+    recycle_flag = st.query_params.get("__tv_recycle", "")
+    if isinstance(recycle_flag, list):
+        recycle_flag = recycle_flag[0] if recycle_flag else ""
+    if str(recycle_flag or "").strip() != "1":
+        return
+
+    back_url = st.query_params.get("back", "/")
+    if isinstance(back_url, list):
+        back_url = back_url[0] if back_url else "/"
+    if not str(back_url or "").strip():
+        back_url = "/"
+    back_url = _safe_relative_back_url(str(back_url), fallback_path="/")
+
+    st.markdown(
+        """
+        <style>
+        html, body, [data-testid="stAppViewContainer"], [data-testid="stMain"] {
+            background: #000 !important;
+        }
+        section.main > div { padding: 0 !important; }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+    components.html(
+        f"""
+        <script>
+        (function() {{
+          const back = {json.dumps(str(back_url))} || "/";
+          setTimeout(() => window.location.replace(back), 2500);
+        }})();
+        </script>
+        """,
+        height=0,
+        scrolling=False,
+    )
+    st.stop()
+
+
+def _safe_relative_back_url(raw_back: str, fallback_path: str = "/") -> str:
+    """Acepta sólo destinos relativos seguros para evitar redirecciones abiertas."""
+    try:
+        parsed = urlparse(raw_back or "")
+        if parsed.scheme or parsed.netloc:
+            return fallback_path
+        if not parsed.path.startswith("/"):
+            return fallback_path
+        return raw_back
+    except Exception:
+        return fallback_path
+
+
+_render_tv_recycle_trampoline_if_needed()
 
 # --- Ajustes UI compactos ---
 st.markdown(
@@ -4811,14 +4869,68 @@ def _inject_keepalive_media(enabled: bool) -> None:
             window.__tdKeepAliveInit = true;
 
             const url = new URL(window.location.href);
-            const storageKeyBase = 'td_tv_wall_state';
+            const storageKeyBase = 'td_tv_wall_state_v3';
+            const pulseKey = 'td_keepalive_ts';
+            const telemetryKey = 'td_tv_wall_telemetry';
+            const stateTTLms = 45 * 60 * 1000;
             const safeState = {
               usuario: url.searchParams.get('usuario') || '',
               tab: url.searchParams.get('tab') || '0',
+              scrollY: window.scrollY || 0,
+              href: window.location.pathname + window.location.search + window.location.hash,
+              ts: Date.now()
             };
             try { localStorage.setItem(storageKeyBase, JSON.stringify(safeState)); } catch (e) {}
 
-            const safeReload = () => {
+            const trackLifecycle = (eventName, extra = {}) => {
+              try {
+                const current = JSON.parse(localStorage.getItem(telemetryKey) || '[]');
+                const entry = {
+                  t: Date.now(),
+                  event: eventName,
+                  path: window.location.pathname,
+                  recycle_reason: new URL(window.location.href).searchParams.get('recycle_reason') || '',
+                  ...extra
+                };
+                current.push(entry);
+                localStorage.setItem(telemetryKey, JSON.stringify(current.slice(-40)));
+              } catch (_) {}
+            };
+
+            const persistState = () => {
+              try {
+                const current = new URL(window.location.href);
+                const state = {
+                  usuario: current.searchParams.get('usuario') || safeState.usuario || '',
+                  tab: current.searchParams.get('tab') || safeState.tab || '0',
+                  scrollY: window.scrollY || 0,
+                  href: window.location.pathname + window.location.search + window.location.hash,
+                  ts: Date.now()
+                };
+                localStorage.setItem(storageKeyBase, JSON.stringify(state));
+                localStorage.setItem(pulseKey, String(Date.now()));
+              } catch (_) {}
+            };
+
+            const cleanupBeforeRecycle = () => {
+              try {
+                document.querySelectorAll('video, audio').forEach((el) => {
+                  try {
+                    el.pause?.();
+                    el.removeAttribute('src');
+                    el.load?.();
+                  } catch (_) {}
+                });
+              } catch (_) {}
+              try {
+                if (window.gc) { window.gc(); }
+              } catch (_) {}
+              try {
+                localStorage.setItem('td_last_cleanup', String(Date.now()));
+              } catch (_) {}
+            };
+
+            const recycleDocument = (reason) => {
               try {
                 const now = Date.now();
                 const current = new URL(window.location.href);
@@ -4829,8 +4941,18 @@ def _inject_keepalive_media(enabled: bool) -> None:
                 if (user) current.searchParams.set('usuario', user);
                 if (tab) current.searchParams.set('tab', tab);
                 current.searchParams.set('soft_reload', String(now));
+                current.searchParams.set('recycle_reason', reason || 'timer');
+
+                const back = current.toString();
+                const tramp = new URL(window.location.origin + window.location.pathname);
+                tramp.searchParams.set('__tv_recycle', '1');
+                tramp.searchParams.set('back', back);
+
+                cleanupBeforeRecycle();
+                persistState();
+                trackLifecycle('recycle', { reason: reason || 'timer' });
                 localStorage.setItem('td_soft_reload_ts', String(now));
-                window.location.replace(current.toString());
+                window.location.replace(tramp.toString());
               } catch (e) {
                 try { window.location.reload(); } catch (_) {}
               }
@@ -4838,30 +4960,66 @@ def _inject_keepalive_media(enabled: bool) -> None:
 
             let lastPulse = Date.now();
             const pulse = () => {
-              try { localStorage.setItem('td_keepalive_ts', String(Date.now())); } catch (e) {}
+              try { localStorage.setItem(pulseKey, String(Date.now())); } catch (e) {}
               lastPulse = Date.now();
             };
 
             pulse();
             setInterval(pulse, 12000);
 
-            const SOFT_RELOAD_MS = 2 * 60 * 1000;
-            setInterval(safeReload, SOFT_RELOAD_MS);
+            const SOFT_RELOAD_MS = 3 * 60 * 1000;
+            setInterval(() => recycleDocument('periodic'), SOFT_RELOAD_MS);
 
             setInterval(() => {
               try {
-                if (Date.now() - lastPulse > 35000) safeReload();
+                const lastSavedPulse = Number(localStorage.getItem(pulseKey) || '0');
+                const age = Date.now() - lastSavedPulse;
+                if ((lastSavedPulse && age > 45000) || Date.now() - lastPulse > 35000) recycleDocument('watchdog');
               } catch (e) {}
             }, 15000);
 
-            window.addEventListener('pageshow', () => {
+            document.addEventListener('visibilitychange', () => {
+              if (document.visibilityState === 'hidden') {
+                persistState();
+                trackLifecycle('hidden');
+              }
+            }, { capture: true });
+            window.addEventListener('pagehide', (ev) => {
+              persistState();
+              trackLifecycle('pagehide', { persisted: !!ev.persisted });
+            }, { capture: true });
+            document.addEventListener('freeze', () => {
+              persistState();
+              trackLifecycle('freeze');
+            }, { capture: true });
+
+            window.addEventListener('pageshow', (ev) => {
               try {
+                const savedRaw = localStorage.getItem(storageKeyBase) || '{}';
+                const saved = JSON.parse(savedRaw || '{}');
+                const age = Date.now() - Number(saved.ts || 0);
                 const current = new URL(window.location.href);
-                if (!current.searchParams.get('usuario') && safeState.usuario) {
-                  current.searchParams.set('usuario', safeState.usuario);
-                  current.searchParams.set('tab', safeState.tab || '0');
+                const isFresh = Number.isFinite(age) && age >= 0 && age <= stateTTLms;
+                const user = current.searchParams.get('usuario') || (isFresh ? (saved.usuario || safeState.usuario || '') : '');
+                const tab = current.searchParams.get('tab') || (isFresh ? (saved.tab || safeState.tab || '0') : '0');
+                if (!current.searchParams.get('usuario') && user) {
+                  current.searchParams.set('usuario', user);
+                  current.searchParams.set('tab', tab);
+                  current.searchParams.set('soft_reload', String(Date.now()));
                   window.location.replace(current.toString());
+                  return;
                 }
+                if (isFresh && typeof saved.scrollY === 'number' && saved.scrollY > 0) {
+                  requestAnimationFrame(() => window.scrollTo(0, saved.scrollY));
+                }
+                if ('wasDiscarded' in document && document.wasDiscarded) persistState();
+                const lastSavedPulse = Number(localStorage.getItem(pulseKey) || '0');
+                trackLifecycle('pageshow', {
+                  persisted: !!ev.persisted,
+                  wasDiscarded: !!(document.wasDiscarded),
+                  state_age_ms: Number.isFinite(age) ? age : -1,
+                  pulse_age_ms: lastSavedPulse ? (Date.now() - lastSavedPulse) : -1
+                });
               } catch (e) {}
             });
           } catch (e) {}
