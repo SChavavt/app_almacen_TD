@@ -8119,8 +8119,11 @@ if df_main is not None:
                 row_to_complete = row_to_complete.iloc[0]
 
             estado_actual = str(row_to_complete.get("Estado", "")).strip()
-            if estado_actual != "🔵 En Proceso":
-                fallidos_pre.append(f"{pedido_id_snapshot or 'Sin ID'}: cambió de estado a {estado_actual or 'N/A'}")
+            estado_requerido = ESTADO_AUDITADO if _es_pedido_local(row_to_complete) else ESTADO_EN_PROCESO
+            if estado_actual != estado_requerido:
+                fallidos_pre.append(
+                    f"{pedido_id_snapshot or 'Sin ID'}: cambió de estado a {estado_actual or 'N/A'} (requiere {estado_requerido})"
+                )
                 continue
 
             if not _pedido_es_completable_rapido(row_to_complete):
