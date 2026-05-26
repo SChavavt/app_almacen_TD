@@ -11019,9 +11019,13 @@ if df_main is not None:
         with main_tabs[8]:  # 🗺️ Ruteo
             st.markdown("### 🗺️ Generar ruta optimizada")
             st.caption("Selecciona pedidos locales (Mañana/Tarde/Saltillo) y marca prioridad cuando aplique.")
+            hora_salida_ruta = st.time_input(
+                "🕒 Hora de salida de ruta",
+                value=mx_now().time().replace(second=0, microsecond=0),
+                key="sinai_route_departure_time",
+            )
             pedidos_locales = df_pendientes_proceso_demorado[
                 (df_pendientes_proceso_demorado.get("Tipo_Envio", pd.Series(dtype=str)).astype(str).str.strip() == "📍 Pedido Local")
-                & (df_pendientes_proceso_demorado.get("Estado", pd.Series(dtype=str)).astype(str).str.strip() == "🔵 En Proceso")
             ].copy()
             if pedidos_locales.empty:
                 st.info("No hay pedidos locales en proceso para rutear.")
@@ -11141,26 +11145,23 @@ if df_main is not None:
                                     servicio_total_h = round(servicio_total_min / 60, 2)
                                     total_estimado_h = round(total_estimado_min / 60, 2)
 
+                                    def _format_duracion(minutos: float) -> str:
+                                        if minutos >= 120:
+                                            return f"{round(minutos / 60, 2)} horas"
+                                        return f"{round(minutos, 1)} min"
+
                                     resumen_df = pd.DataFrame(
                                         [
                                             {"Métrica": "Distancia total km", "Valor": round(dist_total_m / 1000, 2)},
-                                            {"Métrica": "Tiempo manejo total min", "Valor": manejo_total_min},
-                                            {"Métrica": "Tiempo manejo total h", "Valor": manejo_total_h},
+                                            {"Métrica": "Tiempo manejo total", "Valor": _format_duracion(manejo_total_min)},
                                             {"Métrica": "Tiempo servicio por entrega (min)", "Valor": servicio_min_por_entrega},
-                                            {"Métrica": "Tiempo servicio total min", "Valor": servicio_total_min},
-                                            {"Métrica": "Tiempo servicio total h", "Valor": servicio_total_h},
-                                            {"Métrica": "Tiempo total estimado (manejo + entregas) min", "Valor": total_estimado_min},
-                                            {"Métrica": "Tiempo total estimado (manejo + entregas) h", "Valor": total_estimado_h},
+                                            {"Métrica": "Tiempo servicio total", "Valor": _format_duracion(servicio_total_min)},
+                                            {"Métrica": "Tiempo total estimado (manejo + entregas)", "Valor": _format_duracion(total_estimado_min)},
                                         ]
                                     )
 
                                     eta_rows: list[dict[str, Any]] = []
-                                    hora_inicio_ruta = st.time_input(
-                                        "🕒 Hora de inicio de ruta (estimación de llegadas)",
-                                        value=mx_now().time().replace(second=0, microsecond=0),
-                                        key=f"sinai_eta_start_{mx_now().strftime('%Y%m%d')}",
-                                    )
-                                    inicio_dt = datetime.combine(mx_today(), hora_inicio_ruta)
+                                    inicio_dt = datetime.combine(mx_today(), hora_salida_ruta)
                                     cursor_dt = inicio_dt
                                     for i, cand in enumerate(final_candidates):
                                         leg = legs[i] if i < len(legs) else {}
