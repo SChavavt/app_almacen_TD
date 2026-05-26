@@ -69,25 +69,11 @@ TD_LOGO_ALLOWED_EXTENSIONS = tuple(f".{ext}" for ext in TD_LOGO_ALLOWED_TYPES)
 TD_LOGO_EDITOR_USER = "SCHAVA"
 
 DEBUG_BULK_COMPLETE = False
-ESTADO_EN_PROCESO = "🔵 En Proceso"
-ESTADO_AUDITADO = "🔎 Auditado"
-ESTADO_COMPLETADO = "🟢 Completado"
 
 
 def _is_recoverable_auth_error(exc: Exception) -> bool:
     err_text = str(exc)
     return any(code in err_text for code in _RECOVERABLE_AUTH_PATTERNS)
-
-
-def _es_pedido_local(row_data: Any) -> bool:
-    return str(row_data.get("Tipo_Envio", "")).strip() == "📍 Pedido Local"
-
-
-def _estado_operativo(row_data: Any) -> str:
-    estado = str(row_data.get("Estado", "") or "").strip()
-    if _es_pedido_local(row_data) and estado == ESTADO_AUDITADO:
-        return ESTADO_EN_PROCESO
-    return estado
 
 def mx_now():
     return datetime.now(_MX_TZ)           # objeto datetime tz-aware
@@ -5357,12 +5343,10 @@ def completar_pedido(
     """Marca un pedido como completado y preserva el estado visual - OPTIMIZADO."""
 
     estado_actual = str(row.get("Estado", "") or "").strip()
-    es_local = _es_pedido_local(row)
-    estado_requerido = ESTADO_AUDITADO if es_local else ESTADO_EN_PROCESO
-    if not allow_from_any_status and estado_actual != estado_requerido:
+    if not allow_from_any_status and estado_actual != "🔵 En Proceso":
         st.warning(
-            f"⚠️ Para completar el pedido primero debe estar en **{estado_requerido}**. "
-            "Cambia el estado requerido antes de marcarlo como completado."
+            "⚠️ Para completar el pedido primero debe estar en **🔵 En Proceso**. "
+            "Cambia el estado a en proceso antes de marcarlo como completado."
         )
         return False
 
@@ -5399,7 +5383,7 @@ def completar_pedido(
     updates = [
         {
             "range": gspread.utils.rowcol_to_a1(gsheet_row_index, estado_col_idx),
-            "values": [[ESTADO_COMPLETADO]],
+            "values": [["🟢 Completado"]],
         },
         {
             "range": gspread.utils.rowcol_to_a1(gsheet_row_index, fecha_completado_col_idx),
@@ -5411,15 +5395,15 @@ def completar_pedido(
         return False
 
     # 🚀 OPTIMIZACIÓN 3: Actualizar el DataFrame localmente sin recargar desde GSheets
-    df.loc[idx, "Estado"] = ESTADO_COMPLETADO
+    df.loc[idx, "Estado"] = "🟢 Completado"
     df.loc[idx, "Fecha_Completado"] = now
 
     if isinstance(row, pd.Series):
-        row["Estado"] = ESTADO_COMPLETADO
+        row["Estado"] = "🟢 Completado"
         row["Fecha_Completado"] = now
         row_snapshot = row.to_dict()
     elif isinstance(row, dict):
-        row["Estado"] = ESTADO_COMPLETADO
+        row["Estado"] = "🟢 Completado"
         row["Fecha_Completado"] = now
         row_snapshot = dict(row)
     else:
@@ -5427,7 +5411,7 @@ def completar_pedido(
 
     # Snapshot robusto para reportes auxiliares (ej. Pasa_Bodega), incluso en flujos
     # donde `row` llega como dict y no como pd.Series.
-    row_snapshot["Estado"] = ESTADO_COMPLETADO
+    row_snapshot["Estado"] = "🟢 Completado"
     row_snapshot["Fecha_Completado"] = now
     if "Turno" not in row_snapshot and "Turno" in df.columns:
         row_snapshot["Turno"] = df.loc[idx, "Turno"]
@@ -6771,34 +6755,6 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
                             st.error("❌ No se pudo guardar la información del comprobante.")
 
         puede_completar_por_pago = (not es_local_bodega) or pago_confirmado
-
-        # Botón para flujo local: 🔵 En Proceso -> 🔎 Auditado
-        estado_actual_acciones = str(row.get("Estado", "")).strip()
-        es_local_pedido = _es_pedido_local(row)
-        puede_auditar_local = es_local_pedido and estado_actual_acciones == ESTADO_EN_PROCESO and not disabled_if_completed
-        if puede_auditar_local:
-            if col_print_btn.button(
-                "🔎 Marcar Auditado",
-                key=f"audit_button_{row['ID_Pedido']}_{origen_tab}",
-                on_click=_mark_skip_demorado_check_once,
-            ):
-                if update_gsheet_cell(
-                    worksheet,
-                    headers,
-                    gsheet_row_index,
-                    "Estado",
-                    ESTADO_AUDITADO,
-                ):
-                    df.at[idx, "Estado"] = ESTADO_AUDITADO
-                    row["Estado"] = ESTADO_AUDITADO
-                    st.toast("✅ Pedido marcado como 🔎 Auditado", icon="✅")
-                    marcar_contexto_pedido(row["ID_Pedido"], origen_tab, scroll=False)
-                    preserve_tab_state()
-                    st.session_state["refresh_data_caches_pending"] = True
-                    st.session_state["reload_after_action"] = True
-                    st.rerun()
-                else:
-                    st.error("❌ No se pudo actualizar el estado a '🔎 Auditado'.")
 
 
         # Complete Button with streamlined confirmation
@@ -8319,7 +8275,6 @@ if df_main is not None:
         st.markdown("### 📊 Resumen de Estados")
 
     def _count_states(df):
-        estados_operativos = df.apply(_estado_operativo, axis=1)
         completados_visible = df[
             (df["Estado"] == "🟢 Completado") &
             (df.get("Completados_Limpiado", "").astype(str).str.lower() != "sí")
@@ -8330,7 +8285,7 @@ if df_main is not None:
         ]
         return {
             '🟡 Pendiente': (df["Estado"] == '🟡 Pendiente').sum(),
-            '🔵 En Proceso': (estados_operativos == ESTADO_EN_PROCESO).sum(),
+            '🔵 En Proceso': (df["Estado"] == '🔵 En Proceso').sum(),
             '🔴 Demorado': (df["Estado"] == '🔴 Demorado').sum(),
             '🛠 Modificación': (df["Estado"] == '🛠 Modificación').sum(),
             '✏️ Modificación': (df["Estado"] == '✏️ Modificación').sum(),
@@ -10895,8 +10850,9 @@ if df_main is not None:
             color = surtidor_colors.get(raw.lower(), "#95a5a6")
             return f"<span style='background:{color};padding:2px 8px;border-radius:999px;color:#0b1020;font-weight:700;'>{raw or '—'}</span>"
 
-        estados_norm = df_pendientes_proceso_demorado.apply(_estado_operativo, axis=1)
-        pedidos_en_proceso = df_pendientes_proceso_demorado[estados_norm == ESTADO_EN_PROCESO].copy()
+        pedidos_en_proceso = df_pendientes_proceso_demorado[
+            df_pendientes_proceso_demorado.get("Estado", pd.Series(dtype=str)).astype(str).str.strip() == "🔵 En Proceso"
+        ].copy()
 
         if not pedidos_en_proceso.empty:
             pedidos_en_proceso = pedidos_en_proceso[
@@ -10965,12 +10921,9 @@ if df_main is not None:
                 unsafe_allow_html=True,
                 )
                 st.markdown("#### 📍 LOCALES")
-                locales_df = pedidos_en_proceso[
-                    (pedidos_en_proceso["tipo_norm"] == "📍 Pedido Local")
-                    & (pedidos_en_proceso.get("Estado", pd.Series(dtype=str)).astype(str).str.strip() == ESTADO_AUDITADO)
-                ].copy()
+                locales_df = pedidos_en_proceso[pedidos_en_proceso["tipo_norm"] == "📍 Pedido Local"].copy()
                 if locales_df.empty:
-                    st.caption("Sin locales auditados.")
+                    st.caption("Sin locales en proceso.")
                 else:
                     locales_df = locales_df.sort_values(by=["turno_norm", "fecha_norm"], kind="mergesort")
                     for (turno, fecha_lbl), bloque in locales_df.groupby(["turno_norm", "fecha_lbl"], dropna=False, sort=False):
@@ -10988,7 +10941,7 @@ if df_main is not None:
                             if row_idx_fast <= 0:
                                 continue
                             key_chk = f"fast_complete_chk_{row_idx_fast}"
-                            estado_txt = "🟡 Pendiente" if "Pendiente" in estado else estado
+                            estado_txt = "🟡 Pendiente" if "Pendiente" in estado else "🔵 En Proceso"
                             checked = st.checkbox(
                                 f"#{orden} · {cliente} · {estado_txt}",
                                 key=key_chk,
