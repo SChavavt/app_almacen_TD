@@ -3750,7 +3750,12 @@ def _resolve_clientes_coord_columns(df_clientes: pd.DataFrame) -> tuple[Optional
 
 
 def _coords_in_zone(lat: float, lng: float, zone_key: str) -> bool:
-    cfg = _RUTA_OPT_ZONE_CONFIG[zone_key]
+    zone_key_norm = str(zone_key or "").strip().lower()
+    if zone_key_norm == "local":
+        zone_key_norm = "monterrey"
+    cfg = _RUTA_OPT_ZONE_CONFIG.get(zone_key_norm)
+    if not cfg:
+        return False
     return cfg["lat_min"] <= lat <= cfg["lat_max"] and cfg["lng_min"] <= lng <= cfg["lng_max"]
 
 
@@ -4137,7 +4142,11 @@ def _build_hoja_ruta_download_df(
     return df[REPORTE_ALMACEN_COLUMNS].copy()
 
 
-def _call_directions_optimized_route(api_key: str, waypoints: list[str]) -> Optional[dict[str, Any]]:
+def _call_directions_optimized_route(
+    api_key: str,
+    waypoints: list[str],
+    departure_time_unix: Optional[int] = None,
+) -> Optional[dict[str, Any]]:
     if not waypoints:
         return None
 
@@ -4146,7 +4155,7 @@ def _call_directions_optimized_route(api_key: str, waypoints: list[str]) -> Opti
         "destination": _RUTA_OPT_ORIGIN,
         "waypoints": "optimize:true|" + "|".join(waypoints),
         "mode": "driving",
-        "departure_time": "now",
+        "departure_time": departure_time_unix if departure_time_unix is not None else "now",
         "traffic_model": "best_guess",
         "language": "es",
         "region": "mx",
@@ -4172,6 +4181,47 @@ def _call_directions_optimized_route(api_key: str, waypoints: list[str]) -> Opti
         st.error(f"❌ Google Directions no pudo generar la ruta. Status: {status}.")
         return None
 
+    routes = data.get("routes", [])
+    if not routes:
+        st.error("❌ Google Directions no devolvió rutas.")
+        return None
+    return routes[0]
+
+
+def _call_directions_custom_route(
+    api_key: str,
+    ordered_waypoints: list[str],
+    departure_time_unix: Optional[int] = None,
+) -> Optional[dict[str, Any]]:
+    if not ordered_waypoints:
+        return None
+    params = {
+        "origin": _RUTA_OPT_ORIGIN,
+        "destination": _RUTA_OPT_ORIGIN,
+        "waypoints": "|".join(ordered_waypoints),
+        "mode": "driving",
+        "departure_time": departure_time_unix if departure_time_unix is not None else "now",
+        "traffic_model": "best_guess",
+        "language": "es",
+        "region": "mx",
+        "key": api_key,
+    }
+    try:
+        response = requests.get(
+            "https://maps.googleapis.com/maps/api/directions/json",
+            params=params,
+            timeout=25,
+        )
+    except requests.RequestException as exc:
+        st.error(f"❌ Error al llamar Google Directions API: {exc}")
+        return None
+    if response.status_code != 200:
+        st.error(f"❌ Google Directions respondió con HTTP {response.status_code}.")
+        return None
+    data = response.json()
+    if data.get("status", "") != "OK":
+        st.error(f"❌ Google Directions no pudo generar la ruta. Status: {data.get('status', '')}.")
+        return None
     routes = data.get("routes", [])
     if not routes:
         st.error("❌ Google Directions no devolvió rutas.")
@@ -8550,6 +8600,9 @@ if df_main is not None:
         "✅ Completar Rápido",
         "✅ Historial Completados",
     ]
+    sinai_route_tab_enabled = current_user == "SINAI"
+    if sinai_route_tab_enabled:
+        tab_options.append("🗺️ Ruteo")
 
     if current_user == "SINAICEL":
         st.session_state["active_main_tab_index"] = 6
@@ -10967,12 +11020,282 @@ if df_main is not None:
                     st.session_state["bulk_complete_execute_requested"] = True
                     st.rerun()
 
+    if sinai_route_tab_enabled:
+        with main_tabs[8]:  # 🗺️ Ruteo
+            st.markdown("### 🗺️ Generar ruta optimizada")
+            st.caption("Selecciona pedidos locales (Mañana/Tarde/Saltillo) y marca prioridad cuando aplique.")
+            pedidos_locales = df_pendientes_proceso_demorado[
+                (df_pendientes_proceso_demorado.get("Tipo_Envio", pd.Series(dtype=str)).astype(str).str.strip() == "📍 Pedido Local")
+            ].copy()
+            if pedidos_locales.empty:
+                st.info("No hay pedidos locales en proceso para rutear.")
+            else:
+                pedidos_locales["fecha_dt"] = pd.to_datetime(pedidos_locales.get("Fecha_Entrega", pd.Series(dtype=str)), errors="coerce")
+                pedidos_locales = pedidos_locales.sort_values(by=["Turno", "fecha_dt"], kind="mergesort")
+                grupos_turno = [
+                    ("mañana", "☀️ Local Mañana", ["☀️ local mañana", "local mañana", "mañana"]),
+                    ("tarde", "🌙 Local Tarde", ["🌙 local tarde", "local tarde", "tarde"]),
+                    ("saltillo", "⛰️ Saltillo", ["⛰️ saltillo", "🌵 saltillo", "saltillo"]),
+                ]
+                run_sinai = False
+                with st.form("sinai_route_form", clear_on_submit=False):
+                    hora_salida_ruta = st.time_input(
+                        "🕒 Hora de salida de ruta",
+                        value=st.session_state.get(
+                            "sinai_route_departure_time",
+                            mx_now().time().replace(second=0, microsecond=0),
+                        ),
+                        key="sinai_route_departure_time",
+                    )
+                    selected_rows: list[int] = []
+                    priority_rows: list[int] = []
+                    for _, title, aliases in grupos_turno:
+                        st.markdown(f"#### {title}")
+                        turnos_norm = (
+                            pedidos_locales.get("Turno", pd.Series(dtype=str))
+                            .astype(str)
+                            .str.strip()
+                            .str.lower()
+                        )
+                        mask_turno = turnos_norm.isin(aliases)
+                        bloque = pedidos_locales[mask_turno]
+                        if bloque.empty:
+                            st.caption("Sin pedidos en este grupo.")
+                            continue
+                        for _, r in bloque.iterrows():
+                            row_idx = int(r.get("_gsheet_row_index", 0) or 0)
+                            if row_idx <= 0:
+                                continue
+                            cliente = str(r.get("Cliente", "")).strip() or "Sin cliente"
+                            folio = str(r.get("Folio_Factura", "")).strip() or "Sin folio"
+                            fecha_lbl = pd.to_datetime(r.get("Fecha_Entrega"), errors="coerce")
+                            fecha_txt = fecha_lbl.strftime("%d/%m/%Y") if pd.notna(fecha_lbl) else "Sin fecha"
+                            c1, c2 = st.columns([0.72, 0.28])
+                            with c1:
+                                selected = st.checkbox(
+                                    f"Seleccionar · {cliente} · {folio} · {fecha_txt}",
+                                    key=f"sinai_sel_{row_idx}",
+                                )
+                            with c2:
+                                priority = st.checkbox("Prioridad", key=f"sinai_pri_{row_idx}")
+
+                            if selected or priority:
+                                selected_rows.append(row_idx)
+                                if priority:
+                                    priority_rows.append(row_idx)
+                    run_sinai = st.form_submit_button("📍 Generar ruta")
+                if run_sinai:
+                    progress_holder = st.empty()
+                    progress_bar = progress_holder.progress(0, text="Preparando pedidos seleccionados...")
+                    selected_df = pedidos_locales[pedidos_locales["_gsheet_row_index"].astype(int).isin(selected_rows)].copy()
+                    if selected_df.empty:
+                        progress_holder.empty()
+                        st.warning("Selecciona al menos un pedido.")
+                    else:
+                        progress_bar.progress(20, text="Validando configuración de Google Maps...")
+                        api_key = str(st.secrets.get("api_keys", {}).get("google_maps_api_key", "")).strip()
+                        if not api_key:
+                            progress_holder.empty()
+                            st.error("❌ No se encontró api_keys.google_maps_api_key en Streamlit secrets.")
+                        else:
+                            salida_dt_local = _MX_TZ.localize(datetime.combine(mx_today(), hora_salida_ruta))
+                            ahora_dt_local = mx_now()
+                            if salida_dt_local < ahora_dt_local - timedelta(minutes=5):
+                                # Si eligieron una hora ya pasada hoy, usar mañana para proyectar tráfico.
+                                salida_dt_local = salida_dt_local + timedelta(days=1)
+                            departure_time_unix = int(salida_dt_local.timestamp())
+                            progress_bar.progress(40, text="Buscando coordenadas y candidatos de ruta...")
+                            candidates, _, _, _, pending_clients, _ = _collect_route_candidates(selected_df, zone_key="local", google_api_key=api_key)
+                            priority_row_set = {int(v) for v in priority_rows}
+                            final_candidates = []
+                            if candidates:
+                                if len(candidates) > _RUTA_OPT_MAX_WAYPOINTS:
+                                    st.warning(
+                                        f"⚠️ Se detectaron {len(candidates)} pedidos con coordenadas, "
+                                        f"pero Google Directions permite hasta {_RUTA_OPT_MAX_WAYPOINTS} waypoints por solicitud. "
+                                        f"Se usarán los primeros {_RUTA_OPT_MAX_WAYPOINTS}."
+                                    )
+                                    candidates = candidates[:_RUTA_OPT_MAX_WAYPOINTS]
+                                progress_bar.progress(60, text="Optimizando ruta general (con prioridad suave)...")
+                                global_route = _call_directions_optimized_route(
+                                    api_key,
+                                    [f"{c['lat']},{c['lng']}" for c in candidates],
+                                    departure_time_unix=departure_time_unix,
+                                )
+                                global_order_idx = global_route.get("waypoint_order", []) if global_route else []
+                                ordered_base = [candidates[i] for i in global_order_idx] if global_order_idx else candidates
+
+                                # Prioridad suave:
+                                # mueve pedidos prioritarios hacia arriba SIN obligarlos a quedar primero,
+                                # conservando una ruta global cercana al óptimo.
+                                priority_boost_positions = 2
+                                scored: list[tuple[float, int, dict[str, Any]]] = []
+                                for idx_base, cand in enumerate(ordered_base):
+                                    rid = int(cand.get("pedido", {}).get("_gsheet_row_index", 0) or 0)
+                                    is_priority = rid in priority_row_set
+                                    score = float(idx_base - (priority_boost_positions if is_priority else 0))
+                                    scored.append((score, idx_base, cand))
+                                scored.sort(key=lambda x: (x[0], x[1]))
+                                final_candidates = [item[2] for item in scored]
+
+                            if not final_candidates:
+                                progress_holder.empty()
+                                st.warning("No se encontraron pedidos con coordenadas válidas para generar ruta.")
+                            else:
+                                progress_bar.progress(80, text="Calculando ruta final con prioridad...")
+                                route = _call_directions_custom_route(
+                                    api_key,
+                                    [f"{c['lat']},{c['lng']}" for c in final_candidates],
+                                    departure_time_unix=departure_time_unix,
+                                )
+                                if route:
+                                    legs = route.get("legs", [])
+                                    rows_simple = []
+                                    dist_total_m = 0
+                                    dur_total_s = 0
+                                    for i, leg in enumerate(legs):
+                                        de_txt = "Origen" if i == 0 else (final_candidates[i - 1]["cliente"] if i - 1 < len(final_candidates) else "Origen")
+                                        a_txt = "Origen" if i == len(legs) - 1 else (final_candidates[i]["cliente"] if i < len(final_candidates) else "Destino")
+                                        dist_val = int((leg.get("distance", {}) or {}).get("value", 0) or 0)
+                                        dur_val = int(((leg.get("duration_in_traffic", {}) or leg.get("duration", {})) or {}).get("value", 0) or 0)
+                                        dist_total_m += dist_val
+                                        dur_total_s += dur_val
+                                        rows_simple.append({"Paso": i + 1, "De": de_txt, "A": a_txt, "Distancia": leg.get("distance", {}).get("text", ""), "Tiempo": (leg.get("duration_in_traffic", {}) or leg.get("duration", {})).get("text", "")})
+
+                                    num_entregas = len(final_candidates)
+                                    servicio_min_por_entrega = 12  # promedio operativo solicitado (10-15 min)
+                                    servicio_total_min = num_entregas * servicio_min_por_entrega
+                                    manejo_total_min = round(dur_total_s / 60, 1)
+                                    total_estimado_min = round(manejo_total_min + servicio_total_min, 1)
+                                    manejo_total_h = round(manejo_total_min / 60, 2)
+                                    servicio_total_h = round(servicio_total_min / 60, 2)
+                                    total_estimado_h = round(total_estimado_min / 60, 2)
+
+                                    def _format_duracion(minutos: float) -> str:
+                                        if minutos >= 120:
+                                            return f"{round(minutos / 60, 2)} horas"
+                                        return f"{round(minutos, 1)} min"
+
+                                    resumen_df = pd.DataFrame(
+                                        [
+                                            {"Métrica": "Distancia total km", "Valor": round(dist_total_m / 1000, 2)},
+                                            {"Métrica": "Tiempo manejo total", "Valor": _format_duracion(manejo_total_min)},
+                                            {"Métrica": "Tiempo servicio por entrega (min)", "Valor": servicio_min_por_entrega},
+                                            {"Métrica": "Tiempo servicio total", "Valor": _format_duracion(servicio_total_min)},
+                                            {"Métrica": "Tiempo total estimado (manejo + entregas)", "Valor": _format_duracion(total_estimado_min)},
+                                        ]
+                                    )
+
+                                    eta_rows: list[dict[str, Any]] = []
+                                    inicio_dt = salida_dt_local.replace(tzinfo=None)
+                                    cursor_dt = inicio_dt
+                                    for i, cand in enumerate(final_candidates):
+                                        leg = legs[i] if i < len(legs) else {}
+                                        dur_val = int(((leg.get("duration_in_traffic", {}) or leg.get("duration", {})) or {}).get("value", 0) or 0)
+                                        cursor_dt = cursor_dt + timedelta(seconds=dur_val)
+                                        eta_llegada = cursor_dt
+                                        eta_rows.append(
+                                            {
+                                                "Orden": i + 1,
+                                                "Cliente": str(cand.get("cliente", "")).strip() or f"Cliente {i + 1}",
+                                                "Llegada aprox": eta_llegada.strftime("%H:%M"),
+                                                "Salida aprox": (eta_llegada + timedelta(minutes=servicio_min_por_entrega)).strftime("%H:%M"),
+                                            }
+                                        )
+                                        cursor_dt = eta_llegada + timedelta(minutes=servicio_min_por_entrega)
+                                    eta_df = pd.DataFrame(eta_rows)
+
+                                    first_leg = legs[0] if legs else {}
+                                    start_loc = first_leg.get("start_location", {}) if isinstance(first_leg, dict) else {}
+                                    origin_lat = float(start_loc.get("lat", 25.67))
+                                    origin_lng = float(start_loc.get("lng", -100.31))
+                                    m = folium.Map(location=[origin_lat, origin_lng], zoom_start=12, control_scale=True)
+                                    folium.Marker([origin_lat, origin_lng], popup="0. ORIGEN", tooltip="0. ORIGEN", icon=folium.Icon(color="green")).add_to(m)
+                                    folium.Marker(
+                                        [origin_lat, origin_lng],
+                                        icon=folium.features.DivIcon(
+                                            icon_size=(30, 30),
+                                            icon_anchor=(15, 15),
+                                            html=(
+                                                '<div style="font-size:14px;color:white;background-color:green;border-radius:50%;'
+                                                'width:24px;height:24px;text-align:center;line-height:24px;font-weight:bold;'
+                                                'border:2px solid white;">0</div>'
+                                            ),
+                                        ),
+                                    ).add_to(m)
+                                    colors = ["darkblue", "darkgreen", "darkred", "purple", "black", "brown", "gray", "orange"]
+                                    for i, leg in enumerate(legs):
+                                        leg_points = []
+                                        for step_data in leg.get("steps", []):
+                                            encoded = step_data.get("polyline", {}).get("points", "")
+                                            if not encoded:
+                                                continue
+                                            try:
+                                                leg_points.extend(polyline.decode(encoded))
+                                            except Exception:
+                                                continue
+                                        if leg_points:
+                                            folium.PolyLine(locations=leg_points, color=colors[i % len(colors)], weight=5, opacity=0.9).add_to(m)
+                                    for i, leg in enumerate(legs[:-1], start=1):
+                                        end_loc = leg.get("end_location", {})
+                                        lat = float(end_loc.get("lat", origin_lat))
+                                        lng = float(end_loc.get("lng", origin_lng))
+                                        cliente = final_candidates[i - 1]["cliente"] if i - 1 < len(final_candidates) else f"Cliente {i}"
+                                        folium.Marker([lat, lng], popup=f"{i}. {cliente}", tooltip=f"{i}. {cliente}", icon=folium.Icon(color="red")).add_to(m)
+                                        folium.Marker(
+                                            [lat, lng],
+                                            icon=folium.features.DivIcon(
+                                                icon_size=(30, 30),
+                                                icon_anchor=(15, 15),
+                                                html=(
+                                                    '<div style="font-size:14px;color:white;background-color:black;border-radius:50%;'
+                                                    f'width:24px;height:24px;text-align:center;line-height:24px;font-weight:bold;'
+                                                    f'border:2px solid white;">{i}</div>'
+                                                ),
+                                            ),
+                                        ).add_to(m)
+                                    map_html = m.get_root().render()
+
+                                    gmaps_waypoints = [f"{c['lat']},{c['lng']}" for c in final_candidates]
+                                    google_maps_link = (
+                                        "https://www.google.com/maps/dir/?api=1"
+                                        f"&origin={_RUTA_OPT_ORIGIN.replace(' ', '+')}"
+                                        f"&destination={_RUTA_OPT_ORIGIN.replace(' ', '+')}"
+                                        "&travelmode=driving"
+                                        f"&waypoints={'|'.join(gmaps_waypoints)}"
+                                    )
+                                    st.success("✅ Ruta generada correctamente.")
+                                    st.dataframe(pd.DataFrame(rows_simple), use_container_width=True)
+                                    st.markdown("#### 🗺️ Mapa de ruta")
+                                    components.html(map_html, height=560)
+                                    st.markdown("#### 📊 Resumen")
+                                    st.dataframe(resumen_df, use_container_width=True, hide_index=True)
+                                    st.markdown("#### ⏱️ ETA aproximada por entrega")
+                                    st.dataframe(eta_df, use_container_width=True, hide_index=True)
+                                    st.link_button("📱 Abrir ruta en Google Maps", google_maps_link, use_container_width=True)
+                                    hoja_ruta_df = _build_hoja_ruta_download_df(final_candidates, pending_clients)
+                                    output_excel = BytesIO()
+                                    with pd.ExcelWriter(output_excel, engine="xlsxwriter") as writer:
+                                        pd.DataFrame(rows_simple).to_excel(writer, sheet_name="Ruta", index=False)
+                                        resumen_df.to_excel(writer, sheet_name="Resumen", index=False)
+                                        eta_df.to_excel(writer, sheet_name="ETA_Entregas", index=False)
+                                        hoja_ruta_df.to_excel(writer, sheet_name="Hoja_Ruta_Optimizada", index=False)
+                                    output_excel.seek(0)
+                                    progress_bar.progress(100, text="Ruta generada ✅")
+                                    st.download_button(
+                                        "⬇️ Descargar Hoja de Ruta SINAI",
+                                        data=output_excel.getvalue(),
+                                        file_name=f"ruta_sinai_{mx_now().strftime('%Y%m%d_%H%M')}.xlsx",
+                                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                                        use_container_width=True,
+                                    )
+                                else:
+                                    progress_holder.empty()
     with main_tabs[7]:  # ✅ Historial Completados/Cancelados
         df_completados_historial = df_main[
             (df_main["Estado"].isin(["🟢 Completado", "🟣 Cancelado"])) &
             (df_main.get("Completados_Limpiado", "").astype(str).str.lower() != "sí")
         ].copy()
-    
         df_completados_historial['_gsheet_row_index'] = df_completados_historial['_gsheet_row_index'].astype(int)
     
         tipo_casos_col = None
