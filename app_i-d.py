@@ -5063,7 +5063,8 @@ def _persist_page_scroll(view_key: str, user_key: str = "", force_bottom: bool =
         target.scrollTo(0, Math.floor(maxY * 0.5));
       }};
       const scrollToTableTop = () => {{
-        const board = doc.querySelector('.board-wrap, .board-scroll, [data-testid="stHorizontalBlock"]');
+        const anchor = doc.querySelector('#auto-tables-start');
+        const board = anchor || doc.querySelector('.board-wrap, .board-scroll, [data-testid="stHorizontalBlock"]');
         if (!board) return false;
         const rect = board.getBoundingClientRect();
         const absoluteY = (target.scrollY || root.scrollTop || 0) + rect.top - 8;
@@ -5379,6 +5380,8 @@ if selected_tab_key == "assistant":
 if selected_tab_key == "auto_local":
     st_autorefresh(interval=60000, key="auto_refresh_local_casos")
     if logged_user in {"PANTALLAF", "PANTALLAL"}:
+        st.markdown('<div id="auto-tables-start"></div>', unsafe_allow_html=True)
+    if logged_user in {"PANTALLAF", "PANTALLAL"}:
         st.markdown(
             """
             <style>.tv-wall-tight-start{margin-top:-5.2rem;}</style>
@@ -5446,6 +5449,8 @@ if selected_tab_key == "auto_local":
 # ---------------------------
 if selected_tab_key == "auto_foraneo":
     st_autorefresh(interval=60000, key="auto_refresh_foraneo_cdmx")
+    if logged_user in {"PANTALLAF", "PANTALLAL"}:
+        st.markdown('<div id="auto-tables-start"></div>', unsafe_allow_html=True)
     if logged_user in {"PANTALLAF", "PANTALLAL"}:
         st.markdown(
             """
