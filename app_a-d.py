@@ -11348,15 +11348,6 @@ if df_main is not None:
                                         "&travelmode=driving"
                                         f"&waypoints={'|'.join(gmaps_waypoints)}"
                                     )
-                                    st.success("✅ Ruta generada correctamente.")
-                                    st.dataframe(pd.DataFrame(rows_simple), use_container_width=True)
-                                    st.markdown("#### 🗺️ Mapa de ruta")
-                                    components.html(map_html, height=560)
-                                    st.markdown("#### 📊 Resumen")
-                                    st.dataframe(resumen_df, use_container_width=True, hide_index=True)
-                                    st.markdown("#### ⏱️ ETA aproximada por entrega")
-                                    st.dataframe(eta_df, use_container_width=True, hide_index=True)
-                                    st.link_button("📱 Abrir ruta en Google Maps", google_maps_link, use_container_width=True)
                                     hoja_ruta_df = _build_hoja_ruta_download_df(final_candidates, pending_clients)
                                     output_excel = BytesIO()
                                     with pd.ExcelWriter(output_excel, engine="xlsxwriter") as writer:
@@ -11365,16 +11356,65 @@ if df_main is not None:
                                         eta_df.to_excel(writer, sheet_name="ETA_Entregas", index=False)
                                         hoja_ruta_df.to_excel(writer, sheet_name="Hoja_Ruta_Optimizada", index=False)
                                     output_excel.seek(0)
+                                    eta_excel = BytesIO()
+                                    with pd.ExcelWriter(eta_excel, engine="xlsxwriter") as writer:
+                                        eta_df.to_excel(writer, sheet_name="ETA_Entregas", index=False)
+                                        eta_ws = writer.sheets.get("ETA_Entregas")
+                                        if eta_ws is not None:
+                                            header_format = writer.book.add_format(
+                                                {
+                                                    "bold": True,
+                                                    "text_wrap": False,
+                                                    "valign": "vcenter",
+                                                    "align": "center",
+                                                    "bg_color": "#D9E1F2",
+                                                    "border": 1,
+                                                }
+                                            )
+                                            cell_format = writer.book.add_format({"border": 1, "valign": "vcenter"})
+                                            for col_idx, col_name in enumerate(eta_df.columns):
+                                                max_len_data = eta_df[col_name].astype(str).map(len).max() if not eta_df.empty else 0
+                                                width = min(max(len(str(col_name)), int(max_len_data)) + 3, 42)
+                                                eta_ws.set_column(col_idx, col_idx, width, cell_format)
+                                                eta_ws.write(0, col_idx, col_name, header_format)
+                                            eta_ws.freeze_panes(1, 0)
+                                            eta_ws.autofilter(0, 0, max(len(eta_df), 1), max(len(eta_df.columns) - 1, 0))
+                                    eta_excel.seek(0)
                                     progress_bar.progress(100, text="Ruta generada ✅")
-                                    st.download_button(
-                                        "⬇️ Descargar Hoja de Ruta SINAI",
-                                        data=output_excel.getvalue(),
-                                        file_name=f"ruta_sinai_{mx_now().strftime('%Y%m%d_%H%M')}.xlsx",
-                                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                                        use_container_width=True,
-                                    )
+                                    st.session_state["sinai_route_result"] = {
+                                        "rows_simple": rows_simple,
+                                        "map_html": map_html,
+                                        "resumen_df": resumen_df,
+                                        "eta_df": eta_df,
+                                        "google_maps_link": google_maps_link,
+                                        "excel_bytes": output_excel.getvalue(),
+                                        "eta_excel_bytes": eta_excel.getvalue(),
+                                    }
                                 else:
                                     progress_holder.empty()
+                route_result = st.session_state.get("sinai_route_result")
+                if route_result:
+                    st.success("✅ Ruta generada correctamente.")
+                    st.dataframe(pd.DataFrame(route_result["rows_simple"]), use_container_width=True)
+                    st.markdown("#### 🗺️ Mapa de ruta")
+                    components.html(route_result["map_html"], height=560)
+                    st.markdown("#### 📊 Resumen")
+                    st.dataframe(route_result["resumen_df"], use_container_width=True, hide_index=True)
+                    st.markdown("#### ⏱️ ETA aproximada por entrega")
+                    st.dataframe(route_result["eta_df"], use_container_width=True, hide_index=True)
+                    c_link, c_share = st.columns([0.55, 0.45])
+                    with c_link:
+                        st.link_button("📱 Abrir ruta en Google Maps", route_result["google_maps_link"], use_container_width=True)
+                    with c_share:
+                        whatsapp_link = f"https://wa.me/?text={requests.utils.quote(route_result['google_maps_link'])}"
+                        st.link_button("🟢 Enviar por WhatsApp", whatsapp_link, use_container_width=True)
+                    st.download_button(
+                        "⬇️ Descarga Ruta por Tiempos",
+                        data=route_result["eta_excel_bytes"],
+                        file_name=f"eta_entregas_{mx_now().strftime('%Y%m%d_%H%M')}.xlsx",
+                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                        use_container_width=True,
+                    )
     with main_tabs[7]:  # ✅ Historial Completados/Cancelados
         df_completados_historial = df_main[
             (df_main["Estado"].isin(["🟢 Completado", "🟣 Cancelado"])) &
