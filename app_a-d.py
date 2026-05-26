@@ -11356,6 +11356,10 @@ if df_main is not None:
                                         eta_df.to_excel(writer, sheet_name="ETA_Entregas", index=False)
                                         hoja_ruta_df.to_excel(writer, sheet_name="Hoja_Ruta_Optimizada", index=False)
                                     output_excel.seek(0)
+                                    eta_excel = BytesIO()
+                                    with pd.ExcelWriter(eta_excel, engine="xlsxwriter") as writer:
+                                        eta_df.to_excel(writer, sheet_name="ETA_Entregas", index=False)
+                                    eta_excel.seek(0)
                                     progress_bar.progress(100, text="Ruta generada ✅")
                                     st.session_state["sinai_route_result"] = {
                                         "rows_simple": rows_simple,
@@ -11364,6 +11368,7 @@ if df_main is not None:
                                         "eta_df": eta_df,
                                         "google_maps_link": google_maps_link,
                                         "excel_bytes": output_excel.getvalue(),
+                                        "eta_excel_bytes": eta_excel.getvalue(),
                                     }
                                 else:
                                     progress_holder.empty()
@@ -11393,8 +11398,8 @@ if df_main is not None:
                         st.link_button("🟢 Enviar por WhatsApp", whatsapp_link, use_container_width=True)
                     st.download_button(
                         "⬇️ Descarga Ruta por Tiempos",
-                        data=route_result["excel_bytes"],
-                        file_name=f"ruta_sinai_{mx_now().strftime('%Y%m%d_%H%M')}.xlsx",
+                        data=route_result["eta_excel_bytes"],
+                        file_name=f"eta_entregas_{mx_now().strftime('%Y%m%d_%H%M')}.xlsx",
                         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                         use_container_width=True,
                     )
