@@ -11348,15 +11348,6 @@ if df_main is not None:
                                         "&travelmode=driving"
                                         f"&waypoints={'|'.join(gmaps_waypoints)}"
                                     )
-                                    st.success("✅ Ruta generada correctamente.")
-                                    st.dataframe(pd.DataFrame(rows_simple), use_container_width=True)
-                                    st.markdown("#### 🗺️ Mapa de ruta")
-                                    components.html(map_html, height=560)
-                                    st.markdown("#### 📊 Resumen")
-                                    st.dataframe(resumen_df, use_container_width=True, hide_index=True)
-                                    st.markdown("#### ⏱️ ETA aproximada por entrega")
-                                    st.dataframe(eta_df, use_container_width=True, hide_index=True)
-                                    st.link_button("📱 Abrir ruta en Google Maps", google_maps_link, use_container_width=True)
                                     hoja_ruta_df = _build_hoja_ruta_download_df(final_candidates, pending_clients)
                                     output_excel = BytesIO()
                                     with pd.ExcelWriter(output_excel, engine="xlsxwriter") as writer:
@@ -11366,15 +11357,47 @@ if df_main is not None:
                                         hoja_ruta_df.to_excel(writer, sheet_name="Hoja_Ruta_Optimizada", index=False)
                                     output_excel.seek(0)
                                     progress_bar.progress(100, text="Ruta generada ✅")
-                                    st.download_button(
-                                        "⬇️ Descargar Hoja de Ruta SINAI",
-                                        data=output_excel.getvalue(),
-                                        file_name=f"ruta_sinai_{mx_now().strftime('%Y%m%d_%H%M')}.xlsx",
-                                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                                        use_container_width=True,
-                                    )
+                                    st.session_state["sinai_route_result"] = {
+                                        "rows_simple": rows_simple,
+                                        "map_html": map_html,
+                                        "resumen_df": resumen_df,
+                                        "eta_df": eta_df,
+                                        "google_maps_link": google_maps_link,
+                                        "excel_bytes": output_excel.getvalue(),
+                                    }
                                 else:
                                     progress_holder.empty()
+                route_result = st.session_state.get("sinai_route_result")
+                if route_result:
+                    st.success("✅ Ruta generada correctamente.")
+                    st.dataframe(pd.DataFrame(route_result["rows_simple"]), use_container_width=True)
+                    st.markdown("#### 🗺️ Mapa de ruta")
+                    components.html(route_result["map_html"], height=560)
+                    st.markdown("#### 📊 Resumen")
+                    st.dataframe(route_result["resumen_df"], use_container_width=True, hide_index=True)
+                    st.markdown("#### ⏱️ ETA aproximada por entrega")
+                    st.dataframe(route_result["eta_df"], use_container_width=True, hide_index=True)
+                    c_link, c_copy, c_share = st.columns([0.40, 0.30, 0.30])
+                    with c_link:
+                        st.link_button("📱 Abrir ruta en Google Maps", route_result["google_maps_link"], use_container_width=True)
+                    with c_copy:
+                        copy_html = f"""
+                        <button onclick="navigator.clipboard.writeText('{route_result["google_maps_link"]}')"
+                            style="width:100%;padding:0.55rem 0.75rem;border-radius:0.5rem;border:1px solid #d0d0d0;background:white;cursor:pointer;">
+                            📋 Copiar link Google Maps
+                        </button>
+                        """
+                        components.html(copy_html, height=50)
+                    with c_share:
+                        whatsapp_link = f"https://wa.me/?text={requests.utils.quote(route_result['google_maps_link'])}"
+                        st.link_button("🟢 Enviar por WhatsApp", whatsapp_link, use_container_width=True)
+                    st.download_button(
+                        "⬇️ Descarga Ruta por Tiempos",
+                        data=route_result["excel_bytes"],
+                        file_name=f"ruta_sinai_{mx_now().strftime('%Y%m%d_%H%M')}.xlsx",
+                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                        use_container_width=True,
+                    )
     with main_tabs[7]:  # ✅ Historial Completados/Cancelados
         df_completados_historial = df_main[
             (df_main["Estado"].isin(["🟢 Completado", "🟣 Cancelado"])) &
