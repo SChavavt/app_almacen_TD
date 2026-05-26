@@ -5186,14 +5186,22 @@ def render_salida_neta_tab():
             for item in data_ranges:
                 _ws_update_range_safe(worksheet, item["range"], item["values"])
             return None
-        return _retry_gspread_api_call(
-            lambda: worksheet.batch_update(
-                data_ranges,
-                value_input_option="USER_ENTERED",
-            ),
-            retries=5,
-            base_delay=1.0,
-        )
+        try:
+            return _retry_gspread_api_call(
+                lambda: worksheet.batch_update(
+                    data_ranges,
+                    value_input_option="USER_ENTERED",
+                ),
+                retries=5,
+                base_delay=1.0,
+            )
+        except Exception as exc:
+            # Compatibilidad con versiones de gspread que no aceptan este formato en batch_update.
+            if "not enough values to unpack" in str(exc):
+                for item in data_ranges:
+                    _ws_update_range_safe(worksheet, item["range"], item["values"])
+                return None
+            raise
 
     def _actualizar_rotacion_catalogo(df_salida_neta: pd.DataFrame, fecha_desde: datetime, df_existencias: pd.DataFrame):
         def _ensure_column(worksheet, headers_row: list[str], col_name: str) -> tuple[list[str], int]:
