@@ -6772,6 +6772,34 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
 
         puede_completar_por_pago = (not es_local_bodega) or pago_confirmado
 
+        # Botón para flujo local: 🔵 En Proceso -> 🔎 Auditado
+        estado_actual_acciones = str(row.get("Estado", "")).strip()
+        es_local_pedido = _es_pedido_local(row)
+        puede_auditar_local = es_local_pedido and estado_actual_acciones == ESTADO_EN_PROCESO and not disabled_if_completed
+        if puede_auditar_local:
+            if col_process_btn.button(
+                "🔎 Marcar Auditado",
+                key=f"audit_button_{row['ID_Pedido']}_{origen_tab}",
+                on_click=_mark_skip_demorado_check_once,
+            ):
+                if update_gsheet_cell(
+                    worksheet,
+                    headers,
+                    gsheet_row_index,
+                    "Estado",
+                    ESTADO_AUDITADO,
+                ):
+                    df.at[idx, "Estado"] = ESTADO_AUDITADO
+                    row["Estado"] = ESTADO_AUDITADO
+                    st.toast("✅ Pedido marcado como 🔎 Auditado", icon="✅")
+                    marcar_contexto_pedido(row["ID_Pedido"], origen_tab, scroll=False)
+                    preserve_tab_state()
+                    st.session_state["refresh_data_caches_pending"] = True
+                    st.session_state["reload_after_action"] = True
+                    st.rerun()
+                else:
+                    st.error("❌ No se pudo actualizar el estado a '🔎 Auditado'.")
+
 
         # Complete Button with streamlined confirmation
         if not es_local_no_entregado:
