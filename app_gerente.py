@@ -5739,7 +5739,7 @@ def render_salida_neta_tab():
                 with colf1:
                     filtro_prov = st.selectbox("Filtrar por proveedor", options=["Todos"] + prov_opts, key="rot_filtro_proveedor")
                 with colf2:
-                    filtro_comp = st.selectbox("Filtrar por Comprar", options=["Todos", "COMPRAR", "OK"], key="rot_filtro_comprar")
+                    filtro_comp = st.selectbox("Filtrar por Comprar", options=["Todos", "COMPRAR", "OK"], index=1, key="rot_filtro_comprar")
                 if filtro_prov != "Todos":
                     tabla_rot = tabla_rot[tabla_rot["Proveedor"].astype(str).str.strip() == filtro_prov]
                 if filtro_comp != "Todos":
@@ -5769,7 +5769,16 @@ def render_salida_neta_tab():
 
                 editor_df = captura_df.copy()
                 editor_df["__sheet_row"] = editor_df["__row_idx"].astype(int) + 2
-                editor_df = editor_df.drop(columns=["__row_idx"])
+
+                proveedor_captura = filtro_prov if filtro_prov != "Todos" else ""
+                proveedor_captura_col = proveedor_cols.get(proveedor_captura) if proveedor_captura else None
+                cantidad_col_editor = f"Cantidad {proveedor_captura}" if proveedor_captura else "Cantidad proveedor (elige un proveedor)"
+                if proveedor_captura_col:
+                    editor_df[cantidad_col_editor] = cat.loc[editor_df["__row_idx"], proveedor_captura_col].values
+                else:
+                    editor_df[cantidad_col_editor] = ""
+
+                editor_df = editor_df.drop(columns=["__row_idx", "Unidades Sugeridas"])
                 edited_df = st.data_editor(
                     editor_df,
                     hide_index=True,
@@ -5784,9 +5793,12 @@ def render_salida_neta_tab():
                         "Tránsito": st.column_config.NumberColumn(disabled=True),
                         "Ventas Promedio Por Mes": st.column_config.NumberColumn(disabled=True),
                         "Comprar": st.column_config.SelectboxColumn(options=["COMPRAR", "OK", ""]),
-                        "Unidades Sugeridas": st.column_config.NumberColumn(min_value=0, step=1),
+                        cantidad_col_editor: st.column_config.NumberColumn(min_value=0, step=1, disabled=not bool(proveedor_captura_col)),
                     },
                 )
+
+                if not proveedor_captura_col:
+                    st.info("Selecciona un proveedor específico en el filtro para capturar cantidades por proveedor.")
 
                 if st.button("💾 Guardar captura manual en ROTACIONES", key="rot_guardar_captura_manual"):
                     try:
@@ -5797,28 +5809,30 @@ def render_salida_neta_tab():
                                 base_delay=1.0,
                             )
                         headers_ws = list(cat.columns)
-                        if not col_comprar or not col_unidades_sugeridas:
-                            st.error("❌ No se encontraron las columnas Comprar y/o Unidades Sugeridas en ROTACIONES.")
+                        if not col_comprar:
+                            st.error("❌ No se encontró la columna Comprar en ROTACIONES.")
+                        elif not proveedor_captura_col:
+                            st.error("❌ Para guardar cantidades, selecciona un proveedor específico en el filtro.")
                         else:
                             col_comprar_ws = headers_ws.index(col_comprar) + 1
-                            col_unidades_ws = headers_ws.index(col_unidades_sugeridas) + 1
+                            col_proveedor_qty_ws = headers_ws.index(proveedor_captura_col) + 1
                             data_ranges = []
                             for _, row in edited_df.iterrows():
                                 sheet_row = int(row["__sheet_row"])
                                 comprar_val = str(row.get("Comprar", "")).strip().upper()
-                                unidades_val = pd.to_numeric(row.get("Unidades Sugeridas"), errors="coerce")
-                                unidades_val = "" if pd.isna(unidades_val) else (int(unidades_val) if float(unidades_val).is_integer() else float(unidades_val))
+                                cantidad_val = pd.to_numeric(row.get(cantidad_col_editor), errors="coerce")
+                                cantidad_val = "" if pd.isna(cantidad_val) else (int(cantidad_val) if float(cantidad_val).is_integer() else float(cantidad_val))
                                 data_ranges.append({
                                     "range": gspread.utils.rowcol_to_a1(sheet_row, col_comprar_ws),
                                     "values": [[comprar_val]],
                                 })
                                 data_ranges.append({
-                                    "range": gspread.utils.rowcol_to_a1(sheet_row, col_unidades_ws),
-                                    "values": [[unidades_val]],
+                                    "range": gspread.utils.rowcol_to_a1(sheet_row, col_proveedor_qty_ws),
+                                    "values": [[cantidad_val]],
                                 })
                             if data_ranges:
                                 _ws_batch_update_safe(ws_rot, data_ranges)
-                                st.success(f"✅ Captura guardada. Se actualizaron {len(edited_df)} productos en ROTACIONES.")
+                                st.success(f"✅ Captura guardada. Se actualizaron {len(edited_df)} productos en ROTACIONES para proveedor {proveedor_captura}.")
                             else:
                                 st.info("No hay filas para guardar con los filtros seleccionados.")
                     except Exception as exc:
