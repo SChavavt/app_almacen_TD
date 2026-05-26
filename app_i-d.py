@@ -1801,6 +1801,8 @@ _TURNOS_CANONICAL = {
     "saltillo": "🌵 Saltillo",
     "📦 pasa a bodega": "📦 Pasa a Bodega",
     "pasa a bodega": "📦 Pasa a Bodega",
+    "📦 en bodega": "📦 Pasa a Bodega",
+    "en bodega": "📦 Pasa a Bodega",
 }
 
 
@@ -2311,7 +2313,10 @@ def keep_local_entries_prioritizing_today_or_overdue(entries, reference_date):
         grouped.setdefault(turno, []).append(entry)
 
     filtered: list[dict] = []
-    for _, turno_entries in grouped.items():
+    for turno_label, turno_entries in grouped.items():
+        if normalize_turno_label(turno_label) == "📦 Pasa a Bodega":
+            filtered.extend(turno_entries)
+            continue
         undated_entries: list[dict] = []
         dated_entries: list[dict] = []
         for entry in turno_entries:
