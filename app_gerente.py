@@ -5793,23 +5793,38 @@ def render_salida_neta_tab():
 
                 proveedor_captura = filtro_prov if filtro_prov != "Todos" else ""
                 proveedor_captura_col = proveedor_cols.get(proveedor_captura) if proveedor_captura else None
-                cantidad_col_editor = f"Cantidad {proveedor_captura}" if proveedor_captura else "Cantidad proveedor (elige un proveedor)"
+                cantidad_col_editor = "Cantidad proveedor"
                 if proveedor_captura_col:
-                    editor_df[cantidad_col_editor] = cat.loc[editor_df["__row_idx"], proveedor_captura_col].values
+                    valores_editor = cat.loc[editor_df["__row_idx"], proveedor_captura_col].tolist()
+                    valores_editor_limpios = []
+                    for valor in valores_editor:
+                        valor_txt = str(valor).strip().lower() if valor is not None else ""
+                        if valor is None or valor_txt in {"", "none", "nan", "null"}:
+                            valores_editor_limpios.append("")
+                            continue
+                        cantidad_editor = pd.to_numeric(valor, errors="coerce")
+                        if pd.isna(cantidad_editor):
+                            valores_editor_limpios.append("")
+                        elif float(cantidad_editor).is_integer():
+                            valores_editor_limpios.append(int(cantidad_editor))
+                        else:
+                            valores_editor_limpios.append(float(cantidad_editor))
+                    editor_df[cantidad_col_editor] = valores_editor_limpios
                 else:
                     editor_df[cantidad_col_editor] = ""
 
                 editor_df = editor_df.drop(columns=["__row_idx", "Unidades Sugeridas"])
-                nombre_col_cantidad = f"✍️ Valor editable {proveedor_captura}" if proveedor_captura else "✍️ Valor editable proveedor"
+                nombre_col_cantidad = "✍️ Valor editable proveedor"
                 edited_df = editor_df.rename(columns={cantidad_col_editor: nombre_col_cantidad}).copy()
                 sheet_rows_editor = editor_df["__sheet_row"].reset_index(drop=True)
 
+                editor_key_manual = f"rot_editor_manual_{proveedor_captura}" if proveedor_captura else "rot_editor_manual_none"
                 with st.form("rot_form_captura_manual"):
                     edited_df = st.data_editor(
                         edited_df,
                         hide_index=True,
                         use_container_width=True,
-                        key="rot_editor_manual",
+                        key=editor_key_manual,
                         column_order=[
                             "Modelo",
                             "Descripción",
@@ -5850,28 +5865,45 @@ def render_salida_neta_tab():
                         elif not proveedor_captura_col:
                             st.error("❌ Para guardar cantidades, selecciona un proveedor específico en el filtro.")
                         else:
-                            col_comprar_ws = headers_ws.index(col_comprar) + 1
                             col_proveedor_qty_ws = headers_ws.index(proveedor_captura_col) + 1
-                            data_ranges = []
-                            for idx, (_, row) in enumerate(edited_df.iterrows()):
-                                sheet_row = int(sheet_rows_editor.iloc[idx])
-                                comprar_val = str(row.get("Comprar", "")).strip().upper()
-                                cantidad_val = pd.to_numeric(row.get(nombre_col_cantidad), errors="coerce")
-                                cantidad_val = "" if pd.isna(cantidad_val) else (int(cantidad_val) if float(cantidad_val).is_integer() else float(cantidad_val))
-                                data_ranges.append({
-                                    "range": gspread.utils.rowcol_to_a1(sheet_row, col_comprar_ws),
-                                    "values": [[comprar_val]],
-                                })
-                                data_ranges.append({
-                                    "range": gspread.utils.rowcol_to_a1(sheet_row, col_proveedor_qty_ws),
-                                    "values": [[cantidad_val]],
-                                })
-                            if data_ranges:
-                                with st.spinner("Guardando captura manual en ROTACIONES..."):
-                                    _ws_batch_update_safe(ws_rot, data_ranges)
-                                st.success(f"✅ Captura guardada. Se actualizaron {len(edited_df)} productos en ROTACIONES para proveedor {proveedor_captura}.")
+                            total_rows_cat = len(cat)
+                            if total_rows_cat <= 0:
+                                st.info("No hay filas de catálogo para guardar.")
                             else:
-                                st.info("No hay filas para guardar con los filtros seleccionados.")
+                                valores_columna = cat[proveedor_captura_col].tolist()
+                                for i, valor in enumerate(valores_columna):
+                                    valor_txt = str(valor).strip().lower() if valor is not None else ""
+                                    if valor is None or valor_txt in {"", "none", "nan", "null"}:
+                                        valores_columna[i] = ""
+                                        continue
+                                    cantidad_base = pd.to_numeric(valor, errors="coerce")
+                                    if pd.isna(cantidad_base):
+                                        valores_columna[i] = ""
+                                    elif float(cantidad_base).is_integer():
+                                        valores_columna[i] = int(cantidad_base)
+                                    else:
+                                        valores_columna[i] = float(cantidad_base)
+
+                                for idx, (_, row) in enumerate(edited_df.iterrows()):
+                                    row_idx_cat = int(sheet_rows_editor.iloc[idx]) - 2
+                                    if row_idx_cat < 0 or row_idx_cat >= total_rows_cat:
+                                        continue
+                                    cantidad_val = pd.to_numeric(row.get(nombre_col_cantidad), errors="coerce")
+                                    if pd.isna(cantidad_val):
+                                        valores_columna[row_idx_cat] = ""
+                                    elif float(cantidad_val).is_integer():
+                                        valores_columna[row_idx_cat] = int(cantidad_val)
+                                    else:
+                                        valores_columna[row_idx_cat] = float(cantidad_val)
+
+                                data_range = {
+                                    "range": f"{gspread.utils.rowcol_to_a1(2, col_proveedor_qty_ws)}:{gspread.utils.rowcol_to_a1(total_rows_cat + 1, col_proveedor_qty_ws)}",
+                                    "values": [[v] for v in valores_columna],
+                                }
+                                with st.spinner("Guardando captura manual en ROTACIONES..."):
+                                    _ws_batch_update_safe(ws_rot, [data_range])
+                                st.session_state.pop(editor_key_manual, None)
+                                st.success(f"✅ Captura guardada para proveedor {proveedor_captura}.")
                     except Exception as exc:
                         st.error(f"❌ No se pudo guardar la captura manual: {exc}")
                         st.code(traceback.format_exc())
