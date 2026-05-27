@@ -185,6 +185,18 @@ def resolve_vendor_for_user(user_key: str) -> str:
         return ""
     return sanitize_text(VENDEDOR_CREDENTIALS.get(sanitize_text(user_key).upper(), ""))
 
+
+def get_screen_user_override() -> str:
+    """Permite forzar usuario de pantalla por URL: ?screen=pantallaf/pantallal."""
+    raw_screen = get_query_param_value("screen").strip().upper()
+    if raw_screen in {"PANTALLAF", "PANTALLAL"}:
+        return raw_screen
+    return ""
+
+
+def is_kiosk_user(user_key: str) -> bool:
+    return sanitize_text(user_key).upper() in {"PANTALLAF", "PANTALLAL"}
+
 st.set_page_config(page_title="Panel de Almacén Integrado", layout="wide")
 
 
@@ -4780,6 +4792,12 @@ TAB_DEFINITIONS = [
 
 init_login_state()
 
+screen_user_override = get_screen_user_override()
+if screen_user_override:
+    st.session_state.auth_user = screen_user_override
+    st.session_state.auth_vendor = ""
+    st.query_params["usuario"] = screen_user_override
+
 if not get_logged_user():
     usuario_qp = get_query_param_value("usuario").upper()
     if usuario_qp in VENDEDOR_CREDENTIALS:
@@ -4787,13 +4805,16 @@ if not get_logged_user():
         st.session_state.auth_vendor = resolve_vendor_for_user(usuario_qp)
 
 logged_user = get_logged_user().upper()
-is_pantalla_f_view = logged_user == "PANTALLAF"
-if is_pantalla_f_view:
+is_kiosk_mode = is_kiosk_user(logged_user)
+if is_kiosk_mode:
     st.markdown(
         """
         <style>
-        html, body, [data-testid="stAppViewContainer"] { overflow: hidden !important; }
-        [data-testid="stHeaderActionElements"] { display: none !important; }
+        html, body, [data-testid="stAppViewContainer"] { overflow-x: hidden !important; background: #000 !important; }
+        #MainMenu, footer, [data-testid="stSidebar"], [data-testid="stHeaderActionElements"],
+        [data-testid="collapsedControl"] { display: none !important; }
+        section.main > div { padding-top: 0.25rem !important; padding-left: 0.45rem !important; padding-right: 0.45rem !important; max-width: 100vw !important; }
+        .block-container { padding-top: 0.1rem !important; max-width: 100vw !important; }
         </style>
         """,
         unsafe_allow_html=True,
@@ -4976,10 +4997,52 @@ def _inject_keepalive_media(enabled: bool) -> None:
             };
 
             pulse();
-            setInterval(pulse, 12000);
 
-            const SOFT_RELOAD_MS = 3 * 60 * 1000;
+            const reloadMinutes = Math.max(60, Number(url.searchParams.get('kiosk_reload_min') || '240') || 240);
+            const SOFT_RELOAD_MS = reloadMinutes * 60 * 1000;
             setInterval(() => recycleDocument('periodic'), SOFT_RELOAD_MS);
+
+            // Heartbeat visual ligero para que el DOM no parezca congelado en Silk
+            let hb = document.getElementById('td-kiosk-heartbeat');
+            if (!hb) {
+              hb = document.createElement('div');
+              hb.id = 'td-kiosk-heartbeat';
+              hb.style.cssText = 'position:fixed;right:8px;bottom:6px;z-index:999999;font:600 14px/1.2 Arial,sans-serif;color:#8ff;background:rgba(0,0,0,.35);padding:4px 6px;border-radius:4px;';
+              hb.textContent = '--:--:-- · init';
+              document.body.appendChild(hb);
+            }
+
+            const updateHeartbeat = () => {
+              const now = new Date();
+              hb.textContent = `${now.toLocaleTimeString()} · alive`;
+            };
+            updateHeartbeat();
+
+            // Intervalo unificado: heartbeat visual + pulse de keepalive
+            const HEARTBEAT_MS = 30000;
+            setInterval(() => {
+              updateHeartbeat();
+              pulse();
+            }, HEARTBEAT_MS);
+
+            // Intento de audio keepalive silencioso (puede ser bloqueado por autoplay en Silk).
+            const armSilentAudio = () => {
+              try {
+                const ctx = new (window.AudioContext || window.webkitAudioContext)();
+                const osc = ctx.createOscillator();
+                const gain = ctx.createGain();
+                gain.gain.value = 0.00001;
+                osc.frequency.value = 40;
+                osc.connect(gain);
+                gain.connect(ctx.destination);
+                osc.start();
+                setTimeout(() => { try { osc.stop(); ctx.close(); } catch (_) {} }, 400);
+                trackLifecycle('audio_armed');
+              } catch (_) {
+                trackLifecycle('audio_blocked');
+              }
+            };
+            window.addEventListener('pointerdown', armSilentAudio, { once: true, capture: true });
 
             setInterval(() => {
               try {
@@ -4987,7 +5050,7 @@ def _inject_keepalive_media(enabled: bool) -> None:
                 const age = Date.now() - lastSavedPulse;
                 if ((lastSavedPulse && age > 45000) || Date.now() - lastPulse > 35000) recycleDocument('watchdog');
               } catch (e) {}
-            }, 15000);
+            }, 45000);
 
             document.addEventListener('visibilitychange', () => {
               if (document.visibilityState === 'hidden') {
@@ -5131,6 +5194,16 @@ _persist_page_scroll(
     force_center=force_center_scroll,
     force_table_top=force_table_top_scroll,
 )
+
+if is_kiosk_mode:
+    st.caption(
+        f"""
+heartbeat: OK
+last refresh: {datetime.now(TZ).strftime("%Y-%m-%d %H:%M:%S %Z")}
+reload count: controlado por frontend (td_tv_wall_telemetry)
+watchdog: active
+"""
+    )
 
 # helper para "simular" tabs
 tabs = [None] * len(visible_tabs)
