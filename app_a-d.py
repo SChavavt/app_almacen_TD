@@ -11081,7 +11081,7 @@ if df_main is not None:
     if sinai_route_tab_enabled:
         with main_tabs[8]:  # 🗺️ Ruteo
             st.markdown("### 🗺️ Generar ruta optimizada")
-            st.caption("Selecciona pedidos locales (Mañana/Tarde/Saltillo) y marca prioridad cuando aplique.")
+            st.caption("Selecciona pedidos locales (Mañana/Tarde/Saltillo) y define prioridad: Leve o Máxima.")
             # Para este tab de ruteo: incluir TODOS los locales sin filtrar por estado.
             pedidos_locales = df_main[
                 (df_main.get("Tipo_Envio", pd.Series(dtype=str)).astype(str).str.strip() == "📍 Pedido Local")
@@ -11097,6 +11097,25 @@ if df_main is not None:
                     ("saltillo", "⛰️ Saltillo", ["⛰️ saltillo", "🌵 saltillo", "saltillo"]),
                 ]
                 run_sinai = False
+                st.markdown(
+                    """
+                    <style>
+                    div[data-testid="stCheckbox"] label[for^="sinai_pri_"] {
+                        background: rgba(245, 193, 67, 0.30) !important;
+                        border: 1px solid rgba(245, 193, 67, 0.55) !important;
+                        border-radius: 10px !important;
+                        padding: 4px 10px !important;
+                    }
+                    div[data-testid="stCheckbox"] label[for^="sinai_pri_max_"] {
+                        background: rgba(220, 53, 69, 0.30) !important;
+                        border: 1px solid rgba(220, 53, 69, 0.55) !important;
+                        border-radius: 10px !important;
+                        padding: 4px 10px !important;
+                    }
+                    </style>
+                    """,
+                    unsafe_allow_html=True,
+                )
                 with st.form("sinai_route_form", clear_on_submit=False):
                     hora_salida_ruta = st.time_input(
                         "🕒 Hora de salida de ruta",
@@ -11108,6 +11127,7 @@ if df_main is not None:
                     )
                     selected_rows: list[int] = []
                     priority_rows: list[int] = []
+                    max_priority_rows: list[int] = []
                     for _, title, aliases in grupos_turno:
                         st.markdown(f"#### {title}")
                         turnos_norm = (
@@ -11129,19 +11149,23 @@ if df_main is not None:
                             folio = str(r.get("Folio_Factura", "")).strip() or "Sin folio"
                             fecha_lbl = pd.to_datetime(r.get("Fecha_Entrega"), errors="coerce")
                             fecha_txt = fecha_lbl.strftime("%d/%m/%Y") if pd.notna(fecha_lbl) else "Sin fecha"
-                            c1, c2 = st.columns([0.72, 0.28])
+                            c1, c2, c3 = st.columns([0.64, 0.18, 0.18])
                             with c1:
                                 selected = st.checkbox(
                                     f"Seleccionar · {cliente} · {folio} · {fecha_txt}",
                                     key=f"sinai_sel_{row_idx}",
                                 )
                             with c2:
-                                priority = st.checkbox("Prioridad", key=f"sinai_pri_{row_idx}")
+                                priority = st.checkbox("Prioridad Leve", key=f"sinai_pri_{row_idx}")
+                            with c3:
+                                priority_max = st.checkbox("Prioridad Máxima", key=f"sinai_pri_max_{row_idx}")
 
-                            if selected or priority:
+                            if selected or priority or priority_max:
                                 selected_rows.append(row_idx)
                                 if priority:
                                     priority_rows.append(row_idx)
+                                if priority_max:
+                                    max_priority_rows.append(row_idx)
                     run_sinai = st.form_submit_button("📍 Generar ruta")
                 if run_sinai:
                     progress_holder = st.empty()
@@ -11171,6 +11195,7 @@ if df_main is not None:
                                 include_all_status=True,
                             )
                             priority_row_set = {int(v) for v in priority_rows}
+                            max_priority_row_set = {int(v) for v in max_priority_rows}
                             final_candidates = []
                             if candidates:
                                 if len(candidates) > _RUTA_OPT_MAX_WAYPOINTS:
@@ -11189,18 +11214,45 @@ if df_main is not None:
                                 global_order_idx = global_route.get("waypoint_order", []) if global_route else []
                                 ordered_base = [candidates[i] for i in global_order_idx] if global_order_idx else candidates
 
-                                # Prioridad suave:
-                                # mueve pedidos prioritarios hacia arriba SIN obligarlos a quedar primero,
-                                # conservando una ruta global cercana al óptimo.
+                                max_priority_candidates = []
+                                normal_candidates = []
+                                for cand in ordered_base:
+                                    rid = int(cand.get("pedido", {}).get("_gsheet_row_index", 0) or 0)
+                                    if rid in max_priority_row_set:
+                                        max_priority_candidates.append(cand)
+                                    else:
+                                        normal_candidates.append(cand)
+
+                                max_ordered = []
+                                if max_priority_candidates:
+                                    remaining = max_priority_candidates.copy()
+                                    curr_lat, curr_lng = _RUTA_OPT_ORIGIN_LAT, _RUTA_OPT_ORIGIN_LNG
+                                    while remaining:
+                                        nearest_idx = min(
+                                            range(len(remaining)),
+                                            key=lambda i: _haversine_m(
+                                                curr_lat,
+                                                curr_lng,
+                                                float(remaining[i].get("lat", _RUTA_OPT_ORIGIN_LAT)),
+                                                float(remaining[i].get("lng", _RUTA_OPT_ORIGIN_LNG)),
+                                            ),
+                                        )
+                                        nxt = remaining.pop(nearest_idx)
+                                        max_ordered.append(nxt)
+                                        curr_lat = float(nxt.get("lat", curr_lat))
+                                        curr_lng = float(nxt.get("lng", curr_lng))
+
+                                # Prioridad suave para los no máximos.
                                 priority_boost_positions = 2
                                 scored: list[tuple[float, int, dict[str, Any]]] = []
-                                for idx_base, cand in enumerate(ordered_base):
+                                for idx_base, cand in enumerate(normal_candidates):
                                     rid = int(cand.get("pedido", {}).get("_gsheet_row_index", 0) or 0)
                                     is_priority = rid in priority_row_set
                                     score = float(idx_base - (priority_boost_positions if is_priority else 0))
                                     scored.append((score, idx_base, cand))
                                 scored.sort(key=lambda x: (x[0], x[1]))
-                                final_candidates = [item[2] for item in scored]
+                                normal_ordered = [item[2] for item in scored]
+                                final_candidates = max_ordered + normal_ordered
 
                             if not final_candidates:
                                 progress_holder.empty()
