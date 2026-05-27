@@ -2030,7 +2030,6 @@ def render_auto_list(
 
     rows_html = []
     for fallback_number, e in visible:
-        is_priority = "priori" in sanitize_text(e.get("completados_limpiado", "")).lower()
         is_cancelado = _is_cancelado_estado(e.get("estado", ""))
         has_explicit_number = bool(sanitize_text(e.get("numero", "")))
         display_number = None
@@ -2055,10 +2054,9 @@ def render_auto_list(
         if mode in {"foraneo", "local"}:
             cells_html.append(f"<td class='board-surtidor'>{surtidor_col_html}</td>")
         cells_html.append(f"<td class='board-state'>{estado_html}</td>")
-        row_extra_class = " board-row-priority" if (is_priority and mode in {"local", "foraneo"}) else ""
         rows_html.append(
             f"""
-            <tr class='board-row{row_extra_class}'>
+            <tr class='board-row'>
               {''.join(cells_html)}
             </tr>
             """
@@ -2128,7 +2126,6 @@ def render_auto_list(
     .board-head th:first-child{{border-top-left-radius:0.45rem;}}
     .board-head th:last-child{{border-top-right-radius:0.45rem;}}
     .board-row{{border-top:1px solid rgba(255,255,255,0.09);}}
-    .board-row-priority{{background:rgba(255,140,0,0.25)!important;}}
     .board-row:first-child{{border-top:none;}}
     .board-row td{{padding:0.2rem 0.16rem;vertical-align:middle;font-size:{compact_td_size};color:#fff;line-height:1.12rem;}}
     .board-head th + th{{border-left:1px solid rgba(136,176,255,0.3);}}
