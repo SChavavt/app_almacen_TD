@@ -6776,7 +6776,12 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
         estado_actual_acciones = str(row.get("Estado", "")).strip()
         es_local_pedido = _es_pedido_local(row)
         puede_auditar_local = es_local_pedido and estado_actual_acciones == ESTADO_EN_PROCESO and not disabled_if_completed
-        bloqueado_por_auditoria_local = es_local_pedido and estado_actual_acciones != ESTADO_AUDITADO and not disabled_if_completed
+        bloqueado_por_auditoria_local = (
+            es_local_pedido
+            and (not is_victor_simple_flow)
+            and estado_actual_acciones != ESTADO_AUDITADO
+            and not disabled_if_completed
+        )
         disabled_complete_btn = disabled_if_completed or not puede_completar_por_pago or bloqueado_por_auditoria_local
         if puede_auditar_local:
             if col_print_btn.button(
@@ -6834,8 +6839,7 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
                             headers,
                             gsheet_row_index,
                             origen_tab,
-                            allow_from_any_status=is_victor_simple_flow,
-                        )
+                                )
             elif not requires:
                 if col_complete_btn.button(
                     "🟢 Completar",
@@ -6854,8 +6858,7 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
                             headers,
                             gsheet_row_index,
                             origen_tab,
-                            allow_from_any_status=is_victor_simple_flow,
-                        )
+                                )
             elif has_file:
                 if col_complete_btn.button(
                     "🟢 Completar",
@@ -6874,8 +6877,7 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
                             headers,
                             gsheet_row_index,
                             origen_tab,
-                            allow_from_any_status=is_victor_simple_flow,
-                        )
+                                )
             else:
                 flag_key = f"confirmar_completar_{row['ID_Pedido']}"
                 if col_complete_btn.button(
@@ -6915,8 +6917,7 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
                             headers,
                             gsheet_row_index,
                             origen_tab,
-                            allow_from_any_status=is_victor_simple_flow,
-                        )
+                                )
                         st.session_state[flag_key] = False
         else:
             col_complete_btn.write("")
@@ -8398,7 +8399,7 @@ if df_main is not None:
                      for k in ['🟡 Pendiente', '🔵 En Proceso', '🔴 Demorado', '🛠 Modificación', '✏️ Modificación', '🟣 Cancelado', '🟢 Completado']}
 
     total_pedidos_estados = sum(estado_counts.values())
-    estados_fijos = ['🟡 Pendiente', '🔵 En Proceso', '🟢 Completado']
+    estados_fijos = ['🟡 Pendiente', '🟢 Completado'] if is_victor_user_for_view else ['🟡 Pendiente', '🔵 En Proceso', '🟢 Completado']
     estados_condicionales = ['🔴 Demorado', '🛠 Modificación', '✏️ Modificación', '🟣 Cancelado']
     estados_a_mostrar = []
     estados_a_mostrar.append(("📦 Total Pedidos", total_pedidos_estados))
