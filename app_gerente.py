@@ -19,6 +19,7 @@ import urllib.parse
 import urllib.request
 import urllib.error
 import time
+import traceback
 import calendar
 import base64
 from collections.abc import Mapping
@@ -5146,6 +5147,9 @@ def render_salida_neta_tab():
 
     def _ws_update_range_safe(worksheet, a1_range: str, values_matrix):
         """Compatibilidad entre versiones de gspread con/sin Worksheet.update."""
+        # gspread Worksheet.range exige formato A1:B2; si llega una sola celda (A1), expandirla.
+        if ":" not in str(a1_range):
+            a1_range = f"{a1_range}:{a1_range}"
         if hasattr(worksheet, "update"):
             try:
                 return _retry_gspread_api_call(
@@ -5163,6 +5167,15 @@ def render_salida_neta_tab():
                     retries=5,
                     base_delay=1.0,
                 )
+            except Exception as exc:
+                # Algunas versiones esperan update(values, range_name) en lugar de update(range_name, values).
+                if "not enough values to unpack" in str(exc):
+                    return _retry_gspread_api_call(
+                        lambda: worksheet.update(values_matrix, a1_range, value_input_option="USER_ENTERED"),
+                        retries=5,
+                        base_delay=1.0,
+                    )
+                raise
         cells = worksheet.range(a1_range)
         flat_values = [v for row in values_matrix for v in row]
         for idx, cell in enumerate(cells):
@@ -5186,14 +5199,22 @@ def render_salida_neta_tab():
             for item in data_ranges:
                 _ws_update_range_safe(worksheet, item["range"], item["values"])
             return None
-        return _retry_gspread_api_call(
-            lambda: worksheet.batch_update(
-                data_ranges,
-                value_input_option="USER_ENTERED",
-            ),
-            retries=5,
-            base_delay=1.0,
-        )
+        try:
+            return _retry_gspread_api_call(
+                lambda: worksheet.batch_update(
+                    data_ranges,
+                    value_input_option="USER_ENTERED",
+                ),
+                retries=5,
+                base_delay=1.0,
+            )
+        except Exception as exc:
+            # Compatibilidad con versiones de gspread que no aceptan este formato en batch_update.
+            if "not enough values to unpack" in str(exc):
+                for item in data_ranges:
+                    _ws_update_range_safe(worksheet, item["range"], item["values"])
+                return None
+            raise
 
     def _actualizar_rotacion_catalogo(df_salida_neta: pd.DataFrame, fecha_desde: datetime, df_existencias: pd.DataFrame):
         def _ensure_column(worksheet, headers_row: list[str], col_name: str) -> tuple[list[str], int]:
@@ -5853,6 +5874,7 @@ def render_salida_neta_tab():
                                 st.info("No hay filas para guardar con los filtros seleccionados.")
                     except Exception as exc:
                         st.error(f"❌ No se pudo guardar la captura manual: {exc}")
+                        st.code(traceback.format_exc())
 
             po_base = cat_std[cat_std["Modelo"].notna() & (cat_std["Modelo"].astype(str).str.strip() != "")].copy()
             po_base = po_base[po_base["Comprar"] == "COMPRAR"].copy()
