@@ -19,6 +19,7 @@ import urllib.parse
 import urllib.request
 import urllib.error
 import time
+import traceback
 import calendar
 import base64
 from collections.abc import Mapping
@@ -5146,6 +5147,9 @@ def render_salida_neta_tab():
 
     def _ws_update_range_safe(worksheet, a1_range: str, values_matrix):
         """Compatibilidad entre versiones de gspread con/sin Worksheet.update."""
+        # gspread Worksheet.range exige formato A1:B2; si llega una sola celda (A1), expandirla.
+        if ":" not in str(a1_range):
+            a1_range = f"{a1_range}:{a1_range}"
         if hasattr(worksheet, "update"):
             try:
                 return _retry_gspread_api_call(
@@ -5163,22 +5167,26 @@ def render_salida_neta_tab():
                     retries=5,
                     base_delay=1.0,
                 )
-        cells = worksheet.range(a1_range)
+            except Exception as exc:
+                # Algunas versiones esperan update(values, range_name) en lugar de update(range_name, values).
+                if "not enough values to unpack" in str(exc):
+                    return _retry_gspread_api_call(
+                        lambda: worksheet.update(values_matrix, a1_range, value_input_option="USER_ENTERED"),
+                        retries=5,
+                        base_delay=1.0,
+                    )
+                raise
+        # Evitar worksheet.range(...) porque dispara lectura adicional (quota READ).
         flat_values = [v for row in values_matrix for v in row]
-        for idx, cell in enumerate(cells):
-            cell.value = flat_values[idx] if idx < len(flat_values) else ""
-        try:
+        if len(flat_values) == 1 and ":" in a1_range and hasattr(worksheet, "update_cell"):
+            a1_cell = a1_range.split(":", 1)[0]
+            row_i, col_i = gspread.utils.a1_to_rowcol(a1_cell)
             return _retry_gspread_api_call(
-                lambda: worksheet.update_cells(cells, value_input_option="USER_ENTERED"),
+                lambda: worksheet.update_cell(row_i, col_i, flat_values[0]),
                 retries=5,
                 base_delay=1.0,
             )
-        except TypeError:
-            return _retry_gspread_api_call(
-                lambda: worksheet.update_cells(cells),
-                retries=5,
-                base_delay=1.0,
-            )
+        raise RuntimeError("No se encontró método de escritura compatible para worksheet sin update().")
 
     def _ws_batch_update_safe(worksheet, data_ranges: list[dict]):
         """Batch update (una sola escritura API) con reintentos."""
@@ -5186,14 +5194,31 @@ def render_salida_neta_tab():
             for item in data_ranges:
                 _ws_update_range_safe(worksheet, item["range"], item["values"])
             return None
-        return _retry_gspread_api_call(
-            lambda: worksheet.batch_update(
-                data_ranges,
-                value_input_option="USER_ENTERED",
-            ),
-            retries=5,
-            base_delay=1.0,
-        )
+        try:
+            return _retry_gspread_api_call(
+                lambda: worksheet.batch_update(
+                    data_ranges,
+                    value_input_option="USER_ENTERED",
+                ),
+                retries=5,
+                base_delay=1.0,
+            )
+        except Exception as exc:
+            # Compatibilidad con versiones de gspread: intentar payload alterno antes de fallback por rango.
+            try:
+                return _retry_gspread_api_call(
+                    lambda: worksheet.batch_update(
+                        {"data": data_ranges, "valueInputOption": "USER_ENTERED"}
+                    ),
+                    retries=5,
+                    base_delay=1.0,
+                )
+            except Exception:
+                if "not enough values to unpack" in str(exc) or "RESOURCE_EXHAUSTED" in str(exc) or "Quota exceeded" in str(exc):
+                    for item in data_ranges:
+                        _ws_update_range_safe(worksheet, item["range"], item["values"])
+                    return None
+                raise
 
     def _actualizar_rotacion_catalogo(df_salida_neta: pd.DataFrame, fecha_desde: datetime, df_existencias: pd.DataFrame):
         def _ensure_column(worksheet, headers_row: list[str], col_name: str) -> tuple[list[str], int]:
@@ -5739,7 +5764,7 @@ def render_salida_neta_tab():
                 with colf1:
                     filtro_prov = st.selectbox("Filtrar por proveedor", options=["Todos"] + prov_opts, key="rot_filtro_proveedor")
                 with colf2:
-                    filtro_comp = st.selectbox("Filtrar por Comprar", options=["Todos", "COMPRAR", "OK"], key="rot_filtro_comprar")
+                    filtro_comp = st.selectbox("Filtrar por Comprar", options=["Todos", "COMPRAR", "OK"], index=1, key="rot_filtro_comprar")
                 if filtro_prov != "Todos":
                     tabla_rot = tabla_rot[tabla_rot["Proveedor"].astype(str).str.strip() == filtro_prov]
                 if filtro_comp != "Todos":
@@ -5769,26 +5794,53 @@ def render_salida_neta_tab():
 
                 editor_df = captura_df.copy()
                 editor_df["__sheet_row"] = editor_df["__row_idx"].astype(int) + 2
-                editor_df = editor_df.drop(columns=["__row_idx"])
-                edited_df = st.data_editor(
-                    editor_df,
-                    hide_index=True,
-                    use_container_width=True,
-                    key="rot_editor_manual",
-                    column_config={
-                        "__sheet_row": st.column_config.NumberColumn("Fila", disabled=True),
-                        "Modelo": st.column_config.TextColumn(disabled=True),
-                        "Descripción": st.column_config.TextColumn(disabled=True),
-                        "Proveedor": st.column_config.TextColumn(disabled=True),
-                        "Existencias": st.column_config.NumberColumn(disabled=True),
-                        "Tránsito": st.column_config.NumberColumn(disabled=True),
-                        "Ventas Promedio Por Mes": st.column_config.NumberColumn(disabled=True),
-                        "Comprar": st.column_config.SelectboxColumn(options=["COMPRAR", "OK", ""]),
-                        "Unidades Sugeridas": st.column_config.NumberColumn(min_value=0, step=1),
-                    },
-                )
 
-                if st.button("💾 Guardar captura manual en ROTACIONES", key="rot_guardar_captura_manual"):
+                proveedor_captura = filtro_prov if filtro_prov != "Todos" else ""
+                proveedor_captura_col = proveedor_cols.get(proveedor_captura) if proveedor_captura else None
+                cantidad_col_editor = f"Cantidad {proveedor_captura}" if proveedor_captura else "Cantidad proveedor (elige un proveedor)"
+                if proveedor_captura_col:
+                    editor_df[cantidad_col_editor] = cat.loc[editor_df["__row_idx"], proveedor_captura_col].values
+                else:
+                    editor_df[cantidad_col_editor] = ""
+
+                editor_df = editor_df.drop(columns=["__row_idx", "Unidades Sugeridas"])
+                nombre_col_cantidad = f"✍️ Valor editable {proveedor_captura}" if proveedor_captura else "✍️ Valor editable proveedor"
+                edited_df = editor_df.rename(columns={cantidad_col_editor: nombre_col_cantidad}).copy()
+                sheet_rows_editor = editor_df["__sheet_row"].reset_index(drop=True)
+
+                with st.form("rot_form_captura_manual"):
+                    edited_df = st.data_editor(
+                        edited_df,
+                        hide_index=True,
+                        use_container_width=True,
+                        key="rot_editor_manual",
+                        column_order=[
+                            "Modelo",
+                            "Descripción",
+                            "Proveedor",
+                            "Existencias",
+                            "Tránsito",
+                            "Ventas Promedio Por Mes",
+                            "Comprar",
+                            nombre_col_cantidad,
+                        ],
+                        column_config={
+                            "Modelo": st.column_config.TextColumn(disabled=True),
+                            "Descripción": st.column_config.TextColumn(disabled=True),
+                            "Proveedor": st.column_config.TextColumn(disabled=True),
+                            "Existencias": st.column_config.NumberColumn(disabled=True),
+                            "Tránsito": st.column_config.NumberColumn(disabled=True),
+                            "Ventas Promedio Por Mes": st.column_config.NumberColumn(disabled=True),
+                            "Comprar": st.column_config.TextColumn(disabled=True),
+                            nombre_col_cantidad: st.column_config.NumberColumn(min_value=0, step=1, disabled=not bool(proveedor_captura_col)),
+                        },
+                    )
+                    guardar_captura = st.form_submit_button("💾 Guardar captura manual en ROTACIONES")
+
+                if not proveedor_captura_col:
+                    st.info("Selecciona un proveedor específico en el filtro para capturar cantidades por proveedor.")
+
+                if guardar_captura:
                     try:
                         if ws_rot is None:
                             ws_rot = _retry_gspread_api_call(
@@ -5797,32 +5849,38 @@ def render_salida_neta_tab():
                                 base_delay=1.0,
                             )
                         headers_ws = list(cat.columns)
-                        if not col_comprar or not col_unidades_sugeridas:
-                            st.error("❌ No se encontraron las columnas Comprar y/o Unidades Sugeridas en ROTACIONES.")
+                        if not col_comprar:
+                            st.error("❌ No se encontró la columna Comprar en ROTACIONES.")
+                        elif not proveedor_captura_col:
+                            st.error("❌ Para guardar cantidades, selecciona un proveedor específico en el filtro.")
                         else:
-                            col_comprar_ws = headers_ws.index(col_comprar) + 1
-                            col_unidades_ws = headers_ws.index(col_unidades_sugeridas) + 1
-                            data_ranges = []
-                            for _, row in edited_df.iterrows():
-                                sheet_row = int(row["__sheet_row"])
-                                comprar_val = str(row.get("Comprar", "")).strip().upper()
-                                unidades_val = pd.to_numeric(row.get("Unidades Sugeridas"), errors="coerce")
-                                unidades_val = "" if pd.isna(unidades_val) else (int(unidades_val) if float(unidades_val).is_integer() else float(unidades_val))
-                                data_ranges.append({
-                                    "range": gspread.utils.rowcol_to_a1(sheet_row, col_comprar_ws),
-                                    "values": [[comprar_val]],
-                                })
-                                data_ranges.append({
-                                    "range": gspread.utils.rowcol_to_a1(sheet_row, col_unidades_ws),
-                                    "values": [[unidades_val]],
-                                })
+                            col_proveedor_qty_ws = headers_ws.index(proveedor_captura_col) + 1
+                            # Estrategia tipo Tránsito: una sola escritura de rango continuo para evitar cuotas/read extra.
+                            valores_columna = pd.to_numeric(cat[proveedor_captura_col], errors="coerce") if proveedor_captura_col in cat.columns else pd.Series([None] * len(cat))
+                            valores_columna = valores_columna.astype(object)
+                            for idx, (_, row) in enumerate(edited_df.iterrows()):
+                                sheet_row = int(sheet_rows_editor.iloc[idx])
+                                pos = sheet_row - 2
+                                if pos < 0 or pos >= len(valores_columna):
+                                    continue
+                                cantidad_val = pd.to_numeric(row.get(nombre_col_cantidad), errors="coerce")
+                                if pd.isna(cantidad_val):
+                                    valores_columna.iloc[pos] = ""
+                                else:
+                                    valores_columna.iloc[pos] = int(cantidad_val) if float(cantidad_val).is_integer() else float(cantidad_val)
+
+                            rango_col = f"{gspread.utils.rowcol_to_a1(2, col_proveedor_qty_ws)}:{gspread.utils.rowcol_to_a1(len(cat)+1, col_proveedor_qty_ws)}"
+                            valores_matriz = [["" if pd.isna(v) else v] for v in valores_columna.tolist()]
+                            data_ranges = [{"range": rango_col, "values": valores_matriz}]
                             if data_ranges:
-                                _ws_batch_update_safe(ws_rot, data_ranges)
-                                st.success(f"✅ Captura guardada. Se actualizaron {len(edited_df)} productos en ROTACIONES.")
+                                with st.spinner("Guardando captura manual en ROTACIONES (1 sola escritura)..."):
+                                    _ws_batch_update_safe(ws_rot, data_ranges)
+                                st.success(f"✅ Captura guardada para proveedor {proveedor_captura} (1 sola escritura de columna).")
                             else:
                                 st.info("No hay filas para guardar con los filtros seleccionados.")
                     except Exception as exc:
                         st.error(f"❌ No se pudo guardar la captura manual: {exc}")
+                        st.code(traceback.format_exc())
 
             po_base = cat_std[cat_std["Modelo"].notna() & (cat_std["Modelo"].astype(str).str.strip() != "")].copy()
             po_base = po_base[po_base["Comprar"] == "COMPRAR"].copy()
