@@ -79,6 +79,27 @@ def _is_recoverable_auth_error(exc: Exception) -> bool:
     return any(code in err_text for code in _RECOVERABLE_AUTH_PATTERNS)
 
 
+PRIORITY_MARKER = "Priori"
+PRIORITY_EMOJI = "🔥"
+
+
+def _has_priority_marker(value: Any) -> bool:
+    cleaned = _normalize_text_for_matching(str(value or ""))
+    return "priori" in cleaned
+
+
+def _set_priority_marker(value: Any, enabled: bool) -> str:
+    base = str(value or "").strip()
+    if enabled:
+        if _has_priority_marker(base):
+            return base
+        return f"{base} {PRIORITY_MARKER}".strip()
+    if not base:
+        return ""
+    out = re.sub(r"(?i)\s*_?\s*priori\b", "", base)
+    return re.sub(r"\s{2,}", " ", out).strip()
+
+
 def _es_pedido_local(row_data: Any) -> bool:
     return str(row_data.get("Tipo_Envio", "")).strip() == "📍 Pedido Local"
 
@@ -3393,7 +3414,7 @@ def process_sheet_data(all_data: list[list[str]]) -> tuple[pd.DataFrame, list[st
 
 
 def _filter_relevant_pedidos(df: pd.DataFrame, headers: list[str], worksheet_name: str) -> pd.DataFrame:
-    """Modo de carga liviana: mantiene filas pendientes (Completados_Limpiado vacío)."""
+    """Modo de carga liviana: excluye solo filas limpiadas explícitamente (Completados_Limpiado = sí)."""
     if worksheet_name != GOOGLE_SHEET_WORKSHEET_NAME or df.empty:
         return df
 
@@ -3403,8 +3424,8 @@ def _filter_relevant_pedidos(df: pd.DataFrame, headers: list[str], worksheet_nam
         return df
 
     serie = df.get("Completados_Limpiado", pd.Series([""] * len(df), index=df.index))
-    mask = serie.apply(_is_empty_text)
-    return df[mask].copy()
+    mask_no_limpiado = serie.astype(str).str.strip().str.lower() != "sí"
+    return df[mask_no_limpiado].copy()
 
 
 @st.cache_data(ttl=300, hash_funcs={gspread.client.Client: lambda _: None})
@@ -6093,7 +6114,10 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
     enterado_key = f"enterado_comentario_{row['ID_Pedido']}"
     st.markdown(f'<a name="pedido_{row["ID_Pedido"]}"></a>', unsafe_allow_html=True)
     _render_bulk_selector(row)
+    es_prioritario = _has_priority_marker(row.get("Completados_Limpiado", ""))
     titulo_expander = f"{guia_marker}{row['Estado']} - {folio} - {row['Cliente']}"
+    if es_prioritario:
+        titulo_expander = f"{PRIORITY_EMOJI} {titulo_expander}"
     if es_local_bodega:
         titulo_expander = f"{titulo_expander} | Estado de pago: {pago_badge}"
 
@@ -6102,6 +6126,19 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
         expanded=st.session_state["expanded_pedidos"].get(row['ID_Pedido'], False),
     ):
         st.markdown("---")
+        if "Completados_Limpiado" in headers:
+            prioridad_key = f"priority_chk_{row['ID_Pedido']}_{origen_tab}"
+            prioridad_checked = st.checkbox("🔥 Prioridad", value=es_prioritario, key=prioridad_key)
+            if prioridad_checked != es_prioritario:
+                nuevo_valor = _set_priority_marker(row.get("Completados_Limpiado", ""), prioridad_checked)
+                ok_pri = update_gsheet_cell(
+                    worksheet, headers, gsheet_row_index, "Completados_Limpiado", nuevo_valor
+                )
+                if ok_pri:
+                    st.success("✅ Prioridad actualizada.")
+                    st.rerun()
+                else:
+                    st.error("❌ No se pudo actualizar prioridad.")
 
         mod_texto = str(row.get("Modificacion_Surtido", "")).strip()
         hay_modificacion = mod_texto != ""
@@ -9497,6 +9534,7 @@ if df_main is not None:
                 else None
             )
 
+            es_prioritario_caso = _has_priority_marker(row.get("Completados_Limpiado", ""))
             if area_resp.lower() == "cliente":
                 if estado.lower() == "aprobado" and estado_rec.lower() == "todo correcto":
                     emoji_estado = "✅"
@@ -9508,8 +9546,25 @@ if df_main is not None:
             else:
                 expander_title = f"🔁 {folio or 's/folio'} – {cliente or 's/cliente'} | Estado: {estado} | Estado_Recepcion: {estado_rec}"
     
+            if es_prioritario_caso:
+                expander_title = f"{PRIORITY_EMOJI} {expander_title}"
             with st.expander(expander_title, expanded=st.session_state["expanded_devoluciones"].get(row_key, False)):
                 row_idx_case = row.get("_gsheet_row_index", row.get("gsheet_row_index"))
+                if "Completados_Limpiado" in headers_casos and row_idx_case is not None and str(row_idx_case).strip():
+                    prioridad_checked = st.checkbox("🔥 Prioridad", value=es_prioritario_caso, key=f"priority_chk_dev_{row_key}")
+                    if prioridad_checked != es_prioritario_caso:
+                        nuevo_valor = _set_priority_marker(row.get("Completados_Limpiado", ""), prioridad_checked)
+                        ok_pri = update_gsheet_cell(
+                            worksheet_casos,
+                            headers_casos,
+                            int(float(row_idx_case)),
+                            "Completados_Limpiado",
+                            nuevo_valor,
+                        )
+                        if ok_pri:
+                            st.success("✅ Prioridad actualizada.")
+                            st.rerun()
+                        st.error("❌ No se pudo actualizar prioridad.")
                 numero_case_actual = _parse_foraneo_number(row.get("Numero_Foraneo", ""))
                 if is_foraneo_case:
                     if numero_foraneo_visible:
@@ -10244,9 +10299,27 @@ if df_main is not None:
             unique_suffix = re.sub(r"[^0-9A-Za-z_-]", "_", str(unique_suffix))
     
             # Título del expander
+            es_prioritario_caso = _has_priority_marker(row.get("Completados_Limpiado", ""))
             expander_title = f"🛠 {folio or 's/folio'} – {cliente or 's/cliente'} | Estado: {estado} | Estado_Recepcion: {estado_rec}"
+            if es_prioritario_caso:
+                expander_title = f"{PRIORITY_EMOJI} {expander_title}"
             with st.expander(expander_title, expanded=st.session_state["expanded_garantias"].get(row_key, False)):
                 row_idx_case = row.get("_gsheet_row_index", row.get("gsheet_row_index"))
+                if "Completados_Limpiado" in headers_casos and row_idx_case is not None and str(row_idx_case).strip():
+                    prioridad_checked = st.checkbox("🔥 Prioridad", value=es_prioritario_caso, key=f"priority_chk_gar_{row_key}")
+                    if prioridad_checked != es_prioritario_caso:
+                        nuevo_valor = _set_priority_marker(row.get("Completados_Limpiado", ""), prioridad_checked)
+                        ok_pri = update_gsheet_cell(
+                            worksheet_casos,
+                            headers_casos,
+                            int(float(row_idx_case)),
+                            "Completados_Limpiado",
+                            nuevo_valor,
+                        )
+                        if ok_pri:
+                            st.success("✅ Prioridad actualizada.")
+                            st.rerun()
+                        st.error("❌ No se pudo actualizar prioridad.")
                 numero_case_actual = _parse_foraneo_number(row.get("Numero_Foraneo", ""))
                 if is_foraneo_case:
                     if numero_case_actual is not None:
