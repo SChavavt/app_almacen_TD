@@ -2128,7 +2128,7 @@ def render_auto_list(
     .board-head th:first-child{{border-top-left-radius:0.45rem;}}
     .board-head th:last-child{{border-top-right-radius:0.45rem;}}
     .board-row{{border-top:1px solid rgba(255,255,255,0.09);}}
-    .board-row-priority{{background:rgba(255,140,0,0.48)!important;}}
+    .board-row-priority{{background:rgba(128,0,255,0.42)!important;}}
     .board-row:first-child{{border-top:none;}}
     .board-row td{{padding:0.2rem 0.16rem;vertical-align:middle;font-size:{compact_td_size};color:#fff;line-height:1.12rem;}}
     .board-head th + th{{border-left:1px solid rgba(136,176,255,0.3);}}
