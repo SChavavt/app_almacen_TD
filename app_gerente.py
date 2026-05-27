@@ -5850,40 +5850,28 @@ def render_salida_neta_tab():
                         elif not proveedor_captura_col:
                             st.error("❌ Para guardar cantidades, selecciona un proveedor específico en el filtro.")
                         else:
+                            col_comprar_ws = headers_ws.index(col_comprar) + 1
                             col_proveedor_qty_ws = headers_ws.index(proveedor_captura_col) + 1
-                            total_rows_cat = len(cat)
-                            if total_rows_cat <= 0:
-                                st.info("No hay filas de catálogo para guardar.")
-                            else:
-                                valores_columna = cat[proveedor_captura_col].tolist()
-                                for i, valor in enumerate(valores_columna):
-                                    cantidad_base = pd.to_numeric(valor, errors="coerce")
-                                    if pd.isna(cantidad_base):
-                                        valores_columna[i] = ""
-                                    elif float(cantidad_base).is_integer():
-                                        valores_columna[i] = int(cantidad_base)
-                                    else:
-                                        valores_columna[i] = float(cantidad_base)
-
-                                for idx, (_, row) in enumerate(edited_df.iterrows()):
-                                    row_idx_cat = int(sheet_rows_editor.iloc[idx]) - 2
-                                    if row_idx_cat < 0 or row_idx_cat >= total_rows_cat:
-                                        continue
-                                    cantidad_val = pd.to_numeric(row.get(nombre_col_cantidad), errors="coerce")
-                                    if pd.isna(cantidad_val):
-                                        valores_columna[row_idx_cat] = ""
-                                    elif float(cantidad_val).is_integer():
-                                        valores_columna[row_idx_cat] = int(cantidad_val)
-                                    else:
-                                        valores_columna[row_idx_cat] = float(cantidad_val)
-
-                                data_range = {
-                                    "range": f"{gspread.utils.rowcol_to_a1(2, col_proveedor_qty_ws)}:{gspread.utils.rowcol_to_a1(total_rows_cat + 1, col_proveedor_qty_ws)}",
-                                    "values": [[v] for v in valores_columna],
-                                }
+                            data_ranges = []
+                            for idx, (_, row) in enumerate(edited_df.iterrows()):
+                                sheet_row = int(sheet_rows_editor.iloc[idx])
+                                comprar_val = str(row.get("Comprar", "")).strip().upper()
+                                cantidad_val = pd.to_numeric(row.get(nombre_col_cantidad), errors="coerce")
+                                cantidad_val = "" if pd.isna(cantidad_val) else (int(cantidad_val) if float(cantidad_val).is_integer() else float(cantidad_val))
+                                data_ranges.append({
+                                    "range": gspread.utils.rowcol_to_a1(sheet_row, col_comprar_ws),
+                                    "values": [[comprar_val]],
+                                })
+                                data_ranges.append({
+                                    "range": gspread.utils.rowcol_to_a1(sheet_row, col_proveedor_qty_ws),
+                                    "values": [[cantidad_val]],
+                                })
+                            if data_ranges:
                                 with st.spinner("Guardando captura manual en ROTACIONES..."):
-                                    _ws_batch_update_safe(ws_rot, [data_range])
-                                st.success(f"✅ Captura guardada para proveedor {proveedor_captura} (1 sola escritura de columna).")
+                                    _ws_batch_update_safe(ws_rot, data_ranges)
+                                st.success(f"✅ Captura guardada. Se actualizaron {len(edited_df)} productos en ROTACIONES para proveedor {proveedor_captura}.")
+                            else:
+                                st.info("No hay filas para guardar con los filtros seleccionados.")
                     except Exception as exc:
                         st.error(f"❌ No se pudo guardar la captura manual: {exc}")
                         st.code(traceback.format_exc())
