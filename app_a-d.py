@@ -6772,7 +6772,7 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
         # Botón para flujo local: 🔵 En Proceso -> 🔎 Auditado
         estado_actual_acciones = str(row.get("Estado", "")).strip()
         es_local_pedido = _es_pedido_local(row)
-        puede_completar_por_pago = (not es_local_bodega) or pago_confirmado or (es_local_pedido and estado_actual_acciones == ESTADO_AUDITADO)
+        puede_completar_por_pago = (not es_local_bodega) or pago_confirmado
         puede_auditar_local = es_local_pedido and estado_actual_acciones == ESTADO_EN_PROCESO and not disabled_if_completed
         bloqueado_por_auditoria_local = (
             es_local_pedido
