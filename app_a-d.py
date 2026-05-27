@@ -6839,8 +6839,7 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
                             headers,
                             gsheet_row_index,
                             origen_tab,
-                            allow_from_any_status=is_victor_simple_flow,
-                        )
+                                )
             elif not requires:
                 if col_complete_btn.button(
                     "🟢 Completar",
@@ -6859,8 +6858,7 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
                             headers,
                             gsheet_row_index,
                             origen_tab,
-                            allow_from_any_status=is_victor_simple_flow,
-                        )
+                                )
             elif has_file:
                 if col_complete_btn.button(
                     "🟢 Completar",
@@ -6879,8 +6877,7 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
                             headers,
                             gsheet_row_index,
                             origen_tab,
-                            allow_from_any_status=is_victor_simple_flow,
-                        )
+                                )
             else:
                 flag_key = f"confirmar_completar_{row['ID_Pedido']}"
                 if col_complete_btn.button(
@@ -6920,8 +6917,7 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
                             headers,
                             gsheet_row_index,
                             origen_tab,
-                            allow_from_any_status=is_victor_simple_flow,
-                        )
+                                )
                         st.session_state[flag_key] = False
         else:
             col_complete_btn.write("")
@@ -8125,7 +8121,7 @@ if df_main is not None:
 
             estado_actual = str(row_to_complete.get("Estado", "")).strip()
             estado_requerido = ESTADO_AUDITADO if _es_pedido_local(row_to_complete) else ESTADO_EN_PROCESO
-            if (not is_victor_simple_flow) and estado_actual != estado_requerido:
+            if estado_actual != estado_requerido:
                 fallidos_pre.append(
                     f"{pedido_id_snapshot or 'Sin ID'}: cambió de estado a {estado_actual or 'N/A'} (requiere {estado_requerido})"
                 )
@@ -8204,7 +8200,6 @@ if df_main is not None:
                     "bulk_multi",
                     success_message=f"✅ Pedido {pedido_id} completado",
                     trigger_rerun=False,
-                    allow_from_any_status=is_victor_simple_flow,
                 )
                 if ok:
                     completados_ok += 1
