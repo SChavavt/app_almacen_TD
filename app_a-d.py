@@ -5905,27 +5905,26 @@ def mostrar_pedido_detalle(
 
     comentario_enterado_ok = True
     clicked_procesar = False
-    if comentario_requiere_confirmacion:
-        form_key = f"form_procesar_con_enterado_{row['ID_Pedido']}_{origen_tab}"
-        with col_print_btn.form(form_key):
-            comentario_enterado_ok = st.checkbox(
-                "✅ Enterado",
-                key=f"enterado_form_{row['ID_Pedido']}_{origen_tab}",
-                help="Confirma que leíste el comentario antes de procesar.",
-            )
-            clicked_procesar = st.form_submit_button(
+    if puede_procesar_ui:
+        if comentario_requiere_confirmacion:
+            form_key = f"form_procesar_con_enterado_{row['ID_Pedido']}_{origen_tab}"
+            with col_print_btn.form(form_key):
+                comentario_enterado_ok = st.checkbox(
+                    "✅ Enterado",
+                    key=f"enterado_form_{row['ID_Pedido']}_{origen_tab}",
+                    help="Confirma que leíste el comentario antes de procesar.",
+                )
+                clicked_procesar = st.form_submit_button(
+                    "⚙️ Procesar",
+                    on_click=_mark_skip_demorado_check_once,
+                    use_container_width=True,
+                )
+        else:
+            clicked_procesar = col_print_btn.button(
                 "⚙️ Procesar",
+                key=f"procesar_{row['ID_Pedido']}_{origen_tab}",
                 on_click=_mark_skip_demorado_check_once,
-                disabled=not puede_procesar_ui,
-                use_container_width=True,
             )
-    else:
-        clicked_procesar = col_print_btn.button(
-            "⚙️ Procesar",
-            key=f"procesar_{row['ID_Pedido']}_{origen_tab}",
-            on_click=_mark_skip_demorado_check_once,
-            disabled=not puede_procesar_ui,
-        )
 
     if clicked_procesar:
         if comentario_requiere_confirmacion and comentario_enterado_key:
@@ -6770,11 +6769,10 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
                         else:
                             st.error("❌ No se pudo guardar la información del comprobante.")
 
-        puede_completar_por_pago = (not es_local_bodega) or pago_confirmado
-
         # Botón para flujo local: 🔵 En Proceso -> 🔎 Auditado
         estado_actual_acciones = str(row.get("Estado", "")).strip()
         es_local_pedido = _es_pedido_local(row)
+        puede_completar_por_pago = (not es_local_bodega) or pago_confirmado
         puede_auditar_local = es_local_pedido and estado_actual_acciones == ESTADO_EN_PROCESO and not disabled_if_completed
         bloqueado_por_auditoria_local = (
             es_local_pedido
