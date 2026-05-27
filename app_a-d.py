@@ -8125,7 +8125,7 @@ if df_main is not None:
 
             estado_actual = str(row_to_complete.get("Estado", "")).strip()
             estado_requerido = ESTADO_AUDITADO if _es_pedido_local(row_to_complete) else ESTADO_EN_PROCESO
-            if estado_actual != estado_requerido:
+            if (not is_victor_simple_flow) and estado_actual != estado_requerido:
                 fallidos_pre.append(
                     f"{pedido_id_snapshot or 'Sin ID'}: cambió de estado a {estado_actual or 'N/A'} (requiere {estado_requerido})"
                 )
@@ -8204,6 +8204,7 @@ if df_main is not None:
                     "bulk_multi",
                     success_message=f"✅ Pedido {pedido_id} completado",
                     trigger_rerun=False,
+                    allow_from_any_status=is_victor_simple_flow,
                 )
                 if ok:
                     completados_ok += 1
