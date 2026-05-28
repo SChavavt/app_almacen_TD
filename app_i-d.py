@@ -2186,10 +2186,26 @@ def _is_done_estado(estado: str) -> bool:
     return s in {"🟢 Completado", "🟣 Cancelado", "✅ Viajó"}
 
 
+def _contains_si_completados_limpiado(value) -> bool:
+    """Detecta solo el valor afirmativo "sí" en Completados_Limpiado."""
+    cleaned = sanitize_text(value)
+    if not cleaned:
+        return False
+    normalized = unicodedata.normalize("NFKD", cleaned)
+    ascii_clean = "".join(ch for ch in normalized if not unicodedata.combining(ch))
+    return bool(re.search(r"(?<![A-Za-z0-9])si(?![A-Za-z0-9])", ascii_clean.lower()))
+
+
+def _completados_limpiado_has_si(series: pd.Series) -> pd.Series:
+    if not isinstance(series, pd.Series):
+        return pd.Series(dtype=bool)
+    return series.map(_contains_si_completados_limpiado).fillna(False)
+
+
 def _is_visible_auto_entry(entry: dict) -> bool:
     if not _is_done_estado(entry.get("estado", "")):
         return True
-    return sanitize_text(entry.get("completados_limpiado", "")) == ""
+    return not _contains_si_completados_limpiado(entry.get("completados_limpiado", ""))
 
 
 def _is_surtidor_visible_estado(estado: str) -> bool:
@@ -2572,7 +2588,7 @@ def get_local_orders(df_all: pd.DataFrame) -> pd.DataFrame:
         mask_no_entregado = pd.Series(False, index=df_local.index, dtype=bool)
 
     filtro_completados = df_local["Estado"].isin(["🟢 Completado", "🟣 Cancelado", "✅ Viajó"])
-    filtro_limpiado = df_local["Completados_Limpiado"].astype(str).str.lower() == "sí"
+    filtro_limpiado = _completados_limpiado_has_si(df_local["Completados_Limpiado"])
 
     df_local = df_local[~(filtro_completados & filtro_limpiado & ~mask_no_entregado)].copy()
 
@@ -2612,7 +2628,7 @@ def get_foraneo_orders(df_all: pd.DataFrame) -> pd.DataFrame:
     df_for = df_for[
         ~(
             df_for["Estado"].isin(["🟢 Completado", "🟣 Cancelado", "✅ Viajó"])
-            & (df_for["Completados_Limpiado"].astype(str).str.lower() == "sí")
+            & _completados_limpiado_has_si(df_for["Completados_Limpiado"])
         )
     ].copy()
 
@@ -2743,7 +2759,7 @@ def get_casos_orders(df_all: pd.DataFrame) -> pd.DataFrame:
         casos = casos[
             ~(
                 casos["Estado"].astype(str).str.strip().isin(["🟢 Completado", "🟣 Cancelado", "✅ Viajó"])
-                & (casos["Completados_Limpiado"].astype(str).str.lower() == "sí")
+                & _completados_limpiado_has_si(casos["Completados_Limpiado"])
             )
         ]
 
