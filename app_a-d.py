@@ -990,6 +990,48 @@ def _find_section_title_row(values: list[list[str]], section_title: str, week_ma
     return None
 
 
+def _is_cerrada_marker_row(row: Sequence[Any]) -> bool:
+    """Detecta una fila dedicada exclusivamente al marcador CERRADA."""
+    cierre = _normalize_plain_text(row[2] if len(row) > 2 else "").upper()
+    if cierre != "CERRADA":
+        return False
+    other_cells = [cell for idx, cell in enumerate(row[:10]) if idx != 2]
+    return not any(_normalize_plain_text(cell) for cell in other_cells)
+
+
+def _find_cierre_marker_row_for_title(values: list[list[str]], title_row: int) -> Optional[int]:
+    """Devuelve la fila del marcador CERRADA que pertenece a un título.
+
+    El marcador válido es la fila inmediatamente superior al título. Como
+    compatibilidad con hojas antiguas, también aceptamos dos filas arriba si
+    la fila intermedia está completamente vacía. Esto evita tomar por error
+    un CERRADA de otra sección cuando se insertan secciones nuevas arriba.
+    """
+    if title_row <= 1:
+        return None
+
+    prev_row = values[title_row - 2] if title_row - 2 < len(values) else []
+    if _is_cerrada_marker_row(prev_row):
+        return title_row - 1
+
+    if title_row > 2:
+        gap_row = prev_row
+        alt_row = values[title_row - 3] if title_row - 3 < len(values) else []
+        if (
+            not any(_normalize_plain_text(cell) for cell in gap_row[:10])
+            and _is_cerrada_marker_row(alt_row)
+        ):
+            return title_row - 2
+
+    return None
+
+
+def _find_insert_row_before_section(values: list[list[str]], title_row: int) -> int:
+    """Fila donde insertar una sección nueva sin separar CERRADA de su título."""
+    cierre_row = _find_cierre_marker_row_for_title(values, title_row)
+    return cierre_row or title_row
+
+
 def _find_first_section_title_row(values: list[list[str]]) -> Optional[int]:
     for idx, row in enumerate(values, start=1):
         if any(_is_section_title_text(cell) for cell in row):
@@ -1279,7 +1321,11 @@ def _append_local_dia_entry_to_hoja_ruta(row: Any, s3_client_param: Any, origen_
     if title_row is None:
         # Crear nueva sección arriba de las existentes (la más reciente queda primero).
         first_section_row = _find_first_section_title_row(values)
-        title_row = first_section_row if first_section_row is not None else 1
+        title_row = (
+            _find_insert_row_before_section(values, first_section_row)
+            if first_section_row is not None
+            else 1
+        )
         header_row = title_row + 2
         data_row = header_row + 1
         data_end_row = data_row + HOJA_RUTA_SECTION_DATA_ROWS - 1
@@ -1292,6 +1338,10 @@ def _append_local_dia_entry_to_hoja_ruta(row: Any, s3_client_param: Any, origen_
             if inserted:
                 template_title_row = first_section_row + block_rows
             else:
+                title_row = first_section_row
+                header_row = title_row + 2
+                data_row = header_row + 1
+                data_end_row = data_row + HOJA_RUTA_SECTION_DATA_ROWS - 1
                 template_title_row = first_section_row
         else:
             template_title_row = None
@@ -2291,33 +2341,27 @@ def _sync_turno_cierre_en_hoja_ruta(origen_tab: str, fecha_label: str, cerrar: b
     if title_row is None:
         return False, "No se encontró la sección en Hoja_Ruta para esa fecha/turno."
 
-    cierre_row = max(1, title_row - 1)
-    title_prev_row = values[cierre_row - 1] if cierre_row - 1 < len(values) else []
-    cierre_actual = _normalize_plain_text(title_prev_row[2] if len(title_prev_row) > 2 else "").upper()
-
-    # Fallback defensivo: algunas hojas antiguas pudieron dejar "CERRADA"
-    # dos filas arriba del título. Si existe ahí, reutilizamos esa fila para
-    # evitar insertar duplicados o cerrar otra sección por desplazamientos.
-    if cierre_actual != "CERRADA" and title_row > 2:
-        alt_row = title_row - 2
-        alt_cells = values[alt_row - 1] if alt_row - 1 < len(values) else []
-        alt_cierre = _normalize_plain_text(alt_cells[2] if len(alt_cells) > 2 else "").upper()
-        if alt_cierre == "CERRADA":
-            cierre_row = alt_row
-            cierre_actual = alt_cierre
+    cierre_row = _find_cierre_marker_row_for_title(values, title_row)
 
     if cerrar:
-        if cierre_actual == "CERRADA":
+        if cierre_row is not None:
             return True, ""
-        if cierre_row == title_row or cierre_actual:
+
+        prev_row = values[title_row - 2] if title_row > 1 and title_row - 2 < len(values) else []
+        can_reuse_prev_row = title_row > 1 and not any(
+            _normalize_plain_text(cell) for cell in prev_row[:10]
+        )
+        if can_reuse_prev_row:
+            cierre_row = title_row - 1
+        else:
             inserted = _insert_blank_rows(ws, start_row=title_row, count=1)
             if not inserted:
                 return False, "No se pudo insertar una fila para marcar CERRADA."
-            title_row += 1
-            cierre_row = title_row - 1
+            cierre_row = title_row
+
         _write_row_values(ws, cierre_row, ["", "", "CERRADA"], start_col=1)
     else:
-        if cierre_actual == "CERRADA":
+        if cierre_row is not None:
             _write_row_values(ws, cierre_row, ["", "", ""], start_col=1)
     return True, ""
 
@@ -2352,16 +2396,8 @@ def _is_turno_cerrado_en_hoja_ruta(origen_tab: str, fecha_label: str) -> tuple[b
     if title_row is None:
         return False, "No se encontró la sección en Hoja_Ruta para esa fecha/turno."
 
-    cierre_row = max(1, title_row - 1)
-    cierre_cells = values[cierre_row - 1] if cierre_row - 1 < len(values) else []
-    cierre_actual = _normalize_plain_text(cierre_cells[2] if len(cierre_cells) > 2 else "").upper()
-    if cierre_actual != "CERRADA" and title_row > 2:
-        alt_row = title_row - 2
-        alt_cells = values[alt_row - 1] if alt_row - 1 < len(values) else []
-        alt_cierre = _normalize_plain_text(alt_cells[2] if len(alt_cells) > 2 else "").upper()
-        if alt_cierre == "CERRADA":
-            cierre_actual = alt_cierre
-    return cierre_actual == "CERRADA", ""
+    cierre_row = _find_cierre_marker_row_for_title(values, title_row)
+    return cierre_row is not None, ""
 
 
 def collect_tab_locations(
