@@ -1904,6 +1904,21 @@ _EXCLUDED_TIPO_ENVIO_STATUS_VIEW = {
     "Pedidos CDMX",
 }
 
+_LOCAL_CDMX_ORIGINAL_VALUES = {
+    "🌆 Local CDMX",
+    "Local CDMX",
+}
+
+
+def _exclude_local_cdmx_original_cases(df: pd.DataFrame) -> pd.DataFrame:
+    """Exclude casos especiales cuyo envío original pertenece a Local CDMX."""
+
+    if df is None or df.empty or "Tipo_Envio_Original" not in df.columns:
+        return df
+
+    tipo_original_series = df["Tipo_Envio_Original"].astype(str).str.strip()
+    return df[~tipo_original_series.isin(_LOCAL_CDMX_ORIGINAL_VALUES)].copy()
+
 
 def _exclude_turnos_from_status_view(df: pd.DataFrame) -> pd.DataFrame:
     """Exclude turnos/tipos de envío específicos de vistas de estado y métricas."""
@@ -8121,6 +8136,7 @@ if df_main is not None:
     else:
         df_main_alerts_scope = _exclude_turnos_from_status_view(df_main)
         df_casos_alerts_scope = _exclude_turnos_from_status_view(df_casos)
+        df_casos_alerts_scope = _exclude_local_cdmx_original_cases(df_casos_alerts_scope)
 
     mod_surtido_main_df = _pending_modificaciones(df_main_alerts_scope)
     mod_surtido_casos_df = _pending_modificaciones(df_casos_alerts_scope)
@@ -8429,8 +8445,11 @@ if df_main is not None:
             df_casos_status_scope = df_casos[turno_casos_norm.isin(turnos_victor)].copy()
         else:
             df_casos_status_scope = df_casos[~turno_casos_norm.isin(turnos_victor)].copy()
+            df_casos_status_scope = _exclude_local_cdmx_original_cases(df_casos_status_scope)
     else:
         df_casos_status_scope = df_casos.copy()
+        if not is_victor_user_for_view:
+            df_casos_status_scope = _exclude_local_cdmx_original_cases(df_casos_status_scope)
 
     if is_victor_user_for_view:
         turnos_victor_lista = ["🌆 Local CDMX", "Local CDMX", "🎓 Recoge en Aula", "Recoge en Aula"]
@@ -8639,13 +8658,24 @@ if df_main is not None:
     st.caption(f"Usuario activo: **{current_user}**")
 
     if current_user == "VICTOR":
-        victor_tabs = st.tabs(["🌆 Local CDMX", "🎓 Recoge en Aula", "✅ Completado CDMX (72h)"])
+        victor_tab_labels = [
+            "🌆 Local CDMX",
+            "🎓 Recoge en Aula",
+            "🔁 Devoluciones",
+            "🛠 Garantías",
+            "🎓 Cursos y Eventos",
+            "✅ Completado CDMX (72h)",
+        ]
+        victor_tabs = st.tabs(victor_tab_labels)
 
-        def _render_victor_tab(turnos: list[str], origen_tab: str, titulo: str) -> None:
-            df_v = df_main[
-                (df_main["Turno"].astype(str).str.strip().isin(turnos))
-                & (~df_main["Estado"].astype(str).str.strip().isin(["🟢 Completado", "✅ Viajó"]))
-            ].copy()
+        def _render_victor_dataframe_tab(
+            df_v: pd.DataFrame,
+            origen_tab: str,
+            titulo: str,
+            worksheet,
+            headers,
+            pagination_key_prefix: str,
+        ) -> None:
             if df_v.empty:
                 st.info(f"No hay pedidos para {titulo}.")
                 return
@@ -8666,18 +8696,70 @@ if df_main is not None:
                         st.info("Sin pedidos en esta fecha.")
                         continue
                     df_day = ordenar_pedidos_custom(df_day)
-                    for orden, (idx, row) in _render_paginated_iterrows(df_day, f"victor_{origen_tab}_{i}"):
+                    for orden, (idx, row) in _render_paginated_iterrows(df_day, f"{pagination_key_prefix}_{i}"):
                         mostrar_pedido(
-                            df_main,
+                            df_v,
                             idx,
                             row,
                             orden,
                             titulo,
                             origen_tab,
-                            worksheet_main,
-                            headers_main,
+                            worksheet,
+                            headers,
                             s3_client,
                         )
+
+        def _render_victor_tab(turnos: list[str], origen_tab: str, titulo: str) -> None:
+            df_v = df_main[
+                (df_main["Turno"].astype(str).str.strip().isin(turnos))
+                & (~df_main["Estado"].astype(str).str.strip().isin(["🟢 Completado", "✅ Viajó"]))
+            ].copy()
+            _render_victor_dataframe_tab(
+                df_v,
+                origen_tab,
+                titulo,
+                worksheet_main,
+                headers_main,
+                f"victor_{origen_tab}",
+            )
+
+        def _render_victor_casos_tab(tipo_envio: str, titulo: str) -> None:
+            tipo_envio_col = df_casos.get("Tipo_Envio", pd.Series(index=df_casos.index, dtype="object"))
+            tipo_original_col = df_casos.get(
+                "Tipo_Envio_Original", pd.Series(index=df_casos.index, dtype="object")
+            )
+            estados_casos = df_casos.get("Estado", pd.Series(index=df_casos.index, dtype="object"))
+            df_v_casos = df_casos[
+                tipo_envio_col.astype(str).str.strip().eq(tipo_envio)
+                & tipo_original_col.astype(str).str.strip().isin(["🌆 Local CDMX", "Local CDMX"])
+                & (~estados_casos.astype(str).str.strip().isin(["🟢 Completado", "✅ Viajó"]))
+            ].copy()
+            _render_victor_dataframe_tab(
+                df_v_casos,
+                titulo,
+                titulo,
+                worksheet_casos,
+                headers_casos,
+                f"victor_{titulo}",
+            )
+
+        def _render_victor_cursos_eventos_tab() -> None:
+            tipo_envio_col = df_main.get("Tipo_Envio", pd.Series(index=df_main.index, dtype="object"))
+            turno_col = df_main.get("Turno", pd.Series(index=df_main.index, dtype="object"))
+            estados_main = df_main.get("Estado", pd.Series(index=df_main.index, dtype="object"))
+            df_v_cursos = df_main[
+                tipo_envio_col.astype(str).str.strip().eq("🎓 Cursos y Eventos")
+                & turno_col.astype(str).str.strip().isin(["🌆 Local CDMX", "Local CDMX"])
+                & (~estados_main.astype(str).str.strip().isin(["🟢 Completado", "✅ Viajó"]))
+            ].copy()
+            _render_victor_dataframe_tab(
+                df_v_cursos,
+                "🎓 Cursos y Eventos",
+                "Cursos y Eventos",
+                worksheet_main,
+                headers_main,
+                "victor_cursos_eventos",
+            )
 
         with victor_tabs[0]:
             st.markdown("### 🌆 Local CDMX")
@@ -8688,6 +8770,18 @@ if df_main is not None:
             _render_victor_tab(["🎓 Recoge en Aula", "Recoge en Aula"], "🎓 Recoge en Aula", "Recoge en Aula")
 
         with victor_tabs[2]:
+            st.markdown("### 🔁 Devoluciones")
+            _render_victor_casos_tab("🔁 Devolución", "Devoluciones")
+
+        with victor_tabs[3]:
+            st.markdown("### 🛠 Garantías")
+            _render_victor_casos_tab("🛠 Garantía", "Garantías")
+
+        with victor_tabs[4]:
+            st.markdown("### 🎓 Cursos y Eventos")
+            _render_victor_cursos_eventos_tab()
+
+        with victor_tabs[5]:
             st.markdown("### ✅ Completado CDMX (últimas 72 horas)")
             df_comp = df_main[
                 (df_main["Turno"].astype(str).str.strip().isin(["🌆 Local CDMX", "Local CDMX", "🎓 Recoge en Aula", "Recoge en Aula"]))
@@ -9337,6 +9431,7 @@ if df_main is not None:
     
         # 2) Filtrar SOLO devoluciones
         devoluciones_display = df_casos[df_casos[tipo_col].astype(str).str.contains("Devoluci", case=False, na=False)].copy()
+        devoluciones_display = _exclude_local_cdmx_original_cases(devoluciones_display)
     
         if devoluciones_display.empty:
             st.info("ℹ️ No hay devoluciones en 'casos_especiales'.")
@@ -10240,6 +10335,7 @@ if df_main is not None:
     
         # 2) Filtrar SOLO garantías
         garantias_display = df_casos[df_casos[tipo_col].astype(str).str.contains("Garant", case=False, na=False)].copy()
+        garantias_display = _exclude_local_cdmx_original_cases(garantias_display)
         if garantias_display.empty:
             st.info("ℹ️ No hay garantías en 'casos_especiales'.")
     
