@@ -1979,6 +1979,7 @@ _TAB_LABELS_BY_TIPO = {
     "📋 Solicitudes de Guía": "📋 Solicitudes de Guía",
     "📋 Solicitud de Guía": "📋 Solicitudes de Guía",
     "📋 Solicitudes de Guia": "📋 Solicitudes de Guía",
+    "🚗 Uber": "🚗 Uber",
     "🎓 Cursos y Eventos": "🎓 Cursos y Eventos",
     "🎓 Curso y Evento": "🎓 Cursos y Eventos",
     "🔁 Devolución": "🔁 Devoluciones",
@@ -2028,6 +2029,9 @@ _LOCAL_CDMX_ORIGINAL_VALUES = {
     "🌆 Local CDMX",
     "Local CDMX",
 }
+
+_UBER_TIPO_ENVIO = "🚗 Uber"
+_UBER_TURNOS = ("👤 Cliente Uber", "🏢 TD Uber")
 
 
 def _exclude_local_cdmx_original_cases(df: pd.DataFrame) -> pd.DataFrame:
@@ -8260,8 +8264,12 @@ if df_main is not None:
 
     if is_victor_user_for_alerts:
         turno_main_alerts = df_main.get("Turno", pd.Series(dtype=str)).astype(str).str.strip()
+        tipo_main_alerts = df_main.get("Tipo_Envio", pd.Series(index=df_main.index, dtype="object")).astype(str).str.strip()
         turno_casos_alerts = df_casos.get("Turno", pd.Series(dtype=str)).astype(str).str.strip()
-        df_main_alerts_scope = df_main[turno_main_alerts.isin(turnos_victor_alerts)].copy()
+        df_main_alerts_scope = df_main[
+            turno_main_alerts.isin(turnos_victor_alerts)
+            | (tipo_main_alerts.eq(_UBER_TIPO_ENVIO) & turno_main_alerts.isin(_UBER_TURNOS))
+        ].copy()
         df_casos_alerts_scope = df_casos[turno_casos_alerts.isin(turnos_victor_alerts)].copy()
     else:
         df_main_alerts_scope = _exclude_turnos_from_status_view(df_main)
@@ -8538,10 +8546,12 @@ if df_main is not None:
     turnos_victor = {"🌆 Local CDMX", "Local CDMX", "🎓 Recoge en Aula", "Recoge en Aula"}
     if "Turno" in df_main.columns:
         turno_main_norm = df_main["Turno"].astype(str).str.strip()
+        tipo_main_norm = df_main.get("Tipo_Envio", pd.Series(index=df_main.index, dtype="object")).astype(str).str.strip()
+        uber_main_mask = tipo_main_norm.eq(_UBER_TIPO_ENVIO) & turno_main_norm.isin(_UBER_TURNOS)
         if is_victor_user_for_view:
-            df_main_status_scope = df_main[turno_main_norm.isin(turnos_victor)].copy()
+            df_main_status_scope = df_main[turno_main_norm.isin(turnos_victor) | uber_main_mask].copy()
         else:
-            df_main_status_scope = df_main[~turno_main_norm.isin(turnos_victor)].copy()
+            df_main_status_scope = df_main[~(turno_main_norm.isin(turnos_victor) | uber_main_mask)].copy()
     else:
         df_main_status_scope = df_main.copy()
 
@@ -8583,7 +8593,12 @@ if df_main is not None:
 
     if is_victor_user_for_view:
         turnos_victor_lista = ["🌆 Local CDMX", "Local CDMX", "🎓 Recoge en Aula", "Recoge en Aula"]
-        turnos_victor_mask = df_main["Turno"].astype(str).str.strip().isin(turnos_victor_lista)
+        turnos_victor_norm = df_main["Turno"].astype(str).str.strip()
+        tipo_victor_norm = df_main.get("Tipo_Envio", pd.Series(index=df_main.index, dtype="object")).astype(str).str.strip()
+        turnos_victor_mask = (
+            turnos_victor_norm.isin(turnos_victor_lista)
+            | (tipo_victor_norm.eq(_UBER_TIPO_ENVIO) & turnos_victor_norm.isin(_UBER_TURNOS))
+        )
         estados_victor = df_main["Estado"].astype(str).str.strip()
 
         df_victor_activos = df_main[
@@ -8790,6 +8805,7 @@ if df_main is not None:
     if current_user == "VICTOR":
         victor_tab_labels = [
             "🌆 Local CDMX",
+            "🚗 Uber",
             "🎓 Recoge en Aula",
             "🔁 Devoluciones",
             "🛠 Garantías",
@@ -8853,6 +8869,31 @@ if df_main is not None:
                 f"victor_{origen_tab}",
             )
 
+        def _render_victor_uber_tab() -> None:
+            tipo_envio_col = df_main.get("Tipo_Envio", pd.Series(index=df_main.index, dtype="object"))
+            turno_col = df_main.get("Turno", pd.Series(index=df_main.index, dtype="object"))
+            estados_main = df_main.get("Estado", pd.Series(index=df_main.index, dtype="object"))
+            tipo_uber_mask = tipo_envio_col.astype(str).str.strip().eq(_UBER_TIPO_ENVIO)
+            estados_activos_mask = ~estados_main.astype(str).str.strip().isin(["🟢 Completado", "✅ Viajó"])
+            turno_norm = turno_col.astype(str).str.strip()
+
+            uber_subtabs = st.tabs(list(_UBER_TURNOS))
+            for subtab_index, turno_uber in enumerate(_UBER_TURNOS):
+                with uber_subtabs[subtab_index]:
+                    df_v_uber = df_main[
+                        tipo_uber_mask
+                        & turno_norm.eq(turno_uber)
+                        & estados_activos_mask
+                    ].copy()
+                    _render_victor_dataframe_tab(
+                        df_v_uber,
+                        "🚗 Uber",
+                        turno_uber,
+                        worksheet_main,
+                        headers_main,
+                        f"victor_uber_{subtab_index}",
+                    )
+
         def _render_victor_casos_tab(tipo_envio: str, titulo: str) -> None:
             tipo_envio_col = df_casos.get("Tipo_Envio", pd.Series(index=df_casos.index, dtype="object"))
             tipo_original_col = df_casos.get(
@@ -8896,25 +8937,34 @@ if df_main is not None:
             _render_victor_tab(["🌆 Local CDMX", "Local CDMX"], "🌆 Local CDMX", "Local CDMX")
 
         with victor_tabs[1]:
+            st.markdown("### 🚗 Uber")
+            _render_victor_uber_tab()
+
+        with victor_tabs[2]:
             st.markdown("### 🎓 Recoge en Aula")
             _render_victor_tab(["🎓 Recoge en Aula", "Recoge en Aula"], "🎓 Recoge en Aula", "Recoge en Aula")
 
-        with victor_tabs[2]:
+        with victor_tabs[3]:
             st.markdown("### 🔁 Devoluciones")
             _render_victor_casos_tab("🔁 Devolución", "Devoluciones")
 
-        with victor_tabs[3]:
+        with victor_tabs[4]:
             st.markdown("### 🛠 Garantías")
             _render_victor_casos_tab("🛠 Garantía", "Garantías")
 
-        with victor_tabs[4]:
+        with victor_tabs[5]:
             st.markdown("### 🎓 Cursos y Eventos")
             _render_victor_cursos_eventos_tab()
 
-        with victor_tabs[5]:
+        with victor_tabs[6]:
             st.markdown("### ✅ Completado CDMX (últimas 72 horas)")
+            turno_comp_norm = df_main["Turno"].astype(str).str.strip()
+            tipo_comp_norm = df_main.get("Tipo_Envio", pd.Series(index=df_main.index, dtype="object")).astype(str).str.strip()
             df_comp = df_main[
-                (df_main["Turno"].astype(str).str.strip().isin(["🌆 Local CDMX", "Local CDMX", "🎓 Recoge en Aula", "Recoge en Aula"]))
+                (
+                    turno_comp_norm.isin(["🌆 Local CDMX", "Local CDMX", "🎓 Recoge en Aula", "Recoge en Aula"])
+                    | (tipo_comp_norm.eq(_UBER_TIPO_ENVIO) & turno_comp_norm.isin(_UBER_TURNOS))
+                )
                 & (df_main["Estado"].astype(str).str.strip() == "🟢 Completado")
             ].copy()
             # Normaliza a naive para evitar comparación tz-aware vs tz-naive.
