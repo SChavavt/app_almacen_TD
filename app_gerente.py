@@ -7699,7 +7699,7 @@ if "organizador" in tab_map:
             st.subheader("🧾 Check de Facturas")
             st.caption(
                 "Sube un archivo con encabezados en la fila 3 (Vendedor, FolioSerie, Cliente, Fecha) "
-                "para detectar qué facturas no existen en datos_pedidos/data_pedidos."
+                "para detectar qué facturas no existen en datos_pedidos/data_pedidos/casos_especiales."
             )
 
             archivo_facturas = st.file_uploader(
@@ -7748,10 +7748,15 @@ if "organizador" in tab_map:
                         hash_archivo = hashlib.md5(contenido_archivo).hexdigest()
                         firma_archivo = f"{archivo_facturas.name}|{len(contenido_archivo)}|{hash_archivo}"
                         cache_key_check = "organizador_check_facturas_cache"
+                        cache_version_check = "pedidos_y_casos_especiales_v1"
                         filtro_key_check = "organizador_check_facturas_filtro_vendedor"
                         cache_check = st.session_state.get(cache_key_check)
 
-                        if cache_check and cache_check.get("firma_archivo") == firma_archivo:
+                        if (
+                            cache_check
+                            and cache_check.get("firma_archivo") == firma_archivo
+                            and cache_check.get("cache_version") == cache_version_check
+                        ):
                             limite_72h = cache_check["limite_72h"]
                             ahora_naive = cache_check["ahora_naive"]
                             total_archivo = cache_check["total_archivo"]
@@ -7779,6 +7784,13 @@ if "organizador" in tab_map:
                                 )
 
                             df_pedidos_match = cargar_pedidos().copy()
+                            df_casos_match = cargar_casos_especiales().copy()
+                            df_casos_match["__hoja_origen"] = "casos_especiales"
+                            df_pedidos_match = pd.concat(
+                                [df_pedidos_match, df_casos_match],
+                                ignore_index=True,
+                                sort=False,
+                            )
                             if "Folio_Factura" not in df_pedidos_match.columns:
                                 df_pedidos_match["Folio_Factura"] = ""
                             df_pedidos_match["_folio_match"] = df_pedidos_match["Folio_Factura"].apply(normalizar_folio_para_match)
@@ -7952,6 +7964,7 @@ if "organizador" in tab_map:
                             st.session_state["organizador_check_facturas_pdf_folios_cache"] = pdf_folios_cache
                             st.session_state[cache_key_check] = {
                                 "firma_archivo": firma_archivo,
+                                "cache_version": cache_version_check,
                                 "limite_72h": limite_72h,
                                 "ahora_naive": ahora_naive,
                                 "total_archivo": total_archivo,
