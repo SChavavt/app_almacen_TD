@@ -1668,38 +1668,6 @@ def _upsert_pasa_bodega_report_row(row: Any) -> bool:
         return _fail(f"❌ No se pudo actualizar Pasa_Bodega: {exc}")
 
 
-def _sync_pasa_bodega_report_for_rows(rows: Any) -> tuple[int, list[str]]:
-    """Sincroniza Pasa_Bodega para pedidos de bodega ya completados/cancelados."""
-    synced = 0
-    errors: list[str] = []
-    if rows is None:
-        return synced, errors
-
-    try:
-        iterator = rows.iterrows() if isinstance(rows, pd.DataFrame) else enumerate(rows)
-    except Exception:
-        return synced, ["No se pudo iterar la selección para sincronizar Pasa_Bodega."]
-
-    for _, row in iterator:
-        row_data = row.to_dict() if isinstance(row, pd.Series) else dict(row or {})
-        if not _is_pasa_bodega_order(row_data):
-            continue
-
-        estado = str(row_data.get("Estado", "") or "").strip()
-        if estado not in {ESTADO_COMPLETADO, "🟣 Cancelado"}:
-            continue
-
-        ok = _upsert_pasa_bodega_report_row(row_data)
-        if ok:
-            synced += 1
-        else:
-            folio = str(row_data.get("Folio_Factura", "") or "Sin folio").strip()
-            motivo = str(st.session_state.get("last_pasa_bodega_error", "") or "").strip()
-            errors.append(f"{folio}: {motivo or 'error desconocido'}")
-
-    return synced, errors
-
-
 def _ensure_visual_state_defaults():
     """Ensure session_state has all UI control keys with safe defaults."""
 
@@ -7943,16 +7911,6 @@ def archive_and_clean_pedidos(
         if not ids_limpiar:
             return False, "No se pudieron obtener los ID_Pedido a limpiar.", 0
 
-        etapa = "sincronización Pasa_Bodega"
-        status_slot.info("📦 Sincronizando Pasa_Bodega antes de limpiar...")
-        progress_bar.progress(30)
-        _, errores_bodega = _sync_pasa_bodega_report_for_rows(pedidos_a_limpiar)
-        if errores_bodega:
-            raise ValueError(
-                "No se pudo sincronizar Pasa_Bodega antes de limpiar: "
-                + "; ".join(errores_bodega[:5])
-            )
-
         etapa = "movimiento a histórico"
         status_slot.info("📦 Moviendo pedidos al histórico...")
         progress_bar.progress(45)
@@ -11880,20 +11838,6 @@ if df_main is not None:
             by="Fecha_Completado",
             ascending=False,
         )
-
-        pendientes_sync_bodega = df_completados_historial[
-            (df_completados_historial.get("Tipo_Envio", pd.Series(dtype=str)).astype(str).str.strip() == "📍 Pedido Local")
-            & (df_completados_historial.get("Turno", pd.Series(dtype=str)).astype(str).str.strip() == "📦 Pasa a Bodega")
-            & (df_completados_historial.get("Estado", pd.Series(dtype=str)).astype(str).str.strip() == ESTADO_COMPLETADO)
-            & (df_completados_historial.get("Fecha_Completado", pd.Series(dtype=str)).notna())
-        ].copy()
-        if not pendientes_sync_bodega.empty:
-            _, errores_sync_bodega = _sync_pasa_bodega_report_for_rows(pendientes_sync_bodega)
-            if errores_sync_bodega:
-                st.warning(
-                    "⚠️ Hay pedidos completados de Pasa a Bodega que no pudieron sincronizarse con Pasa_Bodega: "
-                    + "; ".join(errores_sync_bodega[:3])
-                )
     
         displayed_historial_ids = set()
     
