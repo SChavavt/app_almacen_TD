@@ -11337,7 +11337,7 @@ if df_main is not None:
     if sinai_route_tab_enabled:
         with main_tabs[8]:  # 🗺️ Ruteo
             st.markdown("### 🗺️ Generar ruta optimizada")
-            st.caption("Selecciona pedidos locales agrupados por turno y fecha de entrega; define prioridad: Leve o Máxima.")
+            st.caption("Selecciona pedidos locales (Mañana/Tarde/Saltillo) y define prioridad: Leve o Máxima.")
             # Para este tab de ruteo: incluir TODOS los locales sin filtrar por estado.
             pedidos_locales = df_main[
                 (df_main.get("Tipo_Envio", pd.Series(dtype=str)).astype(str).str.strip() == "📍 Pedido Local")
@@ -11393,50 +11393,35 @@ if df_main is not None:
                             .str.lower()
                         )
                         mask_turno = turnos_norm.isin(aliases)
-                        bloque = pedidos_locales[mask_turno].copy()
+                        bloque = pedidos_locales[mask_turno]
                         if bloque.empty:
                             st.caption("Sin pedidos en este grupo.")
                             continue
+                        for _, r in bloque.iterrows():
+                            row_idx = int(r.get("_gsheet_row_index", 0) or 0)
+                            if row_idx <= 0:
+                                continue
+                            cliente = str(r.get("Cliente", "")).strip() or "Sin cliente"
+                            folio = str(r.get("Folio_Factura", "")).strip() or "Sin folio"
+                            fecha_lbl = pd.to_datetime(r.get("Fecha_Entrega"), errors="coerce")
+                            fecha_txt = fecha_lbl.strftime("%d/%m/%Y") if pd.notna(fecha_lbl) else "Sin fecha"
+                            c1, c2, c3 = st.columns([0.64, 0.18, 0.18])
+                            with c1:
+                                selected = st.checkbox(
+                                    f"Seleccionar · {cliente} · {folio} · {fecha_txt}",
+                                    key=f"sinai_sel_{row_idx}",
+                                )
+                            with c2:
+                                priority = st.checkbox("Prioridad Leve", key=f"sinai_pri_{row_idx}")
+                            with c3:
+                                priority_max = st.checkbox("Prioridad Máxima", key=f"sinai_pri_max_{row_idx}")
 
-                        bloque["fecha_grupo_dt"] = pd.to_datetime(
-                            bloque.get("Fecha_Entrega", pd.Series(dtype=str)),
-                            errors="coerce",
-                        )
-                        bloque["fecha_grupo_txt"] = bloque["fecha_grupo_dt"].dt.strftime("%d/%m/%Y")
-                        bloque["fecha_grupo_txt"] = bloque["fecha_grupo_txt"].fillna("Sin fecha")
-                        bloque["fecha_grupo_sort"] = bloque["fecha_grupo_dt"].fillna(pd.Timestamp.max)
-                        sort_cols = [
-                            col
-                            for col in ["fecha_grupo_sort", "Cliente", "Folio_Factura"]
-                            if col in bloque.columns
-                        ]
-                        bloque = bloque.sort_values(by=sort_cols, kind="mergesort")
-
-                        for fecha_txt, bloque_fecha in bloque.groupby("fecha_grupo_txt", sort=False, dropna=False):
-                            st.markdown(f"##### 📅 Entrega {fecha_txt}")
-                            for _, r in bloque_fecha.iterrows():
-                                row_idx = int(r.get("_gsheet_row_index", 0) or 0)
-                                if row_idx <= 0:
-                                    continue
-                                cliente = str(r.get("Cliente", "")).strip() or "Sin cliente"
-                                folio = str(r.get("Folio_Factura", "")).strip() or "Sin folio"
-                                c1, c2, c3 = st.columns([0.64, 0.18, 0.18])
-                                with c1:
-                                    selected = st.checkbox(
-                                        f"Seleccionar · {cliente} · {folio}",
-                                        key=f"sinai_sel_{row_idx}",
-                                    )
-                                with c2:
-                                    priority = st.checkbox("Prioridad Leve", key=f"sinai_pri_{row_idx}")
-                                with c3:
-                                    priority_max = st.checkbox("Prioridad Máxima", key=f"sinai_pri_max_{row_idx}")
-
-                                if selected or priority or priority_max:
-                                    selected_rows.append(row_idx)
-                                    if priority:
-                                        priority_rows.append(row_idx)
-                                    if priority_max:
-                                        max_priority_rows.append(row_idx)
+                            if selected or priority or priority_max:
+                                selected_rows.append(row_idx)
+                                if priority:
+                                    priority_rows.append(row_idx)
+                                if priority_max:
+                                    max_priority_rows.append(row_idx)
                     run_sinai = st.form_submit_button("📍 Generar ruta")
                 if run_sinai:
                     progress_holder = st.empty()
