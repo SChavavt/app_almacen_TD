@@ -11337,7 +11337,7 @@ if df_main is not None:
     if sinai_route_tab_enabled:
         with main_tabs[8]:  # 🗺️ Ruteo
             st.markdown("### 🗺️ Generar ruta optimizada")
-            st.caption("Selecciona pedidos locales (Mañana/Tarde/Saltillo) y define prioridad: Leve o Máxima.")
+            st.caption("Selecciona pedidos locales agrupados por turno y fecha de entrega; define prioridad: Leve o Máxima.")
             # Para este tab de ruteo: incluir TODOS los locales sin filtrar por estado.
             pedidos_locales = df_main[
                 (df_main.get("Tipo_Envio", pd.Series(dtype=str)).astype(str).str.strip() == "📍 Pedido Local")
@@ -11356,17 +11356,43 @@ if df_main is not None:
                 st.markdown(
                     """
                     <style>
-                    div[data-testid="stCheckbox"] label[for^="sinai_pri_"] {
-                        background: rgba(245, 193, 67, 0.30) !important;
-                        border: 1px solid rgba(245, 193, 67, 0.55) !important;
-                        border-radius: 10px !important;
-                        padding: 4px 10px !important;
+                    .sinai-route-table-header {
+                        color: #dbeafe;
+                        font-size: 0.82rem;
+                        font-weight: 800;
+                        letter-spacing: 0.03em;
+                        text-transform: uppercase;
+                        padding: 0.15rem 0.35rem 0.2rem;
                     }
-                    div[data-testid="stCheckbox"] label[for^="sinai_pri_max_"] {
-                        background: rgba(220, 53, 69, 0.30) !important;
-                        border: 1px solid rgba(220, 53, 69, 0.55) !important;
-                        border-radius: 10px !important;
-                        padding: 4px 10px !important;
+                    div[data-testid="stCheckbox"] label[for^="sinai_row_a_"],
+                    div[data-testid="stCheckbox"] label[for^="sinai_row_b_"] {
+                        border-radius: 0.55rem !important;
+                        color: #f8fbff !important;
+                        min-height: 2.45rem !important;
+                        padding: 0.42rem 0.58rem !important;
+                        width: 100% !important;
+                        box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.08) inset !important;
+                    }
+                    div[data-testid="stCheckbox"] label[for^="sinai_row_a_"] {
+                        background: rgba(29, 78, 139, 0.72) !important;
+                        border: 1px solid rgba(126, 181, 244, 0.90) !important;
+                    }
+                    div[data-testid="stCheckbox"] label[for^="sinai_row_b_"] {
+                        background: rgba(67, 76, 94, 0.78) !important;
+                        border: 1px solid rgba(178, 190, 205, 0.80) !important;
+                    }
+                    div[data-testid="stCheckbox"] label[for^="sinai_row_a_pri_"],
+                    div[data-testid="stCheckbox"] label[for^="sinai_row_b_pri_"] {
+                        border-left: 0.35rem solid rgba(245, 193, 67, 0.95) !important;
+                    }
+                    div[data-testid="stCheckbox"] label[for^="sinai_row_a_max_"],
+                    div[data-testid="stCheckbox"] label[for^="sinai_row_b_max_"] {
+                        border-left: 0.35rem solid rgba(248, 81, 95, 0.98) !important;
+                    }
+                    div[data-testid="stCheckbox"] label[for^="sinai_row_a_"] p,
+                    div[data-testid="stCheckbox"] label[for^="sinai_row_b_"] p {
+                        color: #f8fbff !important;
+                        font-weight: 800 !important;
                     }
                     </style>
                     """,
@@ -11393,35 +11419,78 @@ if df_main is not None:
                             .str.lower()
                         )
                         mask_turno = turnos_norm.isin(aliases)
-                        bloque = pedidos_locales[mask_turno]
+                        bloque = pedidos_locales[mask_turno].copy()
                         if bloque.empty:
                             st.caption("Sin pedidos en este grupo.")
                             continue
-                        for _, r in bloque.iterrows():
-                            row_idx = int(r.get("_gsheet_row_index", 0) or 0)
-                            if row_idx <= 0:
-                                continue
-                            cliente = str(r.get("Cliente", "")).strip() or "Sin cliente"
-                            folio = str(r.get("Folio_Factura", "")).strip() or "Sin folio"
-                            fecha_lbl = pd.to_datetime(r.get("Fecha_Entrega"), errors="coerce")
-                            fecha_txt = fecha_lbl.strftime("%d/%m/%Y") if pd.notna(fecha_lbl) else "Sin fecha"
-                            c1, c2, c3 = st.columns([0.64, 0.18, 0.18])
-                            with c1:
-                                selected = st.checkbox(
-                                    f"Seleccionar · {cliente} · {folio} · {fecha_txt}",
-                                    key=f"sinai_sel_{row_idx}",
-                                )
-                            with c2:
-                                priority = st.checkbox("Prioridad Leve", key=f"sinai_pri_{row_idx}")
-                            with c3:
-                                priority_max = st.checkbox("Prioridad Máxima", key=f"sinai_pri_max_{row_idx}")
 
-                            if selected or priority or priority_max:
-                                selected_rows.append(row_idx)
-                                if priority:
-                                    priority_rows.append(row_idx)
-                                if priority_max:
-                                    max_priority_rows.append(row_idx)
+                        bloque["fecha_grupo_dt"] = pd.to_datetime(
+                            bloque.get("Fecha_Entrega", pd.Series(dtype=str)),
+                            errors="coerce",
+                        )
+                        bloque["fecha_grupo_txt"] = bloque["fecha_grupo_dt"].dt.strftime("%d/%m/%Y")
+                        bloque["fecha_grupo_txt"] = bloque["fecha_grupo_txt"].fillna("Sin fecha")
+                        bloque["fecha_grupo_sort"] = bloque["fecha_grupo_dt"].fillna(pd.Timestamp.max)
+                        sort_cols = [
+                            col
+                            for col in ["fecha_grupo_sort", "Cliente", "Folio_Factura"]
+                            if col in bloque.columns
+                        ]
+                        bloque = bloque.sort_values(by=sort_cols, kind="mergesort")
+
+                        for fecha_txt, bloque_fecha in bloque.groupby("fecha_grupo_txt", sort=False, dropna=False):
+                            row_indices = pd.to_numeric(
+                                bloque_fecha.get("_gsheet_row_index", pd.Series(dtype=int)),
+                                errors="coerce",
+                            ).fillna(0).astype(int)
+                            bloque_fecha_visible = bloque_fecha[row_indices > 0]
+                            total_fecha = len(bloque_fecha_visible)
+                            pedido_label = "pedido" if total_fecha == 1 else "pedidos"
+                            st.markdown(f"##### 📅 Entrega {fecha_txt} · {total_fecha} {pedido_label}")
+                            h1, h2, h3 = st.columns([0.64, 0.18, 0.18])
+                            with h1:
+                                st.markdown(
+                                    "<div class='sinai-route-table-header'>Pedido (marca para incluir)</div>",
+                                    unsafe_allow_html=True,
+                                )
+                            with h2:
+                                st.markdown(
+                                    "<div class='sinai-route-table-header'>Prioridad leve</div>",
+                                    unsafe_allow_html=True,
+                                )
+                            with h3:
+                                st.markdown(
+                                    "<div class='sinai-route-table-header'>Prioridad máxima</div>",
+                                    unsafe_allow_html=True,
+                                )
+                            for numero_pedido, (_, r) in enumerate(bloque_fecha_visible.iterrows(), start=1):
+                                row_idx = int(r.get("_gsheet_row_index", 0) or 0)
+                                cliente = str(r.get("Cliente", "")).strip() or "Sin cliente"
+                                folio = str(r.get("Folio_Factura", "")).strip() or "Sin folio"
+                                row_tone = "a" if numero_pedido % 2 else "b"
+                                c1, c2, c3 = st.columns([0.64, 0.18, 0.18])
+                                with c1:
+                                    selected = st.checkbox(
+                                        f"{numero_pedido}. {cliente} · {folio}",
+                                        key=f"sinai_row_{row_tone}_sel_{row_idx}",
+                                    )
+                                with c2:
+                                    priority = st.checkbox(
+                                        "Prioridad Leve",
+                                        key=f"sinai_row_{row_tone}_pri_{row_idx}",
+                                    )
+                                with c3:
+                                    priority_max = st.checkbox(
+                                        "Prioridad Máxima",
+                                        key=f"sinai_row_{row_tone}_max_{row_idx}",
+                                    )
+
+                                if selected or priority or priority_max:
+                                    selected_rows.append(row_idx)
+                                    if priority:
+                                        priority_rows.append(row_idx)
+                                    if priority_max:
+                                        max_priority_rows.append(row_idx)
                     run_sinai = st.form_submit_button("📍 Generar ruta")
                 if run_sinai:
                     progress_holder = st.empty()
