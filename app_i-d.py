@@ -2221,7 +2221,8 @@ SURTIDOR_COLOR_MAP = {
     "Enrique": "#58d68d",
     "Cassandra": "#bb8fce",
     "Yaya": "#f5b041",
-    "Karen": "#f1948a",
+    "Azucena": "#f1948a",
+    "Cecilia": "#22d3ee",
 }
 
 
@@ -5783,7 +5784,7 @@ if selected_tab_key == "reportes_surtidores":
                 rank_show = rank.copy()
                 rank_show["% Participación"] = rank_show["% Participación"].map(lambda x: f"{x:.2f}%")
 
-                surtidores_base = ["Baldo", "Alexis", "Enrique", "Cassandra", "Yaya", "Karen"]
+                surtidores_base = ["Baldo", "Alexis", "Enrique", "Cassandra", "Yaya", "Azucena", "Cecilia"]
                 resumen_base = pd.DataFrame({"Surtidor": surtidores_base})
                 resumen_surtidores = resumen_base.merge(
                     rank[["Surtidor", "Pedidos", "% Participación"]],
@@ -5909,7 +5910,7 @@ if selected_tab_key == "surtidores":
     st.markdown("### 🧑‍🔧 Asignación de surtidores")
     st.caption("Selecciona pedidos visibles y elige un surtidor para asignarlos.")
 
-    surtidores_predefinidos = ["Baldo", "Alexis", "Enrique", "Cassandra", "Yaya", "Karen"]
+    surtidores_predefinidos = ["Baldo", "Alexis", "Enrique", "Cassandra", "Yaya", "Azucena", "Cecilia"]
     if "selected_surtidor_nombre" not in st.session_state:
         st.session_state.selected_surtidor_nombre = ""
 
@@ -5987,6 +5988,7 @@ if selected_tab_key == "surtidores":
             div[data-testid="stRadio"] div[role="radiogroup"][aria-label="Surtidor"] > label[data-baseweb="radio"]:nth-child(4) p{background:#bb8fce;}
             div[data-testid="stRadio"] div[role="radiogroup"][aria-label="Surtidor"] > label[data-baseweb="radio"]:nth-child(5) p{background:#f5b041;}
             div[data-testid="stRadio"] div[role="radiogroup"][aria-label="Surtidor"] > label[data-baseweb="radio"]:nth-child(6) p{background:#f1948a;}
+            div[data-testid="stRadio"] div[role="radiogroup"][aria-label="Surtidor"] > label[data-baseweb="radio"]:nth-child(7) p{background:#22d3ee;}
             </style>
             """,
             unsafe_allow_html=True,
@@ -6350,7 +6352,8 @@ if selected_tab_key == "auditores":
                 "Enrique": "🟢",
                 "Cassandra": "🟣",
                 "Yaya": "🟠",
-                "Karen": "🌸",
+                "Azucena": "🌸",
+                "Cecilia": "🩵",
             }
             surtidor_dot = surtidor_dot_map.get(surtidor_actual, "⚪")
             labels[key] = (
