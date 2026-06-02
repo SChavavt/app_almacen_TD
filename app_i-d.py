@@ -3745,6 +3745,8 @@ def load_facturas_faltantes_from_gsheets() -> pd.DataFrame:
             df[col] = ""
         df[col] = df[col].astype(str).map(sanitize_text)
 
+    df = df[df["FolioSerie"] != ""].copy()
+
     return df[FACTURAS_FALTANTES_REQUIRED_COLUMNS].copy()
 
 
