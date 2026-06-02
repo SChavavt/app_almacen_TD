@@ -920,30 +920,17 @@ def _render_hoja_ruta_sections_matrix(sections: dict[datetime.date, list[dict[st
     return matrix
 
 
-def _worksheet_update_range(
-    ws: Any,
-    a1_range: str,
-    values: list[list[Any]],
-    *,
-    value_input_option: str = "USER_ENTERED",
-) -> None:
+def _worksheet_update_range(ws: Any, a1_range: str, values: list[list[Any]]) -> None:
     if hasattr(ws, "update"):
         try:
-            ws.update(a1_range, values, value_input_option=value_input_option)
+            ws.update(a1_range, values)
             return
         except TypeError:
-            try:
-                ws.update(a1_range, values)
-                return
-            except TypeError:
-                ws.update(values, a1_range)
-                return
+            ws.update(values, a1_range)
+            return
 
     if hasattr(ws, "batch_update"):
-        try:
-            ws.batch_update([{"range": a1_range, "values": values}], value_input_option=value_input_option)
-        except TypeError:
-            ws.batch_update([{"range": a1_range, "values": values}])
+        ws.batch_update([{"range": a1_range, "values": values}])
         return
 
     if hasattr(ws, "update_cells"):
@@ -968,31 +955,10 @@ def _worksheet_update_range(
                         value=cell_value,
                     )
                 )
-        try:
-            ws.update_cells(cells, value_input_option=value_input_option)
-        except TypeError:
-            ws.update_cells(cells)
+        ws.update_cells(cells)
         return
 
-    raise AttributeError("La hoja destino no soporta update(), batch_update() ni update_cells().")
-
-
-def _worksheet_append_row(
-    ws: Any,
-    values: list[Any],
-    *,
-    value_input_option: str = "USER_ENTERED",
-) -> None:
-    if hasattr(ws, "append_row"):
-        ws.append_row(values, value_input_option=value_input_option)
-        return
-
-    if hasattr(ws, "append_rows"):
-        ws.append_rows([values], value_input_option=value_input_option)
-        return
-
-    next_row = len(ws.col_values(1)) + 1
-    _worksheet_update_range(ws, f"A{next_row}", [values], value_input_option=value_input_option)
+    raise AttributeError("La hoja destino no soporta update().")
 
 
 def _is_section_title_text(value: Any) -> bool:
@@ -1580,9 +1546,15 @@ def _upsert_pasa_bodega_report_row(row: Any) -> bool:
     if not folio_factura:
         return _fail("⚠️ No se pudo registrar en Pasa_Bodega: Folio_Factura vacío.", warning=True)
 
-    def _sheet_cell_text(value: Any) -> str:
-        """Texto exacto tal como se escribe/lee en Pasa_Bodega, sin normalizar folio ni cliente."""
-        return "" if value is None else str(value)
+    def _folio_key(value: Any) -> str:
+        text = normalize_sheet_text(value).strip().lower()
+        if text.endswith(".0"):
+            maybe_num = text[:-2]
+            if maybe_num.replace("-", "").isdigit():
+                text = maybe_num
+        # Evita duplicados por variaciones de formato (espacios, guiones, etc.).
+        text = re.sub(r"[^a-z0-9]", "", text)
+        return text
 
     payload = {
         "FECHA DE FACTURA": _format_pasa_bodega_date(row.get("Fecha_Entrega", "")),
@@ -1610,105 +1582,44 @@ def _upsert_pasa_bodega_report_row(row: Any) -> bool:
         return _fail(f"❌ Faltan columnas en Pasa_Bodega: {', '.join(missing)}")
 
     num_col_idx = headers.index("NUMERO DE FACTURA") + 1
-    cliente_col_idx = headers.index("NOMBRE DE CLIENTE") + 1
-    estado_col_idx = headers.index("ESTADO") + 1
-    fecha_recoger_col_idx = headers.index("FECHA QUE PASO A RECOGER") + 1
     target_row = None
-    existing_row_values: list[str] = []
-    target_folio = _sheet_cell_text(payload["NUMERO DE FACTURA"])
-    target_cliente = _sheet_cell_text(payload["NOMBRE DE CLIENTE"])
+    folio_target_key = _folio_key(folio_factura)
 
-    def _cell(row_values_existing: list[str], one_based_idx: int) -> str:
-        zero_based_idx = one_based_idx - 1
-        return row_values_existing[zero_based_idx] if len(row_values_existing) > zero_based_idx else ""
-
-    def _is_exact_pasa_bodega_row(row_vals: list[str]) -> bool:
-        # El mismo sistema escribe y después lee estos valores; por eso la fila
-        # correcta debe coincidir exactamente por folio y nombre de cliente.
-        return (
-            _sheet_cell_text(_cell(row_vals, num_col_idx)) == target_folio
-            and _sheet_cell_text(_cell(row_vals, cliente_col_idx)) == target_cliente
-        )
-
-    # Búsqueda exacta por las dos columnas que identifican el registro escrito por la app.
+    # Búsqueda robusta para evitar duplicados/omisiones cuando existen huecos en la columna.
     try:
         all_values = ws.get_all_values()
         for row_idx, row_vals in enumerate(all_values[1:], start=2):
-            if _is_exact_pasa_bodega_row(list(row_vals)):
+            current_val = row_vals[num_col_idx - 1] if len(row_vals) >= num_col_idx else ""
+            if _folio_key(current_val) == folio_target_key:
                 target_row = row_idx
-                existing_row_values = list(row_vals)
                 break
     except Exception:
         target_row = None
-        existing_row_values = []
 
-    # Fallback compatible con versiones antiguas de gspread: primero exacto por folio,
-    # luego confirma exacto por cliente al leer la fila completa.
+    # Fallback compatible con versiones antiguas de gspread.
     if target_row is None:
         try:
             col_values = ws.col_values(num_col_idx)
             for i, val in enumerate(col_values[1:], start=2):
-                if _sheet_cell_text(val) != target_folio:
-                    continue
-                try:
-                    row_vals = ws.row_values(i)
-                except Exception:
-                    row_vals = []
-                if _is_exact_pasa_bodega_row(list(row_vals)):
+                if _folio_key(val) == folio_target_key:
                     target_row = i
-                    existing_row_values = list(row_vals)
                     break
         except Exception:
             target_row = None
-            existing_row_values = []
 
     row_values = [payload.get(h, "") for h in headers]
-    if target_row and existing_row_values:
-        merged_values = [
-            existing_row_values[i] if i < len(existing_row_values) else ""
-            for i in range(len(headers))
-        ]
-        for i, header in enumerate(headers):
-            if header not in payload:
-                continue
-            if header == "COMENTARIOS" and not payload[header]:
-                continue
-            merged_values[i] = payload[header]
-        row_values = merged_values
-
     try:
         written_row = target_row
         if target_row:
-            _worksheet_update_range(ws, f"A{target_row}", [row_values], value_input_option="USER_ENTERED")
+            ws.update(f"A{target_row}", [row_values], value_input_option="USER_ENTERED")
         else:
-            _worksheet_append_row(ws, row_values, value_input_option="USER_ENTERED")
+            ws.append_row(row_values, value_input_option="USER_ENTERED")
             written_row = len(ws.col_values(1))
         if written_row and written_row > 1:
-            # Refuerzo explícito: después del upsert de la fila completa, vuelve a
-            # escribir las dos columnas críticas que deben cambiar al completar.
-            _worksheet_update_range(
-                ws,
-                gspread.utils.rowcol_to_a1(written_row, estado_col_idx),
-                [[payload["ESTADO"]]],
-                value_input_option="USER_ENTERED",
-            )
-            _worksheet_update_range(
-                ws,
-                gspread.utils.rowcol_to_a1(written_row, fecha_recoger_col_idx),
-                [[payload["FECHA QUE PASO A RECOGER"]]],
-                value_input_option="USER_ENTERED",
-            )
-            try:
-                if hasattr(ws, "format"):
-                    ws.format(f"B{written_row}:D{written_row}", {"horizontalAlignment": "CENTER"})
-            except Exception:
-                # El formato visual no debe invalidar la escritura crítica de
-                # ESTADO y FECHA QUE PASO A RECOGER en Pasa_Bodega.
-                pass
+            ws.format(f"B{written_row}:D{written_row}", {"horizontalAlignment": "CENTER"})
         return True
     except Exception as exc:
         return _fail(f"❌ No se pudo actualizar Pasa_Bodega: {exc}")
-
 
 
 def _ensure_visual_state_defaults():
