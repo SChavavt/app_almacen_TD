@@ -5,7 +5,6 @@ import plotly.express as px
 import plotly.graph_objects as go
 import boto3
 import gspread
-import requests
 import pdfplumber
 import json
 import hashlib
@@ -37,62 +36,6 @@ MEXICO_CITY_TZ = ZoneInfo("America/Mexico_City")
 def now_cdmx() -> datetime:
     """Fecha/hora actual en zona horaria de Ciudad de México."""
     return datetime.now(MEXICO_CITY_TZ)
-
-
-def obtener_token_admintotal() -> dict:
-    """Solicita un token JWT a AdminTotal sin exponer credenciales sensibles."""
-    base_url = str(st.secrets.get("ADMINTOTAL_URL", "")).strip().rstrip("/")
-    username = str(st.secrets.get("ADMINTOTAL_USERNAME", "")).strip()
-    password = str(st.secrets.get("ADMINTOTAL_PASSWORD", ""))
-
-    if not base_url:
-        return {"base_url": base_url, "status_code": None, "success": False, "error": "Falta ADMINTOTAL_URL en Streamlit Secrets."}
-    if not username or not password:
-        return {"base_url": base_url, "status_code": None, "success": False, "error": "Faltan ADMINTOTAL_USERNAME o ADMINTOTAL_PASSWORD en Streamlit Secrets."}
-
-    token_url = f"{base_url}/api/v2/token/"
-    try:
-        response = requests.post(
-            token_url,
-            json={"username": username, "password": password},
-            timeout=30,
-        )
-        status_code = response.status_code
-        try:
-            data = response.json()
-        except ValueError:
-            data = {}
-
-        access_token = data.get("access") or data.get("access_token") or data.get("token")
-        if access_token:
-            return {
-                "base_url": base_url,
-                "status_code": status_code,
-                "success": True,
-                "token_preview": f"{str(access_token)[:10]}...",
-            }
-
-        error_msg = data.get("detail") or data.get("error") or response.text[:300] or "No se recibió access token."
-        return {"base_url": base_url, "status_code": status_code, "success": False, "error": error_msg}
-    except requests.RequestException as exc:
-        return {"base_url": base_url, "status_code": None, "success": False, "error": str(exc)}
-    except Exception as exc:
-        return {"base_url": base_url, "status_code": None, "success": False, "error": str(exc)}
-
-
-def render_prueba_admintotal_tab(button_key: str = "btn_probar_admintotal"):
-    """Renderiza la pestaña temporal para validar autenticación con AdminTotal."""
-    st.subheader("🔌 Prueba de conexión AdminTotal")
-    st.info("Esta pestaña temporal solo solicita un token JWT. No consulta clientes, productos, facturas ni pedidos.")
-    if st.button("🔌 Probar conexión AdminTotal", key=button_key):
-        resultado = obtener_token_admintotal()
-        st.write(f"**URL base detectada:** {resultado.get('base_url') or 'No configurada'}")
-        st.write(f"**Status code:** {resultado.get('status_code') if resultado.get('status_code') is not None else 'Sin respuesta HTTP'}")
-        if resultado.get("success"):
-            st.success("✅ Conexión exitosa: se recibió access token.")
-            st.code(f"{resultado.get('token_preview', '')}", language=None)
-        else:
-            st.error(f"❌ Error al obtener token: {resultado.get('error', 'Error desconocido')}")
 
 
 def _mail_config():
@@ -6289,9 +6232,6 @@ else:
     if usuario_actual in {"SChava", "JorgeLic"}:
         tab_specs.append(("salida_neta", "📦 Rotaciones"))
 
-if usuario_actual == "SChava":
-    tab_specs.append(("prueba_admintotal", "🔌 Prueba AdminTotal"))
-
 tabs = st.tabs([titulo for _, titulo in tab_specs])
 tab_map = {clave: tab for (clave, _), tab in zip(tab_specs, tabs)}
 
@@ -11013,7 +10953,3 @@ if "macheo_tool" in tab_map:
 if "salida_neta" in tab_map:
     with tab_map["salida_neta"]:
         render_salida_neta_tab()
-
-if "prueba_admintotal" in tab_map:
-    with tab_map["prueba_admintotal"]:
-        render_prueba_admintotal_tab()
