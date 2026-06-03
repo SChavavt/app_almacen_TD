@@ -1218,6 +1218,28 @@ def _parse_fecha_factura_check(valor):
     return fecha
 
 
+def formatear_fecha_factura_check_visual(valor) -> str:
+    """Mantiene fecha igual, agregando hora solo cuando el dato original la trae."""
+    texto = str(valor or "").strip()
+    if not texto:
+        return ""
+
+    fecha = _parse_fecha_factura_check(valor)
+    if pd.isna(fecha):
+        return texto
+
+    tiene_hora = bool(
+        isinstance(valor, (pd.Timestamp, datetime))
+        and any((fecha.hour, fecha.minute, fecha.second, fecha.microsecond))
+    ) or _admintotal_fecha_tiene_hora(texto)
+    if not tiene_hora:
+        return fecha.strftime("%d/%m/%Y")
+
+    if fecha.second or fecha.microsecond or re.search(r"(?:T|\s)\d{1,2}:\d{2}:\d{2}", texto):
+        return fecha.strftime("%d/%m/%Y %H:%M:%S")
+    return fecha.strftime("%d/%m/%Y %H:%M")
+
+
 def analizar_facturas_check_desde_df(df_facturas_input: pd.DataFrame, *, ventana_horas: int = 96) -> dict:
     """Ejecuta el mismo check de facturas contra pedidos/casos a partir de un DataFrame normalizado."""
     columnas = FACTURAS_FALTANTES_COLUMNAS
@@ -1226,6 +1248,7 @@ def analizar_facturas_check_desde_df(df_facturas_input: pd.DataFrame, *, ventana
         if col not in df_facturas.columns:
             df_facturas[col] = ""
     df_facturas = df_facturas[columnas].copy()
+    df_facturas["Fecha"] = df_facturas["Fecha"].apply(formatear_fecha_factura_check_visual)
     total_recibidas = int(len(df_facturas))
     df_facturas["FolioSerie"] = df_facturas["FolioSerie"].apply(folio_visual_desde_archivo).astype(str).str.strip()
     df_facturas = df_facturas[df_facturas["FolioSerie"] != ""].copy()
@@ -8957,6 +8980,7 @@ if "organizador" in tab_map:
                     else:
                         df_facturas = df_facturas[[col_vendedor, col_folio, col_cliente, col_fecha]].copy()
                         df_facturas.columns = ["Vendedor", "FolioSerie", "Cliente", "Fecha"]
+                        df_facturas["Fecha"] = df_facturas["Fecha"].apply(formatear_fecha_factura_check_visual)
                         df_facturas["FolioSerie"] = df_facturas["FolioSerie"].apply(folio_visual_desde_archivo).astype(str).str.strip()
                         df_facturas = df_facturas[df_facturas["FolioSerie"] != ""].copy()
                         df_facturas["_folio_match"] = df_facturas["FolioSerie"].apply(normalizar_folio_para_match)
