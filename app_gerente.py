@@ -313,6 +313,379 @@ def consultar_facturas_admintotal(params):
         return {"success": False, "status_code": status_code, "error": str(exc), "df": pd.DataFrame(columns=["Vendedor", "FolioSerie", "Cliente", "Fecha"])}
 
 
+
+def _admintotal_url_absoluta(base_url: str, ruta: str) -> str:
+    """Construye una URL absoluta para rutas administrativas de AdminTotal."""
+    ruta_txt = str(ruta or "").strip()
+    if not ruta_txt:
+        ruta_txt = "/admin/inventario/catalogos/productos_almacen/"
+    if re.match(r"^https?://", ruta_txt, flags=re.IGNORECASE):
+        return ruta_txt
+    if not ruta_txt.startswith("/"):
+        ruta_txt = f"/{ruta_txt}"
+    return f"{str(base_url or '').rstrip('/')}{ruta_txt}"
+
+
+def _admintotal_csrf_token(session: requests.Session, html: str) -> str:
+    """Obtiene el CSRF token desde cookies o desde el HTML del login admin."""
+    token_cookie = session.cookies.get("csrftoken")
+    if token_cookie:
+        return token_cookie
+    match = re.search(r'name=["\']csrfmiddlewaretoken["\']\s+value=["\']([^"\']+)', html or "", flags=re.IGNORECASE)
+    return match.group(1) if match else ""
+
+
+def obtener_sesion_admin_admintotal(ruta_destino: str = "/admin/inventario/catalogos/productos_almacen/") -> dict:
+    """Inicia sesión en el admin web de AdminTotal para descargar exportaciones."""
+    base_url = str(st.secrets.get("ADMINTOTAL_URL", "")).strip().rstrip("/")
+    username = str(st.secrets.get("ADMINTOTAL_USERNAME", "")).strip()
+    password = str(st.secrets.get("ADMINTOTAL_PASSWORD", ""))
+
+    if not base_url:
+        return {"success": False, "base_url": base_url, "error": "Falta ADMINTOTAL_URL en Streamlit Secrets."}
+    if not username or not password:
+        return {"success": False, "base_url": base_url, "error": "Faltan ADMINTOTAL_USERNAME o ADMINTOTAL_PASSWORD en Streamlit Secrets."}
+
+    session = requests.Session()
+    session.headers.update({"User-Agent": "app-almacen-td/admintotal-admin-export"})
+    destino_url = _admintotal_url_absoluta(base_url, ruta_destino)
+    login_url = f"{base_url}/admin/login/?next={urllib.parse.quote(urlparse(destino_url).path)}"
+
+    try:
+        login_get = session.get(login_url, timeout=30)
+        csrf_token = _admintotal_csrf_token(session, login_get.text)
+        payload = {
+            "username": username,
+            "password": password,
+            "next": urlparse(destino_url).path,
+        }
+        if csrf_token:
+            payload["csrfmiddlewaretoken"] = csrf_token
+        login_post = session.post(
+            login_url,
+            data=payload,
+            headers={"Referer": login_url},
+            allow_redirects=True,
+            timeout=30,
+        )
+        texto_login = login_post.text or ""
+        login_fallido = (
+            login_post.status_code >= 400
+            or ("csrfmiddlewaretoken" in texto_login and "password" in texto_login.lower() and "username" in texto_login.lower())
+            or "Por favor introduzca" in texto_login
+        )
+        if login_fallido:
+            return {
+                "success": False,
+                "base_url": base_url,
+                "status_code": login_post.status_code,
+                "error": "No fue posible iniciar sesión en el admin web de AdminTotal con las credenciales configuradas.",
+            }
+        return {"success": True, "base_url": base_url, "session": session, "status_code": login_post.status_code}
+    except requests.RequestException as exc:
+        return {"success": False, "base_url": base_url, "status_code": None, "error": str(exc)}
+
+
+def _admintotal_es_respuesta_excel(response: requests.Response) -> bool:
+    """Detecta si una respuesta HTTP contiene un archivo Excel real."""
+    content_type = str(response.headers.get("Content-Type", "")).lower()
+    nombre = str(response.headers.get("Content-Disposition", "")).lower()
+    contenido = response.content or b""
+    return (
+        "spreadsheet" in content_type
+        or "excel" in content_type
+        or ".xlsx" in nombre
+        or ".xls" in nombre
+        or contenido.startswith(b"PK\x03\x04")
+        or contenido.startswith(b"\xd0\xcf\x11\xe0")
+    )
+
+
+def _admintotal_es_respuesta_descargable(response: requests.Response) -> bool:
+    """Detecta archivos de exportación aunque AdminTotal los entregue como CSV o HTML/XLS."""
+    content_type = str(response.headers.get("Content-Type", "")).lower()
+    nombre = str(response.headers.get("Content-Disposition", "")).lower()
+    contenido_inicio = (response.content or b"")[:10000].lower()
+    return (
+        _admintotal_es_respuesta_excel(response)
+        or "attachment" in nombre
+        or ".csv" in nombre
+        or "text/csv" in content_type
+        or contenido_inicio.lstrip().startswith(b"<table")
+        or contenido_inicio.lstrip().startswith(b"<html") and b"<table" in contenido_inicio
+    )
+
+
+def _admintotal_normalizar_nombre_columna(nombre: str) -> str:
+    return unicodedata.normalize("NFKD", str(nombre)).encode("ascii", "ignore").decode("ascii").strip().lower()
+
+
+def _admintotal_columnas_codigo_disponible_desde_df(df: pd.DataFrame) -> pd.DataFrame | None:
+    if df.empty:
+        return None
+    normalizadas = {str(col).strip(): _admintotal_normalizar_nombre_columna(col) for col in df.columns}
+    col_codigo = next((col for col, norm in normalizadas.items() if norm in {"codigo", "code"}), None)
+    col_disponible = next((col for col, norm in normalizadas.items() if norm == "disponible"), None)
+    if not col_codigo or not col_disponible:
+        return None
+    resultado = df[[col_codigo, col_disponible]].copy()
+    resultado.columns = ["Código", "Disponible"]
+    resultado = resultado.dropna(how="all")
+    resultado["Código"] = resultado["Código"].astype(str).str.strip()
+    resultado = resultado[resultado["Código"].ne("") & resultado["Código"].str.lower().ne("nan")].copy()
+    return resultado.reset_index(drop=True)
+
+
+def _admintotal_columnas_codigo_disponible(contenido: bytes, response: requests.Response | None = None) -> pd.DataFrame:
+    """Lee una exportación Excel/CSV/HTML y conserva únicamente Código y Disponible."""
+    errores = []
+    try:
+        if response is None or _admintotal_es_respuesta_excel(response):
+            xls = pd.ExcelFile(BytesIO(contenido))
+            for hoja in xls.sheet_names:
+                resultado = _admintotal_columnas_codigo_disponible_desde_df(pd.read_excel(xls, sheet_name=hoja))
+                if resultado is not None:
+                    return resultado
+    except Exception as exc:
+        errores.append(str(exc))
+
+    try:
+        df_csv = pd.read_csv(BytesIO(contenido))
+        resultado = _admintotal_columnas_codigo_disponible_desde_df(df_csv)
+        if resultado is not None:
+            return resultado
+    except Exception as exc:
+        errores.append(str(exc))
+
+    try:
+        tablas = pd.read_html(BytesIO(contenido))
+        for tabla in tablas:
+            resultado = _admintotal_columnas_codigo_disponible_desde_df(tabla)
+            if resultado is not None:
+                return resultado
+    except Exception as exc:
+        errores.append(str(exc))
+
+    detalle = f" Detalle: {' | '.join(errores[-2:])}" if errores else ""
+    raise ValueError(f"La exportación descargada no contiene las columnas Código y Disponible.{detalle}")
+
+
+def _admintotal_html_a_texto(html: str) -> str:
+    texto = re.sub(r"<[^>]+>", " ", html or "")
+    return re.sub(r"\s+", " ", texto).strip().lower()
+
+
+def _admintotal_es_url_exportacion_relevante(url: str) -> bool:
+    """Descarta enlaces ajenos al modal, como descargas antiguas del centro de procesos."""
+    url_l = str(url or "").lower()
+    if not url_l or url_l.startswith(("#", "javascript:")):
+        return False
+    rutas_ignoradas = (
+        "/admin/procesos/descargar_archivo/",
+        "/admin/procesos/",
+        "/admin/notificaciones/",
+    )
+    if any(ruta in url_l for ruta in rutas_ignoradas):
+        return False
+    pistas_exportacion = ("export", "excel", "xlsx", "xls", "csv", "reporte", "descargar")
+    pistas_productos = ("producto", "productos", "almacen", "inventario", "existencia")
+    return any(pista in url_l for pista in pistas_exportacion) and any(pista in url_l for pista in pistas_productos)
+
+
+def _admintotal_bloques_exportacion_productos(html: str) -> list[str]:
+    """Aísla el modal/lista de Exportar productos para no leer enlaces globales del admin."""
+    html_txt = html or ""
+    bloques = []
+    frases = [
+        "Exportar Productos, incluye descripciones",
+        "Exportar productos, incluye descripciones",
+        "Exportar Productos sin costos",
+        "Exportar productos sin costos",
+        "Exportar productos",
+    ]
+    for frase in frases:
+        for match in re.finditer(re.escape(frase), html_txt, flags=re.IGNORECASE):
+            inicio = max(0, match.start() - 2500)
+            fin = min(len(html_txt), match.end() + 5000)
+            bloque = html_txt[inicio:fin]
+            if bloque not in bloques:
+                bloques.append(bloque)
+    return bloques or [html_txt]
+
+
+def _admintotal_extraer_enlaces_exportacion(html: str, page_url: str) -> list[str]:
+    """Extrae posibles enlaces de la exportación de productos, evitando enlaces globales irrelevantes."""
+    enlaces = []
+    for bloque in _admintotal_bloques_exportacion_productos(html):
+        texto_bloque = _admintotal_html_a_texto(bloque)
+        if "exportar productos" not in texto_bloque and "producto" not in texto_bloque:
+            continue
+
+        # Enlaces directos, data-url/data-href y acciones inline que contienen rutas de exportación.
+        for match in re.finditer(r'(?:href|data-url|data-href|action)=["\']([^"\']+)["\']', bloque, flags=re.IGNORECASE):
+            url = match.group(1)
+            if _admintotal_es_url_exportacion_relevante(url):
+                enlaces.append(urllib.parse.urljoin(page_url, url))
+
+        # Strings en JavaScript, por ejemplo onclick="location.href='...exportar...'".
+        for match in re.finditer(r'["\']([^"\']*(?:export|excel|xlsx|xls|csv|descargar|reporte)[^"\']*)["\']', bloque, flags=re.IGNORECASE):
+            candidato = match.group(1).strip()
+            if ("/" in candidato or "?" in candidato) and _admintotal_es_url_exportacion_relevante(candidato):
+                enlaces.append(urllib.parse.urljoin(page_url, candidato))
+
+    return list(dict.fromkeys(enlaces))
+
+
+def _admintotal_extraer_form_data(html: str) -> dict:
+    """Obtiene valores actuales de inputs/selects para enviar la exportación con los filtros visibles."""
+    data = {}
+    html_txt = html or ""
+    for tag in re.findall(r'<input\b[^>]*>', html_txt, flags=re.IGNORECASE):
+        name = re.search(r'name=["\']([^"\']+)["\']', tag, flags=re.IGNORECASE)
+        if not name:
+            continue
+        value = re.search(r'value=["\']([^"\']*)["\']', tag, flags=re.IGNORECASE)
+        data[name.group(1)] = value.group(1) if value else ""
+    for select_match in re.finditer(r'<select\b[^>]*name=["\']([^"\']+)["\'][^>]*>(.*?)</select>', html_txt, flags=re.IGNORECASE | re.DOTALL):
+        name = select_match.group(1)
+        body = select_match.group(2)
+        selected = re.search(r'<option\b[^>]*selected[^>]*value=["\']([^"\']*)["\']', body, flags=re.IGNORECASE)
+        if not selected:
+            selected = re.search(r'<option\b[^>]*value=["\']([^"\']*)["\']', body, flags=re.IGNORECASE)
+        if selected:
+            data[name] = selected.group(1)
+    data.pop("csrfmiddlewaretoken", None)
+    return data
+
+
+def _admintotal_intentos_exportacion_productos(page_url: str, params: dict, html: str) -> list[dict]:
+    """Genera intentos GET/POST para la primera opción del modal Exportar productos."""
+    form_data = _admintotal_extraer_form_data(html)
+    base_data = {**form_data, **params}
+    intentos = []
+
+    for enlace in _admintotal_extraer_enlaces_exportacion(html, page_url):
+        intentos.append({"method": "GET", "url": enlace, "data": None})
+
+    rutas_exportacion_productos = [
+        "exportar/",
+        "export/",
+        "excel/",
+        "descargar/",
+        "reporte/",
+        "exportar_productos/",
+        "exportar-productos/",
+        "descargar_productos/",
+        "productos/exportar/",
+    ]
+    for ruta in rutas_exportacion_productos:
+        intentos.append({"method": "GET", "url": urllib.parse.urljoin(page_url, ruta), "data": None})
+
+    # Nombres comunes para la opción 1 del modal cuando el export se dispara por POST/AJAX.
+    acciones_opcion_1 = [
+        {"exportar": "1"},
+        {"export": "1"},
+        {"excel": "1"},
+        {"xlsx": "1"},
+        {"descargar": "1"},
+        {"tipo_exportacion": "1"},
+        {"opcion_exportacion": "1"},
+        {"opcion": "1"},
+        {"reporte": "1"},
+        {"accion": "exportar_productos"},
+        {"accion": "exportar_productos", "opcion": "1"},
+        {"action": "exportar_productos", "opcion": "1"},
+        {"exportar_productos": "1"},
+        {"exportar_productos_almacen": "1"},
+        {"productos_almacen_export": "1"},
+    ]
+    for accion in acciones_opcion_1:
+        query = {**base_data, **accion}
+        intentos.append({"method": "GET", "url": f"{page_url}?{urllib.parse.urlencode(query)}", "data": None})
+        intentos.append({"method": "POST", "url": page_url, "data": query})
+
+    vistos = set()
+    unicos = []
+    for intento in intentos:
+        firma = (intento["method"], intento["url"], tuple(sorted((intento.get("data") or {}).items())))
+        if firma not in vistos:
+            vistos.add(firma)
+            unicos.append(intento)
+    return unicos
+
+
+
+def _admintotal_resumen_error_response(response: requests.Response) -> str:
+    """Resume errores HTML/JSON sin mostrar páginas completas en Streamlit."""
+    try:
+        data = response.json()
+        if isinstance(data, dict):
+            return str(data.get("detail") or data.get("error") or data)[:300]
+    except ValueError:
+        pass
+    texto = response.text or ""
+    title = re.search(r"<title[^>]*>(.*?)</title>", texto, flags=re.IGNORECASE | re.DOTALL)
+    if title:
+        return re.sub(r"\s+", " ", title.group(1)).strip()[:300]
+    return re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", texto)).strip()[:300]
+
+
+def consultar_productos_almacen_admin_admintotal(ruta_admin: str, params: dict | None = None) -> dict:
+    """Descarga la primera exportación de productos por almacén del admin y devuelve Código/Disponible."""
+    sesion_resultado = obtener_sesion_admin_admintotal(ruta_admin)
+    if not sesion_resultado.get("success"):
+        return {"success": False, "status_code": sesion_resultado.get("status_code"), "error": sesion_resultado.get("error", "No fue posible iniciar sesión."), "df": pd.DataFrame(columns=["Código", "Disponible"])}
+
+    base_url = sesion_resultado.get("base_url", "").rstrip("/")
+    session = sesion_resultado["session"]
+    page_url = _admintotal_url_absoluta(base_url, ruta_admin)
+    params_limpios = {k: v for k, v in dict(params or {}).items() if v not in (None, "")}
+
+    try:
+        pagina = session.get(page_url, params=params_limpios, timeout=45)
+        if not pagina.ok:
+            return {"success": False, "status_code": pagina.status_code, "error": _admintotal_resumen_error_response(pagina) or "No fue posible abrir la ruta admin de productos por almacén.", "df": pd.DataFrame(columns=["Código", "Disponible"])}
+
+        intentos = _admintotal_intentos_exportacion_productos(page_url, params_limpios, pagina.text)
+        ultimo_error = "No se encontró una descarga exportable para la primera opción de Exportar productos."
+        ultimo_status = pagina.status_code
+        intentos_probados = []
+
+        for intento in intentos:
+            method = intento["method"]
+            export_url = intento["url"]
+            intentos_probados.append(f"{method} {export_url}")
+            if method == "POST":
+                csrf_token = session.cookies.get("csrftoken") or _admintotal_csrf_token(session, pagina.text)
+                headers = {"Referer": pagina.url}
+                if csrf_token:
+                    headers["X-CSRFToken"] = csrf_token
+                respuesta = session.post(export_url, data=intento.get("data") or {}, headers=headers, timeout=90)
+            else:
+                respuesta = session.get(export_url, timeout=90)
+
+            ultimo_status = respuesta.status_code
+            if respuesta.ok and _admintotal_es_respuesta_descargable(respuesta):
+                df = _admintotal_columnas_codigo_disponible(respuesta.content, respuesta)
+                return {"success": True, "status_code": respuesta.status_code, "df": df, "export_url": export_url, "method": method}
+            if not respuesta.ok:
+                ultimo_error = _admintotal_resumen_error_response(respuesta) or f"Exportación respondió con status {respuesta.status_code}."
+
+        detalle_intentos = " | ".join(intentos_probados[:8])
+        if len(intentos_probados) > 8:
+            detalle_intentos += f" | ... {len(intentos_probados) - 8} intentos más"
+        return {
+            "success": False,
+            "status_code": ultimo_status,
+            "error": f"{ultimo_error} Intentos probados: {detalle_intentos or 'ninguno'}",
+            "df": pd.DataFrame(columns=["Código", "Disponible"]),
+        }
+    except requests.RequestException as exc:
+        return {"success": False, "status_code": None, "error": str(exc), "df": pd.DataFrame(columns=["Código", "Disponible"])}
+    except Exception as exc:
+        return {"success": False, "status_code": None, "error": str(exc), "df": pd.DataFrame(columns=["Código", "Disponible"])}
+
+
 def render_prueba_admintotal_tab(button_key: str = "btn_probar_admintotal"):
     """Renderiza la pestaña temporal para validar autenticación con AdminTotal."""
     st.subheader("🔌 Prueba de conexión AdminTotal")
@@ -384,6 +757,74 @@ def render_prueba_admintotal_tab(button_key: str = "btn_probar_admintotal"):
             file_name="facturas_admintotal.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             key=f"{button_key}_descargar_facturas",
+        )
+
+    st.divider()
+    st.subheader("📦 Consultar disponible de productos AdminTotal")
+    st.info(
+        "Consulta la ruta admin de Productos por Almacén, toma la primera opción de exportación "
+        "y muestra únicamente las columnas Código y Disponible."
+    )
+    ruta_productos = st.text_input(
+        "Ruta admin de productos por almacén",
+        value="/admin/inventario/catalogos/productos_almacen/",
+        key=f"{button_key}_productos_ruta",
+        help="Ruta mostrada en AdminTotal para Productos por Almacén.",
+    ).strip()
+    col_estado_prod, col_almacen_prod, col_buscar_prod = st.columns(3)
+    with col_estado_prod:
+        estado_productos = st.text_input(
+            "Estado interno opcional",
+            value="",
+            key=f"{button_key}_productos_estado",
+            help="Déjalo vacío para usar el valor seleccionado por defecto en AdminTotal. Si lo llenas, debe ser el valor interno/query param, no la etiqueta visual.",
+        ).strip()
+    with col_almacen_prod:
+        almacen_productos = st.text_input(
+            "Almacén interno opcional",
+            value="",
+            key=f"{button_key}_productos_almacen",
+            help="Déjalo vacío para usar el almacén seleccionado por defecto en AdminTotal. Si lo llenas, debe ser el valor interno/query param, no la etiqueta visual.",
+        ).strip()
+    with col_buscar_prod:
+        texto_productos = st.text_input("Buscar por texto opcional", key=f"{button_key}_productos_texto").strip()
+
+    if st.button("📦 Consultar Código y Disponible", key=f"{button_key}_consultar_productos"):
+        params_productos = {
+            "estado": estado_productos,
+            "almacen": almacen_productos,
+            "q": texto_productos,
+            "buscar": texto_productos,
+            "search": texto_productos,
+        }
+        with st.spinner("Descargando la primera exportación de productos desde AdminTotal..."):
+            resultado_productos = consultar_productos_almacen_admin_admintotal(ruta_productos, params_productos)
+
+        if not resultado_productos.get("success"):
+            st.error(f"❌ Error al consultar productos: {resultado_productos.get('error', 'Error desconocido')}")
+            if resultado_productos.get("status_code") is not None:
+                st.write(f"**Status code:** {resultado_productos.get('status_code')}")
+            return
+
+        df_productos = resultado_productos.get("df", pd.DataFrame(columns=["Código", "Disponible"]))
+        st.write(f"**Total de productos encontrados:** {len(df_productos)}")
+        if resultado_productos.get("export_url"):
+            metodo_exportacion = resultado_productos.get("method", "GET")
+            st.caption(f"Exportación usada: {metodo_exportacion} {resultado_productos.get('export_url')}")
+        if df_productos.empty:
+            st.warning("El Excel descargado no contiene productos en Código/Disponible.")
+            return
+
+        st.dataframe(df_productos, use_container_width=True, hide_index=True)
+        output_productos = BytesIO()
+        with pd.ExcelWriter(output_productos, engine="xlsxwriter") as writer:
+            df_productos.to_excel(writer, index=False, sheet_name="Disponibles")
+        st.download_button(
+            "⬇️ Descargar Código y Disponible",
+            data=output_productos.getvalue(),
+            file_name="productos_disponible_admintotal.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            key=f"{button_key}_descargar_productos",
         )
 
 
