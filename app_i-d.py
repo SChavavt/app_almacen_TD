@@ -2983,6 +2983,14 @@ SHEET_FACTURAS_FALTANTES = "Facturas_Faltantes"
 
 FACTURAS_FALTANTES_REQUIRED_COLUMNS = ["Vendedor", "FolioSerie", "Cliente", "Fecha"]
 FACTURAS_FALTANTES_ALLOWED_USERS = {"SCHAVA", "ALEJANDRO38"}
+FACTURAS_FALTANTES_VENDEDORES_CONGRESO_CDMX = {
+    "CONGRESO",
+    "PEDIDOS CDMX",
+    "CDMX PEDIDOS",
+    "CONGRESOS EVENTOS TD",
+    "Y CONGRESOS EVENTOS TD",
+    "CDMX PEDIDOS Y CONGRESOS EVENTOS TD",
+}
 
 
 # --- Auth helpers ---
@@ -3635,7 +3643,11 @@ def _clean_cliente_name(x: str) -> str:
 
 
 def _normalize_vendedor_name(value) -> str:
-    return sanitize_text(value).casefold()
+    text = sanitize_text(value).replace(" ", " ")
+    text = unicodedata.normalize("NFKD", text)
+    text = "".join(ch for ch in text if not unicodedata.combining(ch))
+    text = " ".join(text.split())
+    return text.casefold()
 
 
 def _normalize_header_token(value: object) -> str:
@@ -6488,8 +6500,8 @@ if selected_tab_key == "dashboard":
 
             if vendedor_col and not mostrar_congreso_cdmx:
                 vendedores_ocultos = {
-                    _normalize_vendedor_name("CONGRESO"),
-                    _normalize_vendedor_name("PEDIDOS CDMX"),
+                    _normalize_vendedor_name(vendedor)
+                    for vendedor in FACTURAS_FALTANTES_VENDEDORES_CONGRESO_CDMX
                 }
                 df_facturas_vista = df_facturas_vista[
                     ~df_facturas_vista[vendedor_col].map(_normalize_vendedor_name).isin(vendedores_ocultos)
