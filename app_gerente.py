@@ -313,6 +313,179 @@ def consultar_facturas_admintotal(params):
         return {"success": False, "status_code": status_code, "error": str(exc), "df": pd.DataFrame(columns=["Vendedor", "FolioSerie", "Cliente", "Fecha"])}
 
 
+
+def _admintotal_url_absoluta(base_url: str, ruta: str) -> str:
+    """Construye una URL absoluta para rutas administrativas de AdminTotal."""
+    ruta_txt = str(ruta or "").strip()
+    if not ruta_txt:
+        ruta_txt = "/admin/inventario/catalogos/productos_almacen/"
+    if re.match(r"^https?://", ruta_txt, flags=re.IGNORECASE):
+        return ruta_txt
+    if not ruta_txt.startswith("/"):
+        ruta_txt = f"/{ruta_txt}"
+    return f"{str(base_url or '').rstrip('/')}{ruta_txt}"
+
+
+def _admintotal_csrf_token(session: requests.Session, html: str) -> str:
+    """Obtiene el CSRF token desde cookies o desde el HTML del login admin."""
+    token_cookie = session.cookies.get("csrftoken")
+    if token_cookie:
+        return token_cookie
+    match = re.search(r'name=["\']csrfmiddlewaretoken["\']\s+value=["\']([^"\']+)', html or "", flags=re.IGNORECASE)
+    return match.group(1) if match else ""
+
+
+def obtener_sesion_admin_admintotal(ruta_destino: str = "/admin/inventario/catalogos/productos_almacen/") -> dict:
+    """Inicia sesión en el admin web de AdminTotal para descargar exportaciones."""
+    base_url = str(st.secrets.get("ADMINTOTAL_URL", "")).strip().rstrip("/")
+    username = str(st.secrets.get("ADMINTOTAL_USERNAME", "")).strip()
+    password = str(st.secrets.get("ADMINTOTAL_PASSWORD", ""))
+
+    if not base_url:
+        return {"success": False, "base_url": base_url, "error": "Falta ADMINTOTAL_URL en Streamlit Secrets."}
+    if not username or not password:
+        return {"success": False, "base_url": base_url, "error": "Faltan ADMINTOTAL_USERNAME o ADMINTOTAL_PASSWORD en Streamlit Secrets."}
+
+    session = requests.Session()
+    session.headers.update({"User-Agent": "app-almacen-td/admintotal-admin-export"})
+    destino_url = _admintotal_url_absoluta(base_url, ruta_destino)
+    login_url = f"{base_url}/admin/login/?next={urllib.parse.quote(urlparse(destino_url).path)}"
+
+    try:
+        login_get = session.get(login_url, timeout=30)
+        csrf_token = _admintotal_csrf_token(session, login_get.text)
+        payload = {
+            "username": username,
+            "password": password,
+            "next": urlparse(destino_url).path,
+        }
+        if csrf_token:
+            payload["csrfmiddlewaretoken"] = csrf_token
+        login_post = session.post(
+            login_url,
+            data=payload,
+            headers={"Referer": login_url},
+            allow_redirects=True,
+            timeout=30,
+        )
+        texto_login = login_post.text or ""
+        login_fallido = (
+            login_post.status_code >= 400
+            or ("csrfmiddlewaretoken" in texto_login and "password" in texto_login.lower() and "username" in texto_login.lower())
+            or "Por favor introduzca" in texto_login
+        )
+        if login_fallido:
+            return {
+                "success": False,
+                "base_url": base_url,
+                "status_code": login_post.status_code,
+                "error": "No fue posible iniciar sesión en el admin web de AdminTotal con las credenciales configuradas.",
+            }
+        return {"success": True, "base_url": base_url, "session": session, "status_code": login_post.status_code}
+    except requests.RequestException as exc:
+        return {"success": False, "base_url": base_url, "status_code": None, "error": str(exc)}
+
+
+def _admintotal_es_respuesta_excel(response: requests.Response) -> bool:
+    """Detecta si una respuesta HTTP contiene un archivo Excel."""
+    content_type = str(response.headers.get("Content-Type", "")).lower()
+    nombre = str(response.headers.get("Content-Disposition", "")).lower()
+    contenido = response.content or b""
+    return (
+        "spreadsheet" in content_type
+        or "excel" in content_type
+        or ".xlsx" in nombre
+        or ".xls" in nombre
+        or contenido.startswith(b"PK\x03\x04")
+        or contenido.startswith(b"\xd0\xcf\x11\xe0")
+    )
+
+
+def _admintotal_extraer_enlaces_exportacion(html: str, page_url: str) -> list[str]:
+    """Extrae posibles enlaces de exportación, conservando el orden visual del admin."""
+    enlaces = []
+    patron = re.compile(r'<a\b[^>]*href=["\']([^"\']+)["\'][^>]*>(.*?)</a>', flags=re.IGNORECASE | re.DOTALL)
+    for href, contenido in patron.findall(html or ""):
+        texto = re.sub(r"<[^>]+>", " ", contenido)
+        texto = re.sub(r"\s+", " ", texto).strip().lower()
+        href_l = href.lower()
+        if "exportar productos" in texto or "export" in href_l or ".xls" in href_l:
+            enlaces.append(urllib.parse.urljoin(page_url, href))
+    return list(dict.fromkeys(enlaces))
+
+
+def _admintotal_columnas_codigo_disponible(excel_bytes: bytes) -> pd.DataFrame:
+    """Lee el Excel exportado y conserva únicamente Código y Disponible."""
+    xls = pd.ExcelFile(BytesIO(excel_bytes))
+    for hoja in xls.sheet_names:
+        df = pd.read_excel(xls, sheet_name=hoja)
+        if df.empty:
+            continue
+        normalizadas = {
+            str(col).strip(): unicodedata.normalize("NFKD", str(col)).encode("ascii", "ignore").decode("ascii").strip().lower()
+            for col in df.columns
+        }
+        col_codigo = next((col for col, norm in normalizadas.items() if norm in {"codigo", "code"}), None)
+        col_disponible = next((col for col, norm in normalizadas.items() if norm == "disponible"), None)
+        if col_codigo and col_disponible:
+            resultado = df[[col_codigo, col_disponible]].copy()
+            resultado.columns = ["Código", "Disponible"]
+            resultado = resultado.dropna(how="all")
+            resultado["Código"] = resultado["Código"].astype(str).str.strip()
+            resultado = resultado[resultado["Código"].ne("") & resultado["Código"].ne("nan")].copy()
+            return resultado.reset_index(drop=True)
+    raise ValueError("El Excel descargado no contiene las columnas Código y Disponible.")
+
+
+def consultar_productos_almacen_admin_admintotal(ruta_admin: str, params: dict | None = None) -> dict:
+    """Descarga la primera exportación de productos por almacén del admin y devuelve Código/Disponible."""
+    sesion_resultado = obtener_sesion_admin_admintotal(ruta_admin)
+    if not sesion_resultado.get("success"):
+        return {"success": False, "status_code": sesion_resultado.get("status_code"), "error": sesion_resultado.get("error", "No fue posible iniciar sesión."), "df": pd.DataFrame(columns=["Código", "Disponible"])}
+
+    base_url = sesion_resultado.get("base_url", "").rstrip("/")
+    session = sesion_resultado["session"]
+    page_url = _admintotal_url_absoluta(base_url, ruta_admin)
+    params_limpios = {k: v for k, v in dict(params or {}).items() if v not in (None, "")}
+
+    try:
+        pagina = session.get(page_url, params=params_limpios, timeout=45)
+        if not pagina.ok:
+            return {"success": False, "status_code": pagina.status_code, "error": pagina.text[:300] or "No fue posible abrir la ruta admin de productos por almacén.", "df": pd.DataFrame(columns=["Código", "Disponible"])}
+
+        enlaces_exportacion = _admintotal_extraer_enlaces_exportacion(pagina.text, pagina.url)
+        urls_candidatas = enlaces_exportacion[:]
+        # Fallbacks comunes para pantallas Django/admin con acciones de exportación.
+        query_actual = dict(params_limpios)
+        for clave, valor in [
+            ("export", "1"),
+            ("exportar", "1"),
+            ("exportar_productos", "1"),
+            ("exportar_productos_costos", "1"),
+            ("format", "xlsx"),
+        ]:
+            query = dict(query_actual)
+            query[clave] = valor
+            urls_candidatas.append(f"{page_url}?{urllib.parse.urlencode(query)}")
+
+        ultimo_error = "No se encontró una respuesta Excel en la primera opción de exportación."
+        ultimo_status = pagina.status_code
+        for export_url in list(dict.fromkeys(urls_candidatas)):
+            respuesta = session.get(export_url, timeout=90)
+            ultimo_status = respuesta.status_code
+            if respuesta.ok and _admintotal_es_respuesta_excel(respuesta):
+                df = _admintotal_columnas_codigo_disponible(respuesta.content)
+                return {"success": True, "status_code": respuesta.status_code, "df": df, "export_url": export_url}
+            if not respuesta.ok:
+                ultimo_error = respuesta.text[:300] or f"Exportación respondió con status {respuesta.status_code}."
+
+        return {"success": False, "status_code": ultimo_status, "error": ultimo_error, "df": pd.DataFrame(columns=["Código", "Disponible"])}
+    except requests.RequestException as exc:
+        return {"success": False, "status_code": None, "error": str(exc), "df": pd.DataFrame(columns=["Código", "Disponible"])}
+    except Exception as exc:
+        return {"success": False, "status_code": None, "error": str(exc), "df": pd.DataFrame(columns=["Código", "Disponible"])}
+
+
 def render_prueba_admintotal_tab(button_key: str = "btn_probar_admintotal"):
     """Renderiza la pestaña temporal para validar autenticación con AdminTotal."""
     st.subheader("🔌 Prueba de conexión AdminTotal")
@@ -384,6 +557,63 @@ def render_prueba_admintotal_tab(button_key: str = "btn_probar_admintotal"):
             file_name="facturas_admintotal.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             key=f"{button_key}_descargar_facturas",
+        )
+
+    st.divider()
+    st.subheader("📦 Consultar disponible de productos AdminTotal")
+    st.info(
+        "Consulta la ruta admin de Productos por Almacén, toma la primera opción de exportación "
+        "y muestra únicamente las columnas Código y Disponible."
+    )
+    ruta_productos = st.text_input(
+        "Ruta admin de productos por almacén",
+        value="/admin/inventario/catalogos/productos_almacen/",
+        key=f"{button_key}_productos_ruta",
+        help="Ruta mostrada en AdminTotal para Productos por Almacén.",
+    ).strip()
+    col_estado_prod, col_almacen_prod, col_buscar_prod = st.columns(3)
+    with col_estado_prod:
+        estado_productos = st.text_input("Estado", value="Vigentes", key=f"{button_key}_productos_estado").strip()
+    with col_almacen_prod:
+        almacen_productos = st.text_input("Almacén", value="001 Matriz", key=f"{button_key}_productos_almacen").strip()
+    with col_buscar_prod:
+        texto_productos = st.text_input("Buscar por texto opcional", key=f"{button_key}_productos_texto").strip()
+
+    if st.button("📦 Consultar Código y Disponible", key=f"{button_key}_consultar_productos"):
+        params_productos = {
+            "estado": estado_productos,
+            "almacen": almacen_productos,
+            "q": texto_productos,
+            "buscar": texto_productos,
+            "search": texto_productos,
+        }
+        with st.spinner("Descargando la primera exportación de productos desde AdminTotal..."):
+            resultado_productos = consultar_productos_almacen_admin_admintotal(ruta_productos, params_productos)
+
+        if not resultado_productos.get("success"):
+            st.error(f"❌ Error al consultar productos: {resultado_productos.get('error', 'Error desconocido')}")
+            if resultado_productos.get("status_code") is not None:
+                st.write(f"**Status code:** {resultado_productos.get('status_code')}")
+            return
+
+        df_productos = resultado_productos.get("df", pd.DataFrame(columns=["Código", "Disponible"]))
+        st.write(f"**Total de productos encontrados:** {len(df_productos)}")
+        if resultado_productos.get("export_url"):
+            st.caption(f"Exportación usada: {resultado_productos.get('export_url')}")
+        if df_productos.empty:
+            st.warning("El Excel descargado no contiene productos en Código/Disponible.")
+            return
+
+        st.dataframe(df_productos, use_container_width=True, hide_index=True)
+        output_productos = BytesIO()
+        with pd.ExcelWriter(output_productos, engine="xlsxwriter") as writer:
+            df_productos.to_excel(writer, index=False, sheet_name="Disponibles")
+        st.download_button(
+            "⬇️ Descargar Código y Disponible",
+            data=output_productos.getvalue(),
+            file_name="productos_disponible_admintotal.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            key=f"{button_key}_descargar_productos",
         )
 
 
