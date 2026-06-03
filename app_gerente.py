@@ -6207,22 +6207,30 @@ def render_salida_neta_tab():
         "y actualizar de forma independiente cuando lo necesites."
     )
 
-    with st.expander("📤 Carga y procesamiento de archivos", expanded=True):
-        with st.form("salida_neta_existencias_form", clear_on_submit=False):
-            existencias_file = st.file_uploader(
-                "Subir archivo de Existencias.xlsx",
-                type=["xlsx"],
-                key="salida_neta_existencias",
-                help="Carga este archivo de forma independiente para actualizar las existencias sin subir Entradas ni Salidas.",
-            )
-            actualizar_existencias = st.form_submit_button("Actualizar solo existencias")
+    subtab_carga_vista, subtab_transito, subtab_oc = st.tabs([
+        "📤 Carga y Vista",
+        "🚚 Tránsito",
+        "🧾 Órdenes de compra",
+    ])
 
-        st.divider()
+    with subtab_carga_vista:
+        st.markdown("### 📤 Carga y procesamiento de archivos")
+        with st.expander("Subir/actualizar archivos", expanded=True):
+            with st.form("salida_neta_existencias_form", clear_on_submit=False):
+                existencias_file = st.file_uploader(
+                    "Subir archivo de Existencias.xlsx",
+                    type=["xlsx"],
+                    key="salida_neta_existencias",
+                    help="Carga este archivo de forma independiente para actualizar las existencias sin subir Entradas ni Salidas.",
+                )
+                actualizar_existencias = st.form_submit_button("Actualizar solo existencias")
 
-        with st.form("salida_neta_form", clear_on_submit=False):
-            entradas_file = st.file_uploader("1) Subir archivo de Entradas.xlsx", type=["xlsx"], key="salida_neta_entradas")
-            salidas_file = st.file_uploader("2) Subir archivo de Salidas.xlsx", type=["xlsx"], key="salida_neta_salidas")
-            procesar = st.form_submit_button("3) Procesar Entradas y Salidas")
+            st.divider()
+
+            with st.form("salida_neta_form", clear_on_submit=False):
+                entradas_file = st.file_uploader("1) Subir archivo de Entradas.xlsx", type=["xlsx"], key="salida_neta_entradas")
+                salidas_file = st.file_uploader("2) Subir archivo de Salidas.xlsx", type=["xlsx"], key="salida_neta_salidas")
+                procesar = st.form_submit_button("3) Procesar Entradas y Salidas")
 
     def _leer_archivo_excel(uploaded_file):
         xls = pd.ExcelFile(uploaded_file)
@@ -6701,25 +6709,26 @@ def render_salida_neta_tab():
     fecha_desde = st.session_state.get("salida_neta_fecha_desde")
     catalogo_df, no_encontrados_df, col_rotacion = pd.DataFrame(), pd.DataFrame(), ""
 
-    if isinstance(resultado, pd.DataFrame) and not resultado.empty:
-        existencias_df = st.session_state.get("salida_neta_existencias_df")
-        if isinstance(fecha_desde, datetime):
-            try:
-                catalogo_df, no_encontrados_df, col_rotacion = _actualizar_rotacion_catalogo(resultado, fecha_desde, existencias_df)
-                st.info(f"Columna de rotación actualizada en catálogo: **{col_rotacion}**")
-            except Exception as e:
-                st.warning(f"No se pudo actualizar ROTACIONES en Google Sheets: {e}")
+    with subtab_carga_vista:
+        if isinstance(resultado, pd.DataFrame) and not resultado.empty:
+            existencias_df = st.session_state.get("salida_neta_existencias_df")
+            if isinstance(fecha_desde, datetime):
+                try:
+                    catalogo_df, no_encontrados_df, col_rotacion = _actualizar_rotacion_catalogo(resultado, fecha_desde, existencias_df)
+                    st.info(f"Columna de rotación actualizada en catálogo: **{col_rotacion}**")
+                except Exception as e:
+                    st.warning(f"No se pudo actualizar ROTACIONES en Google Sheets: {e}")
 
-        st.markdown("### Tabla Final")
-        st.dataframe(resultado, use_container_width=True, hide_index=True)
-        if isinstance(no_encontrados_df, pd.DataFrame) and not no_encontrados_df.empty:
-            st.markdown("### ⚠️ Productos no encontrados en Catálogo TD")
-            st.caption(
-                "Esta tabla muestra únicamente los productos con **Salida_Neta > 0** cuyo **Código** "
-                "no existe en la columna **Modelo** del catálogo `ROTACIONES`. "
-                "Estos productos **no** se incluyen en la orden de compra hasta que se agreguen/corrijan en el catálogo."
-            )
-            st.dataframe(no_encontrados_df[["Código", "Descripción", "Salida_Neta"]], use_container_width=True, hide_index=True)
+            st.markdown("### Tabla Final")
+            st.dataframe(resultado, use_container_width=True, hide_index=True)
+            if isinstance(no_encontrados_df, pd.DataFrame) and not no_encontrados_df.empty:
+                st.markdown("### ⚠️ Productos no encontrados en Catálogo TD")
+                st.caption(
+                    "Esta tabla muestra únicamente los productos con **Salida_Neta > 0** cuyo **Código** "
+                    "no existe en la columna **Modelo** del catálogo `ROTACIONES`. "
+                    "Estos productos **no** se incluyen en la orden de compra hasta que se agreguen/corrijan en el catálogo."
+                )
+                st.dataframe(no_encontrados_df[["Código", "Descripción", "Salida_Neta"]], use_container_width=True, hide_index=True)
 
     if catalogo_df.empty:
         try:
@@ -6846,121 +6855,96 @@ def render_salida_neta_tab():
                 total = float(serie.sum())
                 if total > 0:
                     resumen_rows.append({"Proveedor": prov, "Productos": int((serie > 0).sum()), "Cantidad en tránsito": total})
-            if resumen_rows:
-                st.markdown("#### Resumen de material en tránsito por proveedor")
-                st.dataframe(pd.DataFrame(resumen_rows).sort_values("Cantidad en tránsito", ascending=False), hide_index=True, use_container_width=True)
+            with subtab_transito:
+                st.markdown("### 🚚 Tránsito")
+                if resumen_rows:
+                    st.markdown("#### Resumen de material en tránsito por proveedor")
+                    st.dataframe(pd.DataFrame(resumen_rows).sort_values("Cantidad en tránsito", ascending=False), hide_index=True, use_container_width=True)
 
-            with st.expander("🚚 Tránsito", expanded=True):
-                pending_por_proveedor = []
-                total_unidades_pendientes = 0.0
-                for prov in proveedor_cols.keys():
-                    serie_p = pd.to_numeric(cat_std[prov], errors="coerce").fillna(0)
-                    total_p = float(serie_p.sum())
-                    if total_p > 0:
-                        pending_por_proveedor.append((prov, total_p))
-                        total_unidades_pendientes += total_p
+                with st.expander("🚚 Tránsito", expanded=True):
+                    pending_por_proveedor = []
+                    total_unidades_pendientes = 0.0
+                    for prov in proveedor_cols.keys():
+                        serie_p = pd.to_numeric(cat_std[prov], errors="coerce").fillna(0)
+                        total_p = float(serie_p.sum())
+                        if total_p > 0:
+                            pending_por_proveedor.append((prov, total_p))
+                            total_unidades_pendientes += total_p
 
-                if pending_por_proveedor:
-                    st.info(
-                        "Hay unidades pendientes por actualizar en tránsito. "
-                        f"Total pendiente: **{int(total_unidades_pendientes) if total_unidades_pendientes.is_integer() else round(total_unidades_pendientes, 2)}**."
-                    )
-                    st.caption(
-                        "Proveedores con pendientes: "
-                        + ", ".join(
-                            f"{prov} ({int(total) if float(total).is_integer() else round(total, 2)})"
-                            for prov, total in sorted(pending_por_proveedor, key=lambda x: x[1], reverse=True)
+                    if pending_por_proveedor:
+                        st.info(
+                            "Hay unidades pendientes por actualizar en tránsito. "
+                            f"Total pendiente: **{int(total_unidades_pendientes) if total_unidades_pendientes.is_integer() else round(total_unidades_pendientes, 2)}**."
                         )
-                    )
-                    col_actualizar_transito = st.button("Actualizar Tránsito", key="rot_update_transito_btn")
-                else:
-                    col_actualizar_transito = False
-                    st.success("✅ La columna Tránsito ya está actualizada. No hay valores pendientes en columnas por proveedor.")
-
-                if col_actualizar_transito and proveedor_cols:
-                    try:
-                        transit_vals = cat_std[list(proveedor_cols.keys())].sum(axis=1)
-                        modelo_to_transit = dict(zip(cat_std["Modelo"].astype(str).str.strip(), transit_vals))
-                        if ws_rot is None:
-                            ws_rot = _retry_gspread_api_call(
-                                lambda: gspread_client.open_by_key(catalogotd).worksheet("ROTACIONES"),
-                                retries=5,
-                                base_delay=1.0,
+                        st.caption(
+                            "Proveedores con pendientes: "
+                            + ", ".join(
+                                f"{prov} ({int(total) if float(total).is_integer() else round(total, 2)})"
+                                for prov, total in sorted(pending_por_proveedor, key=lambda x: x[1], reverse=True)
                             )
-                        ws = ws_rot
-                        headers_ws = list(cat.columns)
-                        col_transito_ws = headers_ws.index("Transito") + 1 if "Transito" in headers_ws else headers_ws.index("Tránsito") + 1
-                        valores_transito = []
-                        for _, row in cat.iterrows():
-                            modelo = str(row.get(col_modelo, "")).strip()
-                            val = float(modelo_to_transit.get(modelo, 0))
-                            valores_transito.append([int(val) if val.is_integer() else val])
-                        barra_transito = st.progress(10, text="Preparando actualización de Tránsito...")
-                        data_ranges = [
-                            {
-                                "range": f"{gspread.utils.rowcol_to_a1(2, col_transito_ws)}:{gspread.utils.rowcol_to_a1(len(cat)+1, col_transito_ws)}",
-                                "values": valores_transito,
-                            }
-                        ]
-                        vacios = [[""] for _ in range(len(cat))]
-                        for _, prov_col in proveedor_cols.items():
-                            idx = headers_ws.index(prov_col) + 1
-                            data_ranges.append(
+                        )
+                        col_actualizar_transito = st.button("Actualizar Tránsito", key="rot_update_transito_btn")
+                    else:
+                        col_actualizar_transito = False
+                        st.success("✅ La columna Tránsito ya está actualizada. No hay valores pendientes en columnas por proveedor.")
+
+                    if col_actualizar_transito and proveedor_cols:
+                        try:
+                            transit_vals = cat_std[list(proveedor_cols.keys())].sum(axis=1)
+                            modelo_to_transit = dict(zip(cat_std["Modelo"].astype(str).str.strip(), transit_vals))
+                            if ws_rot is None:
+                                ws_rot = _retry_gspread_api_call(
+                                    lambda: gspread_client.open_by_key(catalogotd).worksheet("ROTACIONES"),
+                                    retries=5,
+                                    base_delay=1.0,
+                                )
+                            ws = ws_rot
+                            headers_ws = list(cat.columns)
+                            col_transito_ws = headers_ws.index("Transito") + 1 if "Transito" in headers_ws else headers_ws.index("Tránsito") + 1
+                            valores_transito = []
+                            for _, row in cat.iterrows():
+                                modelo = str(row.get(col_modelo, "")).strip()
+                                val = float(modelo_to_transit.get(modelo, 0))
+                                valores_transito.append([int(val) if val.is_integer() else val])
+                            barra_transito = st.progress(10, text="Preparando actualización de Tránsito...")
+                            data_ranges = [
                                 {
-                                    "range": f"{gspread.utils.rowcol_to_a1(2, idx)}:{gspread.utils.rowcol_to_a1(len(cat)+1, idx)}",
-                                    "values": vacios,
+                                    "range": f"{gspread.utils.rowcol_to_a1(2, col_transito_ws)}:{gspread.utils.rowcol_to_a1(len(cat)+1, col_transito_ws)}",
+                                    "values": valores_transito,
                                 }
-                            )
-                        barra_transito.progress(60, text="Aplicando actualización (1 sola escritura)...")
-                        _ws_batch_update_safe(ws, data_ranges)
-                        barra_transito.progress(100, text="Tránsito actualizado.")
-                        st.success("✅ Columna Tránsito actualizada y columnas de proveedor limpiadas (1 sola escritura).")
-                    except Exception as exc:
-                        st.error(f"❌ No se pudo actualizar Tránsito: {exc}")
+                            ]
+                            vacios = [[""] for _ in range(len(cat))]
+                            for _, prov_col in proveedor_cols.items():
+                                idx = headers_ws.index(prov_col) + 1
+                                data_ranges.append(
+                                    {
+                                        "range": f"{gspread.utils.rowcol_to_a1(2, idx)}:{gspread.utils.rowcol_to_a1(len(cat)+1, idx)}",
+                                        "values": vacios,
+                                    }
+                                )
+                            barra_transito.progress(60, text="Aplicando actualización (1 sola escritura)...")
+                            _ws_batch_update_safe(ws, data_ranges)
+                            barra_transito.progress(100, text="Tránsito actualizado.")
+                            st.success("✅ Columna Tránsito actualizada y columnas de proveedor limpiadas (1 sola escritura).")
+                        except Exception as exc:
+                            st.error(f"❌ No se pudo actualizar Tránsito: {exc}")
 
-                transito_preview = pd.DataFrame({
-                    "Modelo": cat[col_modelo] if col_modelo else "",
-                    "Descripción": cat[col_desc] if col_desc else "",
-                    "Proveedor": cat[col_proveedor] if col_proveedor else "",
-                    "Tránsito": cat[col_transito_view] if col_transito_view else "",
-                })
-                transito_preview = transito_preview[
-                    transito_preview["Modelo"].astype(str).str.strip() != ""
-                ].copy()
-                st.markdown("#### Resultado de columna Tránsito")
-                st.dataframe(transito_preview, use_container_width=True, hide_index=True)
+                    transito_preview = pd.DataFrame({
+                        "Modelo": cat[col_modelo] if col_modelo else "",
+                        "Descripción": cat[col_desc] if col_desc else "",
+                        "Proveedor": cat[col_proveedor] if col_proveedor else "",
+                        "Tránsito": cat[col_transito_view] if col_transito_view else "",
+                    })
+                    transito_preview = transito_preview[
+                        transito_preview["Modelo"].astype(str).str.strip() != ""
+                    ].copy()
+                    st.markdown("#### Resultado de columna Tránsito")
+                    st.dataframe(transito_preview, use_container_width=True, hide_index=True)
 
-            with st.expander("📊 Vista de Rotaciones", expanded=True):
-                tabla_rot = pd.DataFrame({
-                "Modelo": cat[col_modelo] if col_modelo else "",
-                "Descripción": cat[col_desc] if col_desc else "",
-                "Proveedor": cat[col_proveedor] if col_proveedor else "",
-                "Existencias": cat[col_existencias_view] if col_existencias_view else "",
-                "Tránsito": cat[col_transito_view] if col_transito_view else "",
-                "Ventas Promedio Por Mes": cat[col_ventas_prom] if col_ventas_prom else "",
-                "Comprar": cat[col_comprar] if col_comprar else "",
-            })
-                for rc in ultimas_rot_cols:
-                    tabla_rot[rc] = cat[rc]
-                prov_opts = sorted([x for x in tabla_rot["Proveedor"].astype(str).str.strip().unique().tolist() if x])
-                colf1, colf2 = st.columns(2)
-                with colf1:
-                    filtro_prov = st.selectbox("Filtrar por proveedor", options=["Todos"] + prov_opts, key="rot_filtro_proveedor")
-                with colf2:
-                    filtro_comp = st.selectbox("Filtrar por Comprar", options=["Todos", "COMPRAR", "OK"], index=1, key="rot_filtro_comprar")
-                if filtro_prov != "Todos":
-                    tabla_rot = tabla_rot[tabla_rot["Proveedor"].astype(str).str.strip() == filtro_prov]
-                if filtro_comp != "Todos":
-                    tabla_rot = tabla_rot[tabla_rot["Comprar"].astype(str).str.upper().str.strip() == filtro_comp]
-                st.dataframe(tabla_rot, use_container_width=True, hide_index=True)
-
-                st.markdown("#### ✍️ Captura manual para guardar en catálogo")
-                st.caption(
-                    "Asigna valores por producto (estilo Excel) y guarda los cambios en ROTACIONES. "
-                    "Esta tabla usa los mismos filtros de proveedor/comprar y no incluye columnas de rotación."
-                )
-                captura_df = pd.DataFrame({
-                    "__row_idx": cat.index,
+            with subtab_carga_vista:
+                st.markdown("### 📊 Vista de Rotaciones")
+                with st.expander("📊 Vista de Rotaciones", expanded=True):
+                    tabla_rot = pd.DataFrame({
                     "Modelo": cat[col_modelo] if col_modelo else "",
                     "Descripción": cat[col_desc] if col_desc else "",
                     "Proveedor": cat[col_proveedor] if col_proveedor else "",
@@ -6968,132 +6952,161 @@ def render_salida_neta_tab():
                     "Tránsito": cat[col_transito_view] if col_transito_view else "",
                     "Ventas Promedio Por Mes": cat[col_ventas_prom] if col_ventas_prom else "",
                     "Comprar": cat[col_comprar] if col_comprar else "",
-                    "Unidades Sugeridas": cat[col_unidades_sugeridas] if col_unidades_sugeridas else "",
                 })
-                if filtro_prov != "Todos":
-                    captura_df = captura_df[captura_df["Proveedor"].astype(str).str.strip() == filtro_prov]
-                if filtro_comp != "Todos":
-                    captura_df = captura_df[captura_df["Comprar"].astype(str).str.upper().str.strip() == filtro_comp]
+                    for rc in ultimas_rot_cols:
+                        tabla_rot[rc] = cat[rc]
+                    prov_opts = sorted([x for x in tabla_rot["Proveedor"].astype(str).str.strip().unique().tolist() if x])
+                    colf1, colf2 = st.columns(2)
+                    with colf1:
+                        filtro_prov = st.selectbox("Filtrar por proveedor", options=["Todos"] + prov_opts, key="rot_filtro_proveedor")
+                    with colf2:
+                        filtro_comp = st.selectbox("Filtrar por Comprar", options=["Todos", "COMPRAR", "OK"], index=1, key="rot_filtro_comprar")
+                    if filtro_prov != "Todos":
+                        tabla_rot = tabla_rot[tabla_rot["Proveedor"].astype(str).str.strip() == filtro_prov]
+                    if filtro_comp != "Todos":
+                        tabla_rot = tabla_rot[tabla_rot["Comprar"].astype(str).str.upper().str.strip() == filtro_comp]
+                    st.dataframe(tabla_rot, use_container_width=True, hide_index=True)
 
-                editor_df = captura_df.copy()
-                editor_df["__sheet_row"] = editor_df["__row_idx"].astype(int) + 2
-
-                proveedor_captura = filtro_prov if filtro_prov != "Todos" else ""
-                proveedor_captura_col = proveedor_cols.get(proveedor_captura) if proveedor_captura else None
-                cantidad_col_editor = "Cantidad proveedor"
-                if proveedor_captura_col:
-                    valores_editor = cat.loc[editor_df["__row_idx"], proveedor_captura_col].tolist()
-                    valores_editor_limpios = []
-                    for valor in valores_editor:
-                        valor_txt = str(valor).strip().lower() if valor is not None else ""
-                        if valor is None or valor_txt in {"", "none", "nan", "null"}:
-                            valores_editor_limpios.append("")
-                            continue
-                        cantidad_editor = pd.to_numeric(valor, errors="coerce")
-                        if pd.isna(cantidad_editor):
-                            valores_editor_limpios.append("")
-                        elif float(cantidad_editor).is_integer():
-                            valores_editor_limpios.append(int(cantidad_editor))
-                        else:
-                            valores_editor_limpios.append(float(cantidad_editor))
-                    editor_df[cantidad_col_editor] = valores_editor_limpios
-                else:
-                    editor_df[cantidad_col_editor] = ""
-
-                editor_df = editor_df.drop(columns=["__row_idx", "Unidades Sugeridas"])
-                nombre_col_cantidad = "✍️ Valor editable proveedor"
-                edited_df = editor_df.rename(columns={cantidad_col_editor: nombre_col_cantidad}).copy()
-                sheet_rows_editor = editor_df["__sheet_row"].reset_index(drop=True)
-
-                editor_key_manual = f"rot_editor_manual_{proveedor_captura}" if proveedor_captura else "rot_editor_manual_none"
-                with st.form("rot_form_captura_manual"):
-                    edited_df = st.data_editor(
-                        edited_df,
-                        hide_index=True,
-                        use_container_width=True,
-                        key=editor_key_manual,
-                        column_order=[
-                            "Modelo",
-                            "Descripción",
-                            "Proveedor",
-                            "Existencias",
-                            "Tránsito",
-                            "Ventas Promedio Por Mes",
-                            "Comprar",
-                            nombre_col_cantidad,
-                        ],
-                        column_config={
-                            "Modelo": st.column_config.TextColumn(disabled=True),
-                            "Descripción": st.column_config.TextColumn(disabled=True),
-                            "Proveedor": st.column_config.TextColumn(disabled=True),
-                            "Existencias": st.column_config.NumberColumn(disabled=True),
-                            "Tránsito": st.column_config.NumberColumn(disabled=True),
-                            "Ventas Promedio Por Mes": st.column_config.NumberColumn(disabled=True),
-                            "Comprar": st.column_config.TextColumn(disabled=True),
-                            nombre_col_cantidad: st.column_config.NumberColumn(min_value=0, step=1, disabled=not bool(proveedor_captura_col)),
-                        },
+                    st.markdown("#### ✍️ Captura manual para guardar en catálogo")
+                    st.caption(
+                        "Asigna valores por producto (estilo Excel) y guarda los cambios en ROTACIONES. "
+                        "Esta tabla usa los mismos filtros de proveedor/comprar y no incluye columnas de rotación."
                     )
-                    guardar_captura = st.form_submit_button("💾 Guardar captura manual en ROTACIONES")
+                    captura_df = pd.DataFrame({
+                        "__row_idx": cat.index,
+                        "Modelo": cat[col_modelo] if col_modelo else "",
+                        "Descripción": cat[col_desc] if col_desc else "",
+                        "Proveedor": cat[col_proveedor] if col_proveedor else "",
+                        "Existencias": cat[col_existencias_view] if col_existencias_view else "",
+                        "Tránsito": cat[col_transito_view] if col_transito_view else "",
+                        "Ventas Promedio Por Mes": cat[col_ventas_prom] if col_ventas_prom else "",
+                        "Comprar": cat[col_comprar] if col_comprar else "",
+                        "Unidades Sugeridas": cat[col_unidades_sugeridas] if col_unidades_sugeridas else "",
+                    })
+                    if filtro_prov != "Todos":
+                        captura_df = captura_df[captura_df["Proveedor"].astype(str).str.strip() == filtro_prov]
+                    if filtro_comp != "Todos":
+                        captura_df = captura_df[captura_df["Comprar"].astype(str).str.upper().str.strip() == filtro_comp]
 
-                if not proveedor_captura_col:
-                    st.info("Selecciona un proveedor específico en el filtro para capturar cantidades por proveedor.")
+                    editor_df = captura_df.copy()
+                    editor_df["__sheet_row"] = editor_df["__row_idx"].astype(int) + 2
 
-                if guardar_captura:
-                    try:
-                        if ws_rot is None:
-                            ws_rot = _retry_gspread_api_call(
-                                lambda: gspread_client.open_by_key(catalogotd).worksheet("ROTACIONES"),
-                                retries=5,
-                                base_delay=1.0,
-                            )
-                        headers_ws = list(cat.columns)
-                        if not col_comprar:
-                            st.error("❌ No se encontró la columna Comprar en ROTACIONES.")
-                        elif not proveedor_captura_col:
-                            st.error("❌ Para guardar cantidades, selecciona un proveedor específico en el filtro.")
-                        else:
-                            col_proveedor_qty_ws = headers_ws.index(proveedor_captura_col) + 1
-                            total_rows_cat = len(cat)
-                            if total_rows_cat <= 0:
-                                st.info("No hay filas de catálogo para guardar.")
+                    proveedor_captura = filtro_prov if filtro_prov != "Todos" else ""
+                    proveedor_captura_col = proveedor_cols.get(proveedor_captura) if proveedor_captura else None
+                    cantidad_col_editor = "Cantidad proveedor"
+                    if proveedor_captura_col:
+                        valores_editor = cat.loc[editor_df["__row_idx"], proveedor_captura_col].tolist()
+                        valores_editor_limpios = []
+                        for valor in valores_editor:
+                            valor_txt = str(valor).strip().lower() if valor is not None else ""
+                            if valor is None or valor_txt in {"", "none", "nan", "null"}:
+                                valores_editor_limpios.append("")
+                                continue
+                            cantidad_editor = pd.to_numeric(valor, errors="coerce")
+                            if pd.isna(cantidad_editor):
+                                valores_editor_limpios.append("")
+                            elif float(cantidad_editor).is_integer():
+                                valores_editor_limpios.append(int(cantidad_editor))
                             else:
-                                valores_columna = cat[proveedor_captura_col].tolist()
-                                for i, valor in enumerate(valores_columna):
-                                    valor_txt = str(valor).strip().lower() if valor is not None else ""
-                                    if valor is None or valor_txt in {"", "none", "nan", "null"}:
-                                        valores_columna[i] = ""
-                                        continue
-                                    cantidad_base = pd.to_numeric(valor, errors="coerce")
-                                    if pd.isna(cantidad_base):
-                                        valores_columna[i] = ""
-                                    elif float(cantidad_base).is_integer():
-                                        valores_columna[i] = int(cantidad_base)
-                                    else:
-                                        valores_columna[i] = float(cantidad_base)
+                                valores_editor_limpios.append(float(cantidad_editor))
+                        editor_df[cantidad_col_editor] = valores_editor_limpios
+                    else:
+                        editor_df[cantidad_col_editor] = ""
 
-                                for idx, (_, row) in enumerate(edited_df.iterrows()):
-                                    row_idx_cat = int(sheet_rows_editor.iloc[idx]) - 2
-                                    if row_idx_cat < 0 or row_idx_cat >= total_rows_cat:
-                                        continue
-                                    cantidad_val = pd.to_numeric(row.get(nombre_col_cantidad), errors="coerce")
-                                    if pd.isna(cantidad_val):
-                                        valores_columna[row_idx_cat] = ""
-                                    elif float(cantidad_val).is_integer():
-                                        valores_columna[row_idx_cat] = int(cantidad_val)
-                                    else:
-                                        valores_columna[row_idx_cat] = float(cantidad_val)
+                    editor_df = editor_df.drop(columns=["__row_idx", "Unidades Sugeridas"])
+                    nombre_col_cantidad = "✍️ Valor editable proveedor"
+                    edited_df = editor_df.rename(columns={cantidad_col_editor: nombre_col_cantidad}).copy()
+                    sheet_rows_editor = editor_df["__sheet_row"].reset_index(drop=True)
 
-                                data_range = {
-                                    "range": f"{gspread.utils.rowcol_to_a1(2, col_proveedor_qty_ws)}:{gspread.utils.rowcol_to_a1(total_rows_cat + 1, col_proveedor_qty_ws)}",
-                                    "values": [[v] for v in valores_columna],
-                                }
-                                with st.spinner("Guardando captura manual en ROTACIONES..."):
-                                    _ws_batch_update_safe(ws_rot, [data_range])
-                                st.session_state.pop(editor_key_manual, None)
-                                st.success(f"✅ Captura guardada para proveedor {proveedor_captura}.")
-                    except Exception as exc:
-                        st.error(f"❌ No se pudo guardar la captura manual: {exc}")
-                        st.code(traceback.format_exc())
+                    editor_key_manual = f"rot_editor_manual_{proveedor_captura}" if proveedor_captura else "rot_editor_manual_none"
+                    with st.form("rot_form_captura_manual"):
+                        edited_df = st.data_editor(
+                            edited_df,
+                            hide_index=True,
+                            use_container_width=True,
+                            key=editor_key_manual,
+                            column_order=[
+                                "Modelo",
+                                "Descripción",
+                                "Proveedor",
+                                "Existencias",
+                                "Tránsito",
+                                "Ventas Promedio Por Mes",
+                                "Comprar",
+                                nombre_col_cantidad,
+                            ],
+                            column_config={
+                                "Modelo": st.column_config.TextColumn(disabled=True),
+                                "Descripción": st.column_config.TextColumn(disabled=True),
+                                "Proveedor": st.column_config.TextColumn(disabled=True),
+                                "Existencias": st.column_config.NumberColumn(disabled=True),
+                                "Tránsito": st.column_config.NumberColumn(disabled=True),
+                                "Ventas Promedio Por Mes": st.column_config.NumberColumn(disabled=True),
+                                "Comprar": st.column_config.TextColumn(disabled=True),
+                                nombre_col_cantidad: st.column_config.NumberColumn(min_value=0, step=1, disabled=not bool(proveedor_captura_col)),
+                            },
+                        )
+                        guardar_captura = st.form_submit_button("💾 Guardar captura manual en ROTACIONES")
+
+                    if not proveedor_captura_col:
+                        st.info("Selecciona un proveedor específico en el filtro para capturar cantidades por proveedor.")
+
+                    if guardar_captura:
+                        try:
+                            if ws_rot is None:
+                                ws_rot = _retry_gspread_api_call(
+                                    lambda: gspread_client.open_by_key(catalogotd).worksheet("ROTACIONES"),
+                                    retries=5,
+                                    base_delay=1.0,
+                                )
+                            headers_ws = list(cat.columns)
+                            if not col_comprar:
+                                st.error("❌ No se encontró la columna Comprar en ROTACIONES.")
+                            elif not proveedor_captura_col:
+                                st.error("❌ Para guardar cantidades, selecciona un proveedor específico en el filtro.")
+                            else:
+                                col_proveedor_qty_ws = headers_ws.index(proveedor_captura_col) + 1
+                                total_rows_cat = len(cat)
+                                if total_rows_cat <= 0:
+                                    st.info("No hay filas de catálogo para guardar.")
+                                else:
+                                    valores_columna = cat[proveedor_captura_col].tolist()
+                                    for i, valor in enumerate(valores_columna):
+                                        valor_txt = str(valor).strip().lower() if valor is not None else ""
+                                        if valor is None or valor_txt in {"", "none", "nan", "null"}:
+                                            valores_columna[i] = ""
+                                            continue
+                                        cantidad_base = pd.to_numeric(valor, errors="coerce")
+                                        if pd.isna(cantidad_base):
+                                            valores_columna[i] = ""
+                                        elif float(cantidad_base).is_integer():
+                                            valores_columna[i] = int(cantidad_base)
+                                        else:
+                                            valores_columna[i] = float(cantidad_base)
+
+                                    for idx, (_, row) in enumerate(edited_df.iterrows()):
+                                        row_idx_cat = int(sheet_rows_editor.iloc[idx]) - 2
+                                        if row_idx_cat < 0 or row_idx_cat >= total_rows_cat:
+                                            continue
+                                        cantidad_val = pd.to_numeric(row.get(nombre_col_cantidad), errors="coerce")
+                                        if pd.isna(cantidad_val):
+                                            valores_columna[row_idx_cat] = ""
+                                        elif float(cantidad_val).is_integer():
+                                            valores_columna[row_idx_cat] = int(cantidad_val)
+                                        else:
+                                            valores_columna[row_idx_cat] = float(cantidad_val)
+
+                                    data_range = {
+                                        "range": f"{gspread.utils.rowcol_to_a1(2, col_proveedor_qty_ws)}:{gspread.utils.rowcol_to_a1(total_rows_cat + 1, col_proveedor_qty_ws)}",
+                                        "values": [[v] for v in valores_columna],
+                                    }
+                                    with st.spinner("Guardando captura manual en ROTACIONES..."):
+                                        _ws_batch_update_safe(ws_rot, [data_range])
+                                    st.session_state.pop(editor_key_manual, None)
+                                    st.success(f"✅ Captura guardada para proveedor {proveedor_captura}.")
+                        except Exception as exc:
+                            st.error(f"❌ No se pudo guardar la captura manual: {exc}")
+                            st.code(traceback.format_exc())
 
             po_base = cat_std[cat_std["Modelo"].notna() & (cat_std["Modelo"].astype(str).str.strip() != "")].copy()
             po_base = po_base[po_base["Comprar"] == "COMPRAR"].copy()
@@ -7115,129 +7128,131 @@ def render_salida_neta_tab():
                     linea["Quantity"] = pd.to_numeric(item.get("Unidades Sugeridas"), errors="coerce")
                     lineas_oc.append(linea)
 
-            with st.expander("🧾 Órdenes de compra por proveedor", expanded=True):
-                po_df = pd.DataFrame(lineas_oc)
-                if po_df.empty:
-                    po_df = pd.DataFrame(columns=["Modelo", "Descripción", "English Description", "Quantity", "Cost", "Total", "Proveedor"])
-                else:
-                    po_df["Quantity"] = pd.to_numeric(po_df["Quantity"], errors="coerce").fillna(0)
-                    po_df = po_df[po_df["Quantity"] > 0].copy()
-                    po_df["Cost"] = po_df["PRECIO"]
-                    po_df["Total"] = po_df["Quantity"] * po_df["Cost"]
-                    po_df = po_df[["Modelo", "Descripción", "English Description", "Quantity", "Cost", "Total", "Proveedor"]]
+            with subtab_oc:
+                st.markdown("### 🧾 Órdenes de compra por proveedor")
+                with st.expander("🧾 Órdenes de compra por proveedor", expanded=True):
+                    po_df = pd.DataFrame(lineas_oc)
+                    if po_df.empty:
+                        po_df = pd.DataFrame(columns=["Modelo", "Descripción", "English Description", "Quantity", "Cost", "Total", "Proveedor"])
+                    else:
+                        po_df["Quantity"] = pd.to_numeric(po_df["Quantity"], errors="coerce").fillna(0)
+                        po_df = po_df[po_df["Quantity"] > 0].copy()
+                        po_df["Cost"] = po_df["PRECIO"]
+                        po_df["Total"] = po_df["Quantity"] * po_df["Cost"]
+                        po_df = po_df[["Modelo", "Descripción", "English Description", "Quantity", "Cost", "Total", "Proveedor"]]
 
-                proveedores_validos = po_df["Proveedor"].astype(str).str.strip()
-                proveedores = (
-                    po_df.assign(_prov=proveedores_validos)
-                    .loc[lambda d: d["_prov"] != ""]
-                    .groupby("_prov")
-                    .size()
-                    .sort_values(ascending=False)
-                    .index
-                    .tolist()
-                )
-                sin_proveedor = int((po_df["Proveedor"].astype(str).str.strip() == "").sum()) if not po_df.empty else 0
-                st.caption(
-                    f"Productos COMPRAR para OC: **{len(po_df)}** | "
-                    f"Con proveedor: **{len(proveedores)}** | Sin proveedor asignado: **{sin_proveedor}**"
-                )
-                if sin_proveedor > 0:
-                    sin_proveedor_df = po_df[po_df["Proveedor"].astype(str).str.strip() == ""].copy()
-                    sin_proveedor_df = sin_proveedor_df[
-                        ["Modelo", "Descripción", "English Description", "Quantity", "Cost", "Total"]
-                    ].copy()
-                    with st.expander(f"⚠️ Ver productos sin proveedor asignado ({sin_proveedor})", expanded=False):
-                        st.caption(
-                            "Estos productos están marcados como **COMPRAR**, pero no tienen cantidades en las "
-                            "columnas de proveedor ni valor en la columna **Proveedor** para usar con "
-                            "**Unidades Sugeridas**; por eso no se incluyen en una OC por proveedor."
-                        )
-                        st.dataframe(sin_proveedor_df, use_container_width=True, hide_index=True)
-                if proveedores:
-                    st.caption("Expande cada proveedor para ver la previsualización de su orden de compra y descargar su Excel.")
-                    for prov in proveedores:
-                        po_prov = po_df[po_df["Proveedor"].astype(str).str.strip() == prov].copy()
-                        po_prov_export = po_prov[["Modelo", "Descripción", "English Description", "Quantity", "Cost", "Total"]].copy()
-                        total_piezas = pd.to_numeric(po_prov_export["Quantity"], errors="coerce").fillna(0).sum()
-                        total_monto = pd.to_numeric(po_prov_export["Total"], errors="coerce").fillna(0).sum()
-    
-                        with st.expander(f"📦 {prov} — {len(po_prov_export)} productos — {int(total_piezas)} piezas", expanded=False):
-                            st.dataframe(po_prov_export, use_container_width=True, hide_index=True)
-                            st.markdown(f"**Total orden:** ${total_monto:,.2f}")
-    
-                            excel_buffer = BytesIO()
-                            with pd.ExcelWriter(excel_buffer, engine="xlsxwriter") as writer:
-                                po_prov_export.to_excel(writer, sheet_name="Orden_Compra", index=False)
-                                ws_oc = writer.sheets["Orden_Compra"]
-                                wb_oc = writer.book
-    
-                                ncols = len(po_prov_export.columns)
-                                nrows = len(po_prov_export)
-    
-                                fmt_header = wb_oc.add_format({"bold": True, "border": 1, "align": "center", "valign": "vcenter"})
-                                fmt_text = wb_oc.add_format({"border": 1})
-                                fmt_num = wb_oc.add_format({"border": 1, "num_format": "#,##0"})
-                                fmt_money = wb_oc.add_format({"border": 1, "num_format": "$#,##0.00"})
-                                fmt_total_label = wb_oc.add_format({"bold": True, "border": 1, "align": "right"})
-                                fmt_total_value = wb_oc.add_format({"bold": True, "border": 1, "num_format": "$#,##0.00"})
-    
-                                # Encabezados con borde completo.
-                                for col_idx, col_name in enumerate(po_prov_export.columns):
-                                    ws_oc.write(0, col_idx, col_name, fmt_header)
-    
-                                # Bordes y formato para todas las celdas del cuerpo.
-                                if nrows > 0:
-                                    for row_idx in range(1, nrows + 1):
-                                        for col_idx, col_name in enumerate(po_prov_export.columns):
-                                            val = po_prov_export.iloc[row_idx - 1, col_idx]
-                                            if col_name == "Quantity":
-                                                ws_oc.write_number(row_idx, col_idx, float(pd.to_numeric(val, errors="coerce") or 0), fmt_num)
-                                            elif col_name in {"Cost", "Total"}:
-                                                ws_oc.write_number(row_idx, col_idx, float(pd.to_numeric(val, errors="coerce") or 0), fmt_money)
-                                            elif col_name in {"Descripción", "English Description"}:
-                                                ws_oc.write(row_idx, col_idx, "" if pd.isna(val) else str(val), fmt_text)
-                                            else:
-                                                ws_oc.write(row_idx, col_idx, "" if pd.isna(val) else str(val), fmt_text)
-    
-                                # Anchos de columna (evitar columnas comprimidas).
-                                column_widths = {
-                                    "Modelo": 18,
-                                    "Descripción": 40,
-                                    "English Description": 48,
-                                    "Quantity": 12,
-                                    "Cost": 14,
-                                    "Total": 16,
-                                }
-                                for col_idx, col_name in enumerate(po_prov_export.columns):
-                                    ws_oc.set_column(col_idx, col_idx, column_widths.get(col_name, 16))
-    
-                                # Total general dos filas debajo del último registro.
-                                if "Total" in po_prov_export.columns and ncols > 0:
-                                    idx_total = po_prov_export.columns.get_loc("Total")
-                                    excel_first_data_row = 2
-                                    excel_last_data_row = nrows + 1
-                                    excel_total_row = nrows + 3
-                                    ws_oc.write(excel_total_row - 1, max(idx_total - 1, 0), "TOTAL", fmt_total_label)
-                                    ws_oc.write_formula(
-                                        excel_total_row - 1,
-                                        idx_total,
-                                        f"=SUM({chr(65 + idx_total)}{excel_first_data_row}:{chr(65 + idx_total)}{excel_last_data_row})",
-                                        fmt_total_value,
-                                    )
-    
-                            st.download_button(
-                                f"Descargar OC - {prov}",
-                                data=excel_buffer.getvalue(),
-                                file_name=f"orden_compra_{prov}_{fecha_desde.strftime('%Y_%m') if isinstance(fecha_desde, datetime) else 'mes'}.xlsx",
-                                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                                key=f"salida_neta_download_prov_{hashlib.md5(prov.encode('utf-8')).hexdigest()[:10]}",
-                            )
-                else:
-                    st.warning(
-                        "No hay proveedores para desplegar órdenes de compra. "
-                        "Revisa que los productos marcados como **COMPRAR** tengan cantidades en columnas de proveedor "
-                        "o tengan la columna **Proveedor** llena para usar **Unidades Sugeridas**."
+                    proveedores_validos = po_df["Proveedor"].astype(str).str.strip()
+                    proveedores = (
+                        po_df.assign(_prov=proveedores_validos)
+                        .loc[lambda d: d["_prov"] != ""]
+                        .groupby("_prov")
+                        .size()
+                        .sort_values(ascending=False)
+                        .index
+                        .tolist()
                     )
+                    sin_proveedor = int((po_df["Proveedor"].astype(str).str.strip() == "").sum()) if not po_df.empty else 0
+                    st.caption(
+                        f"Productos COMPRAR para OC: **{len(po_df)}** | "
+                        f"Con proveedor: **{len(proveedores)}** | Sin proveedor asignado: **{sin_proveedor}**"
+                    )
+                    if sin_proveedor > 0:
+                        sin_proveedor_df = po_df[po_df["Proveedor"].astype(str).str.strip() == ""].copy()
+                        sin_proveedor_df = sin_proveedor_df[
+                            ["Modelo", "Descripción", "English Description", "Quantity", "Cost", "Total"]
+                        ].copy()
+                        with st.expander(f"⚠️ Ver productos sin proveedor asignado ({sin_proveedor})", expanded=False):
+                            st.caption(
+                                "Estos productos están marcados como **COMPRAR**, pero no tienen cantidades en las "
+                                "columnas de proveedor ni valor en la columna **Proveedor** para usar con "
+                                "**Unidades Sugeridas**; por eso no se incluyen en una OC por proveedor."
+                            )
+                            st.dataframe(sin_proveedor_df, use_container_width=True, hide_index=True)
+                    if proveedores:
+                        st.caption("Expande cada proveedor para ver la previsualización de su orden de compra y descargar su Excel.")
+                        for prov in proveedores:
+                            po_prov = po_df[po_df["Proveedor"].astype(str).str.strip() == prov].copy()
+                            po_prov_export = po_prov[["Modelo", "Descripción", "English Description", "Quantity", "Cost", "Total"]].copy()
+                            total_piezas = pd.to_numeric(po_prov_export["Quantity"], errors="coerce").fillna(0).sum()
+                            total_monto = pd.to_numeric(po_prov_export["Total"], errors="coerce").fillna(0).sum()
+    
+                            with st.expander(f"📦 {prov} — {len(po_prov_export)} productos — {int(total_piezas)} piezas", expanded=False):
+                                st.dataframe(po_prov_export, use_container_width=True, hide_index=True)
+                                st.markdown(f"**Total orden:** ${total_monto:,.2f}")
+    
+                                excel_buffer = BytesIO()
+                                with pd.ExcelWriter(excel_buffer, engine="xlsxwriter") as writer:
+                                    po_prov_export.to_excel(writer, sheet_name="Orden_Compra", index=False)
+                                    ws_oc = writer.sheets["Orden_Compra"]
+                                    wb_oc = writer.book
+    
+                                    ncols = len(po_prov_export.columns)
+                                    nrows = len(po_prov_export)
+    
+                                    fmt_header = wb_oc.add_format({"bold": True, "border": 1, "align": "center", "valign": "vcenter"})
+                                    fmt_text = wb_oc.add_format({"border": 1})
+                                    fmt_num = wb_oc.add_format({"border": 1, "num_format": "#,##0"})
+                                    fmt_money = wb_oc.add_format({"border": 1, "num_format": "$#,##0.00"})
+                                    fmt_total_label = wb_oc.add_format({"bold": True, "border": 1, "align": "right"})
+                                    fmt_total_value = wb_oc.add_format({"bold": True, "border": 1, "num_format": "$#,##0.00"})
+    
+                                    # Encabezados con borde completo.
+                                    for col_idx, col_name in enumerate(po_prov_export.columns):
+                                        ws_oc.write(0, col_idx, col_name, fmt_header)
+    
+                                    # Bordes y formato para todas las celdas del cuerpo.
+                                    if nrows > 0:
+                                        for row_idx in range(1, nrows + 1):
+                                            for col_idx, col_name in enumerate(po_prov_export.columns):
+                                                val = po_prov_export.iloc[row_idx - 1, col_idx]
+                                                if col_name == "Quantity":
+                                                    ws_oc.write_number(row_idx, col_idx, float(pd.to_numeric(val, errors="coerce") or 0), fmt_num)
+                                                elif col_name in {"Cost", "Total"}:
+                                                    ws_oc.write_number(row_idx, col_idx, float(pd.to_numeric(val, errors="coerce") or 0), fmt_money)
+                                                elif col_name in {"Descripción", "English Description"}:
+                                                    ws_oc.write(row_idx, col_idx, "" if pd.isna(val) else str(val), fmt_text)
+                                                else:
+                                                    ws_oc.write(row_idx, col_idx, "" if pd.isna(val) else str(val), fmt_text)
+    
+                                    # Anchos de columna (evitar columnas comprimidas).
+                                    column_widths = {
+                                        "Modelo": 18,
+                                        "Descripción": 40,
+                                        "English Description": 48,
+                                        "Quantity": 12,
+                                        "Cost": 14,
+                                        "Total": 16,
+                                    }
+                                    for col_idx, col_name in enumerate(po_prov_export.columns):
+                                        ws_oc.set_column(col_idx, col_idx, column_widths.get(col_name, 16))
+    
+                                    # Total general dos filas debajo del último registro.
+                                    if "Total" in po_prov_export.columns and ncols > 0:
+                                        idx_total = po_prov_export.columns.get_loc("Total")
+                                        excel_first_data_row = 2
+                                        excel_last_data_row = nrows + 1
+                                        excel_total_row = nrows + 3
+                                        ws_oc.write(excel_total_row - 1, max(idx_total - 1, 0), "TOTAL", fmt_total_label)
+                                        ws_oc.write_formula(
+                                            excel_total_row - 1,
+                                            idx_total,
+                                            f"=SUM({chr(65 + idx_total)}{excel_first_data_row}:{chr(65 + idx_total)}{excel_last_data_row})",
+                                            fmt_total_value,
+                                        )
+    
+                                st.download_button(
+                                    f"Descargar OC - {prov}",
+                                    data=excel_buffer.getvalue(),
+                                    file_name=f"orden_compra_{prov}_{fecha_desde.strftime('%Y_%m') if isinstance(fecha_desde, datetime) else 'mes'}.xlsx",
+                                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                                    key=f"salida_neta_download_prov_{hashlib.md5(prov.encode('utf-8')).hexdigest()[:10]}",
+                                )
+                    else:
+                        st.warning(
+                            "No hay proveedores para desplegar órdenes de compra. "
+                            "Revisa que los productos marcados como **COMPRAR** tengan cantidades en columnas de proveedor "
+                            "o tengan la columna **Proveedor** llena para usar **Unidades Sugeridas**."
+                        )
 # --- INTERFAZ ---
 USUARIOS_VALIDOS = ["ALEJANDRO38", "CeciliaATD", "SChava", "BreydaFTD", "SaraiFTD", "JorgeLic"]
 
