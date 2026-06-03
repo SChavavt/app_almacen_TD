@@ -151,54 +151,14 @@ def _admintotal_formatear_fecha_visual(valor: str) -> str:
     return fecha.strftime("%d/%m/%Y")
 
 
-def _admintotal_fecha_candidatos(factura: dict) -> list[str]:
-    """Obtiene posibles fechas de AdminTotal, priorizando campos que suelen traer hora."""
-    claves_fecha_prioritarias = [
-        "fecha_hora",
-        "fechaHora",
-        "fecha_emision",
-        "fechaEmision",
-        "fecha_factura",
-        "fechaFactura",
-        "fecha",
-        "fecha_creacion",
-        "fechaCreacion",
-        "created_at",
-        "createdAt",
-        "fecha_registro",
-        "fechaRegistro",
-        "fecha_timbrado",
-        "fechaTimbrado",
-        "timbrado_at",
-        "timbradoAt",
-        "fecha_alta",
-        "fechaAlta",
-    ]
-    valores = []
-    vistos = set()
-
-    def agregar(valor):
-        texto = _admintotal_valor_texto(valor)
-        if texto and texto not in vistos:
-            valores.append(texto)
-            vistos.add(texto)
-
-    for clave in claves_fecha_prioritarias:
-        agregar(factura.get(clave))
-
-    # Respaldo: si AdminTotal cambia el nombre del campo, busca cualquier llave
-    # de fecha/creación/timbrado en la respuesta y conserva la hora cuando exista.
-    for clave, valor in factura.items():
-        clave_norm = normalizar(clave)
-        if any(token in clave_norm for token in ("fecha", "date", "created", "emision", "timbr")):
-            agregar(valor)
-
-    return valores
-
-
 def _admintotal_fecha_factura(factura: dict) -> str:
     """Elige la fecha más precisa disponible para evitar análisis con hora 00:00."""
-    valores = _admintotal_fecha_candidatos(factura)
+    claves_fecha = ["fecha", "fecha_creacion", "fecha_timbrado"]
+    valores = []
+    for clave in claves_fecha:
+        texto = _admintotal_valor_texto(factura.get(clave))
+        if texto:
+            valores.append(texto)
     for texto in valores:
         if _admintotal_fecha_tiene_hora(texto):
             return _admintotal_formatear_fecha_visual(texto)
