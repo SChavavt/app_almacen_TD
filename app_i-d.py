@@ -313,16 +313,8 @@ current_time = datetime.now(TZ).strftime("%d/%m %H:%M:%S")
 if is_tv_wall_view:
     wall_title = "📦 Pedidos Locales en Tiempo Real" if is_pantalla_l_view else "🚚 Pedidos Foráneos en Tiempo Real"
     st.markdown(
-        f'<div class="header-compact" style="margin-bottom:0.15rem;"><h2 style="color:white;">{wall_title}</h2><div class="header-meta">🕒 Última actualización: 19/05 15:02:52</div></div>',
+        f'<div class="header-compact" style="margin-bottom:0.15rem;"><h2 style="color:white;">{wall_title}</h2><div class="header-meta">🕒 Última actualización: {current_time}</div></div>',
         unsafe_allow_html=True,
-    )
-    components.html(
-        """
-        <script>
-        window.parent.scrollTo({ top: document.body.scrollHeight, behavior: 'auto' });
-        </script>
-        """,
-        height=0,
     )
 elif not is_dissurtidor_view:
     col_title, col_update, col_actions = st.columns([0.6, 0.2, 0.2])
@@ -2050,7 +2042,8 @@ def render_auto_list(
         if not is_cancelado and has_explicit_number:
             display_number = e.get("display_num", fallback_number)
         number_label = f"#{display_number}" if display_number is not None else "—"
-        estado_html = f"<span class='board-status'>{sanitize_text(e.get('estado',''))}</span>"
+        estado_text = sanitize_text(e.get('estado', ''))
+        estado_html = f"<span class='board-status'>{estado_text}</span>"
 
         surtidor = sanitize_text(e.get("surtidor", ""))
         surtidor_html = (
@@ -2097,7 +2090,7 @@ def render_auto_list(
     is_pantalla_l_local_view = is_pantalla_l_view and mode == "local"
     is_large_auto_list_view = is_pantalla_l_view or is_pantalla_f_foraneo_view
 
-    row_height_px = 64 if is_pantalla_l_local_view else (56 if is_large_auto_list_view else 38)
+    row_height_px = 64 if is_pantalla_l_local_view else (52 if is_large_auto_list_view else 38)
     title_height_px = 58 if show_header else 10
     min_content = min_content_height if min_content_height is not None else (140 if show_header else 100)
     safety_padding_px = 24
@@ -2110,25 +2103,35 @@ def render_auto_list(
         "1.34rem" if is_pantalla_l_local_view else ("1.2rem" if is_large_auto_list_view else "1.01rem")
     )
     compact_sub_size = (
-        "1.04rem" if is_pantalla_l_local_view else ("0.94rem" if is_large_auto_list_view else "0.72rem")
+        "1.04rem" if is_pantalla_l_local_view else ("0.88rem" if is_large_auto_list_view else "0.72rem")
     )
     compact_head_size = (
         "1.02rem" if is_pantalla_l_local_view else ("0.92rem" if is_large_auto_list_view else "0.67rem")
     )
     compact_td_size = (
-        "1.22rem" if is_pantalla_l_local_view else ("1.08rem" if is_large_auto_list_view else "0.78rem")
+        "1.22rem" if is_pantalla_l_local_view else ("1.0rem" if is_large_auto_list_view else "0.78rem")
     )
     compact_n_size = (
-        "1.32rem" if is_pantalla_l_local_view else ("1.15rem" if is_large_auto_list_view else "0.77rem")
+        "1.32rem" if is_pantalla_l_local_view else ("1.04rem" if is_large_auto_list_view else "0.77rem")
     )
     compact_surtidor_size = (
-        "1.16rem" if is_pantalla_l_local_view else ("1.04rem" if is_large_auto_list_view else "0.75rem")
+        "1.16rem" if is_pantalla_l_local_view else ("0.92rem" if is_large_auto_list_view else "0.75rem")
     )
     compact_status_size = (
-        "1.08rem" if is_pantalla_l_local_view else ("0.98rem" if is_large_auto_list_view else "0.68rem")
+        "1.08rem" if is_pantalla_l_local_view else ("0.9rem" if is_large_auto_list_view else "0.68rem")
     )
     compact_tag_size = (
-        "1.05rem" if is_pantalla_l_local_view else ("0.95rem" if is_large_auto_list_view else "0.66rem")
+        "1.05rem" if is_pantalla_l_local_view else ("0.86rem" if is_large_auto_list_view else "0.66rem")
+    )
+
+    colgroup_html = (
+        "<col style='width:8%'><col style='width:49%'><col style='width:19%'><col style='width:24%'>"
+        if layout_user == "PANTALLAF" and mode == "foraneo"
+        else (
+            "<col style='width:6%'><col style='width:54%'><col style='width:20%'><col style='width:20%'>"
+            if mode in {"foraneo", "local"}
+            else "<col style='width:4%'><col style='width:70%'><col style='width:26%'>"
+        )
     )
 
     html = f"""
@@ -2143,14 +2146,14 @@ def render_auto_list(
     .board-row{{border-top:1px solid rgba(255,255,255,0.09);}}
     .board-row-priority{{background:rgba(128,0,255,0.42)!important;}}
     .board-row:first-child{{border-top:none;}}
-    .board-row td{{padding:0.2rem 0.16rem;vertical-align:middle;font-size:{compact_td_size};color:#fff;line-height:1.12rem;}}
+    .board-row td{{padding:0.18rem 0.18rem;vertical-align:middle;font-size:{compact_td_size};color:#fff;line-height:1.08rem;}}
     .board-head th + th{{border-left:1px solid rgba(136,176,255,0.3);}}
     .board-row td + td{{border-left:1px solid rgba(255,255,255,0.08);}}
-    .board-n{{width:1.25rem;font-size:{compact_n_size};font-weight:700;white-space:nowrap;color:#fff;padding-left:0.08rem;padding-right:0.08rem;}}
+    .board-n{{width:1.25rem;font-size:{compact_n_size};font-weight:800;white-space:nowrap;color:#fff;padding-left:0.16rem!important;padding-right:0.26rem!important;letter-spacing:-0.03em;}}
     .board-client{{width:auto;font-weight:600;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}}
-    .board-surtidor{{width:4.9rem;white-space:nowrap;text-align:left;font-weight:780;font-size:{compact_surtidor_size};}}
-    .board-state{{width:5.4rem;text-align:left;}}
-    .board-status{{font-size:{compact_status_size};font-weight:700;white-space:nowrap;opacity:0.97;padding:0.05rem 0.36rem;border-radius:0.56rem;background:rgba(255,255,255,0.12);}}
+    .board-surtidor{{width:4.9rem;white-space:nowrap;text-align:left;font-weight:780;font-size:{compact_surtidor_size};overflow:hidden;text-overflow:ellipsis;}}
+    .board-state{{width:5.4rem;text-align:left;white-space:nowrap;overflow:visible;}}
+    .board-status{{font-size:{compact_status_size};font-weight:700;white-space:nowrap;opacity:0.97;padding:0.04rem 0.22rem;border-radius:0.56rem;background:rgba(255,255,255,0.10);}}
     .surtidor-tag{{margin-left:0.1rem;padding:0.07rem 0.34rem;border-radius:0.7rem;background:rgba(114,190,255,0.18);color:#a9dcff;font-weight:650;font-size:{compact_tag_size};white-space:nowrap;}}
     .board-surtidor .surtidor-tag{{display:inline-block;margin-left:0;padding:0.09rem 0.4rem;font-size:{compact_surtidor_size};font-weight:800;}}
     #{list_id} .board-scroll{{max-height:none;overflow:visible;position:relative;}}
@@ -2160,7 +2163,7 @@ def render_auto_list(
     <div class="{scroll_class}">
         <table class="board-table">
             <colgroup>
-                {"<col style='width:6%'><col style='width:54%'><col style='width:20%'><col style='width:20%'>" if mode in {'foraneo', 'local'} else "<col style='width:4%'><col style='width:70%'><col style='width:26%'>"}
+                {colgroup_html}
             </colgroup>
             <thead class="board-head">
                 <tr>
@@ -4845,8 +4848,10 @@ if is_kiosk_mode:
         html, body, [data-testid="stAppViewContainer"] { overflow-x: hidden !important; background: #000 !important; }
         #MainMenu, footer, [data-testid="stSidebar"], [data-testid="stHeaderActionElements"],
         [data-testid="collapsedControl"] { display: none !important; }
-        section.main > div { padding-top: 0.25rem !important; padding-left: 0.45rem !important; padding-right: 0.45rem !important; max-width: 100vw !important; }
-        .block-container { padding-top: 0.1rem !important; max-width: 100vw !important; }
+        section.main > div { padding-top: 0.25rem !important; padding-left: 0.18rem !important; padding-right: 0.18rem !important; max-width: none !important; width: 100vw !important; }
+        .block-container { padding: 0.1rem 0.18rem 0.2rem 0.18rem !important; max-width: none !important; width: 100vw !important; }
+        div[data-testid="stHorizontalBlock"] { gap: 0.22rem !important; }
+        div[data-testid="stHorizontalBlock"] > div[data-testid="column"] { padding-left: 0 !important; padding-right: 0 !important; }
         </style>
         """,
         unsafe_allow_html=True,
@@ -4937,7 +4942,7 @@ def _inject_keepalive_media(enabled: bool) -> None:
             const safeState = {
               usuario: url.searchParams.get('usuario') || '',
               tab: url.searchParams.get('tab') || '0',
-              scrollY: window.scrollY || 0,
+              scrollY: 0,
               href: window.location.pathname + window.location.search + window.location.hash,
               ts: Date.now()
             };
@@ -4964,7 +4969,7 @@ def _inject_keepalive_media(enabled: bool) -> None:
                 const state = {
                   usuario: current.searchParams.get('usuario') || safeState.usuario || '',
                   tab: current.searchParams.get('tab') || safeState.tab || '0',
-                  scrollY: window.scrollY || 0,
+                  scrollY: 0,
                   href: window.location.pathname + window.location.search + window.location.hash,
                   ts: Date.now()
                 };
@@ -5115,9 +5120,7 @@ def _inject_keepalive_media(enabled: bool) -> None:
                   window.location.replace(current.toString());
                   return;
                 }
-                if (isFresh && typeof saved.scrollY === 'number' && saved.scrollY > 0) {
-                  requestAnimationFrame(() => window.scrollTo(0, saved.scrollY));
-                }
+                // En pantallas fijas no restauramos un scroll anterior: siempre volvemos al inicio de las listas.
                 if ('wasDiscarded' in document && document.wasDiscarded) persistState();
                 const lastSavedPulse = Number(localStorage.getItem(pulseKey) || '0');
                 trackLifecycle('pageshow', {
@@ -5180,6 +5183,11 @@ def _persist_page_scroll(view_key: str, user_key: str = "", force_bottom: bool =
         setTimeout(tryTop, 220);
         setTimeout(tryTop, 500);
         setTimeout(tryTop, 900);
+        // Fully Kiosk/TV: aunque una recarga pesada o el motor mueva la página,
+        // reanclamos el tablero al inicio de las listas cada 60 segundos.
+        if (!target.__tdTableTopResetInterval) {{
+          target.__tdTableTopResetInterval = setInterval(tryTop, 60000);
+        }}
       }} else if (forceCenter) {{
         setTimeout(scrollToCenter, 20);
         setTimeout(scrollToCenter, 220);
@@ -5197,7 +5205,8 @@ def _persist_page_scroll(view_key: str, user_key: str = "", force_bottom: bool =
 
       const save = () => {{
         if (!target.sessionStorage) return;
-        target.sessionStorage.setItem(key, String(root.scrollTop || target.scrollY || 0));
+        const y = forceTableTop ? 0 : (root.scrollTop || target.scrollY || 0);
+        target.sessionStorage.setItem(key, String(y));
       }};
 
       target.addEventListener('scroll', save, {{ passive: true }});
@@ -5627,8 +5636,10 @@ if selected_tab_key == "auto_foraneo":
     hoy_centro = hoy_entries[:midpoint_hoy]
     hoy_derecha = hoy_entries[midpoint_hoy:]
 
-    # 2) Layout: tres columnas
-    col_left, col_center, col_right = st.columns(3, gap="large")
+    # 2) Layout: tres columnas. En PANTALLAF usamos todo el ancho disponible
+    # y reducimos el espacio entre bloques para que no se compriman las filas.
+    foraneo_gap = "small" if logged_user == "PANTALLAF" else "large"
+    col_left, col_center, col_right = st.columns([1, 1, 1], gap=foraneo_gap)
 
     # --- IZQUIERDA: ANTERIORES ---
     with col_left:
