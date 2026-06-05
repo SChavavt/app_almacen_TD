@@ -1073,7 +1073,7 @@ PEDIDOS_COLUMNAS_MINIMAS = [
     "Comentario", "Comentarios", "Modificacion_Surtido", "Adjuntos_Surtido", "Adjuntos_Guia",
     "Adjuntos", "Direccion_Guia_Retorno", "Nota_Venta", "Tiene_Nota_Venta", "Motivo_NotaVenta",
     "Refacturacion_Tipo", "Refacturacion_Subtipo", "Folio_Factura_Refacturada", "fecha_modificacion", "Fecha_Modificacion",
-    "Tipo_Envio", "id_vendedor", "ID_Vendedor", "Id_Vendedor"
+    "Tipo_Envio", "Tipo_Venta", "id_vendedor", "ID_Vendedor", "Id_Vendedor"
 ]
 FACTURAS_FALTANTES_COLUMNAS = ["Vendedor", "FolioSerie", "Cliente", "Fecha"]
 ADMINTOTAL_CHECK_FACTURAS_HORA = (17, 40)
@@ -1976,6 +1976,148 @@ def cargar_casos_especiales():
 def cargar_todos_los_pedidos():
     """Carga todos los pedidos combinando datos_pedidos + data_pedidos."""
     return cargar_pedidos().copy()
+
+
+@st.cache_data(ttl=300)
+def cargar_ventas_terceros():
+    """Carga pedidos de ambas hojas cuyo Tipo_Venta sea Venta terceros."""
+    df = cargar_pedidos().copy()
+    if df.empty:
+        return df
+    if "Tipo_Venta" not in df.columns:
+        df["Tipo_Venta"] = ""
+
+    tipo_venta_norm = df["Tipo_Venta"].astype(str).str.strip().apply(normalizar)
+    df = df[tipo_venta_norm == "venta terceros"].copy()
+    if "Hora_Registro" in df.columns:
+        df["__hora_registro_dt"] = pd.to_datetime(df["Hora_Registro"], errors="coerce")
+        df = df.sort_values("__hora_registro_dt", ascending=False, na_position="last")
+    else:
+        df["__hora_registro_dt"] = pd.NaT
+    df = df.reset_index(drop=True)
+    df["__venta_terceros_key"] = df.apply(
+        lambda row: "|".join(
+            [
+                str(row.get("__hoja_origen", "")),
+                str(row.get("__sheet_row", "")),
+                str(row.get("ID_Pedido", "")),
+                str(row.get("Folio_Factura", "")),
+            ]
+        ),
+        axis=1,
+    )
+    return df
+
+
+def _venta_terceros_label(row: pd.Series) -> str:
+    """Etiqueta legible para elegir un pedido de Venta terceros."""
+    partes = []
+    id_pedido = str(row.get("ID_Pedido", "") or "").strip()
+    folio = str(row.get("Folio_Factura", "") or "").strip()
+    cliente = str(row.get("Cliente", "") or "").strip()
+    hora = str(row.get("Hora_Registro", "") or "").strip()
+    hoja = str(row.get("__hoja_origen", "") or "").strip()
+    if id_pedido:
+        partes.append(f"ID {id_pedido}")
+    if folio:
+        partes.append(f"Folio {folio_visual_desde_archivo(folio)}")
+    if cliente:
+        partes.append(cliente)
+    if hora:
+        partes.append(hora)
+    if hoja:
+        partes.append(f"hoja: {hoja}")
+    return " · ".join(partes) or f"Pedido fila {row.get('__sheet_row', '')}"
+
+
+def render_venta_terceros_tab():
+    """Muestra la lista y detalle completo de pedidos marcados como Venta terceros."""
+    st.header("🤝 Venta Terceros")
+    st.caption(
+        "Lista de pedidos de `datos_pedidos` y `data_pedidos` donde la columna "
+        "`Tipo_Venta` tiene el valor `Venta terceros`."
+    )
+
+    df_ventas = cargar_ventas_terceros()
+    if df_ventas.empty:
+        st.info("No se encontraron pedidos con Tipo_Venta = Venta terceros en datos_pedidos ni data_pedidos.")
+        return
+
+    col_m1, col_m2, col_m3 = st.columns(3)
+    col_m1.metric("Pedidos Venta terceros", len(df_ventas))
+    if "__hoja_origen" in df_ventas.columns:
+        col_m2.metric("En datos_pedidos", int((df_ventas["__hoja_origen"].astype(str) == "datos_pedidos").sum()))
+        col_m3.metric("En data_pedidos", int((df_ventas["__hoja_origen"].astype(str) == "data_pedidos").sum()))
+
+    columnas_lista = [
+        "__hoja_origen", "__sheet_row", "ID_Pedido", "Hora_Registro", "Cliente",
+        "Vendedor_Registro", "Folio_Factura", "Tipo_Venta", "Tipo_Envio", "Estado",
+    ]
+    columnas_lista = [c for c in columnas_lista if c in df_ventas.columns]
+    tabla = df_ventas[columnas_lista].copy()
+    tabla = tabla.rename(
+        columns={
+            "__hoja_origen": "Hoja origen",
+            "__sheet_row": "Fila hoja",
+            "ID_Pedido": "ID pedido",
+            "Hora_Registro": "Hora registro",
+            "Cliente": "Cliente",
+            "Vendedor_Registro": "Vendedor",
+            "Folio_Factura": "Folio factura",
+            "Tipo_Venta": "Tipo venta",
+            "Tipo_Envio": "Tipo envío",
+            "Estado": "Estado",
+        }
+    )
+    st.markdown("#### 📋 Lista de pedidos")
+    st.dataframe(tabla, use_container_width=True, hide_index=True)
+
+    opciones = df_ventas["__venta_terceros_key"].tolist()
+    labels = {row["__venta_terceros_key"]: _venta_terceros_label(row) for _, row in df_ventas.iterrows()}
+    pedido_key = st.selectbox(
+        "Selecciona un pedido para ver todos sus valores",
+        opciones,
+        format_func=lambda key: labels.get(key, key),
+        key="venta_terceros_pedido_select",
+    )
+
+    pedido_sel = df_ventas[df_ventas["__venta_terceros_key"] == pedido_key].iloc[0].copy()
+    st.markdown("#### 🔎 Detalle completo")
+    st.caption(
+        f"Origen: `{pedido_sel.get('__hoja_origen', '')}` · "
+        f"fila en hoja: `{pedido_sel.get('__sheet_row', '')}`"
+    )
+
+    columnas_internas = {"__venta_terceros_key", "__hora_registro_dt"}
+
+    def _valor_detalle(valor):
+        if valor is None:
+            return ""
+        if isinstance(valor, (list, tuple, dict, set)):
+            return json.dumps(valor, ensure_ascii=False)
+        try:
+            if pd.isna(valor):
+                return ""
+        except (TypeError, ValueError):
+            pass
+        return str(valor)
+
+    detalle = pd.DataFrame(
+        [
+            {"Campo": col, "Valor": _valor_detalle(pedido_sel.get(col))}
+            for col in df_ventas.columns
+            if col not in columnas_internas
+        ]
+    )
+    st.dataframe(detalle, use_container_width=True, hide_index=True)
+
+    st.download_button(
+        "⬇️ Descargar detalle del pedido (CSV)",
+        data=detalle.to_csv(index=False).encode("utf-8-sig"),
+        file_name=f"venta_terceros_{pedido_sel.get('ID_Pedido', 'pedido')}.csv",
+        mime="text/csv",
+        key="venta_terceros_descargar_detalle",
+    )
 
 
 def construir_descarga_completados_sin_limpieza():
@@ -7266,6 +7408,7 @@ PERMISOS_USUARIO = {
 }
 
 COBRANZA_ONLY_USERS = {"BreydaFTD", "SaraiFTD"}
+VENTA_TERCEROS_USERS = {"BreydaFTD", "SaraiFTD"}
 USUARIOS_VALIDOS_LOOKUP = {u.upper(): u for u in USUARIOS_VALIDOS}
 
 
@@ -7334,6 +7477,7 @@ elif usuario_actual in COBRANZA_ONLY_USERS:
         ("cobranza", "📒 Cobranza"),
         ("seguimiento_cobranza", "📊 Seguimiento Cobranza"),
         ("macheo_tool", "🧩 Macheo Tool"),
+        ("venta_terceros", "🤝 Venta Terceros"),
         ("buscar", "🔍 Buscar Pedido"),
     ]
 else:
@@ -7346,6 +7490,9 @@ else:
         tab_specs.append(("cobranza", "📒 Cobranza"))
         tab_specs.append(("seguimiento_cobranza", "📊 Seguimiento Cobranza"))
         tab_specs.append(("macheo_tool", "🧩 Macheo Tool"))
+
+    if usuario_actual in VENTA_TERCEROS_USERS:
+        tab_specs.append(("venta_terceros", "🤝 Venta Terceros"))
 
     if usuario_puede(usuario_actual, "organizador"):
         tab_specs.insert(0, ("organizador", "🗂️ Organizador"))
@@ -12152,6 +12299,10 @@ if "seguimiento_cobranza" in tab_map:
 if "macheo_tool" in tab_map:
     with tab_map["macheo_tool"]:
         render_macheo_tool_tab_gerente()
+
+if "venta_terceros" in tab_map:
+    with tab_map["venta_terceros"]:
+        render_venta_terceros_tab()
 
 if "salida_neta" in tab_map:
     with tab_map["salida_neta"]:
