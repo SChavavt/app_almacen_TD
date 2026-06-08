@@ -1914,6 +1914,117 @@ def build_entries_casos(df_casos: pd.DataFrame):
     return entries
 
 
+def _entry_identity_values(entry: dict) -> tuple[str, str, str]:
+    return (
+        sanitize_text(entry.get("sheet_source", "")),
+        sanitize_text(entry.get("gsheet_row_index", "")),
+        _flow_match_key(entry.get("id_pedido", "")) or _flow_match_key(entry.get("folio", "")),
+    )
+
+
+def _entry_exists_by_identity(entry: dict, existing_identities: set[tuple[str, str, str]]) -> bool:
+    source, row_idx, pedido_key = _entry_identity_values(entry)
+    for existing_source, existing_row_idx, existing_pedido_key in existing_identities:
+        if source and row_idx and source == existing_source and row_idx == existing_row_idx:
+            return True
+        if pedido_key and pedido_key == existing_pedido_key:
+            return True
+    return False
+
+
+def _append_identity(entry: dict, existing_identities: set[tuple[str, str, str]]) -> None:
+    identity = _entry_identity_values(entry)
+    if any(identity):
+        existing_identities.add(identity)
+
+
+def _case_envio_bucket(entry: dict) -> str:
+    envio_text = " ".join(
+        [
+            _normalize_envio_original(entry.get("tipo_envio", "")),
+            _normalize_envio_original(entry.get("tipo_envio_original", "")),
+        ]
+    )
+    if "foraneo" in envio_text or _parse_foraneo_number(entry.get("numero_foraneo", "")) is not None:
+        return "foraneo"
+    if "local" in envio_text or sanitize_text(entry.get("turno", "")):
+        return "local"
+    return ""
+
+
+def _next_display_num(entries: list[dict]) -> int:
+    nums = []
+    for entry in entries:
+        try:
+            nums.append(int(entry.get("display_num")))
+        except Exception:
+            continue
+    return (max(nums) + 1) if nums else 1
+
+
+def add_missing_en_proceso_casos_for_surtidores(
+    local_entries: list[dict], foraneo_entries: list[dict]
+) -> tuple[list[dict], list[dict]]:
+    """Agrega casos_especiales En Proceso sin surtidor que no llegaron por el flujo automático."""
+    df_casos = load_casos_from_gsheets()
+    if df_casos.empty:
+        return local_entries, foraneo_entries
+
+    casos = df_casos.copy()
+    for col in [
+        "Estado",
+        "Surtidor",
+        "Completados_Limpiado",
+        "Tipo_Envio",
+        "Tipo_Envio_Original",
+        "Tipo_Caso",
+        "Turno",
+    ]:
+        if col not in casos.columns:
+            casos[col] = ""
+
+    mask_en_proceso = casos["Estado"].map(sanitize_text).str.lower().str.contains("en proceso", na=False)
+    mask_sin_surtidor = casos["Surtidor"].map(sanitize_text) == ""
+    mask_no_limpiado = ~_completados_limpiado_has_si(casos["Completados_Limpiado"])
+    casos = casos[mask_en_proceso & mask_sin_surtidor & mask_no_limpiado].copy()
+    if casos.empty:
+        return local_entries, foraneo_entries
+
+    casos["Turno"] = casos["Turno"].apply(normalize_turno_label)
+    casos.loc[casos["Tipo_Envio_Original"].map(sanitize_text) == "", "Tipo_Envio_Original"] = casos["Tipo_Envio"]
+    casos["Tipo"] = casos["Tipo_Caso"].apply(_etiqueta_tipo_caso)
+
+    existing_local = {_entry_identity_values(entry) for entry in local_entries}
+    existing_foraneo = {_entry_identity_values(entry) for entry in foraneo_entries}
+    next_local = _next_display_num(local_entries)
+    next_foraneo = _next_display_num(foraneo_entries)
+
+    for entry in build_entries_casos(casos):
+        bucket = _case_envio_bucket(entry)
+        target_entries = foraneo_entries if bucket == "foraneo" else local_entries
+        target_identities = existing_foraneo if bucket == "foraneo" else existing_local
+        if _entry_exists_by_identity(entry, target_identities):
+            continue
+
+        parsed_foraneo = _parse_foraneo_number(entry.get("numero_foraneo", ""))
+        if bucket == "foraneo" and parsed_foraneo is not None:
+            entry["numero"] = f"{parsed_foraneo:02d}"
+            entry["display_num"] = parsed_foraneo
+        elif bucket == "foraneo":
+            entry["numero"] = str(next_foraneo)
+            entry["display_num"] = next_foraneo
+            next_foraneo += 1
+        else:
+            entry["numero"] = str(next_local)
+            entry["display_num"] = next_local
+            next_local += 1
+
+        target_entries.append(entry)
+        _append_identity(entry, target_identities)
+
+    return local_entries, foraneo_entries
+
+
 def build_entries_foraneo(df_for: pd.DataFrame):
     entries = []
     for _, row in df_for.iterrows():
@@ -5981,6 +6092,8 @@ if selected_tab_key == "surtidores":
         estado = sanitize_text(entry.get("estado", ""))
         parts = [f"**#{numero}**", cliente, estado]
         return " · ".join([p for p in parts if p])
+
+    local_hoy, foraneo_hoy = add_missing_en_proceso_casos_for_surtidores(local_hoy, foraneo_hoy)
 
     local_entry_by_key = {build_surtidor_key(e): e for e in local_hoy}
     local_options = {key: _entry_label(entry) for key, entry in local_entry_by_key.items()}
