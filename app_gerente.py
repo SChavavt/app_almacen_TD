@@ -1073,7 +1073,10 @@ PEDIDOS_COLUMNAS_MINIMAS = [
     "Comentario", "Comentarios", "Modificacion_Surtido", "Adjuntos_Surtido", "Adjuntos_Guia",
     "Adjuntos", "Direccion_Guia_Retorno", "Nota_Venta", "Tiene_Nota_Venta", "Motivo_NotaVenta",
     "Refacturacion_Tipo", "Refacturacion_Subtipo", "Folio_Factura_Refacturada", "fecha_modificacion", "Fecha_Modificacion",
-    "Tipo_Envio", "id_vendedor", "ID_Vendedor", "Id_Vendedor"
+    "Tipo_Envio", "Tipo_Venta", "Condicion_Venta_Terceros", "Fecha_Entrega",
+    "Fecha_Pago_Comprobante", "Forma_Pago_Comprobante", "Monto_Comprobante", "Banco_Destino_Pago",
+    "Referencia_Pago", "Monto_Venta_Terceros", "Plazo_Credito_Meses", "Frecuencia_Pago",
+    "Anticipo", "Dia_Cobro", "Datos_Contacto", "id_vendedor", "ID_Vendedor", "Id_Vendedor"
 ]
 FACTURAS_FALTANTES_COLUMNAS = ["Vendedor", "FolioSerie", "Cliente", "Fecha"]
 ADMINTOTAL_CHECK_FACTURAS_HORA = (17, 40)
@@ -1976,6 +1979,281 @@ def cargar_casos_especiales():
 def cargar_todos_los_pedidos():
     """Carga todos los pedidos combinando datos_pedidos + data_pedidos."""
     return cargar_pedidos().copy()
+
+
+@st.cache_data(ttl=300)
+def cargar_ventas_terceros():
+    """Carga pedidos de ambas hojas cuyo Tipo_Venta sea Venta terceros."""
+    df = cargar_pedidos().copy()
+    if df.empty:
+        return df
+    if "Tipo_Venta" not in df.columns:
+        df["Tipo_Venta"] = ""
+
+    tipo_venta_norm = df["Tipo_Venta"].astype(str).str.strip().apply(normalizar)
+    df = df[tipo_venta_norm == "venta terceros"].copy()
+    if "Condicion_Venta_Terceros" not in df.columns:
+        df["Condicion_Venta_Terceros"] = ""
+    for col_condicion_alias in [
+        "Condición_Venta_Terceros",
+        "Condicion Venta Terceros",
+        "Condición Venta Terceros",
+    ]:
+        if col_condicion_alias in df.columns:
+            condicion_alias = df[col_condicion_alias].astype(str).str.strip()
+            condicion_actual = df["Condicion_Venta_Terceros"].astype(str).str.strip()
+            df.loc[condicion_actual == "", "Condicion_Venta_Terceros"] = condicion_alias[condicion_actual == ""]
+    if "Hora_Registro" in df.columns:
+        df["__hora_registro_dt"] = pd.to_datetime(df["Hora_Registro"], errors="coerce")
+        df = df.sort_values("__hora_registro_dt", ascending=False, na_position="last")
+    else:
+        df["__hora_registro_dt"] = pd.NaT
+    df = df.reset_index(drop=True)
+    df["__venta_terceros_key"] = df.apply(
+        lambda row: "|".join(
+            [
+                str(row.get("__hoja_origen", "")),
+                str(row.get("__sheet_row", "")),
+                str(row.get("ID_Pedido", "")),
+                str(row.get("Folio_Factura", "")),
+            ]
+        ),
+        axis=1,
+    )
+    return df
+
+
+def _venta_terceros_label(row: pd.Series) -> str:
+    """Etiqueta legible para elegir un pedido de Venta terceros sin saturar con el ID."""
+    partes = []
+    folio = _venta_terceros_valor(row, ["Folio_Factura", "Folio"])
+    cliente = _venta_terceros_valor(row, ["Cliente", "Nombre_Cliente"])
+    condicion = _venta_terceros_condicion(row)
+    hora = _venta_terceros_valor(row, ["Hora_Registro", "Fecha_Registro"])
+    hoja = _venta_terceros_valor(row, ["__hoja_origen"])
+    if folio:
+        partes.append(f"Folio {folio_visual_desde_archivo(folio)}")
+    if cliente:
+        partes.append(cliente)
+    if condicion:
+        partes.append(condicion.capitalize())
+    if hora:
+        partes.append(hora)
+    if hoja:
+        partes.append(f"hoja: {hoja}")
+    return " · ".join(partes) or f"Fila {row.get('__sheet_row', '')}"
+
+
+def _venta_terceros_valor(row: pd.Series, columnas: list[str], default: str = "") -> str:
+    """Obtiene el primer valor no vacío entre columnas equivalentes."""
+    for col in columnas:
+        if col not in row.index:
+            continue
+        valor = row.get(col, "")
+        if valor is None:
+            continue
+        try:
+            if pd.isna(valor):
+                continue
+        except (TypeError, ValueError):
+            pass
+        texto = str(valor).strip()
+        if texto:
+            return texto
+    return default
+
+
+def _venta_terceros_condicion(row: pd.Series) -> str:
+    """Normaliza Condicion_Venta_Terceros a contado/crédito para elegir el detalle."""
+    condicion = _venta_terceros_valor(
+        row,
+        [
+            "Condicion_Venta_Terceros",
+            "Condición_Venta_Terceros",
+            "Condicion Venta Terceros",
+            "Condición Venta Terceros",
+        ],
+    )
+    condicion_norm = normalizar(condicion)
+    if "credit" in condicion_norm:
+        return "crédito"
+    if "contad" in condicion_norm:
+        return "contado"
+    return condicion
+
+
+def _venta_terceros_formatear_fecha(valor: str) -> str:
+    """Muestra fechas en DD/MM/YYYY cuando es posible, respetando textos no parseables."""
+    texto = str(valor or "").strip()
+    if not texto:
+        return ""
+    fecha = pd.to_datetime(texto, errors="coerce")
+    if pd.isna(fecha):
+        return texto
+    return fecha.strftime("%d/%m/%Y")
+
+
+def _venta_terceros_metric(label: str, value: str, *, help_text: str | None = None):
+    """Bloque compacto de lectura para campos de Venta terceros."""
+    st.markdown(f"**{label}**")
+    st.write(str(value or "—"))
+    if help_text:
+        st.caption(help_text)
+
+
+def _venta_terceros_render_adjuntos(row: pd.Series):
+    """Muestra todos los adjuntos registrados en columnas habituales del pedido."""
+    columnas_adjuntos = [
+        ("Adjuntos", "Adjuntos del pedido"),
+        ("Adjuntos_Guia", "Adjuntos guía"),
+        ("Adjuntos_Surtido", "Adjuntos surtido"),
+    ]
+    items = []
+    vistos = set()
+    for col, grupo in columnas_adjuntos:
+        for raw_url in partir_urls(row.get(col, "")):
+            clave = extract_s3_key(raw_url) or raw_url
+            clave_norm = str(clave or raw_url).strip().lower()
+            if not clave_norm or clave_norm in vistos:
+                continue
+            vistos.add(clave_norm)
+            nombre, enlace = resolver_nombre_y_enlace(raw_url, grupo)
+            items.append((grupo, nombre or clave_norm, enlace or raw_url))
+
+    st.markdown("#### 📎 Adjuntos del pedido")
+    if not items:
+        st.info("Este pedido no tiene adjuntos registrados en la hoja.")
+        return
+    for grupo, nombre, enlace in items:
+        st.markdown(
+            f'- **{grupo}:** <a href="{enlace}" target="_blank">{nombre}</a>',
+            unsafe_allow_html=True,
+        )
+
+
+def _venta_terceros_render_contado(row: pd.Series):
+    """Detalle solicitado para pedidos de Venta terceros de contado."""
+    st.markdown("### 💳 Datos de contado (Venta terceros)")
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        _venta_terceros_metric("📅 Fecha del Pago", _venta_terceros_formatear_fecha(_venta_terceros_valor(row, ["Fecha_Pago_Comprobante", "Fecha_Pago", "Fecha_Pago_Venta_Terceros"])))
+        _venta_terceros_metric("🏦 Banco Destino", _venta_terceros_valor(row, ["Banco_Destino_Pago", "Banco_Destino", "Banco_Destino_Venta_Terceros"]))
+    with col2:
+        _venta_terceros_metric("💳 Forma de Pago", _venta_terceros_valor(row, ["Forma_Pago_Comprobante", "Forma_Pago", "Forma_Pago_Venta_Terceros"]))
+        _venta_terceros_metric("🔢 Referencia (opcional)", _venta_terceros_valor(row, ["Referencia_Pago", "Referencia", "Referencia_Venta_Terceros"]))
+    with col3:
+        _venta_terceros_metric("💲 Monto del Pago", _venta_terceros_valor(row, ["Monto_Comprobante", "Monto_Pago", "Monto_Pago_Venta_Terceros"], "0.00"))
+        _venta_terceros_metric("🗓 Fecha de Entrega Requerida", _venta_terceros_formatear_fecha(_venta_terceros_valor(row, ["Fecha_Entrega", "Fecha_Entrega_Requerida", "Fecha_Entrega_Venta_Terceros"])))
+
+
+def _venta_terceros_render_credito(row: pd.Series):
+    """Detalle solicitado para pedidos de Venta terceros de crédito."""
+    st.markdown("### 🧾 Datos de crédito (Venta terceros)")
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        _venta_terceros_metric("💲 Monto de la venta", _venta_terceros_valor(row, ["Monto_Venta_Terceros", "Monto_Venta", "Monto_Comprobante"], "0.00"))
+        _venta_terceros_metric("💵 Anticipo (opcional)", _venta_terceros_valor(row, ["Anticipo", "Anticipo_Venta_Terceros"], "0.00"))
+    with col2:
+        _venta_terceros_metric("📆 Plazo de crédito (meses)", _venta_terceros_valor(row, ["Plazo_Credito_Meses", "Plazo_Credito", "Meses_Credito"], "0"))
+        _venta_terceros_metric("🗓 Día de cobro (opcional)", _venta_terceros_formatear_fecha(_venta_terceros_valor(row, ["Dia_Cobro", "Dia_Cobro_Venta_Terceros", "Fecha_Cobro"])))
+    with col3:
+        _venta_terceros_metric("🔁 Frecuencia de pago", _venta_terceros_valor(row, ["Frecuencia_Pago", "Frecuencia_Pago_Venta_Terceros"]))
+        _venta_terceros_metric("📞 Datos de contacto (opcional)", _venta_terceros_valor(row, ["Datos_Contacto", "Datos_Contacto_Venta_Terceros", "Contacto_Venta_Terceros"]))
+
+    st.markdown("#### 🧾 Datos del pago")
+    col_pago_1, col_pago_2, col_pago_3 = st.columns(3)
+    with col_pago_1:
+        _venta_terceros_metric("💳 Forma de Pago", _venta_terceros_valor(row, ["Forma_Pago_Comprobante", "Forma_Pago", "Forma_Pago_Venta_Terceros"]))
+    with col_pago_2:
+        _venta_terceros_metric("🏦 Banco Destino", _venta_terceros_valor(row, ["Banco_Destino_Pago", "Banco_Destino", "Banco_Destino_Venta_Terceros"]))
+    with col_pago_3:
+        _venta_terceros_metric("🔢 Referencia (opcional)", _venta_terceros_valor(row, ["Referencia_Pago", "Referencia", "Referencia_Venta_Terceros"]))
+
+    _venta_terceros_metric("🗓 Fecha de Entrega Requerida", _venta_terceros_formatear_fecha(_venta_terceros_valor(row, ["Fecha_Entrega", "Fecha_Entrega_Requerida", "Fecha_Entrega_Venta_Terceros"])))
+
+
+def render_venta_terceros_tab():
+    """Muestra la lista y el detalle de pedidos marcados como Venta terceros."""
+    st.header("🤝 Venta Terceros")
+
+    df_ventas = cargar_ventas_terceros()
+    if df_ventas.empty:
+        st.info("No se encontraron pedidos con Tipo_Venta = Venta terceros.")
+        return
+
+    col_m1, col_m2, col_m3 = st.columns(3)
+    col_m1.metric("Pedidos Venta terceros", len(df_ventas))
+    if "__hoja_origen" in df_ventas.columns:
+        col_m2.metric("En datos_pedidos", int((df_ventas["__hoja_origen"].astype(str) == "datos_pedidos").sum()))
+        col_m3.metric("En data_pedidos", int((df_ventas["__hoja_origen"].astype(str) == "data_pedidos").sum()))
+
+    columnas_lista = [
+        "__hoja_origen", "__sheet_row", "Hora_Registro", "Cliente",
+        "Vendedor_Registro", "Folio_Factura", "Tipo_Venta", "Condicion_Venta_Terceros", "Tipo_Envio", "Estado",
+    ]
+    columnas_lista = [c for c in columnas_lista if c in df_ventas.columns]
+    tabla = df_ventas[columnas_lista].copy()
+    tabla = tabla.rename(
+        columns={
+            "__hoja_origen": "Hoja origen",
+            "__sheet_row": "Fila hoja",
+            "Hora_Registro": "Hora registro",
+            "Cliente": "Cliente",
+            "Vendedor_Registro": "Vendedor",
+            "Folio_Factura": "Folio factura",
+            "Tipo_Venta": "Tipo venta",
+            "Condicion_Venta_Terceros": "Condición venta terceros",
+            "Tipo_Envio": "Tipo envío",
+            "Estado": "Estado",
+        }
+    )
+    st.markdown("#### 📋 Lista de pedidos")
+    st.dataframe(tabla, use_container_width=True, hide_index=True)
+
+    opciones = df_ventas["__venta_terceros_key"].tolist()
+    labels = {row["__venta_terceros_key"]: _venta_terceros_label(row) for _, row in df_ventas.iterrows()}
+    pedido_key = st.selectbox(
+        "Selecciona un pedido",
+        opciones,
+        format_func=lambda key: labels.get(key, key),
+        key="venta_terceros_pedido_select",
+    )
+
+    pedido_sel = df_ventas[df_ventas["__venta_terceros_key"] == pedido_key].iloc[0].copy()
+    condicion = _venta_terceros_condicion(pedido_sel)
+
+    st.markdown("#### 🔎 Detalle del pedido")
+    st.caption(
+        f"Origen: `{pedido_sel.get('__hoja_origen', '')}` · "
+        f"fila en hoja: `{pedido_sel.get('__sheet_row', '')}` · "
+        f"ID pedido: `{pedido_sel.get('ID_Pedido', '')}`"
+    )
+
+    col_vendedor, col_cliente, col_nota, col_motivo = st.columns(4)
+    with col_vendedor:
+        _venta_terceros_metric("👤 Vendedor", _venta_terceros_valor(pedido_sel, ["Vendedor_Registro", "Vendedor", "Nombre_Vendedor"]))
+    with col_cliente:
+        _venta_terceros_metric("🤝 Cliente", _venta_terceros_valor(pedido_sel, ["Cliente", "Nombre_Cliente"]))
+    with col_nota:
+        _venta_terceros_metric("🧾 Nota de Venta", _venta_terceros_valor(pedido_sel, ["Nota_Venta", "NotaVenta", "Nota_De_Venta"]))
+    with col_motivo:
+        _venta_terceros_metric("✏️ Motivo de nota de venta", _venta_terceros_valor(pedido_sel, ["Motivo_NotaVenta", "Motivo_Nota_Venta"]))
+
+    if condicion == "crédito":
+        _venta_terceros_render_credito(pedido_sel)
+    else:
+        if condicion and condicion != "contado":
+            st.warning(f"Condición no reconocida: {condicion}. Se muestra el detalle de contado por defecto.")
+        _venta_terceros_render_contado(pedido_sel)
+
+    st.markdown("#### 💬 Comentario / Descripción Detallada")
+    comentario = _venta_terceros_valor(pedido_sel, ["Comentario", "Comentarios", "Descripcion_Detallada", "Descripción_Detallada"])
+    if comentario:
+        st.info(comentario)
+    else:
+        st.write("—")
+
+    _venta_terceros_render_adjuntos(pedido_sel)
 
 
 def construir_descarga_completados_sin_limpieza():
@@ -7266,6 +7544,7 @@ PERMISOS_USUARIO = {
 }
 
 COBRANZA_ONLY_USERS = {"BreydaFTD", "SaraiFTD"}
+VENTA_TERCEROS_USERS = {"BreydaFTD", "SaraiFTD"}
 USUARIOS_VALIDOS_LOOKUP = {u.upper(): u for u in USUARIOS_VALIDOS}
 
 
@@ -7334,6 +7613,7 @@ elif usuario_actual in COBRANZA_ONLY_USERS:
         ("cobranza", "📒 Cobranza"),
         ("seguimiento_cobranza", "📊 Seguimiento Cobranza"),
         ("macheo_tool", "🧩 Macheo Tool"),
+        ("venta_terceros", "🤝 Venta Terceros"),
         ("buscar", "🔍 Buscar Pedido"),
     ]
 else:
@@ -7346,6 +7626,9 @@ else:
         tab_specs.append(("cobranza", "📒 Cobranza"))
         tab_specs.append(("seguimiento_cobranza", "📊 Seguimiento Cobranza"))
         tab_specs.append(("macheo_tool", "🧩 Macheo Tool"))
+
+    if usuario_actual in VENTA_TERCEROS_USERS:
+        tab_specs.append(("venta_terceros", "🤝 Venta Terceros"))
 
     if usuario_puede(usuario_actual, "organizador"):
         tab_specs.insert(0, ("organizador", "🗂️ Organizador"))
@@ -12152,6 +12435,10 @@ if "seguimiento_cobranza" in tab_map:
 if "macheo_tool" in tab_map:
     with tab_map["macheo_tool"]:
         render_macheo_tool_tab_gerente()
+
+if "venta_terceros" in tab_map:
+    with tab_map["venta_terceros"]:
+        render_venta_terceros_tab()
 
 if "salida_neta" in tab_map:
     with tab_map["salida_neta"]:
