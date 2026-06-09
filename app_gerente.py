@@ -3408,6 +3408,41 @@ def _cobranza_clean_text(v) -> str:
     return str(v).strip()
 
 
+COBRANZA_CLIENTES_BURO_CREDITO = {
+    "Luis Fernando Pérez López",
+    "Alberto Cruz Manjarrez",
+    "José Guadalupe Torres Sotelo",
+    "Felipe Flores Duran",
+}
+
+
+def _cobranza_norm_cliente_buro(v) -> str:
+    """Normaliza razón social para comparar clientes enviados a buró de crédito."""
+    txt = _cobranza_clean_text(v)
+    if not txt:
+        return ""
+    txt = "".join(
+        c for c in unicodedata.normalize("NFD", txt)
+        if unicodedata.category(c) != "Mn"
+    )
+    txt = re.sub(r"[^a-zA-Z0-9]+", " ", txt).strip().lower()
+    return re.sub(r"\s+", " ", txt)
+
+
+COBRANZA_CLIENTES_BURO_CREDITO_NORM = {
+    _cobranza_norm_cliente_buro(nombre)
+    for nombre in COBRANZA_CLIENTES_BURO_CREDITO
+}
+
+
+def _cobranza_cliente_en_buro_credito(razon_social: str) -> bool:
+    """Identifica clientes castigados en buró para que no aparezcan como alerta roja."""
+    razon_norm = _cobranza_norm_cliente_buro(razon_social)
+    if not razon_norm:
+        return False
+    return any(nombre_norm and nombre_norm in razon_norm for nombre_norm in COBRANZA_CLIENTES_BURO_CREDITO_NORM)
+
+
 def _cobranza_norm_code(v) -> str:
     t = _cobranza_clean_text(v)
     if not t:
@@ -4783,6 +4818,12 @@ def render_cobranza_tab_gerente():
                     & (saldos_df["Semaforo_Seguimiento"] != "🟢")
                 )
                 saldos_df.loc[mask_azul, "Semaforo_Seguimiento"] = "🔵"
+
+                mask_buro_credito = saldos_df.get("Razon_Social", pd.Series("", index=saldos_df.index)).apply(
+                    _cobranza_cliente_en_buro_credito
+                )
+                if mask_buro_credito.any():
+                    saldos_df.loc[mask_buro_credito, "Semaforo_Seguimiento"] = "🟢"
 
                 if orden_sel == "Vencidas más caras a más baratas":
                     saldos_df = saldos_df.sort_values(["Vencido", "Saldo_Vencido_Total", "Saldo"], ascending=[False, False, False])
