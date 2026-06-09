@@ -4881,15 +4881,7 @@ def confirmar_modificacion_surtido(
     gsheet_row_index,
     mod_texto,
 ):
-    """
-    Confirma una modificación de surtido sin mezclar campos operativos.
-
-    Reglas del flujo:
-    - Modificacion_Surtido conserva el comentario y solo agrega [✔CONFIRMADO].
-    - Estado vuelve a un estado válido del flujo: 🔵 En Proceso.
-    - Hora_Proceso registra la hora de confirmación del almacén.
-    - Fecha_Modificacion NO se actualiza; esa fecha pertenece a la solicitud del vendedor.
-    """
+    """Confirma modificación de surtido priorizando batch y con fallback seguro."""
     debug_steps: list[str] = []
 
     def _dbg(msg: str):
@@ -4898,18 +4890,6 @@ def confirmar_modificacion_surtido(
             st.info(f"🧪 DEBUG surtido: {msg}")
         except Exception:
             pass
-
-    def _update_cell_by_col(col_index: int, value: Any, col_name: str) -> bool:
-        """Actualiza por índice de columna ya validado para evitar desalinear encabezados."""
-        try:
-            worksheet.update_cell(gsheet_row_index, col_index, value)
-            worksheet_name = _get_worksheet_name_safe(worksheet)
-            if worksheet_name:
-                _record_local_sheet_update(worksheet_name, int(gsheet_row_index), {col_name: value})
-            return True
-        except Exception as exc:
-            st.error(f"❌ Error al actualizar '{col_name}' en Google Sheets: {exc}")
-            return False
 
     live_headers = list(headers or [])
     try:
@@ -4920,93 +4900,96 @@ def confirmar_modificacion_surtido(
         # Si falla la lectura de encabezados, usamos los que ya traíamos en memoria.
         live_headers = list(headers or [])
 
+    def _normalize_header_name(name: Any) -> str:
+        return str(name or "").strip().lower()
+
     col_mod = _find_header_col_in_row1(worksheet, "Modificacion_Surtido", live_headers)
     col_estado = _find_header_col_in_row1(worksheet, "Estado", live_headers)
     col_hora = _find_header_col_in_row1(worksheet, "Hora_Proceso", live_headers)
-    col_fecha_mod = _find_header_col_in_row1(worksheet, "Fecha_Modificacion", live_headers)
     _dbg(
-        "fila_objetivo="
-        f"{gsheet_row_index} | col_mod={col_mod} col_estado={col_estado} "
-        f"col_hora={col_hora} col_fecha_mod={col_fecha_mod}"
+        f"fila_objetivo={gsheet_row_index} | col_mod={col_mod} col_estado={col_estado} col_hora={col_hora}"
     )
 
     if col_mod is None:
         st.error("❌ No existe la columna 'Modificacion_Surtido' para confirmar el cambio.")
         return False
-    if col_estado is None:
-        st.error("❌ No existe la columna 'Estado' para regresar el caso a '🔵 En Proceso'.")
-        return False
-    if col_hora is None:
-        st.error("❌ No existe la columna 'Hora_Proceso' para registrar la confirmación de almacén.")
-        return False
 
-    columnas_destino = {
-        "Modificacion_Surtido": col_mod,
-        "Estado": col_estado,
-        "Hora_Proceso": col_hora,
-    }
-    if len(set(columnas_destino.values())) != len(columnas_destino):
-        st.error(
-            "❌ No se confirmó la modificación porque los encabezados de Google Sheets están duplicados "
-            "o desalineados entre Modificacion_Surtido, Estado y Hora_Proceso."
-        )
-        _dbg(f"columnas_destino_invalidas={columnas_destino}")
-        return False
-    if col_fecha_mod in columnas_destino.values():
-        st.error("❌ No se confirmó la modificación para proteger 'Fecha_Modificacion'.")
-        _dbg(f"Fecha_Modificacion_colisiona_con_destino={col_fecha_mod}")
-        return False
-
-    mod_texto_limpio = str(mod_texto or "").strip()
-    texto_confirmado = (
-        mod_texto_limpio
-        if mod_texto_limpio.endswith("[✔CONFIRMADO]")
-        else f"{mod_texto_limpio} [✔CONFIRMADO]".strip()
-    )
-    hora_confirmacion = mx_now_str()
-    _dbg(f"texto_original='{mod_texto_limpio}' | texto_confirmado='{texto_confirmado}'")
+    texto_confirmado = f"{str(mod_texto or '').strip()} [✔CONFIRMADO]".strip()
+    _dbg(f"texto_original='{str(mod_texto or '').strip()}' | texto_confirmado='{texto_confirmado}'")
 
     updates = [
         {
-            "range": gspread.utils.rowcol_to_a1(gsheet_row_index, col_mod),
+            "range": gspread.utils.rowcol_to_a1(
+                gsheet_row_index,
+                col_mod,
+            ),
             "values": [[texto_confirmado]],
-        },
-        {
-            "range": gspread.utils.rowcol_to_a1(gsheet_row_index, col_estado),
-            "values": [["🔵 En Proceso"]],
-        },
-        {
-            "range": gspread.utils.rowcol_to_a1(gsheet_row_index, col_hora),
-            "values": [[hora_confirmacion]],
-        },
+        }
     ]
+
+    if col_estado is not None:
+        updates.append(
+            {
+                "range": gspread.utils.rowcol_to_a1(
+                    gsheet_row_index,
+                    col_estado,
+                ),
+                "values": [["🔵 En Proceso"]],
+            }
+        )
+
+    if col_hora is not None:
+        updates.append(
+            {
+                "range": gspread.utils.rowcol_to_a1(
+                    gsheet_row_index,
+                    col_hora,
+                ),
+                "values": [[mx_now_str()]],
+            }
+        )
     _dbg(f"updates_batch={updates}")
 
     try:
         before_row = get_sheet_row_values_cached(worksheet, int(gsheet_row_index))
-        before_mod = before_row[col_mod - 1] if len(before_row) >= col_mod else ""
-        before_estado = before_row[col_estado - 1] if len(before_row) >= col_estado else ""
-        before_hora = before_row[col_hora - 1] if len(before_row) >= col_hora else ""
-        before_fecha_mod = before_row[col_fecha_mod - 1] if col_fecha_mod and len(before_row) >= col_fecha_mod else ""
+        before_mod = before_row[col_mod - 1] if col_mod and len(before_row) >= col_mod else ""
+        before_estado = before_row[col_estado - 1] if col_estado and len(before_row) >= col_estado else ""
+        before_hora = before_row[col_hora - 1] if col_hora and len(before_row) >= col_hora else ""
         _dbg(
-            "antes | "
-            f"Modificacion_Surtido='{before_mod}' | Estado='{before_estado}' | "
-            f"Hora_Proceso='{before_hora}' | Fecha_Modificacion='{before_fecha_mod}'"
+            f"antes | Modificacion_Surtido='{before_mod}' | Estado='{before_estado}' | Hora_Proceso='{before_hora}'"
         )
     except Exception as e:
         _dbg(f"no_se_pudo_leer_estado_previo: {e}")
 
     if batch_update_gsheet_cells(worksheet, updates, headers=live_headers):
-        _dbg("batch_update=OK | Fecha_Modificacion no incluida en updates")
+        _dbg("batch_update=OK")
         return True
-    _dbg("batch_update=FALLÓ -> usando fallback por columna validada")
+    _dbg("batch_update=FALLÓ -> usando fallback update_gsheet_cell")
 
-    # Fallback resiliente por índices ya resueltos: no recalcula encabezados ni toca Fecha_Modificacion.
-    ok = _update_cell_by_col(col_mod, texto_confirmado, "Modificacion_Surtido")
-    if ok:
-        ok = _update_cell_by_col(col_estado, "🔵 En Proceso", "Estado")
-    if ok:
-        ok = _update_cell_by_col(col_hora, hora_confirmacion, "Hora_Proceso")
+    # Fallback resiliente: conservar funcionalidad aunque falle la operación batch.
+    ok = update_gsheet_cell(
+        worksheet,
+        live_headers,
+        gsheet_row_index,
+        "Modificacion_Surtido",
+        texto_confirmado,
+    )
+    if ok and col_estado is not None:
+        ok = update_gsheet_cell(
+            worksheet,
+            live_headers,
+            gsheet_row_index,
+            "Estado",
+            "🔵 En Proceso",
+        )
+    if ok and col_hora is not None:
+        ok = update_gsheet_cell(
+            worksheet,
+            live_headers,
+            gsheet_row_index,
+            "Hora_Proceso",
+            mx_now_str(),
+        )
     _dbg(f"fallback_resultado_final={ok}")
 
     return ok
