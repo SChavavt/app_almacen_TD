@@ -2291,12 +2291,22 @@ def _venta_terceros_nombre_archivo_seguro(nombre: str) -> str:
     return re.sub(r"\s+", "_", nombre).strip("._ ") or "comprobante"
 
 
+def _limpiar_cache_si_existe(func):
+    """Limpia una función cacheada de Streamlit solo cuando expone `.clear()`."""
+    clear_func = getattr(func, "clear", None)
+    if callable(clear_func):
+        clear_func()
+
+
 def _venta_terceros_limpiar_cache_pedidos():
     """Limpia caches de pedidos para recargar datos frescos en la pestaña."""
-    cargar_hoja_pedidos.clear()
-    cargar_pedidos.clear()
-    cargar_todos_los_pedidos.clear()
-    cargar_ventas_terceros.clear()
+    for cache_func in (
+        cargar_hoja_pedidos,
+        cargar_pedidos,
+        cargar_todos_los_pedidos,
+        cargar_ventas_terceros,
+    ):
+        _limpiar_cache_si_existe(cache_func)
 
 
 def _venta_terceros_actualizar_campos(row: pd.Series, cambios: list[tuple[list[str], str]]) -> tuple[bool, str]:
@@ -2376,22 +2386,25 @@ def _venta_terceros_render_upload_comprobantes(row: pd.Series):
     folio = _venta_terceros_valor(row, ["Folio_Factura", "Folio"]) or "sin_folio"
     cliente = _venta_terceros_valor(row, ["Cliente", "Nombre_Cliente"]) or "sin_cliente"
     pedido_id_s3 = _venta_terceros_nombre_archivo_seguro(pedido_id)
+    form_key = f"venta_terceros_comprobantes_form_{hoja_origen}_{sheet_row}_{pedido_id}"
     uploader_key = f"venta_terceros_comprobantes_uploader_{hoja_origen}_{sheet_row}_{pedido_id}"
     confirm_key = f"venta_terceros_comprobantes_confirm_{hoja_origen}_{sheet_row}_{pedido_id}"
 
-    archivos = st.file_uploader(
-        "📎 Comprobantes",
-        type=["pdf", "jpg", "jpeg", "png", "webp", "xlsx", "xls", "doc", "docx"],
-        accept_multiple_files=True,
-        key=uploader_key,
-    )
-    st.info(f"Vas a guardar comprobantes en: Cliente **{cliente}** / Folio **{folio}** / fila **{sheet_row}**.")
-    confirmado = st.checkbox(
-        "Confirmo que este es el pedido correcto para subir comprobantes.",
-        key=confirm_key,
-    )
+    with st.form(key=form_key, clear_on_submit=False):
+        archivos = st.file_uploader(
+            "📎 Comprobantes",
+            type=["pdf", "jpg", "jpeg", "png", "webp", "xlsx", "xls", "doc", "docx"],
+            accept_multiple_files=True,
+            key=uploader_key,
+        )
+        st.info(f"Vas a guardar comprobantes en: Cliente **{cliente}** / Folio **{folio}** / fila **{sheet_row}**.")
+        confirmado = st.checkbox(
+            "Confirmo que este es el pedido correcto para subir comprobantes.",
+            key=confirm_key,
+        )
+        subir = st.form_submit_button("⬆️ Subir comprobantes")
 
-    if st.button("⬆️ Subir comprobantes", key=f"venta_terceros_comprobantes_btn_{hoja_origen}_{sheet_row}_{pedido_id}"):
+    if subir:
         if not confirmado:
             st.warning("⚠️ Confirma cliente, folio y fila antes de subir comprobantes.")
             return
