@@ -2291,51 +2291,58 @@ def _venta_terceros_nombre_archivo_seguro(nombre: str) -> str:
     return re.sub(r"\s+", "_", nombre).strip("._ ") or "comprobante"
 
 
+def _limpiar_cache_si_existe(func):
+    """Limpia una función cacheada de Streamlit solo cuando expone `.clear()`."""
+    clear_func = getattr(func, "clear", None)
+    if callable(clear_func):
+        clear_func()
+
+
 def _venta_terceros_limpiar_cache_pedidos():
     """Limpia caches de pedidos para recargar datos frescos en la pestaña."""
-    cargar_hoja_pedidos.clear()
-    cargar_pedidos.clear()
-    cargar_todos_los_pedidos.clear()
-    cargar_ventas_terceros.clear()
+    for cache_func in (
+        cargar_hoja_pedidos,
+        cargar_pedidos,
+        cargar_todos_los_pedidos,
+        cargar_ventas_terceros,
+    ):
+        _limpiar_cache_si_existe(cache_func)
 
 
-def _venta_terceros_actualizar_campos(row: pd.Series, cambios: list[tuple[list[str], str]]) -> tuple[bool, str]:
-    """Actualiza campos editables en la fila de origen usando columnas existentes."""
-    hoja_origen = str(row.get("__hoja_origen", "") or "").strip()
-    try:
-        sheet_row = int(row.get("__sheet_row", 0))
-    except (TypeError, ValueError):
-        sheet_row = 0
-    if hoja_origen not in PEDIDOS_SHEETS or sheet_row < 2:
-        return False, "No se pudo identificar la fila exacta del pedido en Google Sheets."
-
-    try:
-        ws = get_main_worksheet(hoja_origen)
-        headers = [str(h or "").strip() for h in ws.row_values(1)]
-        celdas = []
-        faltantes = []
-        for aliases, valor in cambios:
-            col_objetivo = next((col for col in aliases if col in headers), None)
-            if not col_objetivo:
-                faltantes.append(aliases[0])
-                continue
-            col_idx = headers.index(col_objetivo) + 1
-            celdas.append(gspread.Cell(row=sheet_row, col=col_idx, value=valor))
-
-        if faltantes:
-            return False, "No existen estas columnas en la hoja: " + ", ".join(faltantes)
-        if not celdas:
-            return False, "No hay campos para actualizar."
-
-        ws.update_cells(celdas, value_input_option="USER_ENTERED")
-        _venta_terceros_limpiar_cache_pedidos()
-        return True, f"Datos del pago actualizados en {hoja_origen}, fila {sheet_row}."
-    except Exception as exc:
-        return False, f"No se pudieron actualizar los datos del pago: {exc}"
+def _venta_terceros_formatear_monto_sheet(valor: float) -> str:
+    """Convierte importes a texto numérico estable para guardar en Google Sheets."""
+    return f"{float(valor or 0):.2f}"
 
 
-def _venta_terceros_actualizar_comprobantes(row: pd.Series, nuevas_urls: list[str]) -> tuple[bool, str]:
-    """Guarda URLs de comprobantes en la hoja de origen del pedido seleccionado."""
+def _venta_terceros_cambio_monto_pago(row: pd.Series, condicion: str, monto_pago: float) -> tuple[list[str], str] | None:
+    """Prepara el cambio de monto según contado/crédito.
+
+    En crédito, el monto capturado es un abono nuevo y se suma al acumulado de
+    Anticipo_Credito; en contado se guarda como Monto_Comprobante editable.
+    """
+    monto_pago = float(monto_pago or 0)
+    if condicion == "crédito":
+        if monto_pago <= 0:
+            return None
+        anticipo_actual = _venta_terceros_parse_monto(
+            _venta_terceros_valor(row, ["Anticipo_Credito", "Anticipo", "Anticipo_Venta_Terceros"], "0")
+        )
+        return (
+            ["Anticipo_Credito", "Anticipo", "Anticipo_Venta_Terceros"],
+            _venta_terceros_formatear_monto_sheet(anticipo_actual + monto_pago),
+        )
+    return (
+        ["Monto_Comprobante", "Monto_Pago", "Monto_Pago_Venta_Terceros"],
+        _venta_terceros_formatear_monto_sheet(monto_pago),
+    )
+
+
+def _venta_terceros_actualizar_comprobantes_y_pago(
+    row: pd.Series,
+    nuevas_urls: list[str],
+    cambios_pago: list[tuple[list[str], str]],
+) -> tuple[bool, str]:
+    """Guarda comprobantes y datos de pago/entrega en la fila del pedido."""
     if not nuevas_urls:
         return False, "No se recibieron comprobantes para guardar."
 
@@ -2350,54 +2357,145 @@ def _venta_terceros_actualizar_comprobantes(row: pd.Series, nuevas_urls: list[st
     try:
         ws = get_main_worksheet(hoja_origen)
         headers = [str(h or "").strip() for h in ws.row_values(1)]
-        columna_objetivo = "Adjuntos"
-        if columna_objetivo not in headers:
-            return False, "No existe la columna 'Adjuntos' en la hoja de pedidos."
+        celdas = []
+        faltantes = []
 
-        col_idx = headers.index(columna_objetivo) + 1
-        existente = row.get(columna_objetivo, "") if columna_objetivo in row.index else ""
-        nuevo_valor = combinar_urls_existentes(existente, nuevas_urls)
-        ws.update_cell(sheet_row, col_idx, nuevo_valor)
+        columna_adjuntos = "Adjuntos"
+        if columna_adjuntos not in headers:
+            faltantes.append(columna_adjuntos)
+        else:
+            col_idx = headers.index(columna_adjuntos) + 1
+            existente = row.get(columna_adjuntos, "") if columna_adjuntos in row.index else ""
+            nuevo_valor = combinar_urls_existentes(existente, nuevas_urls)
+            celdas.append(gspread.Cell(row=sheet_row, col=col_idx, value=nuevo_valor))
 
+        for aliases, valor in cambios_pago:
+            col_objetivo = next((col for col in aliases if col in headers), None)
+            if not col_objetivo:
+                faltantes.append(aliases[0])
+                continue
+            col_idx = headers.index(col_objetivo) + 1
+            celdas.append(gspread.Cell(row=sheet_row, col=col_idx, value=valor))
+
+        if faltantes:
+            return False, "No existen estas columnas en la hoja: " + ", ".join(faltantes)
+        if not celdas:
+            return False, "No hay datos para actualizar."
+
+        ws.update_cells(celdas, value_input_option="USER_ENTERED")
         _venta_terceros_limpiar_cache_pedidos()
-        return True, f"Comprobantes guardados en Adjuntos ({hoja_origen}, fila {sheet_row})."
+        return True, f"Comprobantes y datos del pago guardados en {hoja_origen}, fila {sheet_row}."
     except Exception as exc:
         return False, f"No se pudieron guardar los comprobantes en Google Sheets: {exc}"
 
 
 def _venta_terceros_render_upload_comprobantes(row: pd.Series):
-    """Permite subir comprobantes de Venta terceros a S3 y registrar sus URLs."""
+    """Permite subir comprobantes y registrar datos de pago/entrega de Venta terceros."""
     st.markdown("#### ⬆️ Subir comprobantes")
-    st.caption("Carga PDF, imágenes o archivos de Office; se guardarán en S3 y se registrarán en la hoja del pedido.")
+    st.caption("Carga comprobantes, captura el pago y la entrega; todo se guardará junto en la fila del pedido.")
 
     hoja_origen = _venta_terceros_valor(row, ["__hoja_origen"]) or "sin_hoja"
     sheet_row = str(row.get("__sheet_row", "") or "sin_fila")
     pedido_id = _venta_terceros_valor(row, ["ID_Pedido"]) or sheet_row
     folio = _venta_terceros_valor(row, ["Folio_Factura", "Folio"]) or "sin_folio"
     cliente = _venta_terceros_valor(row, ["Cliente", "Nombre_Cliente"]) or "sin_cliente"
+    condicion = _venta_terceros_condicion(row)
     pedido_id_s3 = _venta_terceros_nombre_archivo_seguro(pedido_id)
+    form_key = f"venta_terceros_comprobantes_form_{hoja_origen}_{sheet_row}_{pedido_id}"
     uploader_key = f"venta_terceros_comprobantes_uploader_{hoja_origen}_{sheet_row}_{pedido_id}"
     confirm_key = f"venta_terceros_comprobantes_confirm_{hoja_origen}_{sheet_row}_{pedido_id}"
+    key_prefix = f"venta_terceros_pago_upload_{hoja_origen}_{sheet_row}_"
 
-    archivos = st.file_uploader(
-        "📎 Comprobantes",
-        type=["pdf", "jpg", "jpeg", "png", "webp", "xlsx", "xls", "doc", "docx"],
-        accept_multiple_files=True,
-        key=uploader_key,
-    )
-    st.info(f"Vas a guardar comprobantes en: Cliente **{cliente}** / Folio **{folio}** / fila **{sheet_row}**.")
-    confirmado = st.checkbox(
-        "Confirmo que este es el pedido correcto para subir comprobantes.",
-        key=confirm_key,
-    )
+    with st.form(key=form_key, clear_on_submit=False):
+        archivos = st.file_uploader(
+            "📎 Comprobantes",
+            type=["pdf", "jpg", "jpeg", "png", "webp", "xlsx", "xls", "doc", "docx"],
+            accept_multiple_files=True,
+            key=uploader_key,
+        )
+        st.info(f"Vas a guardar comprobantes en: Cliente **{cliente}** / Folio **{folio}** / fila **{sheet_row}**.")
 
-    if st.button("⬆️ Subir comprobantes", key=f"venta_terceros_comprobantes_btn_{hoja_origen}_{sheet_row}_{pedido_id}"):
+        st.markdown("#### ✏️ Editar datos del pago y entrega")
+        pago = _venta_terceros_render_payment_details_fields(
+            key_prefix=key_prefix,
+            forma_pago_value=_venta_terceros_valor(row, ["Forma_Pago_Comprobante", "Forma_Pago", "Forma_Pago_Venta_Terceros"]),
+            terminal_value=_venta_terceros_valor(row, ["Terminal", "Terminal_Pago", "Terminal_Venta_Terceros"]),
+            banco_destino_value=_venta_terceros_valor(row, ["Banco_Destino_Pago", "Banco_Destino", "Banco_Destino_Venta_Terceros"]),
+            referencia_pago_value=_venta_terceros_valor(row, ["Referencia_Pago", "Referencia", "Referencia_Venta_Terceros"]),
+        )
+
+        col_fecha_pago, col_monto_pago, col_fecha_entrega = st.columns(3)
+        fecha_pago_actual = _venta_terceros_valor(row, ["Fecha_Pago_Comprobante", "Fecha_Pago", "Fecha_Pago_Venta_Terceros"])
+        with col_fecha_pago:
+            fecha_pago = st.date_input(
+                "📅 Fecha del pago",
+                value=_venta_terceros_parse_fecha_date(fecha_pago_actual) or now_cdmx().date(),
+                key=f"{key_prefix}fecha_pago_input",
+            )
+        with col_monto_pago:
+            if condicion == "crédito":
+                monto_pago = st.number_input(
+                    "💵 Pago recibido (se suma a Anticipo_Credito)",
+                    min_value=0.0,
+                    value=0.0,
+                    step=100.0,
+                    format="%.2f",
+                    key=f"{key_prefix}monto_pago_input",
+                )
+                anticipo_actual = _venta_terceros_parse_monto(
+                    _venta_terceros_valor(row, ["Anticipo_Credito", "Anticipo", "Anticipo_Venta_Terceros"], "0")
+                )
+                st.caption(f"Anticipo actual: {_venta_terceros_formatear_monto(anticipo_actual)}")
+            else:
+                monto_pago = st.number_input(
+                    "💲 Monto del pago",
+                    min_value=0.0,
+                    value=_venta_terceros_parse_monto(
+                        _venta_terceros_valor(row, ["Monto_Comprobante", "Monto_Pago", "Monto_Pago_Venta_Terceros"], "0")
+                    ),
+                    step=100.0,
+                    format="%.2f",
+                    key=f"{key_prefix}monto_pago_input",
+                )
+        fecha_entrega_actual = _venta_terceros_valor(
+            row,
+            ["Fecha_Entrega", "Fecha_Entrega_Requerida", "Fecha_Entrega_Venta_Terceros"],
+        )
+        with col_fecha_entrega:
+            fecha_entrega = st.date_input(
+                "🗓 Fecha de Entrega Requerida",
+                value=_venta_terceros_parse_fecha_date(fecha_entrega_actual) or now_cdmx().date(),
+                key=f"{key_prefix}fecha_entrega_input",
+            )
+
+        confirmado = st.checkbox(
+            "Confirmo que este es el pedido correcto para subir comprobantes y guardar el pago.",
+            key=confirm_key,
+        )
+        subir = st.form_submit_button("⬆️ Subir comprobantes y guardar pago")
+
+    if subir:
         if not confirmado:
             st.warning("⚠️ Confirma cliente, folio y fila antes de subir comprobantes.")
             return
         if not archivos:
             st.warning("⚠️ Selecciona al menos un comprobante para subir.")
             return
+        if condicion == "crédito" and monto_pago <= 0:
+            st.warning("⚠️ Captura el pago recibido para sumarlo a Anticipo_Credito.")
+            return
+
+        cambios_pago = [
+            (["Fecha_Pago_Comprobante", "Fecha_Pago", "Fecha_Pago_Venta_Terceros"], fecha_pago.strftime("%d/%m/%Y")),
+            (["Forma_Pago_Comprobante", "Forma_Pago", "Forma_Pago_Venta_Terceros"], pago["forma_pago"].strip()),
+            (["Banco_Destino_Pago", "Banco_Destino", "Banco_Destino_Venta_Terceros"], pago["banco_destino"].strip()),
+            (["Terminal", "Terminal_Pago", "Terminal_Venta_Terceros"], pago["terminal"].strip()),
+            (["Referencia_Pago", "Referencia", "Referencia_Venta_Terceros"], pago["referencia_pago"].strip()),
+            (["Fecha_Entrega", "Fecha_Entrega_Requerida", "Fecha_Entrega_Venta_Terceros"], fecha_entrega.strftime("%d/%m/%Y")),
+        ]
+        cambio_monto = _venta_terceros_cambio_monto_pago(row, condicion, monto_pago)
+        if cambio_monto:
+            cambios_pago.append(cambio_monto)
 
         nuevas_urls = []
         errores = []
@@ -2417,55 +2515,12 @@ def _venta_terceros_render_upload_comprobantes(row: pd.Series):
             st.warning("⚠️ No se cargaron comprobantes nuevos para registrar.")
             return
 
-        ok, mensaje = _venta_terceros_actualizar_comprobantes(row, nuevas_urls)
+        ok, mensaje = _venta_terceros_actualizar_comprobantes_y_pago(row, nuevas_urls, cambios_pago)
         if ok:
             st.success(f"✅ {mensaje}")
             st.rerun()
         else:
             st.error(f"❌ {mensaje}")
-
-
-def _venta_terceros_render_edicion_pago_credito(row: pd.Series):
-    """Formulario para editar datos de pago y entrega desde Venta terceros."""
-    with st.expander("✏️ Editar datos del pago y entrega", expanded=False):
-        st.caption("Estos cambios se guardan en la fila original del pedido en Google Sheets.")
-        with st.form(
-            key=f"venta_terceros_editar_pago_{row.get('__hoja_origen', '')}_{row.get('__sheet_row', '')}",
-            clear_on_submit=False,
-        ):
-            pago = _venta_terceros_render_payment_details_fields(
-                key_prefix=f"venta_terceros_pago_{row.get('__hoja_origen', '')}_{row.get('__sheet_row', '')}_",
-                forma_pago_value=_venta_terceros_valor(row, ["Forma_Pago_Comprobante", "Forma_Pago", "Forma_Pago_Venta_Terceros"]),
-                terminal_value=_venta_terceros_valor(row, ["Terminal", "Terminal_Pago", "Terminal_Venta_Terceros"]),
-                banco_destino_value=_venta_terceros_valor(row, ["Banco_Destino_Pago", "Banco_Destino", "Banco_Destino_Venta_Terceros"]),
-                referencia_pago_value=_venta_terceros_valor(row, ["Referencia_Pago", "Referencia", "Referencia_Venta_Terceros"]),
-            )
-
-            fecha_entrega_actual = _venta_terceros_valor(
-                row,
-                ["Fecha_Entrega", "Fecha_Entrega_Requerida", "Fecha_Entrega_Venta_Terceros"],
-            )
-            fecha_entrega = st.date_input(
-                "🗓 Fecha de Entrega Requerida",
-                value=_venta_terceros_parse_fecha_date(fecha_entrega_actual) or now_cdmx().date(),
-                key=f"venta_terceros_fecha_entrega_{row.get('__hoja_origen', '')}_{row.get('__sheet_row', '')}",
-            )
-
-            guardar = st.form_submit_button("💾 Guardar datos del pago")
-            if guardar:
-                cambios = [
-                    (["Forma_Pago_Comprobante", "Forma_Pago", "Forma_Pago_Venta_Terceros"], pago["forma_pago"].strip()),
-                    (["Banco_Destino_Pago", "Banco_Destino", "Banco_Destino_Venta_Terceros"], pago["banco_destino"].strip()),
-                    (["Terminal", "Terminal_Pago", "Terminal_Venta_Terceros"], pago["terminal"].strip()),
-                    (["Referencia_Pago", "Referencia", "Referencia_Venta_Terceros"], pago["referencia_pago"].strip()),
-                    (["Fecha_Entrega", "Fecha_Entrega_Requerida", "Fecha_Entrega_Venta_Terceros"], fecha_entrega.strftime("%d/%m/%Y")),
-                ]
-                ok, mensaje = _venta_terceros_actualizar_campos(row, cambios)
-                if ok:
-                    st.success(f"✅ {mensaje}")
-                    st.rerun()
-                else:
-                    st.error(f"❌ {mensaje}")
 
 
 def _venta_terceros_render_contado(row: pd.Series):
@@ -2518,7 +2573,6 @@ def _venta_terceros_render_credito(row: pd.Series):
 
     _venta_terceros_metric("🗓 Fecha de Entrega Requerida", _venta_terceros_formatear_fecha(_venta_terceros_valor(row, ["Fecha_Entrega", "Fecha_Entrega_Requerida", "Fecha_Entrega_Venta_Terceros"])))
 
-    _venta_terceros_render_edicion_pago_credito(row)
 
 
 def render_venta_terceros_tab():
