@@ -23,6 +23,7 @@ import time
 import traceback
 import calendar
 import base64
+from html import escape
 from collections.abc import Mapping
 from zoneinfo import ZoneInfo
 
@@ -2269,12 +2270,33 @@ def _venta_terceros_formatear_monto(valor: float) -> str:
     return f"${valor:,.2f}"
 
 
-def _venta_terceros_metric_clave(label: str, value: str, *, help_text: str | None = None):
-    """Resalta un dato financiero importante dentro de Venta terceros."""
+def _venta_terceros_metric_clave(
+    label: str,
+    value: str,
+    *,
+    amount: float | None = None,
+    help_text: str | None = None,
+):
+    """Resalta un dato financiero importante como semáforo compacto."""
+    debe_cobrar = amount is None or amount > 0
+    color_borde = "#e74c3c" if debe_cobrar else "#2ecc71"
+    color_fondo = "rgba(231, 76, 60, 0.13)" if debe_cobrar else "rgba(46, 204, 113, 0.14)"
+    color_texto = "#b42318" if debe_cobrar else "#137333"
+    estado = "Por cobrar" if debe_cobrar else "Pagado / saldo a favor"
     html = f"""
-    <div style="border: 2px solid #2ecc71; border-radius: 12px; padding: 14px; background: rgba(46, 204, 113, 0.12);">
-        <div style="font-weight: 700; font-size: 0.95rem;">{label}</div>
-        <div style="font-weight: 800; font-size: 1.65rem; margin-top: 6px;">{value}</div>
+    <div style="
+        display: inline-block;
+        width: fit-content;
+        max-width: 100%;
+        border: 2px solid {color_borde};
+        border-radius: 12px;
+        padding: 10px 14px;
+        background: {color_fondo};
+        box-sizing: border-box;
+    ">
+        <div style="font-weight: 700; font-size: 0.9rem; color: {color_texto};">{escape(str(label))}</div>
+        <div style="font-weight: 800; font-size: 1.45rem; margin-top: 3px; color: {color_texto}; line-height: 1.15;">{escape(str(value))}</div>
+        <div style="font-weight: 700; font-size: 0.78rem; margin-top: 4px; color: {color_texto}; text-transform: uppercase; letter-spacing: 0.02em;">{estado}</div>
     </div>
     """
     st.markdown(html, unsafe_allow_html=True)
@@ -2609,6 +2631,7 @@ def _venta_terceros_render_credito(row: pd.Series):
     _venta_terceros_metric_clave(
         "⭐ Restante a cobrar",
         _venta_terceros_formatear_monto(restante_cobrar),
+        amount=restante_cobrar,
         help_text="Diferencia entre el monto de la venta y el anticipo registrado.",
     )
 
