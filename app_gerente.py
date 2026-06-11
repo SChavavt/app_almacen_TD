@@ -2139,58 +2139,108 @@ def _venta_terceros_safe_index(options, value: str | None) -> int:
     return list(options).index(value) if value in options else 0
 
 
+VENTA_TERCEROS_COMPROBANTE_SEPARATOR = "---REGISTRO_COMPROBANTE---"
+
+
 def _venta_terceros_render_payment_details_fields(
     *,
     key_prefix: str,
-    forma_pago_value: str = "",
-    terminal_value: str = "",
-    banco_destino_value: str = "",
-    referencia_pago_value: str = "",
 ) -> dict[str, str]:
-    """Renderiza los campos editables de pago directamente en app_gerente."""
-    key = lambda name: f"{key_prefix}{name}"
-    forma_pago = forma_pago_value if forma_pago_value in VENTA_TERCEROS_PAYMENT_METHOD_OPTIONS else VENTA_TERCEROS_PAYMENT_METHOD_OPTIONS[0]
-    terminal = terminal_value or ""
-    banco_destino = banco_destino_value or ""
+    """Renderiza la nota editable que se añadirá al historial del cobro."""
+    referencia_pago = st.text_area(
+        "📝 Nota opcional del cobro",
+        value="",
+        placeholder="Ej. Cliente envió transferencia parcial por WhatsApp. Si lo dejas vacío se guardará 'Sin nota adicional.'",
+        key=f"{key_prefix}referencia_pago_input",
+        height=90,
+    )
+    st.caption("Se agregará al historial automático del comprobante; no reemplaza registros anteriores.")
+    return {"referencia_pago": referencia_pago}
 
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        forma_pago = st.selectbox(
-            "💳 Forma de Pago",
-            VENTA_TERCEROS_PAYMENT_METHOD_OPTIONS,
-            index=_venta_terceros_safe_index(VENTA_TERCEROS_PAYMENT_METHOD_OPTIONS, forma_pago),
-            key=key("forma_pago_input"),
-        )
-    with col2:
-        if forma_pago in VENTA_TERCEROS_CARD_PAYMENT_METHODS:
-            terminal = st.selectbox(
-                "🏧 Terminal",
-                VENTA_TERCEROS_TERMINAL_OPTIONS,
-                index=_venta_terceros_safe_index(VENTA_TERCEROS_TERMINAL_OPTIONS, terminal_value),
-                key=key("terminal_input"),
-            )
-            banco_destino = ""
-        else:
-            banco_destino = st.selectbox(
-                "🏦 Banco Destino",
-                VENTA_TERCEROS_BANK_DESTINATION_OPTIONS,
-                index=_venta_terceros_safe_index(VENTA_TERCEROS_BANK_DESTINATION_OPTIONS, banco_destino_value),
-                key=key("banco_destino_input"),
-            )
-            terminal = ""
-    with col3:
-        referencia_pago = st.text_input(
-            "🔢 Referencia (opcional)",
-            value=referencia_pago_value,
-            key=key("referencia_pago_input"),
-        )
 
-    return {
-        "forma_pago": forma_pago,
-        "terminal": terminal,
-        "banco_destino": banco_destino,
-        "referencia_pago": referencia_pago,
-    }
+def _venta_terceros_referencia_actual(row: pd.Series) -> str:
+    """Obtiene el campo usado como historial de cobros/referencias."""
+    return _venta_terceros_valor(row, ["Referencia_Pago", "Referencia", "Referencia_Venta_Terceros"])
+
+
+def _venta_terceros_contar_registros_comprobante(historial: str) -> int:
+    """Cuenta registros existentes para numerar el siguiente comprobante."""
+    historial_limpio = str(historial or "").strip()
+    if not historial_limpio:
+        return 0
+    return len([p for p in historial_limpio.split(VENTA_TERCEROS_COMPROBANTE_SEPARATOR) if p.strip()])
+
+
+def _venta_terceros_construir_registro_comprobante(
+    *,
+    numero_registro: int,
+    condicion: str,
+    fecha_registro: datetime,
+    monto_pago: float,
+    acumulado_anterior: float,
+    acumulado_nuevo: float,
+    nota_usuario: str,
+) -> str:
+    """Crea el bloque histórico que se appendeará a Referencia_Pago."""
+    nota_limpia = str(nota_usuario or "").strip() or "Sin nota adicional."
+    condicion_limpia = str(condicion or "").strip() or "No especificada"
+    if condicion_limpia == "crédito":
+        etiqueta_anterior = "Anticipo anterior"
+        etiqueta_nuevo = "Anticipo nuevo"
+    else:
+        etiqueta_anterior = "Monto registrado anterior"
+        etiqueta_nuevo = "Monto registrado nuevo"
+    return "\n".join(
+        [
+            VENTA_TERCEROS_COMPROBANTE_SEPARATOR,
+            f"Tipo: Registro comprobante {numero_registro}",
+            f"Fecha: {fecha_registro.strftime('%d/%m/%Y %H:%M')}",
+            f"Condición: {condicion_limpia}",
+            f"Monto pagado: {_venta_terceros_formatear_monto(monto_pago)}",
+            f"{etiqueta_anterior}: {_venta_terceros_formatear_monto(acumulado_anterior)}",
+            f"{etiqueta_nuevo}: {_venta_terceros_formatear_monto(acumulado_nuevo)}",
+            f"Nota del usuario: {nota_limpia}",
+        ]
+    )
+
+
+def _venta_terceros_append_registro_comprobante(historial_actual: str, registro: str) -> str:
+    """Agrega un registro al historial sin borrar referencias anteriores."""
+    historial_limpio = str(historial_actual or "").strip()
+    registro_limpio = str(registro or "").strip()
+    if not historial_limpio:
+        return registro_limpio
+    return f"{historial_limpio}\n\n{registro_limpio}"
+
+
+def _venta_terceros_render_historial_cobros(historial: str):
+    """Muestra el historial de cobros separado por comprobante para consulta rápida."""
+    historial_limpio = str(historial or "").strip()
+    st.markdown("#### 📚 Historial de cobros")
+    if not historial_limpio:
+        st.caption("Aún no hay registros de comprobantes en el historial.")
+        return
+
+    partes = [p.strip() for p in historial_limpio.split(VENTA_TERCEROS_COMPROBANTE_SEPARATOR) if p.strip()]
+    if not partes:
+        st.caption(historial_limpio)
+        return
+
+    for idx, parte in enumerate(partes, start=1):
+        titulo = f"Registro comprobante {idx}"
+        lineas = [linea.strip() for linea in parte.splitlines() if linea.strip()]
+        if lineas and lineas[0].lower().startswith("tipo:"):
+            titulo = lineas[0].split(":", 1)[1].strip() or titulo
+            lineas = lineas[1:]
+        elif idx == 1 and VENTA_TERCEROS_COMPROBANTE_SEPARATOR in historial_limpio:
+            titulo = "Referencia anterior"
+        with st.expander(f"🧾 {titulo}", expanded=idx == len(partes)):
+            for linea in lineas:
+                if ":" in linea:
+                    etiqueta, valor = linea.split(":", 1)
+                    st.markdown(f"**{etiqueta.strip()}:** {valor.strip()}")
+                else:
+                    st.write(linea)
 
 
 def _venta_terceros_metric(label: str, value: str, *, help_text: str | None = None):
@@ -2342,7 +2392,7 @@ def _venta_terceros_actualizar_comprobantes_y_pago(
     nuevas_urls: list[str],
     cambios_pago: list[tuple[list[str], str]],
 ) -> tuple[bool, str]:
-    """Guarda comprobantes y datos de pago/entrega en la fila del pedido."""
+    """Guarda comprobantes, pago e historial de cobros en la fila del pedido."""
     if not nuevas_urls:
         return False, "No se recibieron comprobantes para guardar."
 
@@ -2384,15 +2434,15 @@ def _venta_terceros_actualizar_comprobantes_y_pago(
 
         ws.update_cells(celdas, value_input_option="USER_ENTERED")
         _venta_terceros_limpiar_cache_pedidos()
-        return True, f"Comprobantes y datos del pago guardados en {hoja_origen}, fila {sheet_row}."
+        return True, f"Comprobantes, pago e historial de cobros guardados en {hoja_origen}, fila {sheet_row}."
     except Exception as exc:
         return False, f"No se pudieron guardar los comprobantes en Google Sheets: {exc}"
 
 
 def _venta_terceros_render_upload_comprobantes(row: pd.Series):
-    """Permite subir comprobantes y registrar datos de pago/entrega de Venta terceros."""
+    """Permite subir comprobantes y registrar cobros de Venta terceros."""
     st.markdown("#### ⬆️ Subir comprobantes")
-    st.caption("Carga comprobantes, captura el pago y la entrega; todo se guardará junto en la fila del pedido.")
+    st.caption("Carga comprobantes y captura el pago; el sistema agregará un registro automático al historial de cobros.")
 
     hoja_origen = _venta_terceros_valor(row, ["__hoja_origen"]) or "sin_hoja"
     sheet_row = str(row.get("__sheet_row", "") or "sin_fila")
@@ -2415,16 +2465,10 @@ def _venta_terceros_render_upload_comprobantes(row: pd.Series):
         )
         st.info(f"Vas a guardar comprobantes en: Cliente **{cliente}** / Folio **{folio}** / fila **{sheet_row}**.")
 
-        st.markdown("#### ✏️ Editar datos del pago y entrega")
-        pago = _venta_terceros_render_payment_details_fields(
-            key_prefix=key_prefix,
-            forma_pago_value=_venta_terceros_valor(row, ["Forma_Pago_Comprobante", "Forma_Pago", "Forma_Pago_Venta_Terceros"]),
-            terminal_value=_venta_terceros_valor(row, ["Terminal", "Terminal_Pago", "Terminal_Venta_Terceros"]),
-            banco_destino_value=_venta_terceros_valor(row, ["Banco_Destino_Pago", "Banco_Destino", "Banco_Destino_Venta_Terceros"]),
-            referencia_pago_value=_venta_terceros_valor(row, ["Referencia_Pago", "Referencia", "Referencia_Venta_Terceros"]),
-        )
+        st.markdown("#### ✏️ Editar datos del pago")
+        pago = _venta_terceros_render_payment_details_fields(key_prefix=key_prefix)
 
-        col_fecha_pago, col_monto_pago, col_fecha_entrega = st.columns(3)
+        col_fecha_pago, col_monto_pago = st.columns(2)
         fecha_pago_actual = _venta_terceros_valor(row, ["Fecha_Pago_Comprobante", "Fecha_Pago", "Fecha_Pago_Venta_Terceros"])
         with col_fecha_pago:
             fecha_pago = st.date_input(
@@ -2457,16 +2501,6 @@ def _venta_terceros_render_upload_comprobantes(row: pd.Series):
                     format="%.2f",
                     key=f"{key_prefix}monto_pago_input",
                 )
-        fecha_entrega_actual = _venta_terceros_valor(
-            row,
-            ["Fecha_Entrega", "Fecha_Entrega_Requerida", "Fecha_Entrega_Venta_Terceros"],
-        )
-        with col_fecha_entrega:
-            fecha_entrega = st.date_input(
-                "🗓 Fecha de Entrega Requerida",
-                value=_venta_terceros_parse_fecha_date(fecha_entrega_actual) or now_cdmx().date(),
-                key=f"{key_prefix}fecha_entrega_input",
-            )
 
         confirmado = st.checkbox(
             "Confirmo que este es el pedido correcto para subir comprobantes y guardar el pago.",
@@ -2485,13 +2519,32 @@ def _venta_terceros_render_upload_comprobantes(row: pd.Series):
             st.warning("⚠️ Captura el pago recibido para sumarlo a Anticipo_Credito.")
             return
 
+        historial_actual = _venta_terceros_referencia_actual(row)
+        if condicion == "crédito":
+            acumulado_anterior = _venta_terceros_parse_monto(
+                _venta_terceros_valor(row, ["Anticipo_Credito", "Anticipo", "Anticipo_Venta_Terceros"], "0")
+            )
+            acumulado_nuevo = acumulado_anterior + float(monto_pago or 0)
+        else:
+            acumulado_anterior = _venta_terceros_parse_monto(
+                _venta_terceros_valor(row, ["Monto_Comprobante", "Monto_Pago", "Monto_Pago_Venta_Terceros"], "0")
+            )
+            acumulado_nuevo = float(monto_pago or 0)
+        registro_comprobante = _venta_terceros_construir_registro_comprobante(
+            numero_registro=_venta_terceros_contar_registros_comprobante(historial_actual) + 1,
+            condicion=condicion,
+            fecha_registro=now_cdmx(),
+            monto_pago=float(monto_pago or 0),
+            acumulado_anterior=acumulado_anterior,
+            acumulado_nuevo=acumulado_nuevo,
+            nota_usuario=pago["referencia_pago"],
+        )
         cambios_pago = [
             (["Fecha_Pago_Comprobante", "Fecha_Pago", "Fecha_Pago_Venta_Terceros"], fecha_pago.strftime("%d/%m/%Y")),
-            (["Forma_Pago_Comprobante", "Forma_Pago", "Forma_Pago_Venta_Terceros"], pago["forma_pago"].strip()),
-            (["Banco_Destino_Pago", "Banco_Destino", "Banco_Destino_Venta_Terceros"], pago["banco_destino"].strip()),
-            (["Terminal", "Terminal_Pago", "Terminal_Venta_Terceros"], pago["terminal"].strip()),
-            (["Referencia_Pago", "Referencia", "Referencia_Venta_Terceros"], pago["referencia_pago"].strip()),
-            (["Fecha_Entrega", "Fecha_Entrega_Requerida", "Fecha_Entrega_Venta_Terceros"], fecha_entrega.strftime("%d/%m/%Y")),
+            (
+                ["Referencia_Pago", "Referencia", "Referencia_Venta_Terceros"],
+                _venta_terceros_append_registro_comprobante(historial_actual, registro_comprobante),
+            ),
         ]
         cambio_monto = _venta_terceros_cambio_monto_pago(row, condicion, monto_pago)
         if cambio_monto:
@@ -2526,16 +2579,13 @@ def _venta_terceros_render_upload_comprobantes(row: pd.Series):
 def _venta_terceros_render_contado(row: pd.Series):
     """Detalle solicitado para pedidos de Venta terceros de contado."""
     st.markdown("### 💳 Datos de contado (Venta terceros)")
-    col1, col2, col3 = st.columns(3)
+    col1, col2 = st.columns(2)
     with col1:
         _venta_terceros_metric("📅 Fecha del Pago", _venta_terceros_formatear_fecha(_venta_terceros_valor(row, ["Fecha_Pago_Comprobante", "Fecha_Pago", "Fecha_Pago_Venta_Terceros"])))
-        _venta_terceros_metric("🏦 Banco Destino", _venta_terceros_valor(row, ["Banco_Destino_Pago", "Banco_Destino", "Banco_Destino_Venta_Terceros"]))
     with col2:
-        _venta_terceros_metric("💳 Forma de Pago", _venta_terceros_valor(row, ["Forma_Pago_Comprobante", "Forma_Pago", "Forma_Pago_Venta_Terceros"]))
-        _venta_terceros_metric("🔢 Referencia (opcional)", _venta_terceros_valor(row, ["Referencia_Pago", "Referencia", "Referencia_Venta_Terceros"]))
-    with col3:
         _venta_terceros_metric("💲 Monto del Pago", _venta_terceros_valor(row, ["Monto_Comprobante", "Monto_Pago", "Monto_Pago_Venta_Terceros"], "0.00"))
-        _venta_terceros_metric("🗓 Fecha de Entrega Requerida", _venta_terceros_formatear_fecha(_venta_terceros_valor(row, ["Fecha_Entrega", "Fecha_Entrega_Requerida", "Fecha_Entrega_Venta_Terceros"])))
+
+    _venta_terceros_render_historial_cobros(_venta_terceros_referencia_actual(row))
 
 
 def _venta_terceros_render_credito(row: pd.Series):
@@ -2563,15 +2613,8 @@ def _venta_terceros_render_credito(row: pd.Series):
     )
 
     st.markdown("#### 🧾 Datos del pago")
-    col_pago_1, col_pago_2, col_pago_3 = st.columns(3)
-    with col_pago_1:
-        _venta_terceros_metric("💳 Forma de Pago", _venta_terceros_valor(row, ["Forma_Pago_Comprobante", "Forma_Pago", "Forma_Pago_Venta_Terceros"]))
-    with col_pago_2:
-        _venta_terceros_metric("🏦 Banco Destino", _venta_terceros_valor(row, ["Banco_Destino_Pago", "Banco_Destino", "Banco_Destino_Venta_Terceros"]))
-    with col_pago_3:
-        _venta_terceros_metric("🔢 Referencia (opcional)", _venta_terceros_valor(row, ["Referencia_Pago", "Referencia", "Referencia_Venta_Terceros"]))
-
-    _venta_terceros_metric("🗓 Fecha de Entrega Requerida", _venta_terceros_formatear_fecha(_venta_terceros_valor(row, ["Fecha_Entrega", "Fecha_Entrega_Requerida", "Fecha_Entrega_Venta_Terceros"])))
+    _venta_terceros_metric("📅 Última fecha del pago", _venta_terceros_formatear_fecha(_venta_terceros_valor(row, ["Fecha_Pago_Comprobante", "Fecha_Pago", "Fecha_Pago_Venta_Terceros"])))
+    _venta_terceros_render_historial_cobros(_venta_terceros_referencia_actual(row))
 
 
 
