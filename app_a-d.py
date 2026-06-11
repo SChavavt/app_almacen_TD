@@ -72,6 +72,18 @@ DEBUG_BULK_COMPLETE = False
 ESTADO_EN_PROCESO = "🔵 En Proceso"
 ESTADO_AUDITADO = "🔎 Auditado"
 ESTADO_COMPLETADO = "🟢 Completado"
+ESTADOS_FLUJO_VALIDOS = {
+    "🟡 Pendiente",
+    ESTADO_EN_PROCESO,
+    ESTADO_COMPLETADO,
+    "🔴 Demorado",
+    "✏️ Modificación",
+    "🛠 Modificación",
+    "🟣 Cancelado",
+    "✅ Viajó",
+    ESTADO_AUDITADO,
+}
+CONFIRMACION_SURTIDO_TAG = "[✔CONFIRMADO]"
 
 
 def _is_recoverable_auth_error(exc: Exception) -> bool:
@@ -1931,7 +1943,7 @@ def _render_bulk_selector(row: Any) -> None:
     if not st.session_state.get("bulk_complete_mode", False):
         return
 
-    if str(row.get("Estado", "")).strip() != "🔵 En Proceso":
+    if str(row.get("Estado", "")).strip() != ESTADO_EN_PROCESO:
         return
 
     pedido_id = str(row.get("ID_Pedido", "")).strip()
@@ -3717,7 +3729,7 @@ def _estado_sort_key(estado: Any) -> int:
         "🔴 Demorado": 15,
         "🛠 Modificación": 15,
         "✏️ Modificación": 15,
-        "🔵 En Proceso": 20,
+        ESTADO_EN_PROCESO: 20,
         "🟢 Completado": 30,
         "✅ Viajó": 30,
         "🟣 Cancelado": 30,
@@ -3767,21 +3779,19 @@ def _get_live_headers_preserving_positions(worksheet, fallback_headers=None):
 
 
 def _find_header_col_in_row1(worksheet, header_name: str, fallback_headers=None) -> Optional[int]:
-    """Busca el encabezado por nombre en fila 1 y devuelve índice 1-based de columna."""
-    target = str(header_name or "").strip()
-    if not target:
+    """
+    Busca un encabezado exclusivamente en la fila 1 y devuelve su índice 1-based.
+
+    Importante: no usa ``worksheet.find`` porque en algunos escenarios puede devolver
+    coincidencias fuera de la fila de encabezados o quedar afectado por rangos/valores
+    no esperados. Para escrituras críticas, la única fuente válida para ubicar columnas
+    es la fila 1 leída completa, conservando posiciones.
+    """
+    target_norm = str(header_name or "").strip().lower()
+    if not target_norm:
         return None
 
-    try:
-        exact_pattern = re.compile(rf"^\s*{re.escape(target)}\s*$", re.IGNORECASE)
-        cell = worksheet.find(exact_pattern, in_row=1)
-        if cell and getattr(cell, "col", None):
-            return int(cell.col)
-    except Exception:
-        pass
-
     headers = _get_live_headers_preserving_positions(worksheet, fallback_headers)
-    target_norm = target.lower()
     for idx, header in enumerate(headers, start=1):
         if str(header or "").strip().lower() == target_norm:
             return idx
@@ -4153,7 +4163,7 @@ def _collect_route_candidates(
         pedidos_en_proceso = pedidos_fecha.copy()
     else:
         pedidos_en_proceso = pedidos_fecha[
-            pedidos_fecha.get("Estado", pd.Series("", index=pedidos_fecha.index)).astype(str).str.strip().eq("🔵 En Proceso")
+            pedidos_fecha.get("Estado", pd.Series("", index=pedidos_fecha.index)).astype(str).str.strip().eq(ESTADO_EN_PROCESO)
         ].copy()
 
     if "Turno" in pedidos_en_proceso.columns:
@@ -4875,13 +4885,248 @@ def batch_update_gsheet_cells(worksheet, updates_list, *, headers: Optional[list
     return False
 
 
+def _read_sheet_row_uncached(worksheet: Any, row_index: int) -> list[Any]:
+    """Lee una fila directamente desde Sheets, sin cache, para verificar escrituras críticas."""
+    try:
+        return list(worksheet.row_values(int(row_index)))
+    except Exception:
+        return get_sheet_row_values_cached(worksheet, int(row_index))
+
+
+def _build_confirmed_modificacion_text(mod_texto: Any) -> str:
+    mod_texto_limpio = str(mod_texto or "").strip()
+    if mod_texto_limpio.endswith(CONFIRMACION_SURTIDO_TAG):
+        return mod_texto_limpio
+    return f"{mod_texto_limpio} {CONFIRMACION_SURTIDO_TAG}".strip()
+
+
+def _looks_like_sheet_datetime(value: Any) -> bool:
+    """Detecta fechas tipo Sheets usadas por error en columnas de texto/responsable."""
+    text = str(value or "").strip()
+    if not text:
+        return False
+    if not re.match(r"^\d{4}-\d{2}-\d{2}(?:[ T]\d{1,2}:\d{2}(?::\d{2})?)?$", text):
+        return False
+    return not pd.isna(pd.to_datetime(text, errors="coerce"))
+
+
+def _extract_modificacion_from_contaminated_estado(value: Any) -> str:
+    text = str(value or "").strip()
+    if CONFIRMACION_SURTIDO_TAG not in text:
+        return ""
+    return text.replace(CONFIRMACION_SURTIDO_TAG, "").strip()
+
+
+def _update_cell_by_validated_col(
+    worksheet: Any,
+    row_index: int,
+    col_index: int,
+    value: Any,
+    col_name: str,
+) -> bool:
+    """Actualiza una celda por índice ya validado y registra la actualización local."""
+    try:
+        worksheet.update_cell(int(row_index), int(col_index), value)
+        worksheet_name = _get_worksheet_name_safe(worksheet)
+        if worksheet_name:
+            _record_local_sheet_update(worksheet_name, int(row_index), {col_name: value})
+        return True
+    except Exception as exc:
+        st.error(f"❌ Error al actualizar '{col_name}' en Google Sheets: {exc}")
+        return False
+
+
+def _verify_confirmacion_surtido_row(
+    worksheet: Any,
+    gsheet_row_index: int,
+    *,
+    col_mod: int,
+    col_estado: int,
+    col_hora: int,
+    col_fecha_mod: Optional[int],
+    col_nombre_resp: Optional[int],
+    texto_confirmado: str,
+    hora_confirmacion: str,
+    fecha_modificacion_antes: str,
+    nombre_responsable_antes: str,
+    dbg=None,
+) -> bool:
+    """Verifica y, si es necesario, repara una confirmación sin tocar Fecha_Modificacion."""
+    def _dbg(msg: str) -> None:
+        if dbg:
+            dbg(msg)
+
+    try:
+        after_row = _read_sheet_row_uncached(worksheet, int(gsheet_row_index))
+    except Exception as exc:
+        st.error(f"❌ No se pudo verificar la confirmación de surtido después de escribir: {exc}")
+        return False
+
+    after_mod = str(after_row[col_mod - 1]).strip() if len(after_row) >= col_mod else ""
+    after_estado = str(after_row[col_estado - 1]).strip() if len(after_row) >= col_estado else ""
+    after_hora = str(after_row[col_hora - 1]).strip() if len(after_row) >= col_hora else ""
+    after_fecha_mod = str(after_row[col_fecha_mod - 1]).strip() if col_fecha_mod and len(after_row) >= col_fecha_mod else ""
+    after_nombre_resp = str(after_row[col_nombre_resp - 1]).strip() if col_nombre_resp and len(after_row) >= col_nombre_resp else ""
+
+    _dbg(
+        "despues | "
+        f"Modificacion_Surtido='{after_mod}' | Estado='{after_estado}' | "
+        f"Hora_Proceso='{after_hora}' | Fecha_Modificacion='{after_fecha_mod}' | "
+        f"Nombre_Responsable='{after_nombre_resp}'"
+    )
+
+    if col_fecha_mod and after_fecha_mod != fecha_modificacion_antes:
+        st.error(
+            "❌ La confirmación intentó alterar 'Fecha_Modificacion'. "
+            "Se restaurará la fecha original para proteger el historial."
+        )
+        if not _update_cell_by_validated_col(
+            worksheet, gsheet_row_index, col_fecha_mod, fecha_modificacion_antes, "Fecha_Modificacion"
+        ):
+            return False
+
+    if col_nombre_resp and after_nombre_resp != nombre_responsable_antes:
+        st.error(
+            "❌ La confirmación alteró 'Nombre_Responsable'. "
+            "Se restaurará el valor original para proteger el responsable del caso."
+        )
+        if not _update_cell_by_validated_col(
+            worksheet, gsheet_row_index, col_nombre_resp, nombre_responsable_antes, "Nombre_Responsable"
+        ):
+            return False
+
+    needs_repair = (
+        after_mod != texto_confirmado
+        or after_estado != ESTADO_EN_PROCESO
+        or after_hora != hora_confirmacion
+    )
+    if not needs_repair:
+        return True
+
+    _dbg("post_verificacion_reparacion=INICIANDO")
+    ok = _update_cell_by_validated_col(
+        worksheet, gsheet_row_index, col_mod, texto_confirmado, "Modificacion_Surtido"
+    )
+    if ok:
+        ok = _update_cell_by_validated_col(
+            worksheet, gsheet_row_index, col_estado, ESTADO_EN_PROCESO, "Estado"
+        )
+    if ok:
+        ok = _update_cell_by_validated_col(
+            worksheet, gsheet_row_index, col_hora, hora_confirmacion, "Hora_Proceso"
+        )
+    if col_fecha_mod and ok:
+        ok = _update_cell_by_validated_col(
+            worksheet, gsheet_row_index, col_fecha_mod, fecha_modificacion_antes, "Fecha_Modificacion"
+        )
+    if col_nombre_resp and ok:
+        ok = _update_cell_by_validated_col(
+            worksheet, gsheet_row_index, col_nombre_resp, nombre_responsable_antes, "Nombre_Responsable"
+        )
+    return ok
+
+
+def _repair_contaminated_modificacion_estado_rows(
+    df: pd.DataFrame,
+    worksheet: Any,
+    headers: list[str],
+) -> int:
+    """
+    Repara filas donde una confirmación de surtido contaminó columnas operativas.
+
+    Casos cubiertos:
+    - Estado recibió el comentario con [✔CONFIRMADO].
+    - Nombre_Responsable recibió por error la fecha/hora que pertenecía a Hora_Proceso.
+    """
+    required_df_cols = {"Estado", "Modificacion_Surtido"}
+    if df is None or df.empty or not required_df_cols.issubset(df.columns):
+        return 0
+
+    live_headers = _get_live_headers_preserving_positions(worksheet, headers)
+    col_mod = _find_header_col_in_row1(worksheet, "Modificacion_Surtido", live_headers)
+    col_estado = _find_header_col_in_row1(worksheet, "Estado", live_headers)
+    col_hora = _find_header_col_in_row1(worksheet, "Hora_Proceso", live_headers)
+    col_fecha_mod = _find_header_col_in_row1(worksheet, "Fecha_Modificacion", live_headers)
+    col_nombre_resp = _find_header_col_in_row1(worksheet, "Nombre_Responsable", live_headers)
+    if not col_mod or not col_estado or not col_hora:
+        return 0
+
+    destino_cols = {col_mod, col_estado, col_hora}
+    protected_cols = {col for col in [col_fecha_mod, col_nombre_resp] if col}
+    if len(destino_cols) != 3 or destino_cols.intersection(protected_cols):
+        return 0
+
+    repaired = 0
+    for idx, row in df.iterrows():
+        estado_actual = str(row.get("Estado", "")).strip()
+        mod_actual = str(row.get("Modificacion_Surtido", "")).strip()
+        nombre_resp_actual = str(row.get("Nombre_Responsable", "")).strip()
+
+        estado_contaminado = (
+            CONFIRMACION_SURTIDO_TAG in estado_actual
+            and estado_actual not in ESTADOS_FLUJO_VALIDOS
+        )
+        nombre_resp_contaminado = _looks_like_sheet_datetime(nombre_resp_actual)
+        if not estado_contaminado and not nombre_resp_contaminado:
+            continue
+
+        if not mod_actual and estado_contaminado:
+            mod_actual = _extract_modificacion_from_contaminated_estado(estado_actual)
+        if not mod_actual:
+            continue
+
+        gsheet_row_idx = row.get("_gsheet_row_index", row.get("gsheet_row_index"))
+        try:
+            gsheet_row_idx = int(float(gsheet_row_idx))
+        except Exception:
+            try:
+                gsheet_row_idx = int(idx) + 2
+            except Exception:
+                continue
+
+        texto_confirmado = _build_confirmed_modificacion_text(mod_actual)
+        hora_reparacion = nombre_resp_actual if nombre_resp_contaminado else mx_now_str()
+        ok = _update_cell_by_validated_col(
+            worksheet, gsheet_row_idx, col_mod, texto_confirmado, "Modificacion_Surtido"
+        )
+        if ok:
+            ok = _update_cell_by_validated_col(
+                worksheet, gsheet_row_idx, col_estado, ESTADO_EN_PROCESO, "Estado"
+            )
+        if ok:
+            ok = _update_cell_by_validated_col(
+                worksheet, gsheet_row_idx, col_hora, hora_reparacion, "Hora_Proceso"
+            )
+        if ok and nombre_resp_contaminado and col_nombre_resp:
+            ok = _update_cell_by_validated_col(
+                worksheet, gsheet_row_idx, col_nombre_resp, "", "Nombre_Responsable"
+            )
+        if ok:
+            df.at[idx, "Modificacion_Surtido"] = texto_confirmado
+            df.at[idx, "Estado"] = ESTADO_EN_PROCESO
+            df.at[idx, "Hora_Proceso"] = hora_reparacion
+            if nombre_resp_contaminado and "Nombre_Responsable" in df.columns:
+                df.at[idx, "Nombre_Responsable"] = ""
+            repaired += 1
+
+    return repaired
+
+
 def confirmar_modificacion_surtido(
     worksheet,
     headers,
     gsheet_row_index,
     mod_texto,
 ):
-    """Confirma modificación de surtido priorizando batch y con fallback seguro."""
+    """
+    Confirma una modificación de surtido sin mezclar campos operativos.
+
+    Reglas del flujo:
+    - Modificacion_Surtido conserva el comentario y solo agrega [✔CONFIRMADO].
+    - Estado vuelve a un estado válido del flujo: 🔵 En Proceso.
+    - Hora_Proceso registra la hora de confirmación del almacén.
+    - Fecha_Modificacion NO se actualiza; esa fecha pertenece a la solicitud del vendedor.
+    """
     debug_steps: list[str] = []
 
     def _dbg(msg: str):
@@ -4900,99 +5145,156 @@ def confirmar_modificacion_surtido(
         # Si falla la lectura de encabezados, usamos los que ya traíamos en memoria.
         live_headers = list(headers or [])
 
-    def _normalize_header_name(name: Any) -> str:
-        return str(name or "").strip().lower()
-
     col_mod = _find_header_col_in_row1(worksheet, "Modificacion_Surtido", live_headers)
     col_estado = _find_header_col_in_row1(worksheet, "Estado", live_headers)
     col_hora = _find_header_col_in_row1(worksheet, "Hora_Proceso", live_headers)
+    col_fecha_mod = _find_header_col_in_row1(worksheet, "Fecha_Modificacion", live_headers)
+    col_nombre_resp = _find_header_col_in_row1(worksheet, "Nombre_Responsable", live_headers)
     _dbg(
-        f"fila_objetivo={gsheet_row_index} | col_mod={col_mod} col_estado={col_estado} col_hora={col_hora}"
+        "fila_objetivo="
+        f"{gsheet_row_index} | col_mod={col_mod} col_estado={col_estado} "
+        f"col_hora={col_hora} col_fecha_mod={col_fecha_mod} col_nombre_resp={col_nombre_resp}"
     )
 
     if col_mod is None:
         st.error("❌ No existe la columna 'Modificacion_Surtido' para confirmar el cambio.")
         return False
+    if col_estado is None:
+        st.error("❌ No existe la columna 'Estado' para regresar el caso a '🔵 En Proceso'.")
+        return False
+    if col_hora is None:
+        st.error("❌ No existe la columna 'Hora_Proceso' para registrar la confirmación de almacén.")
+        return False
 
-    texto_confirmado = f"{str(mod_texto or '').strip()} [✔CONFIRMADO]".strip()
-    _dbg(f"texto_original='{str(mod_texto or '').strip()}' | texto_confirmado='{texto_confirmado}'")
+    columnas_destino = {
+        "Modificacion_Surtido": col_mod,
+        "Estado": col_estado,
+        "Hora_Proceso": col_hora,
+    }
+    if len(set(columnas_destino.values())) != len(columnas_destino):
+        st.error(
+            "❌ No se confirmó la modificación porque los encabezados de Google Sheets están duplicados "
+            "o desalineados entre Modificacion_Surtido, Estado y Hora_Proceso."
+        )
+        _dbg(f"columnas_destino_invalidas={columnas_destino}")
+        return False
+    protected_columns = {
+        name: col
+        for name, col in {
+            "Fecha_Modificacion": col_fecha_mod,
+            "Nombre_Responsable": col_nombre_resp,
+        }.items()
+        if col
+    }
+    for protected_name, protected_col in protected_columns.items():
+        if protected_col in columnas_destino.values():
+            st.error(f"❌ No se confirmó la modificación para proteger '{protected_name}'.")
+            _dbg(f"{protected_name}_colisiona_con_destino={protected_col}")
+            return False
+
+    mod_texto_limpio = str(mod_texto or "").strip()
+    texto_confirmado = _build_confirmed_modificacion_text(mod_texto_limpio)
+    hora_confirmacion = mx_now_str()
+    _dbg(f"texto_original='{mod_texto_limpio}' | texto_confirmado='{texto_confirmado}'")
+
+    try:
+        before_row = _read_sheet_row_uncached(worksheet, int(gsheet_row_index))
+    except Exception as e:
+        st.error(
+            "❌ No se confirmó la modificación porque no se pudo verificar la fila actual "
+            f"antes de escribir: {e}"
+        )
+        _dbg(f"no_se_pudo_leer_estado_previo: {e}")
+        return False
+
+    before_mod = str(before_row[col_mod - 1]).strip() if len(before_row) >= col_mod else ""
+    before_estado = str(before_row[col_estado - 1]).strip() if len(before_row) >= col_estado else ""
+    before_hora = str(before_row[col_hora - 1]).strip() if len(before_row) >= col_hora else ""
+    before_fecha_mod = str(before_row[col_fecha_mod - 1]).strip() if col_fecha_mod and len(before_row) >= col_fecha_mod else ""
+    before_nombre_resp = str(before_row[col_nombre_resp - 1]).strip() if col_nombre_resp and len(before_row) >= col_nombre_resp else ""
+    _dbg(
+        "antes | "
+        f"Modificacion_Surtido='{before_mod}' | Estado='{before_estado}' | "
+        f"Hora_Proceso='{before_hora}' | Fecha_Modificacion='{before_fecha_mod}' | "
+        f"Nombre_Responsable='{before_nombre_resp}'"
+    )
+
+    mod_en_columna_correcta = before_mod in {mod_texto_limpio, texto_confirmado}
+    if not mod_en_columna_correcta:
+        posible_col = None
+        for idx, value in enumerate(before_row, start=1):
+            if str(value or "").strip() == mod_texto_limpio:
+                posible_col = idx
+                break
+        st.error(
+            "❌ No se confirmó la modificación porque la columna resuelta para "
+            "'Modificacion_Surtido' no contiene el texto esperado. Se evitó escribir para no "
+            "contaminar 'Estado' ni 'Fecha_Modificacion'."
+        )
+        _dbg(
+            f"guardia_modificacion_fallo | col_mod={col_mod} valor_col_mod='{before_mod}' "
+            f"texto_esperado='{mod_texto_limpio}' posible_col={posible_col}"
+        )
+        return False
+
+    if CONFIRMACION_SURTIDO_TAG in before_estado and before_estado not in {"🔵 En Proceso", "✏️ Modificación"}:
+        _dbg(
+            "estado_contaminado_detectado | se reparará Estado a '🔵 En Proceso' "
+            "y el historial confirmado quedará en Modificacion_Surtido"
+        )
 
     updates = [
         {
-            "range": gspread.utils.rowcol_to_a1(
-                gsheet_row_index,
-                col_mod,
-            ),
+            "range": gspread.utils.rowcol_to_a1(gsheet_row_index, col_mod),
             "values": [[texto_confirmado]],
-        }
+        },
+        {
+            "range": gspread.utils.rowcol_to_a1(gsheet_row_index, col_estado),
+            "values": [["🔵 En Proceso"]],
+        },
+        {
+            "range": gspread.utils.rowcol_to_a1(gsheet_row_index, col_hora),
+            "values": [[hora_confirmacion]],
+        },
     ]
-
-    if col_estado is not None:
-        updates.append(
-            {
-                "range": gspread.utils.rowcol_to_a1(
-                    gsheet_row_index,
-                    col_estado,
-                ),
-                "values": [["🔵 En Proceso"]],
-            }
-        )
-
-    if col_hora is not None:
-        updates.append(
-            {
-                "range": gspread.utils.rowcol_to_a1(
-                    gsheet_row_index,
-                    col_hora,
-                ),
-                "values": [[mx_now_str()]],
-            }
-        )
     _dbg(f"updates_batch={updates}")
 
-    try:
-        before_row = get_sheet_row_values_cached(worksheet, int(gsheet_row_index))
-        before_mod = before_row[col_mod - 1] if col_mod and len(before_row) >= col_mod else ""
-        before_estado = before_row[col_estado - 1] if col_estado and len(before_row) >= col_estado else ""
-        before_hora = before_row[col_hora - 1] if col_hora and len(before_row) >= col_hora else ""
-        _dbg(
-            f"antes | Modificacion_Surtido='{before_mod}' | Estado='{before_estado}' | Hora_Proceso='{before_hora}'"
+    wrote_ok = batch_update_gsheet_cells(worksheet, updates, headers=live_headers)
+    if wrote_ok:
+        _dbg("batch_update=OK | Fecha_Modificacion no incluida en updates")
+    else:
+        _dbg("batch_update=FALLÓ -> usando fallback por columna validada")
+        # Fallback resiliente por índices ya resueltos: no recalcula encabezados ni toca Fecha_Modificacion.
+        wrote_ok = _update_cell_by_validated_col(
+            worksheet, gsheet_row_index, col_mod, texto_confirmado, "Modificacion_Surtido"
         )
-    except Exception as e:
-        _dbg(f"no_se_pudo_leer_estado_previo: {e}")
+        if wrote_ok:
+            wrote_ok = _update_cell_by_validated_col(
+                worksheet, gsheet_row_index, col_estado, ESTADO_EN_PROCESO, "Estado"
+            )
+        if wrote_ok:
+            wrote_ok = _update_cell_by_validated_col(
+                worksheet, gsheet_row_index, col_hora, hora_confirmacion, "Hora_Proceso"
+            )
+        _dbg(f"fallback_resultado_final={wrote_ok}")
 
-    if batch_update_gsheet_cells(worksheet, updates, headers=live_headers):
-        _dbg("batch_update=OK")
-        return True
-    _dbg("batch_update=FALLÓ -> usando fallback update_gsheet_cell")
+    if not wrote_ok:
+        return False
 
-    # Fallback resiliente: conservar funcionalidad aunque falle la operación batch.
-    ok = update_gsheet_cell(
+    return _verify_confirmacion_surtido_row(
         worksheet,
-        live_headers,
-        gsheet_row_index,
-        "Modificacion_Surtido",
-        texto_confirmado,
+        int(gsheet_row_index),
+        col_mod=col_mod,
+        col_estado=col_estado,
+        col_hora=col_hora,
+        col_fecha_mod=col_fecha_mod,
+        col_nombre_resp=col_nombre_resp,
+        texto_confirmado=texto_confirmado,
+        hora_confirmacion=hora_confirmacion,
+        fecha_modificacion_antes=before_fecha_mod,
+        nombre_responsable_antes=before_nombre_resp,
+        dbg=_dbg,
     )
-    if ok and col_estado is not None:
-        ok = update_gsheet_cell(
-            worksheet,
-            live_headers,
-            gsheet_row_index,
-            "Estado",
-            "🔵 En Proceso",
-        )
-    if ok and col_hora is not None:
-        ok = update_gsheet_cell(
-            worksheet,
-            live_headers,
-            gsheet_row_index,
-            "Hora_Proceso",
-            mx_now_str(),
-        )
-    _dbg(f"fallback_resultado_final={ok}")
-
-    return ok
 
 
 def resolve_caso_gsheet_row_index(df_casos, row, id_pedido, folio, cliente, df_index=None):
@@ -8498,6 +8800,15 @@ if df_main is not None:
             df_casos[c] = ""
         else:
             df_casos[c] = df_casos[c].fillna("")
+
+    repaired_mod_estado_rows = _repair_contaminated_modificacion_estado_rows(
+        df_casos, worksheet_casos, headers_casos
+    )
+    if repaired_mod_estado_rows:
+        st.warning(
+            f"🧯 Se repararon {repaired_mod_estado_rows} caso(s) con columnas de confirmación "
+            "contaminadas. Fecha_Modificacion se conservó y Nombre_Responsable se limpió si tenía Hora_Proceso."
+        )
 
     if (not skip_demorado_check_once) and (df_casos is not None) and (not df_casos.empty):
         df_casos, changes_made_by_demorado_check_casos = check_and_update_demorados(
