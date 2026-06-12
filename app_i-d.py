@@ -1858,7 +1858,6 @@ def build_base_entry(row, categoria: str):
         "estado": sanitize_text(row.get("Estado", "")),
         "surtidor": sanitize_text(row.get("Surtidor", "")),
         "completados_limpiado": sanitize_text(row.get("Completados_Limpiado", "")),
-        "tipo_modificacion": sanitize_text(row.get("Tipo_Modificacion", "")),
         "cliente": format_cliente_line(row),
         "cliente_nombre": sanitize_text(row.get("Cliente", "")),
         "folio": sanitize_text(row.get("Folio_Factura", "")),
@@ -2146,7 +2145,6 @@ def render_auto_list(
     rows_html = []
     for fallback_number, e in visible:
         is_priority = "priori" in sanitize_text(e.get("completados_limpiado", "")).lower()
-        is_mod_material = "por material" in sanitize_text(e.get("tipo_modificacion", "")).lower()
         is_cancelado = _is_cancelado_estado(e.get("estado", ""))
         has_explicit_number = bool(sanitize_text(e.get("numero", "")))
         display_number = None
@@ -2172,12 +2170,7 @@ def render_auto_list(
         if mode in {"foraneo", "local"}:
             cells_html.append(f"<td class='board-surtidor'>{surtidor_col_html}</td>")
         cells_html.append(f"<td class='board-state'>{estado_html}</td>")
-        row_extra_class = ""
-        if mode in {"local", "foraneo"}:
-            if is_mod_material:
-                row_extra_class = " board-row-mod-material"
-            elif is_priority:
-                row_extra_class = " board-row-priority"
+        row_extra_class = " board-row-priority" if (is_priority and mode in {"local", "foraneo"}) else ""
         rows_html.append(
             f"""
             <tr class='board-row{row_extra_class}'>
@@ -2261,7 +2254,6 @@ def render_auto_list(
     .board-head th:last-child{{border-top-right-radius:0.45rem;}}
     .board-row{{border-top:1px solid rgba(255,255,255,0.09);}}
     .board-row-priority{{background:rgba(128,0,255,0.42)!important;}}
-    .board-row-mod-material{{background:rgba(249,115,22,0.50)!important;}}
     .board-row:first-child{{border-top:none;}}
     .board-row td{{padding:0.18rem 0.18rem;vertical-align:middle;font-size:{compact_td_size};color:#fff;line-height:1.08rem;}}
     .board-head th + th{{border-left:1px solid rgba(136,176,255,0.3);}}

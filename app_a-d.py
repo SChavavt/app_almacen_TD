@@ -93,19 +93,6 @@ def _is_recoverable_auth_error(exc: Exception) -> bool:
 
 PRIORITY_MARKER = "Priori"
 PRIORITY_EMOJI = "🔥"
-MATERIAL_MODIFICATION_VALUE = "Por Material"
-MATERIAL_MODIFICATION_FALLBACK_VALUE = "otro"
-MATERIAL_MODIFICATION_EMOJI = "🟧"
-ESTADO_MODIFICACION_MATERIAL_VISIBLE = "✏️ Modificación"
-
-
-def _has_material_modification(value: Any) -> bool:
-    cleaned = _normalize_text_for_matching(str(value or ""))
-    return "por material" in cleaned
-
-
-def _set_material_modification(enabled: bool) -> str:
-    return MATERIAL_MODIFICATION_VALUE if enabled else MATERIAL_MODIFICATION_FALLBACK_VALUE
 
 
 def _has_priority_marker(value: Any) -> bool:
@@ -6617,34 +6604,7 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
         expanded=st.session_state["expanded_pedidos"].get(row['ID_Pedido'], False),
     ):
         st.markdown("---")
-        es_estado_modificacion_material = (
-            str(row.get("Estado", "")).strip() == ESTADO_MODIFICACION_MATERIAL_VISIBLE
-        )
-        if es_estado_modificacion_material:
-            if "Tipo_Modificacion" in headers:
-                tipo_mod_actual = str(row.get("Tipo_Modificacion", "")).strip()
-                mod_material_actual = _has_material_modification(tipo_mod_actual)
-                mod_material_key = f"mod_material_chk_{row['ID_Pedido']}_{origen_tab}"
-                mod_material_checked = st.checkbox(
-                    f"{MATERIAL_MODIFICATION_EMOJI} Mod por Material",
-                    value=mod_material_actual,
-                    key=mod_material_key,
-                )
-                if mod_material_checked != mod_material_actual:
-                    nuevo_tipo_mod = _set_material_modification(mod_material_checked)
-                    ok_mod_material = update_gsheet_cell(
-                        worksheet, headers, gsheet_row_index, "Tipo_Modificacion", nuevo_tipo_mod
-                    )
-                    if ok_mod_material:
-                        st.success("✅ Modificación por material actualizada.")
-                        st.rerun()
-                    else:
-                        st.error("❌ No se pudo actualizar Tipo_Modificacion.")
-            else:
-                st.warning(
-                    "⚠️ No se encontró la columna Tipo_Modificacion para marcar Mod por Material."
-                )
-        elif "Completados_Limpiado" in headers:
+        if "Completados_Limpiado" in headers:
             prioridad_key = f"priority_chk_{row['ID_Pedido']}_{origen_tab}"
             prioridad_checked = st.checkbox("🔥 Prioridad", value=es_prioritario, key=prioridad_key)
             if prioridad_checked != es_prioritario:
