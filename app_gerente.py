@@ -2149,13 +2149,21 @@ def _venta_terceros_render_payment_details_fields(
 ) -> dict[str, str]:
     """Renderiza la nota editable que se añadirá al historial del cobro."""
     referencia_pago = st.text_area(
-        "📝 Nota opcional del cobro",
+        "📝 Nota adicional para el cobro",
         value="",
-        placeholder="Ej. Cliente envió transferencia parcial por WhatsApp. Si lo dejas vacío se guardará 'Sin nota adicional.'",
+        placeholder="Escribe aquí solo si quieres agregar una nota extra al registro automático del comprobante.",
         key=f"{key_prefix}referencia_pago_input",
         height=90,
     )
-    st.caption("Se agregará al historial automático del comprobante; no reemplaza registros anteriores.")
+    st.caption(
+        "Opcional: esta nota se agrega aparte del mensaje automático del comprobante; "
+        "si la dejas vacía, solo se guardará el registro automático."
+    )
+    st.info(
+        "Ejemplo de historial: el sistema guardará datos como tipo, fecha, condición, "
+        "monto y acumulado. Si agregas nota, aparecerá al final como: "
+        "Nota adicional: Cliente envió el comprobante por WhatsApp."
+    )
     return {"referencia_pago": referencia_pago}
 
 
@@ -2183,7 +2191,7 @@ def _venta_terceros_construir_registro_comprobante(
     nota_usuario: str,
 ) -> str:
     """Crea el bloque histórico que se appendeará a Referencia_Pago."""
-    nota_limpia = str(nota_usuario or "").strip() or "Sin nota adicional."
+    nota_limpia = str(nota_usuario or "").strip()
     condicion_limpia = str(condicion or "").strip() or "No especificada"
     if condicion_limpia == "crédito":
         etiqueta_anterior = "Anticipo anterior"
@@ -2191,18 +2199,18 @@ def _venta_terceros_construir_registro_comprobante(
     else:
         etiqueta_anterior = "Monto registrado anterior"
         etiqueta_nuevo = "Monto registrado nuevo"
-    return "\n".join(
-        [
-            VENTA_TERCEROS_COMPROBANTE_SEPARATOR,
-            f"Tipo: Registro comprobante {numero_registro}",
-            f"Fecha: {fecha_registro.strftime('%d/%m/%Y %H:%M')}",
-            f"Condición: {condicion_limpia}",
-            f"Monto pagado: {_venta_terceros_formatear_monto(monto_pago)}",
-            f"{etiqueta_anterior}: {_venta_terceros_formatear_monto(acumulado_anterior)}",
-            f"{etiqueta_nuevo}: {_venta_terceros_formatear_monto(acumulado_nuevo)}",
-            f"Nota del usuario: {nota_limpia}",
-        ]
-    )
+    lineas_registro = [
+        VENTA_TERCEROS_COMPROBANTE_SEPARATOR,
+        f"Tipo: Registro comprobante {numero_registro}",
+        f"Fecha: {fecha_registro.strftime('%d/%m/%Y %H:%M')}",
+        f"Condición: {condicion_limpia}",
+        f"Monto pagado: {_venta_terceros_formatear_monto(monto_pago)}",
+        f"{etiqueta_anterior}: {_venta_terceros_formatear_monto(acumulado_anterior)}",
+        f"{etiqueta_nuevo}: {_venta_terceros_formatear_monto(acumulado_nuevo)}",
+    ]
+    if nota_limpia:
+        lineas_registro.append(f"Nota adicional: {nota_limpia}")
+    return "\n".join(lineas_registro)
 
 
 def _venta_terceros_append_registro_comprobante(historial_actual: str, registro: str) -> str:
@@ -2475,7 +2483,6 @@ def _venta_terceros_render_upload_comprobantes(row: pd.Series):
     pedido_id_s3 = _venta_terceros_nombre_archivo_seguro(pedido_id)
     form_key = f"venta_terceros_comprobantes_form_{hoja_origen}_{sheet_row}_{pedido_id}"
     uploader_key = f"venta_terceros_comprobantes_uploader_{hoja_origen}_{sheet_row}_{pedido_id}"
-    confirm_key = f"venta_terceros_comprobantes_confirm_{hoja_origen}_{sheet_row}_{pedido_id}"
     key_prefix = f"venta_terceros_pago_upload_{hoja_origen}_{sheet_row}_"
 
     with st.form(key=form_key, clear_on_submit=False):
@@ -2524,16 +2531,9 @@ def _venta_terceros_render_upload_comprobantes(row: pd.Series):
                     key=f"{key_prefix}monto_pago_input",
                 )
 
-        confirmado = st.checkbox(
-            "Confirmo que este es el pedido correcto para subir comprobantes y guardar el pago.",
-            key=confirm_key,
-        )
         subir = st.form_submit_button("⬆️ Subir comprobantes y guardar pago")
 
     if subir:
-        if not confirmado:
-            st.warning("⚠️ Confirma cliente, folio y fila antes de subir comprobantes.")
-            return
         if not archivos:
             st.warning("⚠️ Selecciona al menos un comprobante para subir.")
             return
