@@ -4949,10 +4949,6 @@ if not get_logged_user():
     if usuario_qp in VENDEDOR_CREDENTIALS:
         st.session_state.auth_user = usuario_qp
         st.session_state.auth_vendor = resolve_vendor_for_user(usuario_qp)
-        vendor_name = st.session_state.auth_vendor
-        if vendor_name:
-            st.session_state.dashboard_vendedor_sel = vendor_name
-            st.session_state.dashboard_facturas_faltantes_vendedor_filter = vendor_name
 
 logged_user = get_logged_user().upper()
 is_kiosk_mode = is_kiosk_user(logged_user)
@@ -5382,7 +5378,6 @@ with st.sidebar:
             st.session_state.auth_user = ""
             st.session_state.auth_vendor = ""
             st.session_state.dashboard_vendedor_sel = "(Todos)"
-            st.session_state.dashboard_facturas_faltantes_vendedor_filter = "(Todos)"
             st.session_state.td_assistant_messages = []
             clear_query_param("usuario")
             st.rerun()
@@ -5399,7 +5394,6 @@ with st.sidebar:
                 st.session_state.auth_user = user_input
                 st.session_state.auth_vendor = vendor_name
                 st.session_state.dashboard_vendedor_sel = vendor_name if vendor_name else "(Todos)"
-                st.session_state.dashboard_facturas_faltantes_vendedor_filter = vendor_name if vendor_name else "(Todos)"
                 st.query_params["usuario"] = user_input
                 st.rerun()
             st.error("Usuario no válido. Verifica la clave e intenta de nuevo.")
@@ -6646,29 +6640,12 @@ if selected_tab_key == "dashboard":
                         if sanitize_text(v)
                     }
                 )
-                facturas_vendedor_options = ["(Todos)"] + vendedores_disponibles
-                facturas_vendedor_key = "dashboard_facturas_faltantes_vendedor_filter"
-                logged_vendor_facturas = get_logged_vendor()
-                default_facturas_vendedor = "(Todos)"
-                if logged_vendor_facturas:
-                    logged_vendor_norm = _normalize_vendedor_name(logged_vendor_facturas)
-                    for opt in facturas_vendedor_options:
-                        if _normalize_vendedor_name(opt) == logged_vendor_norm:
-                            default_facturas_vendedor = opt
-                            break
-
-                if facturas_vendedor_key not in st.session_state:
-                    st.session_state[facturas_vendedor_key] = default_facturas_vendedor
-                elif logged_vendor_facturas and st.session_state[facturas_vendedor_key] == "(Todos)":
-                    st.session_state[facturas_vendedor_key] = default_facturas_vendedor
-                if st.session_state[facturas_vendedor_key] not in facturas_vendedor_options:
-                    st.session_state[facturas_vendedor_key] = default_facturas_vendedor
-
                 with filtros_cols[0]:
                     vendedor_sel = st.selectbox(
                         "Filtrar por vendedor",
-                        options=facturas_vendedor_options,
-                        key=facturas_vendedor_key,
+                        options=["(Todos)"] + vendedores_disponibles,
+                        index=0,
+                        key="dashboard_facturas_faltantes_vendedor_filter",
                         on_change=_keep_facturas_faltantes_open,
                     )
                 if vendedor_sel != "(Todos)":
@@ -6957,11 +6934,21 @@ if selected_tab_key == "dashboard":
                     )
 
     historial_expander_key = "dashboard_historial_expander_open"
-    st.session_state[historial_expander_key] = True
+    if historial_expander_key not in st.session_state:
+        st.session_state[historial_expander_key] = False
+
+    toggle_label = (
+        "🔼 Ocultar revisado de pedidos"
+        if st.session_state[historial_expander_key]
+        else "🔽 Mostrar todos"
+    )
+    if st.button(toggle_label, key="dashboard_historial_expander_toggle"):
+        st.session_state[historial_expander_key] = not st.session_state[historial_expander_key]
+        st.rerun()
 
     with st.expander(
         "🧾 Revisado de pedidos que viajaron",
-        expanded=True,
+        expanded=st.session_state[historial_expander_key],
     ):
         if st.button(
             "🔄 Actualizar datos_pedidos",
@@ -7040,11 +7027,9 @@ if selected_tab_key == "dashboard":
                     [f for f in historial_work["_fecha_revision"].dropna().unique().tolist()],
                     reverse=True,
                 )
-                if "dashboard_historial_usar_fecha" not in st.session_state:
-                    st.session_state.dashboard_historial_usar_fecha = False
                 usar_filtro_fecha = st.toggle(
                     "Filtrar por fecha exacta",
-                    value=False,
+                    value=True,
                     key="dashboard_historial_usar_fecha",
                 )
                 fecha_sel = None
