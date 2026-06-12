@@ -93,6 +93,37 @@ def _is_recoverable_auth_error(exc: Exception) -> bool:
 
 PRIORITY_MARKER = "Priori"
 PRIORITY_EMOJI = "🔥"
+MATERIAL_MODIFICATION_VALUE = "Por Material"
+MATERIAL_MODIFICATION_FALLBACK_VALUE = "otro"
+MATERIAL_MODIFICATION_EMOJI = "🟧"
+MATERIAL_MODIFICATION_SUPPRESS_VALUE = "no"
+ESTADO_MODIFICACION_MATERIAL_VISIBLE = "✏️ Modificación"
+
+
+def _has_material_modification(value: Any) -> bool:
+    cleaned = _normalize_text_for_matching(str(value or ""))
+    return "por material" in cleaned
+
+
+def _set_material_modification(enabled: bool) -> str:
+    return MATERIAL_MODIFICATION_VALUE if enabled else MATERIAL_MODIFICATION_FALLBACK_VALUE
+
+
+def _has_material_suppression(value: Any) -> bool:
+    cleaned = _normalize_text_for_matching(str(value or ""))
+    return bool(re.search(r"\bno\b", cleaned))
+
+
+def _set_material_suppression(value: Any, suppressed: bool) -> str:
+    base = str(value or "").strip()
+    if suppressed:
+        if _has_material_suppression(base):
+            return base
+        return f"{MATERIAL_MODIFICATION_SUPPRESS_VALUE} {base}".strip()
+    if not base:
+        return ""
+    out = re.sub(r"(?i)\bno\b", "", base)
+    return re.sub(r"\s{2,}", " ", out).strip()
 
 
 def _has_priority_marker(value: Any) -> bool:
@@ -6604,19 +6635,80 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
         expanded=st.session_state["expanded_pedidos"].get(row['ID_Pedido'], False),
     ):
         st.markdown("---")
-        if "Completados_Limpiado" in headers:
-            prioridad_key = f"priority_chk_{row['ID_Pedido']}_{origen_tab}"
-            prioridad_checked = st.checkbox("🔥 Prioridad", value=es_prioritario, key=prioridad_key)
-            if prioridad_checked != es_prioritario:
-                nuevo_valor = _set_priority_marker(row.get("Completados_Limpiado", ""), prioridad_checked)
-                ok_pri = update_gsheet_cell(
-                    worksheet, headers, gsheet_row_index, "Completados_Limpiado", nuevo_valor
+        es_estado_modificacion_material = (
+            str(row.get("Estado", "")).strip() == ESTADO_MODIFICACION_MATERIAL_VISIBLE
+        )
+        tipo_mod_actual = str(row.get("Tipo_Modificacion", "")).strip()
+        mod_material_actual = _has_material_modification(tipo_mod_actual)
+        completados_limpiado_actual = row.get("Completados_Limpiado", "")
+        mod_material_suprimido = _has_material_suppression(completados_limpiado_actual)
+        if es_estado_modificacion_material:
+            if "Tipo_Modificacion" in headers:
+                mod_material_key = f"mod_material_chk_{row['ID_Pedido']}_{origen_tab}"
+                mod_material_checked = st.checkbox(
+                    f"{MATERIAL_MODIFICATION_EMOJI} Mod por Material",
+                    value=mod_material_actual,
+                    key=mod_material_key,
                 )
-                if ok_pri:
-                    st.success("✅ Prioridad actualizada.")
-                    st.rerun()
+                if mod_material_checked != mod_material_actual:
+                    nuevo_tipo_mod = _set_material_modification(mod_material_checked)
+                    ok_mod_material = update_gsheet_cell(
+                        worksheet, headers, gsheet_row_index, "Tipo_Modificacion", nuevo_tipo_mod
+                    )
+                    if ok_mod_material:
+                        st.success("✅ Modificación por material actualizada.")
+                        st.rerun()
+                    else:
+                        st.error("❌ No se pudo actualizar Tipo_Modificacion.")
+            else:
+                st.warning(
+                    "⚠️ No se encontró la columna Tipo_Modificacion para marcar Mod por Material."
+                )
+        else:
+            if "Completados_Limpiado" in headers:
+                prioridad_key = f"priority_chk_{row['ID_Pedido']}_{origen_tab}"
+                prioridad_checked = st.checkbox("🔥 Prioridad", value=es_prioritario, key=prioridad_key)
+                if prioridad_checked != es_prioritario:
+                    nuevo_valor = _set_priority_marker(
+                        completados_limpiado_actual, prioridad_checked
+                    )
+                    ok_pri = update_gsheet_cell(
+                        worksheet, headers, gsheet_row_index, "Completados_Limpiado", nuevo_valor
+                    )
+                    if ok_pri:
+                        st.success("✅ Prioridad actualizada.")
+                        st.rerun()
+                    else:
+                        st.error("❌ No se pudo actualizar prioridad.")
+
+            if mod_material_actual:
+                if "Completados_Limpiado" in headers:
+                    mod_material_key = f"mod_material_visible_chk_{row['ID_Pedido']}_{origen_tab}"
+                    mod_material_checked = st.checkbox(
+                        f"{MATERIAL_MODIFICATION_EMOJI} Mod por Material",
+                        value=not mod_material_suprimido,
+                        key=mod_material_key,
+                        help=(
+                            "Desmárcalo para escribir 'no' en Completados_Limpiado y quitar "
+                            "el color naranja sin cambiar Tipo_Modificacion."
+                        ),
+                    )
+                    if mod_material_checked == mod_material_suprimido:
+                        nuevo_valor = _set_material_suppression(
+                            completados_limpiado_actual, not mod_material_checked
+                        )
+                        ok_mod_material = update_gsheet_cell(
+                            worksheet, headers, gsheet_row_index, "Completados_Limpiado", nuevo_valor
+                        )
+                        if ok_mod_material:
+                            st.success("✅ Color de Mod por Material actualizado.")
+                            st.rerun()
+                        else:
+                            st.error("❌ No se pudo actualizar Completados_Limpiado.")
                 else:
-                    st.error("❌ No se pudo actualizar prioridad.")
+                    st.warning(
+                        "⚠️ No se encontró Completados_Limpiado para controlar el color de Mod por Material."
+                    )
 
         mod_texto = str(row.get("Modificacion_Surtido", "")).strip()
         hay_modificacion = mod_texto != ""
