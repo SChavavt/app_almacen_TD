@@ -8183,9 +8183,13 @@ with tab_map["buscar"]:
     fecha_inicio_date = None
     fecha_fin_date = None
 
+    keyword = ""
+    buscar_btn = False
+
     if modo_busqueda == "🔢 Por número de guía":
-        keyword = st.text_input("📦 Ingresa una palabra clave, número de guía, fragmento o código a buscar:")
-        buscar_btn = st.button("🔎 Buscar")
+        with st.form("buscar_pedido_guia_form"):
+            keyword = st.text_input("📦 Ingresa una palabra clave, número de guía, fragmento o código a buscar:")
+            buscar_btn = st.form_submit_button("🔎 Buscar")
 
         orden_seleccionado = st.selectbox(
             "Orden de los resultados",
@@ -8223,11 +8227,12 @@ with tab_map["buscar"]:
                 fecha_fin_dt = datetime.combine(fecha_fin_date, datetime.max.time())
 
     elif modo_busqueda == "🧑 Por cliente/factura":
-        keyword = st.text_input(
-            "🧑 Ingresa el nombre del cliente o folio de factura a buscar:",
-            help="Puedes escribir el nombre del cliente o el folio de factura; la búsqueda ignora mayúsculas, acentos y espacios en el folio.",
-        )
-        buscar_btn = st.button("🔍 Buscar Pedido del Cliente")
+        with st.form("buscar_pedido_cliente_factura_form"):
+            keyword = st.text_input(
+                "🧑 Ingresa el nombre del cliente o folio de factura a buscar:",
+                help="Puedes escribir el nombre del cliente o el folio de factura; la búsqueda ignora mayúsculas, acentos y espacios en el folio.",
+            )
+            buscar_btn = st.form_submit_button("🔍 Buscar Pedido del Cliente")
 
 
     filtro_fechas_activo = bool(filtrar_por_rango and fecha_inicio_dt and fecha_fin_dt)
