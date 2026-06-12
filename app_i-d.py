@@ -407,10 +407,11 @@ def filter_df_by_vendedor(
     if not isinstance(df, pd.DataFrame) or df.empty or vendedor == "(Todos)":
         return df.copy() if isinstance(df, pd.DataFrame) else pd.DataFrame()
     cols = candidate_cols or ["Vendedor_Registro", "Vendedor", "id_vendedor"]
+    vend_norm = _normalize_vendedor_name(vendedor)
     mask = pd.Series(False, index=df.index)
     for col in cols:
         if col in df.columns:
-            mask = mask | df[col].map(lambda value: _vendedor_names_match(value, vendedor))
+            mask = mask | (df[col].map(_normalize_vendedor_name) == vend_norm)
     return df[mask].copy()
 
 
@@ -911,13 +912,14 @@ def _filter_rows_by_vendor(df: pd.DataFrame, vendor_name: str) -> pd.DataFrame:
     if df is None or df.empty or not vendor_name:
         return pd.DataFrame() if df is None else df.copy()
 
+    vend_norm = _normalize_vendedor_name(vendor_name)
     vendor_columns = [col for col in ["Vendedor", "Vendedor_Registro"] if col in df.columns]
     if not vendor_columns:
         return df.iloc[0:0].copy()
 
     mask = pd.Series(False, index=df.index)
     for col in vendor_columns:
-        mask = mask | df[col].map(lambda value: _vendedor_names_match(value, vendor_name))
+        mask = mask | (df[col].map(_normalize_vendedor_name) == vend_norm)
     return df.loc[mask].copy()
 
 
@@ -3763,40 +3765,6 @@ def _normalize_vendedor_name(value) -> str:
     return text.casefold()
 
 
-def _vendedor_tokens(value) -> set[str]:
-    normalized = _normalize_vendedor_name(value)
-    return {token for token in re.split(r"[^a-z0-9]+", normalized) if token}
-
-
-def _vendedor_names_match(left, right) -> bool:
-    left_norm = _normalize_vendedor_name(left)
-    right_norm = _normalize_vendedor_name(right)
-    if not left_norm or not right_norm:
-        return False
-    if left_norm == right_norm:
-        return True
-
-    left_tokens = _vendedor_tokens(left_norm)
-    right_tokens = _vendedor_tokens(right_norm)
-    if not left_tokens or not right_tokens:
-        return False
-
-    if len(left_tokens) <= len(right_tokens):
-        shorter, longer = left_tokens, right_tokens
-    else:
-        shorter, longer = right_tokens, left_tokens
-    return len(shorter) >= 2 and shorter.issubset(longer)
-
-
-def _resolve_vendedor_option(vendedor, options: list[str], fallback: str = "(Todos)") -> str:
-    if not vendedor:
-        return fallback if fallback in options else (options[0] if options else fallback)
-    for opt in options:
-        if _vendedor_names_match(opt, vendedor):
-            return opt
-    return fallback if fallback in options else (options[0] if options else fallback)
-
-
 def _normalize_header_token(value: object) -> str:
     text = sanitize_text(value).strip().lower()
     text = unicodedata.normalize("NFKD", text)
@@ -4216,7 +4184,10 @@ def build_clientes_inactivos(tabla_clientes: pd.DataFrame, vendedor: str = "(Tod
 
     work = tabla_clientes.copy()
     if vendedor != "(Todos)" and "Vendedor" in work.columns:
-        work = work[work["Vendedor"].map(lambda value: _vendedor_names_match(value, vendedor))].copy()
+        work = work[
+            work["Vendedor"].map(_normalize_vendedor_name)
+            == _normalize_vendedor_name(vendedor)
+        ].copy()
 
     if work.empty:
         return pd.DataFrame()
@@ -4367,8 +4338,9 @@ def build_compra_unica_resumen(
         return pd.DataFrame()
 
     if vendedor_sel != "(Todos)" and "Vendedor_Registro" in work.columns:
+        vendedor_norm = _normalize_vendedor_name(vendedor_sel)
         work = work[
-            work["Vendedor_Registro"].map(lambda value: _vendedor_names_match(value, vendedor_sel))
+            work["Vendedor_Registro"].map(_normalize_vendedor_name) == vendedor_norm
         ].copy()
         if work.empty:
             return pd.DataFrame()
@@ -4486,8 +4458,9 @@ def build_ultimos_pedidos_data(df_pedidos: pd.DataFrame, vendedor: str) -> pd.Da
         work["Vendedor_Registro"] = ""
 
     if vendedor != "(Todos)":
+        vend_norm = _normalize_vendedor_name(vendedor)
         work = work[
-            work["Vendedor_Registro"].map(lambda value: _vendedor_names_match(value, vendedor))
+            work["Vendedor_Registro"].map(_normalize_vendedor_name) == vend_norm
         ]
 
     return work.sort_values("Hora_Registro", ascending=False).copy()
@@ -4976,10 +4949,6 @@ if not get_logged_user():
     if usuario_qp in VENDEDOR_CREDENTIALS:
         st.session_state.auth_user = usuario_qp
         st.session_state.auth_vendor = resolve_vendor_for_user(usuario_qp)
-        vendor_name = st.session_state.auth_vendor
-        if vendor_name:
-            st.session_state.dashboard_vendedor_sel = vendor_name
-            st.session_state.dashboard_facturas_faltantes_vendedor_filter = vendor_name
 
 logged_user = get_logged_user().upper()
 is_kiosk_mode = is_kiosk_user(logged_user)
@@ -5409,7 +5378,6 @@ with st.sidebar:
             st.session_state.auth_user = ""
             st.session_state.auth_vendor = ""
             st.session_state.dashboard_vendedor_sel = "(Todos)"
-            st.session_state.dashboard_facturas_faltantes_vendedor_filter = "(Todos)"
             st.session_state.td_assistant_messages = []
             clear_query_param("usuario")
             st.rerun()
@@ -5426,7 +5394,6 @@ with st.sidebar:
                 st.session_state.auth_user = user_input
                 st.session_state.auth_vendor = vendor_name
                 st.session_state.dashboard_vendedor_sel = vendor_name if vendor_name else "(Todos)"
-                st.session_state.dashboard_facturas_faltantes_vendedor_filter = vendor_name if vendor_name else "(Todos)"
                 st.query_params["usuario"] = user_input
                 st.rerun()
             st.error("Usuario no válido. Verifica la clave e intenta de nuevo.")
@@ -6673,34 +6640,18 @@ if selected_tab_key == "dashboard":
                         if sanitize_text(v)
                     }
                 )
-                facturas_vendedor_options = ["(Todos)"] + vendedores_disponibles
-                facturas_vendedor_key = "dashboard_facturas_faltantes_vendedor_filter"
-                logged_vendor_facturas = get_logged_vendor()
-                default_facturas_vendedor = "(Todos)"
-                if logged_vendor_facturas:
-                    default_facturas_vendedor = _resolve_vendedor_option(
-                        logged_vendor_facturas, facturas_vendedor_options
-                    )
-
-                if facturas_vendedor_key not in st.session_state:
-                    st.session_state[facturas_vendedor_key] = default_facturas_vendedor
-                elif logged_vendor_facturas and st.session_state[facturas_vendedor_key] == "(Todos)":
-                    st.session_state[facturas_vendedor_key] = default_facturas_vendedor
-                if st.session_state[facturas_vendedor_key] not in facturas_vendedor_options:
-                    st.session_state[facturas_vendedor_key] = default_facturas_vendedor
-
                 with filtros_cols[0]:
                     vendedor_sel = st.selectbox(
                         "Filtrar por vendedor",
-                        options=facturas_vendedor_options,
-                        key=facturas_vendedor_key,
+                        options=["(Todos)"] + vendedores_disponibles,
+                        index=0,
+                        key="dashboard_facturas_faltantes_vendedor_filter",
                         on_change=_keep_facturas_faltantes_open,
                     )
                 if vendedor_sel != "(Todos)":
+                    vendedor_norm = _normalize_vendedor_name(vendedor_sel)
                     df_facturas_vista = df_facturas_vista[
-                        df_facturas_vista[vendedor_col].map(
-                            lambda value: _vendedor_names_match(value, vendedor_sel)
-                        )
+                        df_facturas_vista[vendedor_col].map(_normalize_vendedor_name) == vendedor_norm
                     ].copy()
 
             fecha_col = _find_column_by_alias(df_facturas_vista, ["Fecha"])
@@ -6810,10 +6761,12 @@ if selected_tab_key == "dashboard":
         logged_vendor = get_logged_vendor()
         default_vendor = "(Todos)"
         if logged_vendor:
-            default_vendor = _resolve_vendedor_option(logged_vendor, vendedor_options)
+            logged_vendor_norm = _normalize_vendedor_name(logged_vendor)
+            for opt in vendedor_options:
+                if _normalize_vendedor_name(opt) == logged_vendor_norm:
+                    default_vendor = opt
+                    break
         if vendedor_state_key not in st.session_state:
-            st.session_state[vendedor_state_key] = default_vendor
-        elif logged_vendor and st.session_state[vendedor_state_key] == "(Todos)":
             st.session_state[vendedor_state_key] = default_vendor
         if st.session_state[vendedor_state_key] not in vendedor_options:
             st.session_state[vendedor_state_key] = default_vendor
@@ -6850,9 +6803,8 @@ if selected_tab_key == "dashboard":
     tc_vendedor_base = tabla_clientes.copy()
     if vendedor_sel != "(Todos)":
         tc_vendedor_base = tc_vendedor_base[
-            tc_vendedor_base["Vendedor"].map(
-                lambda value: _vendedor_names_match(value, vendedor_sel)
-            )
+            tc_vendedor_base["Vendedor"].map(_normalize_vendedor_name)
+            == _normalize_vendedor_name(vendedor_sel)
         ]
 
     tc = tc_vendedor_base.copy()
@@ -6982,11 +6934,21 @@ if selected_tab_key == "dashboard":
                     )
 
     historial_expander_key = "dashboard_historial_expander_open"
-    st.session_state[historial_expander_key] = True
+    if historial_expander_key not in st.session_state:
+        st.session_state[historial_expander_key] = False
+
+    toggle_label = (
+        "🔼 Ocultar revisado de pedidos"
+        if st.session_state[historial_expander_key]
+        else "🔽 Mostrar todos"
+    )
+    if st.button(toggle_label, key="dashboard_historial_expander_toggle"):
+        st.session_state[historial_expander_key] = not st.session_state[historial_expander_key]
+        st.rerun()
 
     with st.expander(
         "🧾 Revisado de pedidos que viajaron",
-        expanded=True,
+        expanded=st.session_state[historial_expander_key],
     ):
         if st.button(
             "🔄 Actualizar datos_pedidos",
@@ -7022,14 +6984,11 @@ if selected_tab_key == "dashboard":
             )
 
             if vendedor_sel != "(Todos)":
+                vend_norm = _normalize_vendedor_name(vendedor_sel)
                 mask_vendedor = (
-                    historial_work["Vendedor_Registro"].map(
-                        lambda value: _vendedor_names_match(value, vendedor_sel)
-                    )
+                    historial_work["Vendedor_Registro"].map(_normalize_vendedor_name) == vend_norm
                 ) | (
-                    historial_work["Vendedor"].map(
-                        lambda value: _vendedor_names_match(value, vendedor_sel)
-                    )
+                    historial_work["Vendedor"].map(_normalize_vendedor_name) == vend_norm
                 )
                 historial_work = historial_work[mask_vendedor].copy()
 
@@ -7068,11 +7027,9 @@ if selected_tab_key == "dashboard":
                     [f for f in historial_work["_fecha_revision"].dropna().unique().tolist()],
                     reverse=True,
                 )
-                if "dashboard_historial_usar_fecha" not in st.session_state:
-                    st.session_state.dashboard_historial_usar_fecha = False
                 usar_filtro_fecha = st.toggle(
                     "Filtrar por fecha exacta",
-                    value=False,
+                    value=True,
                     key="dashboard_historial_usar_fecha",
                 )
                 fecha_sel = None
