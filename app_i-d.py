@@ -5004,7 +5004,7 @@ if is_kiosk_mode:
 # - AUDITOR: solo Auditores
 # - SCHAVA y CECILIA94: acceso completo sin excepciones
 # - Sin usuario: vista operativa básica (Dashboard, Asistente, Auto Local, Auto Foráneo)
-# - Resto: acceso completo excepto Reportes surtidores
+# - Resto: vista operativa básica (sin Surtidores, Auditores ni Reportes surtidores)
 if logged_user == "SINAI":
     visible_tab_keys = ["auto_foraneo", "auto_local", "assistant"]
 elif logged_user == "DISSURTIDOR":
@@ -5020,7 +5020,7 @@ elif logged_user in {"SCHAVA", "CECILIA94"}:
 elif not logged_user:
     visible_tab_keys = ["dashboard", "assistant", "auto_local", "auto_foraneo"]
 else:
-    visible_tab_keys = [tab_key for tab_key, _ in TAB_DEFINITIONS]
+    visible_tab_keys = ["dashboard", "assistant", "auto_local", "auto_foraneo"]
 
 allowed_report_users = {"CECILIA94", "SCHAVA"}
 if logged_user not in allowed_report_users and "reportes_surtidores" in visible_tab_keys:
