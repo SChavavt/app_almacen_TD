@@ -6610,24 +6610,31 @@ if selected_tab_key == "dashboard":
 
     st_autorefresh(interval=60000, key="auto_refresh_dashboard")
 
-    if "dashboard_facturas_faltantes_open" not in st.session_state:
-        st.session_state.dashboard_facturas_faltantes_open = False
-
     hora_actual_local = datetime.now(TZ).time()
     ventana_revision_inicio = datetime.strptime("17:30", "%H:%M").time()
     ventana_revision_fin = datetime.strptime("19:00", "%H:%M").time()
     ventana_revision_activa = ventana_revision_inicio <= hora_actual_local <= ventana_revision_fin
+
+    if "dashboard_facturas_faltantes_open" not in st.session_state:
+        st.session_state.dashboard_facturas_faltantes_open = ventana_revision_activa
+    if "dashboard_facturas_faltantes_auto_opened" not in st.session_state:
+        st.session_state.dashboard_facturas_faltantes_auto_opened = False
+
     if ventana_revision_activa:
         st.session_state.dashboard_facturas_faltantes_open = True
+        st.session_state.dashboard_facturas_faltantes_auto_opened = True
+    elif st.session_state.dashboard_facturas_faltantes_auto_opened:
+        st.session_state.dashboard_facturas_faltantes_open = False
+        st.session_state.dashboard_facturas_faltantes_auto_opened = False
 
     def _keep_facturas_faltantes_open():
         st.session_state.dashboard_facturas_faltantes_open = True
+        st.session_state.dashboard_facturas_faltantes_auto_opened = False
 
     with st.expander(
         "🧾 Facturas faltantes por enviar",
         expanded=st.session_state.dashboard_facturas_faltantes_open,
     ):
-        st.session_state.dashboard_facturas_faltantes_open = True
         if ventana_revision_activa:
             st.warning(
                 "⏰ Recordatorio diario (5:30 p.m. a 7:00 p.m.): revisa las facturas faltantes "
@@ -6638,6 +6645,7 @@ if selected_tab_key == "dashboard":
             st.markdown("**Vista compartida actual (`Facturas_Faltantes`)**")
         with col_ff_2:
             if st.button("🔄 Actualizar lista", key="dashboard_facturas_faltantes_refresh", use_container_width=True):
+                _keep_facturas_faltantes_open()
                 load_facturas_faltantes_from_gsheets.clear()
                 st.rerun()
 
