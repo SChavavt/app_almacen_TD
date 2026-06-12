@@ -3531,6 +3531,95 @@ def preparar_resultado_caso(row):
     }
 
 
+def parsear_tabla_material_devuelto(valor):
+    """Convierte texto tipo tabla de Material_Devuelto en filas legibles."""
+    texto = str(valor or "").strip()
+    if not texto or texto.lower() == "nan":
+        return pd.DataFrame()
+
+    texto = texto.replace("\r\n", "\n").replace("\r", "\n")
+    texto = re.sub(
+        r"(Monto\s+IVA)\s+([A-ZÁÉÍÓÚÑ]{2,}\d{3,})\s*\|",
+        r"\1\n\2 |",
+        texto,
+        flags=re.IGNORECASE,
+    )
+    texto = re.sub(r"\n\s*\|\s*", "\n", texto)
+
+    columnas = ["Código", "Descripción", "Cantidad", "Monto IVA"]
+    filas = []
+    pendiente = None
+
+    def limpiar_celda(celda):
+        celda_limpia = re.sub(r"\s+", " ", str(celda or "")).strip()
+        return "" if celda_limpia.lower() == "nan" else celda_limpia
+
+    def agregar_fila(partes):
+        partes_limpias = [limpiar_celda(parte) for parte in partes]
+        if len(partes_limpias) < 4:
+            return
+        filas.append(dict(zip(columnas, partes_limpias[:4])))
+
+    lineas = [linea.strip() for linea in texto.split("\n") if linea.strip()]
+    for linea in lineas:
+        partes = [limpiar_celda(parte) for parte in linea.split("|")]
+        partes = [parte for parte in partes if parte]
+        if not partes:
+            continue
+
+        encabezado = " ".join(partes).lower()
+        if all(col.lower() in encabezado for col in columnas[:3]) and "monto" in encabezado:
+            continue
+
+        if pendiente:
+            if len(partes) >= 3:
+                pendiente["Descripción"] = limpiar_celda(f"{pendiente['Descripción']} {partes[0]}")
+                pendiente["Cantidad"] = partes[1]
+                pendiente["Monto IVA"] = partes[2]
+                filas.append(pendiente)
+                pendiente = None
+                if len(partes) > 3:
+                    restantes = partes[3:]
+                    for i in range(0, len(restantes), 4):
+                        agregar_fila(restantes[i:i + 4])
+                continue
+            pendiente["Descripción"] = limpiar_celda(f"{pendiente['Descripción']} {' '.join(partes)}")
+            continue
+
+        if len(partes) == 2 and re.fullmatch(r"[A-ZÁÉÍÓÚÑ]{2,}\d{3,}", partes[0], flags=re.IGNORECASE):
+            pendiente = {
+                "Código": partes[0],
+                "Descripción": partes[1],
+                "Cantidad": "",
+                "Monto IVA": "",
+            }
+            continue
+
+        if len(partes) >= 4:
+            for i in range(0, len(partes), 4):
+                agregar_fila(partes[i:i + 4])
+
+    if pendiente:
+        filas.append(pendiente)
+
+    return pd.DataFrame(filas, columns=columnas)
+
+
+def render_material_devuelto(valor, titulo="📦 Material devuelto"):
+    """Muestra Material_Devuelto como tabla cuando viene delimitado por pipes."""
+    valor_limpio = str(valor or "").strip()
+    if not valor_limpio or valor_limpio.lower() == "nan":
+        return False
+
+    st.markdown(f"**{titulo}:**")
+    tabla_material = parsear_tabla_material_devuelto(valor_limpio)
+    if not tabla_material.empty:
+        st.dataframe(tabla_material, use_container_width=True, hide_index=True)
+    else:
+        st.info(valor_limpio)
+    return True
+
+
 def render_caso_especial(res):
     """Renderiza en pantalla la información de un caso especial."""
     titulo = f"🧾 Caso Especial – {res.get('Tipo_Envio','') or 'N/A'}"
@@ -3601,9 +3690,7 @@ def render_caso_especial(res):
     if str(res.get("Motivo_Detallado","")).strip():
         st.markdown("**📝 Motivo / Descripción:**")
         st.info(str(res.get("Motivo_Detallado","")).strip())
-    if str(res.get("Material_Devuelto","")).strip():
-        st.markdown("**📦 Piezas / Material:**")
-        st.info(str(res.get("Material_Devuelto","")).strip())
+    render_material_devuelto(res.get("Material_Devuelto", ""), "📦 Piezas / Material")
     if str(res.get("Monto_Devuelto","")).strip():
         st.markdown(f"**💵 Monto (dev./estimado):** {res.get('Monto_Devuelto','')}")
 
@@ -9075,7 +9162,6 @@ if "modificar" in tab_map:
                             formatear_fecha(row_garantia.get("Fecha_Compra"), "%d/%m/%Y"),
                         ),
                         ("🎯 Resultado esperado", row_garantia.get("Resultado_Esperado", "")),
-                        ("📦 Material devuelto", row_garantia.get("Material_Devuelto", "")),
                         ("💵 Monto devuelto", formatear_monto(row_garantia.get("Monto_Devuelto", ""))),
                         ("📝 Motivo detallado", row_garantia.get("Motivo_Detallado", "")),
                         ("🏢 Área responsable", row_garantia.get("Area_Responsable", "")),
@@ -9097,6 +9183,8 @@ if "modificar" in tab_map:
                                 columna.info(f"{etiqueta}: {valor_limpio}")
                             else:
                                 columna.markdown(f"**{etiqueta}:** {valor_limpio}")
+
+                    render_material_devuelto(row_garantia.get("Material_Devuelto", ""))
 
                     comentarios = str(row_garantia.get("Comentario", "")).strip()
                     comentarios_adicionales = str(row_garantia.get("Comentarios", "")).strip()
@@ -12169,7 +12257,6 @@ if "organizador" in tab_map:
                         ("🚚 Tipo envío", row_caso.get("Tipo_Envio", "")),
                         ("↩️ Tipo envío original", row_caso.get("Tipo_Envio_Original", "")),
                         ("🎯 Resultado esperado", row_caso.get("Resultado_Esperado", "")),
-                        ("📦 Material devuelto", row_caso.get("Material_Devuelto", "")),
                         ("📝 Motivo detallado", row_caso.get("Motivo_Detallado", "")),
                         ("🏢 Área responsable", row_caso.get("Area_Responsable", "")),
                         ("🙋 Responsable", row_caso.get("Nombre_Responsable", "")),
@@ -12186,6 +12273,7 @@ if "organizador" in tab_map:
                             valor_txt = str(valor).strip() or "—"
                             col_ui.markdown(f"**{titulo}**")
                             col_ui.info(valor_txt)
+                    render_material_devuelto(row_caso.get("Material_Devuelto", ""))
                 else:
                     with st.expander("📘 Detalles del caso especial seleccionado", expanded=True):
                         render_caso_especial(preparar_resultado_caso(row_caso))
