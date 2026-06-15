@@ -7016,6 +7016,13 @@ if selected_tab_key == "dashboard":
     historial_expander_key = "dashboard_historial_expander_open"
     st.session_state[historial_expander_key] = True
 
+    st.markdown("---")
+    st.markdown("### 🧾 Historial de pedidos que ya viajaron")
+    st.caption(
+        "Abre esta sección para revisar rápidamente los pedidos enviados, "
+        "buscar por cliente o folio y filtrar por fecha o tipo de envío."
+    )
+
     with st.expander(
         "🧾 Revisado de pedidos que viajaron",
         expanded=True,
