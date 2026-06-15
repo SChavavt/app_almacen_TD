@@ -4950,6 +4950,141 @@ def usuario_puede(usuario: str | None, permiso: str) -> bool:
     return PERMISOS_USUARIO.get(usuario, {}).get(permiso, False)
 
 
+def usuario_puede_ver_reportes_guia(usuario: str | None) -> bool:
+    return str(usuario or "").strip() in {"CeciliaATD", "SChava"}
+
+
+@st.cache_data(ttl=300)
+def cargar_reporte_guias_drive() -> pd.DataFrame:
+    gs = st.secrets.get("gsheets", {})
+    reporte_sheet_id = str(gs.get("reportes_sheet_id", "")).strip()
+    if not reporte_sheet_id:
+        raise ValueError("Falta configurar gsheets.reportes_sheet_id en secrets.")
+
+    ss = gspread_client.open_by_key(_extract_sheet_id(reporte_sheet_id))
+    ws = ss.worksheet("REPORTE GUÍAS")
+    data = _get_all_records_with_retry(ws)
+    return pd.DataFrame(data)
+
+
+def _normalizar_texto(v):
+    return str(v if v is not None else "").strip().upper()
+
+
+def render_reportes_guia_tab():
+    st.subheader("📦 Reportes Guía")
+
+    try:
+        df_original = cargar_reporte_guias_drive()
+    except Exception as e:
+        st.error(f"No se pudo cargar la hoja 'REPORTE GUÍAS': {e}")
+        return
+
+    if df_original.empty:
+        st.info("La hoja 'REPORTE GUÍAS' no tiene información.")
+        return
+
+    columnas_visibles = list(df_original.columns)
+    df = df_original.copy()
+
+    recibido_col = "RECIBIDO POR"
+    ver_todos = st.checkbox("Ver también filas ENTREGADO", value=False, key="rep_guia_ver_todos")
+    if recibido_col in df.columns and not ver_todos:
+        estado = df[recibido_col].apply(_normalizar_texto)
+        df = df[estado != "ENTREGADO"].copy()
+
+    c1, c2, c3 = st.columns(3)
+    with c1:
+        filtro_guia = st.text_input("Filtrar GUIA", key="rep_guia_filtro_guia")
+        filtro_nombre = st.text_input("Filtrar NOMBRE", key="rep_guia_filtro_nombre")
+    with c2:
+        tipos = sorted([x for x in df.get("TIPO DE GUÍA", pd.Series(dtype=str)).astype(str).str.strip().unique() if x])
+        vendedores = sorted([x for x in df.get("VENDEDOR", pd.Series(dtype=str)).astype(str).str.strip().unique() if x])
+        tipo_sel = st.multiselect("TIPO DE GUÍA", options=tipos, key="rep_guia_tipo")
+        vendedor_sel = st.multiselect("VENDEDOR", options=vendedores, key="rep_guia_vendedor")
+    with c3:
+        recibidos = sorted([x for x in df.get(recibido_col, pd.Series(dtype=str)).astype(str).str.strip().unique() if x])
+        recibido_sel = st.multiselect("RECIBIDO POR", options=recibidos, key="rep_guia_recibido")
+        rango = st.date_input("Rango FECHA DE GUÍA", value=(), key="rep_guia_fecha_rango")
+
+    if filtro_guia and "GUIA" in df.columns:
+        df = df[df["GUIA"].astype(str).str.contains(filtro_guia, case=False, na=False)]
+    if filtro_nombre and "NOMBRE" in df.columns:
+        df = df[df["NOMBRE"].astype(str).str.contains(filtro_nombre, case=False, na=False)]
+    if tipo_sel and "TIPO DE GUÍA" in df.columns:
+        df = df[df["TIPO DE GUÍA"].astype(str).isin(tipo_sel)]
+    if vendedor_sel and "VENDEDOR" in df.columns:
+        df = df[df["VENDEDOR"].astype(str).isin(vendedor_sel)]
+    if recibido_sel and recibido_col in df.columns:
+        df = df[df[recibido_col].astype(str).isin(recibido_sel)]
+
+    if "FECHA DE GUÍA" in df.columns and isinstance(rango, (list, tuple)) and len(rango) in (1, 2):
+        fechas = pd.to_datetime(df["FECHA DE GUÍA"], errors="coerce")
+        inicio = pd.to_datetime(rango[0]) if len(rango) >= 1 else None
+        fin = pd.to_datetime(rango[1]) if len(rango) == 2 else inicio
+        if inicio is not None and fin is not None:
+            if inicio > fin:
+                inicio, fin = fin, inicio
+            df = df[(fechas >= inicio) & (fechas <= fin)].copy()
+
+    st.caption(f"Filas mostradas: {len(df)} de {len(df_original)}")
+    st.dataframe(df[columnas_visibles], use_container_width=True, hide_index=True)
+
+    bio = BytesIO()
+    with pd.ExcelWriter(bio, engine="xlsxwriter") as writer:
+        df[columnas_visibles].to_excel(writer, sheet_name="REPORTE GUIAS", index=False)
+    st.download_button(
+        "⬇️ Descargar Excel filtrado",
+        data=bio.getvalue(),
+        file_name="reporte_guias_filtrado.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        key="rep_guias_descarga",
+    )
+
+    st.markdown("---")
+    st.markdown("#### 📤 Subir Excel para actualizar 'RECIBIDO POR' en Drive")
+    archivo = st.file_uploader("Sube el Excel editado", type=["xlsx"], key="rep_guia_upload")
+    if archivo is not None and st.button("Aplicar actualización en Drive", key="rep_guia_apply_upload"):
+        try:
+            df_upload = pd.read_excel(archivo)
+            if "GUIA" not in df_upload.columns or recibido_col not in df_upload.columns:
+                st.error("El archivo debe incluir las columnas 'GUIA' y 'RECIBIDO POR'.")
+                return
+
+            gs = st.secrets.get("gsheets", {})
+            reporte_sheet_id = _extract_sheet_id(str(gs.get("reportes_sheet_id", "")).strip())
+            ws = gspread_client.open_by_key(reporte_sheet_id).worksheet("REPORTE GUÍAS")
+            headers = ws.row_values(1)
+            guia_idx = headers.index("GUIA") + 1 if "GUIA" in headers else None
+            recibido_idx = headers.index(recibido_col) + 1 if recibido_col in headers else None
+            if not guia_idx or not recibido_idx:
+                st.error("No se encontraron columnas 'GUIA' o 'RECIBIDO POR' en la hoja de Drive.")
+                return
+
+            guias_drive = ws.col_values(guia_idx)[1:]
+            mapa_fila_por_guia = {str(g).strip(): i + 2 for i, g in enumerate(guias_drive) if str(g).strip()}
+
+            actualizadas = 0
+            ignoradas = 0
+            celdas = []
+            for _, row in df_upload.iterrows():
+                guia = str(row.get("GUIA", "")).strip()
+                if not guia or guia not in mapa_fila_por_guia:
+                    ignoradas += 1
+                    continue
+                nuevo_valor = row.get(recibido_col, "")
+                fila_drive = mapa_fila_por_guia[guia]
+                celdas.append(gspread.Cell(row=fila_drive, col=recibido_idx, value="" if pd.isna(nuevo_valor) else str(nuevo_valor)))
+                actualizadas += 1
+
+            if celdas:
+                ws.update_cells(celdas, value_input_option="USER_ENTERED")
+            cargar_reporte_guias_drive.clear()
+            st.success(f"Actualización terminada. Filas actualizadas: {actualizadas}. Guías ignoradas: {ignoradas}.")
+        except Exception as e:
+            st.error(f"Error al procesar el archivo: {e}")
+
+
 usuario_actual = ensure_user_logged_in()
 
 if usuario_actual in COBRANZA_ONLY_USERS:
@@ -4975,6 +5110,9 @@ else:
 
     if usuario_puede(usuario_actual, "modificar"):
         tab_specs.append(("modificar", "✏️ Modificar Pedido"))
+
+    if usuario_puede_ver_reportes_guia(usuario_actual):
+        tab_specs.append(("reportes_guia", "📦 Reportes Guía"))
 
 tabs = st.tabs([titulo for _, titulo in tab_specs])
 tab_map = {clave: tab for (clave, _), tab in zip(tab_specs, tabs)}
@@ -9675,3 +9813,7 @@ if "seguimiento_cobranza" in tab_map:
 if "macheo_tool" in tab_map:
     with tab_map["macheo_tool"]:
         render_macheo_tool_tab_gerente()
+
+if "reportes_guia" in tab_map:
+    with tab_map["reportes_guia"]:
+        render_reportes_guia_tab()
