@@ -8134,6 +8134,367 @@ def render_salida_neta_tab():
                             "Revisa que los productos marcados como **COMPRAR** tengan cantidades en columnas de proveedor "
                             "o tengan la columna **Proveedor** llena para usar **Unidades Sugeridas**."
                         )
+
+# ===== REPORTES GUÍA =====
+REPORTES_GUIA_ALLOWED_USERS = {"CeciliaATD", "SChava"}
+REPORTES_GUIA_SHEET_NAME = "REPORTE GUÍAS"
+REPORTES_GUIA_COLUMNS = ["GUIA", "NOMBRE", "TIPO DE GUÍA", "FECHA DE GUÍA", "VENDEDOR", "RECIBIDO POR"]
+REPORTES_GUIA_FILTER_COLUMNS = ["FECHA DE GUÍA", "VENDEDOR", "RECIBIDO POR"]
+DIAS_SEMANA_ES_SIN_ACENTO = ["LUNES", "MARTES", "MIERCOLES", "JUEVES", "VIERNES", "SABADO", "DOMINGO"]
+
+
+def _find_secret_value_case_insensitive(container, target_key: str):
+    """Busca un secret por nombre, incluso si quedó dentro de una sección de secrets.toml."""
+    if not isinstance(container, Mapping):
+        return None
+
+    target_norm = str(target_key or "").strip().lower()
+    for key, value in container.items():
+        if str(key or "").strip().lower() == target_norm:
+            return value
+
+    for value in container.values():
+        nested_value = _find_secret_value_case_insensitive(value, target_key)
+        if nested_value not in (None, ""):
+            return nested_value
+    return None
+
+
+def _reportes_guia_sheet_id() -> str:
+    """Obtiene el spreadsheet id del secret reportes_sheet_id, aceptando URL completa."""
+    candidates = [
+        st.secrets.get("reportes_sheet_id", ""),
+        st.secrets.get("REPORTES_SHEET_ID", ""),
+    ]
+
+    for section_name in ("gsheets", "reportes", "app_gerente"):
+        section = st.secrets.get(section_name, {})
+        if isinstance(section, Mapping):
+            candidates.extend([
+                section.get("reportes_sheet_id", ""),
+                section.get("REPORTES_SHEET_ID", ""),
+            ])
+
+    recursive_value = _find_secret_value_case_insensitive(st.secrets, "reportes_sheet_id")
+    if recursive_value not in (None, ""):
+        candidates.append(recursive_value)
+
+    for candidate in candidates:
+        sheet_id = _extract_sheet_id(candidate)
+        if sheet_id:
+            return sheet_id
+    return ""
+
+
+def get_reportes_guia_worksheet():
+    """Abre la worksheet REPORTE GUÍAS configurada en reportes_sheet_id."""
+    sheet_id = _reportes_guia_sheet_id()
+    if not sheet_id:
+        raise ValueError(
+            "Falta configurar el secret reportes_sheet_id. "
+            "También se acepta dentro de [gsheets], [reportes] o [app_gerente]."
+        )
+    return _retry_gspread_api_call(
+        lambda: gspread_client.open_by_key(sheet_id).worksheet(REPORTES_GUIA_SHEET_NAME),
+        retries=4,
+        base_delay=0.9,
+    )
+
+
+@st.cache_data(ttl=120, show_spinner=False)
+def load_reportes_guia_from_gsheets() -> pd.DataFrame:
+    """Carga la hoja REPORTE GUÍAS y conserva la fila real para actualizar RECIBIDO POR."""
+    ws = get_reportes_guia_worksheet()
+    values = _retry_gspread_api_call(lambda: ws.get_all_values(), retries=4, base_delay=0.9)
+    if not values:
+        return pd.DataFrame(columns=REPORTES_GUIA_COLUMNS + ["__sheet_row"])
+
+    raw_headers = [str(h or "").strip() for h in values[0]]
+    header_positions: dict[str, int] = {}
+    for idx, header in enumerate(raw_headers):
+        if header and header not in header_positions:
+            header_positions[header] = idx
+
+    rows = []
+    for sheet_row, row_values in enumerate(values[1:], start=2):
+        row = {col: "" for col in REPORTES_GUIA_COLUMNS}
+        for col in REPORTES_GUIA_COLUMNS:
+            pos = header_positions.get(col)
+            if pos is not None and pos < len(row_values):
+                row[col] = str(row_values[pos] or "").strip()
+        # Ignorar renglones de relleno/arrastre: para ser una guía válida debe traer
+        # al menos GUIA o NOMBRE, aunque otras columnas tengan fórmulas o valores repetidos.
+        if row.get("GUIA", "").strip() or row.get("NOMBRE", "").strip():
+            row["__sheet_row"] = sheet_row
+            rows.append(row)
+
+    df = pd.DataFrame(rows, columns=REPORTES_GUIA_COLUMNS + ["__sheet_row"])
+    return df
+
+
+def _reportes_guia_recibido_col_index(ws) -> int:
+    headers = _retry_gspread_api_call(lambda: ws.row_values(1), retries=4, base_delay=0.9)
+    headers = [str(h or "").strip() for h in headers]
+    if "RECIBIDO POR" not in headers:
+        raise ValueError("No se encontró la columna RECIBIDO POR en REPORTE GUÍAS.")
+    return headers.index("RECIBIDO POR") + 1
+
+
+def update_reportes_guia_recibido(sheet_rows: list[int], valor: str) -> tuple[int, int]:
+    """Actualiza RECIBIDO POR para las filas indicadas."""
+    ws = get_reportes_guia_worksheet()
+    col_idx = _reportes_guia_recibido_col_index(ws)
+    updates = []
+    for raw_row in sheet_rows:
+        try:
+            row_idx = int(raw_row)
+        except (TypeError, ValueError):
+            continue
+        if row_idx >= 2:
+            updates.append({"range": gspread.utils.rowcol_to_a1(row_idx, col_idx), "values": [[valor]]})
+    if not updates:
+        return 0, 0
+    _retry_gspread_api_call(lambda: ws.batch_update(updates, value_input_option="USER_ENTERED"), retries=4, base_delay=0.9)
+    load_reportes_guia_from_gsheets.clear()
+    return len(updates), 0
+
+
+def _reportes_guia_fecha_a_texto(fecha_val: date) -> str:
+    return f"{DIAS_SEMANA_ES_SIN_ACENTO[fecha_val.weekday()]} {fecha_val.day}"
+
+
+def _reportes_guia_colapsar_letras_repetidas(texto: str) -> str:
+    """Colapsa letras repetidas para detectar capturas como ENNTREGADO."""
+    return re.sub(r"([A-Z])\1+", r"\1", str(texto or ""))
+
+
+def _reportes_guia_recibido_key(valor: str) -> str:
+    """Normaliza RECIBIDO POR para comparar estados sin acentos, espacios ni símbolos."""
+    return re.sub(r"[^A-Z0-9]", "", normalizar(str(valor or "")).upper())
+
+
+def _reportes_guia_levenshtein_limitado(a: str, b: str, limite: int = 2) -> int:
+    """Calcula distancia de edición con corte temprano para detectar typos cortos."""
+    if abs(len(a) - len(b)) > limite:
+        return limite + 1
+    prev = list(range(len(b) + 1))
+    for i, ca in enumerate(a, start=1):
+        curr = [i]
+        row_min = curr[0]
+        for j, cb in enumerate(b, start=1):
+            cost = 0 if ca == cb else 1
+            val = min(prev[j] + 1, curr[j - 1] + 1, prev[j - 1] + cost)
+            curr.append(val)
+            row_min = min(row_min, val)
+        if row_min > limite:
+            return limite + 1
+        prev = curr
+    return prev[-1]
+
+
+def _reportes_guia_es_entregado(valor: str) -> bool:
+    """Detecta ENTREGADO y errores comunes como ENNTREGADO o ENNTREADO para excluirlos."""
+    valor_key = _reportes_guia_recibido_key(valor)
+    if not valor_key:
+        return False
+    valor_colapsado = _reportes_guia_colapsar_letras_repetidas(valor_key)
+    if valor_key == "ENTREGADO" or valor_colapsado == "ENTREGADO":
+        return True
+    return valor_key.startswith("E") and _reportes_guia_levenshtein_limitado(valor_colapsado, "ENTREGADO", 2) <= 2
+
+
+def _reportes_guia_tiene_letras_o_numeros(valor: str) -> bool:
+    return bool(re.search(r"[a-z0-9]", normalizar(str(valor or ""))))
+
+
+def _reportes_guia_recibido_filter_label(valor: str) -> str:
+    valor_txt = str(valor or "").strip()
+    if not valor_txt:
+        return "PENDIENTES"
+    if not _reportes_guia_tiene_letras_o_numeros(valor_txt):
+        return "NO RECONOCIDO"
+    return valor_txt
+
+
+def _reportes_guia_vendedor_filter_label(valor: str, vendedores_base: set[str]) -> str:
+    valor_txt = str(valor or "").strip()
+    if not valor_txt or not _reportes_guia_tiene_letras_o_numeros(valor_txt):
+        return "DESCONOCIDO"
+    valor_limpio = re.sub(r"\s+", " ", valor_txt).strip().upper()
+    primer_nombre = valor_limpio.split(" ", 1)[0]
+    if primer_nombre in vendedores_base:
+        return primer_nombre
+    return valor_limpio
+
+
+def _reportes_guia_fecha_sort_key(valor: str):
+    fecha = pd.to_datetime(str(valor or "").strip(), errors="coerce", dayfirst=True)
+    if pd.isna(fecha):
+        return (0, pd.Timestamp.min, str(valor or ""))
+    return (1, fecha, str(valor or ""))
+
+
+def _build_reportes_guia_excel(df: pd.DataFrame) -> bytes:
+    buffer = BytesIO()
+    export_df = df[[c for c in REPORTES_GUIA_COLUMNS if c in df.columns]].copy()
+    with pd.ExcelWriter(buffer, engine="xlsxwriter") as writer:
+        export_df.to_excel(writer, index=False, sheet_name="Reportes_Guia")
+        ws_excel = writer.sheets["Reportes_Guia"]
+        ws_excel.freeze_panes(1, 0)
+        ws_excel.autofilter(0, 0, max(len(export_df), 1), max(len(export_df.columns) - 1, 0))
+        for idx, col in enumerate(export_df.columns):
+            width = min(max(12, export_df[col].astype(str).map(len).max() + 2 if not export_df.empty else len(col) + 2), 45)
+            ws_excel.set_column(idx, idx, width)
+    return buffer.getvalue()
+
+
+def render_reportes_guia_tab():
+    st.subheader("📑 Reportes Guía")
+    st.caption("Muestra guías pendientes; las filas con RECIBIDO POR = ENTREGADO se ocultan automáticamente.")
+
+    if st.button("🔄 Recargar Reportes Guía", key="reportes_guia_reload"):
+        load_reportes_guia_from_gsheets.clear()
+        st.rerun()
+
+    try:
+        df_all = load_reportes_guia_from_gsheets().copy()
+    except Exception as exc:
+        st.error(f"❌ No se pudo cargar REPORTE GUÍAS: {exc}")
+        return
+
+    if df_all.empty:
+        st.info("No hay registros en REPORTE GUÍAS.")
+        return
+
+    entregado_mask = df_all["RECIBIDO POR"].apply(_reportes_guia_es_entregado)
+    df_view = df_all[~entregado_mask].copy()
+    df_view["__sheet_row_num"] = pd.to_numeric(df_view["__sheet_row"], errors="coerce").fillna(0).astype(int)
+    df_view = df_view.sort_values("__sheet_row_num", ascending=False).drop(columns=["__sheet_row_num"])
+
+    vendedor_raw_values = df_view["VENDEDOR"].astype(str).str.strip().tolist() if "VENDEDOR" in df_view.columns else []
+    vendedores_base = {
+        re.sub(r"\s+", " ", v).strip().upper()
+        for v in vendedor_raw_values
+        if v and _reportes_guia_tiene_letras_o_numeros(v) and len(re.sub(r"\s+", " ", v).strip().split()) == 1
+    }
+
+    filter_labels = {
+        "FECHA DE GUÍA": "📅 FECHA DE GUÍA",
+        "VENDEDOR": "🧑‍💼 VENDEDOR",
+        "RECIBIDO POR": "📦 RECIBIDO POR",
+    }
+    fcols = st.columns(3)
+    filtros = {}
+    for idx, col in enumerate(REPORTES_GUIA_FILTER_COLUMNS):
+        if col == "RECIBIDO POR" and col in df_view.columns:
+            labels = [_reportes_guia_recibido_filter_label(v) for v in df_view[col].astype(str).tolist()]
+            opciones = sorted({v for v in labels if v and v != "PENDIENTES"})
+            opciones = (["PENDIENTES"] if "PENDIENTES" in labels else []) + opciones
+        elif col == "VENDEDOR" and col in df_view.columns:
+            labels = [_reportes_guia_vendedor_filter_label(v, vendedores_base) for v in vendedor_raw_values]
+            opciones = sorted({v for v in labels if v and v != "DESCONOCIDO"})
+            opciones = (["DESCONOCIDO"] if "DESCONOCIDO" in labels else []) + opciones
+        elif col == "FECHA DE GUÍA" and col in df_view.columns:
+            valores_fecha = {v for v in df_view[col].astype(str).str.strip().tolist() if v}
+            opciones = sorted(valores_fecha, key=_reportes_guia_fecha_sort_key, reverse=True)
+        else:
+            opciones = sorted([v for v in df_view[col].astype(str).str.strip().unique().tolist() if v]) if col in df_view.columns else []
+        with fcols[idx]:
+            filtros[col] = st.multiselect(filter_labels.get(col, col), options=opciones, key=f"reportes_guia_filter_{col}")
+
+    df_filtrado = df_view.copy()
+    for col, seleccion in filtros.items():
+        if not seleccion:
+            continue
+        if col == "RECIBIDO POR":
+            labels = df_filtrado[col].apply(_reportes_guia_recibido_filter_label)
+            df_filtrado = df_filtrado[labels.isin(seleccion)]
+        elif col == "VENDEDOR":
+            labels = df_filtrado[col].apply(lambda v: _reportes_guia_vendedor_filter_label(v, vendedores_base))
+            df_filtrado = df_filtrado[labels.isin(seleccion)]
+        else:
+            df_filtrado = df_filtrado[df_filtrado[col].astype(str).str.strip().isin(seleccion)]
+
+    st.metric("📊 Guías pendientes visibles", len(df_filtrado))
+    st.download_button(
+        "📥 Descargar Excel filtrado",
+        data=_build_reportes_guia_excel(df_filtrado),
+        file_name=f"reportes_guia_{now_cdmx().strftime('%Y%m%d_%H%M')}.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        key="reportes_guia_download",
+    )
+
+    editor_df = df_filtrado[REPORTES_GUIA_COLUMNS + ["__sheet_row"]].copy()
+    editor_df.insert(0, "Seleccionar", False)
+    edited = st.data_editor(
+        editor_df,
+        hide_index=True,
+        use_container_width=True,
+        disabled=[c for c in editor_df.columns if c != "Seleccionar"],
+        column_order=["Seleccionar"] + REPORTES_GUIA_COLUMNS,
+        column_config={
+            "Seleccionar": st.column_config.CheckboxColumn("✅ Seleccionar"),
+            "GUIA": st.column_config.TextColumn("🚚 GUÍA"),
+            "NOMBRE": st.column_config.TextColumn("👤 NOMBRE"),
+            "TIPO DE GUÍA": st.column_config.TextColumn("📦 TIPO DE GUÍA"),
+            "FECHA DE GUÍA": st.column_config.TextColumn("📅 FECHA DE GUÍA"),
+            "VENDEDOR": st.column_config.TextColumn("🧑‍💼 VENDEDOR"),
+            "RECIBIDO POR": st.column_config.TextColumn("📍 RECIBIDO POR"),
+        },
+        key="reportes_guia_editor",
+    )
+
+    seleccionadas = edited[edited["Seleccionar"] == True]["__sheet_row"].astype(int).tolist() if not edited.empty else []
+    if st.button(f"✅ Marcar seleccionadas como ENTREGADO ({len(seleccionadas)})", disabled=not seleccionadas, key="reportes_guia_bulk_entregado"):
+        ok, fail = update_reportes_guia_recibido(seleccionadas, "ENTREGADO")
+        st.success(f"✅ Se actualizaron {ok} guía(s) como ENTREGADO.")
+        st.rerun()
+
+    st.markdown("#### ✏️ Actualización individual de RECIBIDO POR")
+    if df_filtrado.empty:
+        st.caption("No hay filas para actualizar con los filtros actuales.")
+        return
+    opciones_fila = []
+    for _, r in df_filtrado.iterrows():
+        vendedor = str(r.get("VENDEDOR", "")).strip() or "SIN VENDEDOR"
+        guia = str(r.get("GUIA", "")).strip() or "SIN GUÍA"
+        nombre = str(r.get("NOMBRE", "")).strip() or "SIN NOMBRE"
+        opciones_fila.append(f"🧑‍💼 {vendedor} — 🚚 {guia} — 👤 {nombre}")
+    fila_sel_label = st.selectbox("🚚 Guía a actualizar", options=opciones_fila, key="reportes_guia_row_select")
+    fila_idx = opciones_fila.index(fila_sel_label)
+    sheet_row_sel = int(df_filtrado.iloc[fila_idx]["__sheet_row"])
+
+    accion_rapida = st.radio(
+        "⚡ Acción rápida",
+        ["ENTREGADO", "HOY AL FINAL DEL DIA"],
+        index=None,
+        horizontal=True,
+        key="reportes_guia_accion_rapida",
+        help="Si eliges una acción rápida, se guardará solo ese texto aunque también haya una fecha seleccionada.",
+    )
+    fecha_sel = st.date_input(
+        "📅 Selector de fecha opcional",
+        value=None,
+        format="YYYY-MM-DD",
+        key="reportes_guia_fecha_ind",
+        help="Úsalo solo si quieres escribir una fecha como MIERCOLES 10 en RECIBIDO POR.",
+    )
+
+    valor_final = ""
+    if accion_rapida:
+        valor_final = accion_rapida
+        st.caption(f"Se escribirá en el Excel: **{valor_final}**")
+    elif fecha_sel:
+        valor_final = _reportes_guia_fecha_a_texto(fecha_sel)
+        st.caption(f"Se escribirá en el Excel: **{valor_final}**")
+    else:
+        st.caption("Selecciona una acción rápida o una fecha para habilitar el guardado.")
+
+    if st.button("💾 Guardar cambio individual", key="reportes_guia_guardar_individual", disabled=not bool(valor_final)):
+        ok, fail = update_reportes_guia_recibido([sheet_row_sel], valor_final)
+        st.success(f"✅ Se actualizó la guía seleccionada con {valor_final}.")
+        st.rerun()
+
 # --- INTERFAZ ---
 USUARIOS_VALIDOS = ["ALEJANDRO38", "CeciliaATD", "SChava", "BreydaFTD", "SaraiFTD", "JorgeLic"]
 
@@ -8238,6 +8599,9 @@ else:
 
     if usuario_puede(usuario_actual, "modificar"):
         tab_specs.append(("modificar", "✏️ Modificar Pedido"))
+
+    if usuario_actual in REPORTES_GUIA_ALLOWED_USERS:
+        tab_specs.append(("reportes_guia", "📑 Reportes Guía"))
 
     if usuario_actual in {"SChava", "JorgeLic"}:
         tab_specs.append(("salida_neta", "📦 Rotaciones"))
@@ -13056,3 +13420,7 @@ if "salida_neta" in tab_map:
 if "prueba_admintotal" in tab_map:
     with tab_map["prueba_admintotal"]:
         render_prueba_admintotal_tab()
+
+if "reportes_guia" in tab_map:
+    with tab_map["reportes_guia"]:
+        render_reportes_guia_tab()
