@@ -14,7 +14,8 @@ import unicodedata
 from io import BytesIO
 from oauth2client.service_account import ServiceAccountCredentials
 from urllib.parse import urlparse, unquote
-from datetime import datetime, timedelta, date
+from datetime import datetime, timedelta, date, timezone
+from email.utils import format_datetime
 import uuid
 import urllib.parse
 import urllib.request
@@ -39,6 +40,91 @@ MEXICO_CITY_TZ = ZoneInfo("America/Mexico_City")
 def now_cdmx() -> datetime:
     """Fecha/hora actual en zona horaria de Ciudad de México."""
     return datetime.now(MEXICO_CITY_TZ)
+
+
+
+def consultar_tracking_dhl(tracking_number: str) -> dict:
+    """Consulta el tracking de una guía DHL usando BasicAuth de MyDHL API."""
+    guia_limpia = re.sub(r"\s+", "", str(tracking_number or ""))
+    base_url = str(st.secrets.get("DHL_BASE_URL", "https://express.api.dhl.com/mydhlapi")).strip().rstrip("/")
+    username = str(st.secrets.get("DHL_API_USERNAME", "")).strip()
+    password = str(st.secrets.get("DHL_API_PASSWORD", ""))
+
+    if not guia_limpia:
+        return {"success": False, "status_code": None, "tracking_number": guia_limpia, "error": "Ingresa una guía DHL."}
+    if not username or not password:
+        return {
+            "success": False,
+            "status_code": None,
+            "tracking_number": guia_limpia,
+            "base_url": base_url,
+            "error": "Faltan DHL_API_USERNAME o DHL_API_PASSWORD en Streamlit Secrets.",
+        }
+    if not base_url:
+        return {"success": False, "status_code": None, "tracking_number": guia_limpia, "error": "Falta DHL_BASE_URL en Streamlit Secrets."}
+
+    url = f"{base_url}/shipments/{guia_limpia}/tracking"
+    headers = {
+        "Accept": "application/json",
+        "Message-Reference": str(uuid.uuid4()),
+        "Message-Reference-Date": format_datetime(datetime.now(timezone.utc), usegmt=True),
+    }
+
+    try:
+        response = requests.get(url, auth=(username, password), headers=headers, timeout=30)
+        try:
+            data = response.json()
+        except ValueError:
+            data = {"raw_text": response.text}
+
+        return {
+            "success": response.ok,
+            "status_code": response.status_code,
+            "tracking_number": guia_limpia,
+            "base_url": base_url,
+            "url": url,
+            "headers": headers,
+            "json": data,
+            "error": None if response.ok else (response.text[:500] or f"DHL API respondió con status {response.status_code}."),
+        }
+    except requests.RequestException as exc:
+        return {"success": False, "status_code": None, "tracking_number": guia_limpia, "base_url": base_url, "url": url, "headers": headers, "error": str(exc)}
+    except Exception as exc:
+        return {"success": False, "status_code": None, "tracking_number": guia_limpia, "base_url": base_url, "url": url, "headers": headers, "error": str(exc)}
+
+
+def render_prueba_dhl_tab(button_key: str = "btn_probar_dhl"):
+    """Renderiza el panel temporal para validar tracking contra DHL MyDHL API."""
+    st.subheader("📦 Prueba de conexión DHL API")
+    st.info("Panel temporal para probar tracking de guías DHL con BasicAuth de MyDHL API.")
+
+    guia = st.text_input(
+        "Guía DHL",
+        key=f"{button_key}_guia",
+        help="Se eliminarán espacios antes de consultar la API.",
+    )
+    guia_limpia_preview = re.sub(r"\s+", "", str(guia or ""))
+    if guia_limpia_preview and guia_limpia_preview != guia:
+        st.caption(f"Guía limpia que se consultará: {guia_limpia_preview}")
+
+    if st.button("Probar DHL API", key=button_key):
+        with st.spinner("Consultando DHL API..."):
+            resultado = consultar_tracking_dhl(guia)
+
+        st.write(f"**Guía consultada:** {resultado.get('tracking_number') or 'Sin guía'}")
+        if resultado.get("base_url"):
+            st.write(f"**DHL_BASE_URL:** {resultado.get('base_url')}")
+        if resultado.get("url"):
+            st.code(resultado.get("url"), language=None)
+        st.write(f"**Status code:** {resultado.get('status_code') if resultado.get('status_code') is not None else 'Sin respuesta HTTP'}")
+
+        if resultado.get("success"):
+            st.success("✅ DHL API respondió correctamente.")
+        else:
+            st.error(f"❌ Error al consultar DHL API: {resultado.get('error', 'Error desconocido')}")
+
+        st.subheader("JSON crudo")
+        st.json(resultado.get("json", {}))
 
 
 def obtener_token_admintotal() -> dict:
@@ -8703,7 +8789,7 @@ else:
         tab_specs.append(("salida_neta", "📦 Rotaciones"))
 
 if usuario_actual == "SChava":
-    tab_specs.append(("prueba_admintotal", "🔌 Prueba AdminTotal"))
+    tab_specs.append(("prueba_admintotal", "📦 Prueba DHL API"))
 
 tabs = st.tabs([titulo for _, titulo in tab_specs])
 tab_map = {clave: tab for (clave, _), tab in zip(tab_specs, tabs)}
@@ -13515,7 +13601,7 @@ if "salida_neta" in tab_map:
 
 if "prueba_admintotal" in tab_map:
     with tab_map["prueba_admintotal"]:
-        render_prueba_admintotal_tab()
+        render_prueba_dhl_tab()
 
 if "reportes_guia" in tab_map:
     with tab_map["reportes_guia"]:
