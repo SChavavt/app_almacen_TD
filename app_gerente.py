@@ -8250,11 +8250,44 @@ def _reportes_guia_recibido_col_index(ws) -> int:
     return headers.index("RECIBIDO POR") + 1
 
 
+def _update_reportes_guia_cells(ws, cells: list[gspread.Cell], updates: list[dict]) -> None:
+    """Escribe celdas de REPORTE GUÍAS compatible con gspread viejo/nuevo."""
+    if not cells:
+        return
+
+    # El proyecto fija gspread 3.1.0, donde Worksheet.batch_update no existe.
+    # Preferimos update_cells en ese caso para que tanto el botón masivo como el
+    # formulario individual usen la misma ruta compatible en Streamlit Cloud.
+    if not hasattr(ws, "batch_update"):
+        _retry_gspread_api_call(
+            lambda: ws.update_cells(cells, value_input_option="USER_ENTERED"),
+            retries=4,
+            base_delay=0.9,
+        )
+        return
+
+    try:
+        _retry_gspread_api_call(
+            lambda: ws.batch_update(updates, value_input_option="USER_ENTERED"),
+            retries=4,
+            base_delay=0.9,
+        )
+    except AttributeError:
+        # Defensa extra para despliegues con objetos Worksheet antiguos o envueltos
+        # que anuncian/ocultan métodos distinto a la clase instalada.
+        _retry_gspread_api_call(
+            lambda: ws.update_cells(cells, value_input_option="USER_ENTERED"),
+            retries=4,
+            base_delay=0.9,
+        )
+
+
 def update_reportes_guia_recibido(sheet_rows: list[int], valor: str) -> tuple[int, int]:
     """Actualiza RECIBIDO POR para las filas indicadas."""
     ws = get_reportes_guia_worksheet()
     col_idx = _reportes_guia_recibido_col_index(ws)
     updates = []
+    cells = []
     for raw_row in sheet_rows:
         try:
             row_idx = int(raw_row)
@@ -8262,11 +8295,13 @@ def update_reportes_guia_recibido(sheet_rows: list[int], valor: str) -> tuple[in
             continue
         if row_idx >= 2:
             updates.append({"range": gspread.utils.rowcol_to_a1(row_idx, col_idx), "values": [[valor]]})
-    if not updates:
+            cells.append(gspread.Cell(row=row_idx, col=col_idx, value=valor))
+    if not cells:
         return 0, 0
-    _retry_gspread_api_call(lambda: ws.batch_update(updates, value_input_option="USER_ENTERED"), retries=4, base_delay=0.9)
+
+    _update_reportes_guia_cells(ws, cells, updates)
     load_reportes_guia_from_gsheets.clear()
-    return len(updates), 0
+    return len(cells), 0
 
 
 def _reportes_guia_fecha_a_texto(fecha_val: date) -> str:
