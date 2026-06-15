@@ -8141,6 +8141,16 @@ REPORTES_GUIA_SHEET_NAME = "REPORTE GUÍAS"
 REPORTES_GUIA_COLUMNS = ["GUIA", "NOMBRE", "TIPO DE GUÍA", "FECHA DE GUÍA", "VENDEDOR", "RECIBIDO POR"]
 REPORTES_GUIA_FILTER_COLUMNS = ["FECHA DE GUÍA", "VENDEDOR", "RECIBIDO POR"]
 DIAS_SEMANA_ES_SIN_ACENTO = ["LUNES", "MARTES", "MIERCOLES", "JUEVES", "VIERNES", "SABADO", "DOMINGO"]
+REPORTES_GUIA_ACCIONES_RAPIDAS = [
+    "ENTREGADO",
+    "HOY AL FINAL DEL DIA",
+    "CANCELADO",
+    "EN ESPERA DE SER RECOLECTADO",
+    "RECHAZO ENTREGA",
+    "REQUIERE INFORMACION",
+    "RETORNADO",
+    "RETORNADO AL REMITENTE",
+]
 
 
 def _find_secret_value_case_insensitive(container, target_key: str):
@@ -8424,6 +8434,16 @@ def render_reportes_guia_tab():
         key="reportes_guia_download",
     )
 
+    modo_varios_entregado = st.checkbox(
+        "✅ Marcar varios como ENTREGADO",
+        value=False,
+        key="reportes_guia_modo_varios_entregado",
+        help=(
+            "Activado: puedes marcar varias guías y luego presionar el botón para ponerlas como ENTREGADO. "
+            "Desactivado: marca una guía para cargarla abajo en la actualización individual."
+        ),
+    )
+
     editor_df = df_filtrado[REPORTES_GUIA_COLUMNS + ["__sheet_row"]].copy()
     editor_df.insert(0, "Seleccionar", False)
     edited = st.data_editor(
@@ -8445,10 +8465,14 @@ def render_reportes_guia_tab():
     )
 
     seleccionadas = edited[edited["Seleccionar"] == True]["__sheet_row"].astype(int).tolist() if not edited.empty else []
-    if st.button(f"✅ Marcar seleccionadas como ENTREGADO ({len(seleccionadas)})", disabled=not seleccionadas, key="reportes_guia_bulk_entregado"):
-        ok, fail = update_reportes_guia_recibido(seleccionadas, "ENTREGADO")
-        st.success(f"✅ Se actualizaron {ok} guía(s) como ENTREGADO.")
-        st.rerun()
+    if modo_varios_entregado:
+        st.caption("Marca todas las guías necesarias y confirma una sola vez para evitar actualizar al seleccionar cada fila.")
+        if st.button(f"✅ Marcar seleccionadas como ENTREGADO ({len(seleccionadas)})", disabled=not seleccionadas, key="reportes_guia_bulk_entregado"):
+            ok, fail = update_reportes_guia_recibido(seleccionadas, "ENTREGADO")
+            st.success(f"✅ Se actualizaron {ok} guía(s) como ENTREGADO.")
+            st.rerun()
+    elif len(seleccionadas) > 1:
+        st.warning("Selecciona solo una guía cuando el modo de varios está desactivado. Activa el check si deseas marcar varias como ENTREGADO.")
 
     st.markdown("#### ✏️ Actualización individual de RECIBIDO POR")
     if df_filtrado.empty:
@@ -8460,13 +8484,22 @@ def render_reportes_guia_tab():
         guia = str(r.get("GUIA", "")).strip() or "SIN GUÍA"
         nombre = str(r.get("NOMBRE", "")).strip() or "SIN NOMBRE"
         opciones_fila.append(f"🧑‍💼 {vendedor} — 🚚 {guia} — 👤 {nombre}")
-    fila_sel_label = st.selectbox("🚚 Guía a actualizar", options=opciones_fila, key="reportes_guia_row_select")
+    selected_row_to_index = {int(r["__sheet_row"]): idx for idx, (_, r) in enumerate(df_filtrado.iterrows())}
+    selected_single_row = seleccionadas[0] if (not modo_varios_entregado and len(seleccionadas) == 1) else None
+    fila_default_idx = selected_row_to_index.get(selected_single_row, 0)
+    fila_sel_label = st.selectbox(
+        "🚚 Guía a actualizar",
+        options=opciones_fila,
+        index=fila_default_idx,
+        key=f"reportes_guia_row_select_{selected_single_row or 'manual'}",
+        help="Con el modo de varios desactivado, marca una fila en la tabla para cargarla aquí automáticamente.",
+    )
     fila_idx = opciones_fila.index(fila_sel_label)
     sheet_row_sel = int(df_filtrado.iloc[fila_idx]["__sheet_row"])
 
     accion_rapida = st.radio(
         "⚡ Acción rápida",
-        ["ENTREGADO", "HOY AL FINAL DEL DIA"],
+        REPORTES_GUIA_ACCIONES_RAPIDAS,
         index=None,
         horizontal=True,
         key="reportes_guia_accion_rapida",
