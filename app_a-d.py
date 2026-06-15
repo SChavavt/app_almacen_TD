@@ -6623,8 +6623,14 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
     enterado_key = f"enterado_comentario_{row['ID_Pedido']}"
     st.markdown(f'<a name="pedido_{row["ID_Pedido"]}"></a>', unsafe_allow_html=True)
     _render_bulk_selector(row)
-    es_prioritario = _has_priority_marker(row.get("Completados_Limpiado", ""))
+    completados_limpiado_actual = row.get("Completados_Limpiado", "")
+    tipo_mod_actual = str(row.get("Tipo_Modificacion", "")).strip()
+    es_prioritario = _has_priority_marker(completados_limpiado_actual)
+    mod_material_actual = _has_material_modification(tipo_mod_actual)
+    mod_material_suprimido = _has_material_suppression(completados_limpiado_actual)
     titulo_expander = f"{guia_marker}{row['Estado']} - {folio} - {row['Cliente']}"
+    if mod_material_actual and not mod_material_suprimido:
+        titulo_expander = f"{MATERIAL_MODIFICATION_EMOJI} {titulo_expander}"
     if es_prioritario:
         titulo_expander = f"{PRIORITY_EMOJI} {titulo_expander}"
     if es_local_bodega:
@@ -6638,10 +6644,6 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
         es_estado_modificacion_material = (
             str(row.get("Estado", "")).strip() == ESTADO_MODIFICACION_MATERIAL_VISIBLE
         )
-        tipo_mod_actual = str(row.get("Tipo_Modificacion", "")).strip()
-        mod_material_actual = _has_material_modification(tipo_mod_actual)
-        completados_limpiado_actual = row.get("Completados_Limpiado", "")
-        mod_material_suprimido = _has_material_suppression(completados_limpiado_actual)
         if es_estado_modificacion_material:
             if "Tipo_Modificacion" in headers:
                 mod_material_key = f"mod_material_chk_{row['ID_Pedido']}_{origen_tab}"
@@ -6669,14 +6671,18 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
                 prioridad_key = f"priority_chk_{row['ID_Pedido']}_{origen_tab}"
                 prioridad_checked = st.checkbox("🔥 Prioridad", value=es_prioritario, key=prioridad_key)
                 if prioridad_checked != es_prioritario:
-                    nuevo_valor = _set_priority_marker(
-                        completados_limpiado_actual, prioridad_checked
-                    )
+                    nuevo_valor = completados_limpiado_actual
+                    if prioridad_checked and mod_material_actual and not mod_material_suprimido:
+                        nuevo_valor = _set_material_suppression(nuevo_valor, True)
+                    nuevo_valor = _set_priority_marker(nuevo_valor, prioridad_checked)
                     ok_pri = update_gsheet_cell(
                         worksheet, headers, gsheet_row_index, "Completados_Limpiado", nuevo_valor
                     )
                     if ok_pri:
-                        st.success("✅ Prioridad actualizada.")
+                        if prioridad_checked and mod_material_actual and not mod_material_suprimido:
+                            st.success("✅ Prioridad actualizada y Mod por Material desmarcado.")
+                        else:
+                            st.success("✅ Prioridad actualizada.")
                         st.rerun()
                     else:
                         st.error("❌ No se pudo actualizar prioridad.")
@@ -6694,14 +6700,20 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
                         ),
                     )
                     if mod_material_checked == mod_material_suprimido:
+                        nuevo_valor = completados_limpiado_actual
+                        if mod_material_checked and es_prioritario:
+                            nuevo_valor = _set_priority_marker(nuevo_valor, False)
                         nuevo_valor = _set_material_suppression(
-                            completados_limpiado_actual, not mod_material_checked
+                            nuevo_valor, not mod_material_checked
                         )
                         ok_mod_material = update_gsheet_cell(
                             worksheet, headers, gsheet_row_index, "Completados_Limpiado", nuevo_valor
                         )
                         if ok_mod_material:
-                            st.success("✅ Color de Mod por Material actualizado.")
+                            if mod_material_checked and es_prioritario:
+                                st.success("✅ Mod por Material actualizado y Prioridad desmarcada.")
+                            else:
+                                st.success("✅ Color de Mod por Material actualizado.")
                             st.rerun()
                         else:
                             st.error("❌ No se pudo actualizar Completados_Limpiado.")
