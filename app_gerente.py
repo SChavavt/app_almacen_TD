@@ -8141,6 +8141,16 @@ REPORTES_GUIA_SHEET_NAME = "REPORTE GUÍAS"
 REPORTES_GUIA_COLUMNS = ["GUIA", "NOMBRE", "TIPO DE GUÍA", "FECHA DE GUÍA", "VENDEDOR", "RECIBIDO POR"]
 REPORTES_GUIA_FILTER_COLUMNS = ["FECHA DE GUÍA", "VENDEDOR", "RECIBIDO POR"]
 DIAS_SEMANA_ES_SIN_ACENTO = ["LUNES", "MARTES", "MIERCOLES", "JUEVES", "VIERNES", "SABADO", "DOMINGO"]
+REPORTES_GUIA_ACCIONES_RAPIDAS = [
+    "ENTREGADO",
+    "HOY AL FINAL DEL DIA",
+    "CANCELADO",
+    "EN ESPERA DE SER RECOLECTADO",
+    "RECHAZO ENTREGA",
+    "REQUIERE INFORMACION",
+    "RETORNADO",
+    "RETORNADO AL REMITENTE",
+]
 
 
 def _find_secret_value_case_insensitive(container, target_key: str):
@@ -8424,6 +8434,16 @@ def render_reportes_guia_tab():
         key="reportes_guia_download",
     )
 
+    modo_varios_entregado = st.checkbox(
+        "✅ Marcar varios como ENTREGADO",
+        value=False,
+        key="reportes_guia_modo_varios_entregado",
+        help=(
+            "Activado: puedes marcar varias guías y luego presionar el botón para ponerlas como ENTREGADO. "
+            "Desactivado: marca una guía para cargarla abajo en la actualización individual."
+        ),
+    )
+
     editor_df = df_filtrado[REPORTES_GUIA_COLUMNS + ["__sheet_row"]].copy()
     editor_df.insert(0, "Seleccionar", False)
     edited = st.data_editor(
@@ -8445,55 +8465,93 @@ def render_reportes_guia_tab():
     )
 
     seleccionadas = edited[edited["Seleccionar"] == True]["__sheet_row"].astype(int).tolist() if not edited.empty else []
-    if st.button(f"✅ Marcar seleccionadas como ENTREGADO ({len(seleccionadas)})", disabled=not seleccionadas, key="reportes_guia_bulk_entregado"):
-        ok, fail = update_reportes_guia_recibido(seleccionadas, "ENTREGADO")
-        st.success(f"✅ Se actualizaron {ok} guía(s) como ENTREGADO.")
-        st.rerun()
+    if modo_varios_entregado:
+        st.caption("Marca todas las guías necesarias y confirma una sola vez para evitar actualizar al seleccionar cada fila.")
+        if st.button(f"✅ Marcar seleccionadas como ENTREGADO ({len(seleccionadas)})", disabled=not seleccionadas, key="reportes_guia_bulk_entregado"):
+            ok, fail = update_reportes_guia_recibido(seleccionadas, "ENTREGADO")
+            st.success(f"✅ Se actualizaron {ok} guía(s) como ENTREGADO.")
+            st.rerun()
 
     st.markdown("#### ✏️ Actualización individual de RECIBIDO POR")
     if df_filtrado.empty:
         st.caption("No hay filas para actualizar con los filtros actuales.")
         return
-    opciones_fila = []
-    for _, r in df_filtrado.iterrows():
-        vendedor = str(r.get("VENDEDOR", "")).strip() or "SIN VENDEDOR"
-        guia = str(r.get("GUIA", "")).strip() or "SIN GUÍA"
-        nombre = str(r.get("NOMBRE", "")).strip() or "SIN NOMBRE"
-        opciones_fila.append(f"🧑‍💼 {vendedor} — 🚚 {guia} — 👤 {nombre}")
-    fila_sel_label = st.selectbox("🚚 Guía a actualizar", options=opciones_fila, key="reportes_guia_row_select")
-    fila_idx = opciones_fila.index(fila_sel_label)
-    sheet_row_sel = int(df_filtrado.iloc[fila_idx]["__sheet_row"])
 
-    accion_rapida = st.radio(
-        "⚡ Acción rápida",
-        ["ENTREGADO", "HOY AL FINAL DEL DIA"],
-        index=None,
-        horizontal=True,
-        key="reportes_guia_accion_rapida",
-        help="Si eliges una acción rápida, se guardará solo ese texto aunque también haya una fecha seleccionada.",
-    )
-    fecha_sel = st.date_input(
-        "📅 Selector de fecha opcional",
-        value=None,
-        format="YYYY-MM-DD",
-        key="reportes_guia_fecha_ind",
-        help="Úsalo solo si quieres escribir una fecha como MIERCOLES 10 en RECIBIDO POR.",
-    )
+    def _reportes_guia_row_label(row) -> str:
+        vendedor = str(row.get("VENDEDOR", "")).strip() or "SIN VENDEDOR"
+        guia = str(row.get("GUIA", "")).strip() or "SIN GUÍA"
+        nombre = str(row.get("NOMBRE", "")).strip() or "SIN NOMBRE"
+        return f"🧑‍💼 {vendedor} — 🚚 {guia} — 👤 {nombre}"
 
-    valor_final = ""
-    if accion_rapida:
-        valor_final = accion_rapida
-        st.caption(f"Se escribirá en el Excel: **{valor_final}**")
-    elif fecha_sel:
-        valor_final = _reportes_guia_fecha_a_texto(fecha_sel)
-        st.caption(f"Se escribirá en el Excel: **{valor_final}**")
+    if modo_varios_entregado:
+        st.caption("Desactiva el check de varios como ENTREGADO si quieres asignar una acción rápida o fecha distinta por guía seleccionada.")
+        return
+
+    opciones_fila = [_reportes_guia_row_label(r) for _, r in df_filtrado.iterrows()]
+    selected_row_to_index = {int(r["__sheet_row"]): idx for idx, (_, r) in enumerate(df_filtrado.iterrows())}
+    selected_valid_rows = [row for row in seleccionadas if row in selected_row_to_index]
+
+    if selected_valid_rows:
+        filas_a_actualizar = df_filtrado[df_filtrado["__sheet_row"].astype(int).isin(selected_valid_rows)].copy()
+        st.caption(
+            f"Se cargaron {len(filas_a_actualizar)} guía(s) seleccionada(s). "
+            "Elige una acción rápida o fecha para cada una y guarda todo con un solo botón."
+        )
     else:
-        st.caption("Selecciona una acción rápida o una fecha para habilitar el guardado.")
+        fila_sel_label = st.selectbox(
+            "🚚 Guía a actualizar",
+            options=opciones_fila,
+            key="reportes_guia_row_select_manual",
+            help="También puedes marcar una o varias filas en la tabla para cargarlas aquí automáticamente.",
+        )
+        fila_idx = opciones_fila.index(fila_sel_label)
+        filas_a_actualizar = df_filtrado.iloc[[fila_idx]].copy()
 
-    if st.button("💾 Guardar cambio individual", key="reportes_guia_guardar_individual", disabled=not bool(valor_final)):
-        ok, fail = update_reportes_guia_recibido([sheet_row_sel], valor_final)
-        st.success(f"✅ Se actualizó la guía seleccionada con {valor_final}.")
-        st.rerun()
+    cambios_a_guardar: list[tuple[int, str]] = []
+    with st.form("reportes_guia_actualizacion_individual_form"):
+        for _, row in filas_a_actualizar.iterrows():
+            sheet_row = int(row["__sheet_row"])
+            st.markdown(f"##### {_reportes_guia_row_label(row)}")
+            accion_rapida = st.radio(
+                "⚡ Acción rápida",
+                REPORTES_GUIA_ACCIONES_RAPIDAS,
+                index=None,
+                horizontal=True,
+                key=f"reportes_guia_accion_rapida_{sheet_row}",
+                help="Si eliges una acción rápida, se guardará solo ese texto aunque también haya una fecha seleccionada.",
+            )
+            fecha_sel = st.date_input(
+                "📅 Selector de fecha opcional",
+                value=None,
+                format="YYYY-MM-DD",
+                key=f"reportes_guia_fecha_ind_{sheet_row}",
+                help="Úsalo solo si quieres escribir una fecha como MIERCOLES 10 en RECIBIDO POR.",
+            )
+
+            valor_final = ""
+            if accion_rapida:
+                valor_final = accion_rapida
+                st.caption(f"Se escribirá en el Excel: **{valor_final}**")
+            elif fecha_sel:
+                valor_final = _reportes_guia_fecha_a_texto(fecha_sel)
+                st.caption(f"Se escribirá en el Excel: **{valor_final}**")
+            else:
+                st.caption("Selecciona una acción rápida o una fecha para incluir esta guía en el guardado.")
+            if valor_final:
+                cambios_a_guardar.append((sheet_row, valor_final))
+
+        guardar_individual = st.form_submit_button("💾 Guardar cambios seleccionados")
+
+    if guardar_individual:
+        if not cambios_a_guardar:
+            st.warning("Selecciona al menos una acción rápida o fecha antes de guardar.")
+        else:
+            ok_total = 0
+            for sheet_row, valor_final in cambios_a_guardar:
+                ok, fail = update_reportes_guia_recibido([sheet_row], valor_final)
+                ok_total += ok
+            st.success(f"✅ Se actualizaron {ok_total} guía(s) con los valores seleccionados.")
+            st.rerun()
 
 # --- INTERFAZ ---
 USUARIOS_VALIDOS = ["ALEJANDRO38", "CeciliaATD", "SChava", "BreydaFTD", "SaraiFTD", "JorgeLic"]
