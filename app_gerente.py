@@ -8512,13 +8512,16 @@ def render_reportes_guia_tab():
         for _, row in filas_a_actualizar.iterrows():
             sheet_row = int(row["__sheet_row"])
             st.markdown(f"##### {_reportes_guia_row_label(row)}")
-            accion_rapida = st.radio(
+            accion_rapida = st.pills(
                 "⚡ Acción rápida",
                 REPORTES_GUIA_ACCIONES_RAPIDAS,
-                index=None,
-                horizontal=True,
+                selection_mode="single",
+                default=None,
                 key=f"reportes_guia_accion_rapida_{sheet_row}",
-                help="Si eliges una acción rápida, se guardará solo ese texto aunque también haya una fecha seleccionada.",
+                help=(
+                    "Si eliges una acción rápida, se guardará solo ese texto aunque también haya una fecha seleccionada. "
+                    "Puedes volver a tocar la opción marcada para desmarcarla."
+                ),
             )
             fecha_sel = st.date_input(
                 "📅 Selector de fecha opcional",
