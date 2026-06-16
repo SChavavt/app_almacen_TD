@@ -1,4 +1,5 @@
 import streamlit as st
+import streamlit.components.v1 as components
 import pandas as pd
 import numpy as np
 import plotly.express as px
@@ -8465,6 +8466,67 @@ def _reportes_guia_fecha_sort_key(valor: str):
     return (1, fecha, str(valor or ""))
 
 
+def _reportes_guia_antiguedad_sort_key(row) -> tuple:
+    """Ordena guías de más antiguas a más recientes usando fecha y fila de la hoja."""
+    fecha_key = _reportes_guia_fecha_sort_key(row.get("FECHA DE GUÍA", ""))
+    fecha_val = fecha_key[1] if fecha_key[0] else pd.Timestamp.max
+    try:
+        sheet_row = int(row.get("__sheet_row", 0))
+    except (TypeError, ValueError):
+        sheet_row = 0
+    return (fecha_val, sheet_row)
+
+
+def _reportes_guia_es_guia_dhl_valida(guia) -> bool:
+    """Una guía DHL válida para copiado masivo solo puede traer números y espacios."""
+    guia_txt = str(guia or "").strip()
+    return bool(guia_txt) and bool(re.search(r"\d", guia_txt)) and bool(re.fullmatch(r"[\d\s]+", guia_txt))
+
+
+def _reportes_guia_dhl_tracking_text(guias) -> str:
+    """Devuelve hasta 10 guías limpias separadas por coma, como las pide DHL."""
+    guias_limpias = []
+    for guia in guias:
+        if not _reportes_guia_es_guia_dhl_valida(guia):
+            continue
+        guia_txt = re.sub(r"\s+", "", str(guia or "").strip())
+        if guia_txt and guia_txt not in guias_limpias:
+            guias_limpias.append(guia_txt)
+        if len(guias_limpias) >= 10:
+            break
+    return ",".join(guias_limpias)
+
+
+def _render_copy_to_clipboard_button(label: str, texto: str, key: str) -> None:
+    """Botón HTML para copiar texto al portapapeles desde el navegador."""
+    safe_text = json.dumps(str(texto or ""))
+    safe_label = escape(label)
+    safe_key = re.sub(r"[^a-zA-Z0-9_-]", "_", str(key or "copy_btn"))
+    components.html(
+        f"""
+        <button id="{safe_key}" style="
+            background:#ffcc00;border:1px solid #b38f00;border-radius:0.5rem;
+            padding:0.45rem 0.75rem;cursor:pointer;font-weight:600;">
+            {safe_label}
+        </button>
+        <span id="{safe_key}_msg" style="margin-left:0.75rem;color:#0f5132;font-size:0.9rem;"></span>
+        <script>
+        const btn = document.getElementById("{safe_key}");
+        const msg = document.getElementById("{safe_key}_msg");
+        btn.onclick = async () => {{
+            try {{
+                await navigator.clipboard.writeText({safe_text});
+                msg.textContent = "Copiado";
+            }} catch (err) {{
+                msg.textContent = "Selecciona y copia el texto manualmente";
+            }}
+        }};
+        </script>
+        """,
+        height=48,
+    )
+
+
 def _build_reportes_guia_excel(df: pd.DataFrame) -> bytes:
     buffer = BytesIO()
     export_df = df[[c for c in REPORTES_GUIA_COLUMNS if c in df.columns]].copy()
@@ -8546,6 +8608,20 @@ def render_reportes_guia_tab():
         else:
             df_filtrado = df_filtrado[df_filtrado[col].astype(str).str.strip().isin(seleccion)]
 
+    filtro_solo_pendientes = filtros.get("RECIBIDO POR") == ["PENDIENTES"]
+    filas_dhl_sugeridas: list[int] = []
+    texto_dhl_sugerido = ""
+    guias_dhl_invalidas = 0
+    if filtro_solo_pendientes and not df_filtrado.empty:
+        df_dhl_candidatas = df_filtrado.copy()
+        validas_mask = df_dhl_candidatas["GUIA"].apply(_reportes_guia_es_guia_dhl_valida)
+        guias_dhl_invalidas = int((~validas_mask).sum())
+        df_dhl_sugeridas = df_dhl_candidatas[validas_mask].copy()
+        df_dhl_sugeridas["__oldest_sort"] = df_dhl_sugeridas.apply(_reportes_guia_antiguedad_sort_key, axis=1)
+        df_dhl_sugeridas = df_dhl_sugeridas.sort_values("__oldest_sort", ascending=True).head(10)
+        filas_dhl_sugeridas = df_dhl_sugeridas["__sheet_row"].astype(int).tolist()
+        texto_dhl_sugerido = _reportes_guia_dhl_tracking_text(df_dhl_sugeridas["GUIA"].tolist())
+
     st.metric("📊 Guías pendientes visibles", len(df_filtrado))
     st.download_button(
         "📥 Descargar Excel filtrado",
@@ -8555,18 +8631,43 @@ def render_reportes_guia_tab():
         key="reportes_guia_download",
     )
 
+    if filtro_solo_pendientes:
+        st.info(
+            "📋 Modo DHL activo: se preseleccionan hasta 10 guías pendientes más antiguas "
+            "para copiarlas a DHL y después actualizar su estado en bloque o una por una."
+        )
+        if guias_dhl_invalidas:
+            st.caption(
+                f"Se omitieron {guias_dhl_invalidas} guía(s) porque la columna GUIA contiene letras, símbolos "
+                "u otros caracteres. Para DHL solo se consideran válidas las guías con números y espacios."
+            )
+        if texto_dhl_sugerido:
+            st.text_area(
+                "🚚 Guías para DHL (máximo 10, separadas por coma)",
+                value=texto_dhl_sugerido,
+                height=80,
+                key="reportes_guia_dhl_texto",
+                help="DHL permite introducir hasta 10 números separados por coma.",
+            )
+            _render_copy_to_clipboard_button("📋 Copiar guías para DHL", texto_dhl_sugerido, "reportes_guia_copy_dhl")
+        else:
+            st.warning("No se encontraron guías válidas para copiar con el filtro actual.")
+    else:
+        st.caption("Tip: filtra **RECIBIDO POR = PENDIENTES** para activar la selección automática de las 10 guías más antiguas y copiarlas en formato DHL.")
+
     modo_varios_entregado = st.checkbox(
         "✅ Marcar varios como ENTREGADO",
-        value=False,
+        value=bool(filas_dhl_sugeridas),
         key="reportes_guia_modo_varios_entregado",
         help=(
             "Activado: puedes marcar varias guías y luego presionar el botón para ponerlas como ENTREGADO. "
-            "Desactivado: marca una guía para cargarla abajo en la actualización individual."
+            "También puedes usar las filas seleccionadas para cargarlas abajo en la actualización individual."
         ),
     )
 
     editor_df = df_filtrado[REPORTES_GUIA_COLUMNS + ["__sheet_row"]].copy()
-    editor_df.insert(0, "Seleccionar", False)
+    editor_df.insert(0, "Seleccionar", editor_df["__sheet_row"].astype(int).isin(filas_dhl_sugeridas))
+    editor_key_suffix = hashlib.md5(",".join(map(str, filas_dhl_sugeridas)).encode("utf-8")).hexdigest()[:8] if filas_dhl_sugeridas else "manual"
     edited = st.data_editor(
         editor_df,
         hide_index=True,
@@ -8582,7 +8683,7 @@ def render_reportes_guia_tab():
             "VENDEDOR": st.column_config.TextColumn("🧑‍💼 VENDEDOR"),
             "RECIBIDO POR": st.column_config.TextColumn("📍 RECIBIDO POR"),
         },
-        key="reportes_guia_editor",
+        key=f"reportes_guia_editor_{editor_key_suffix}",
     )
 
     seleccionadas = edited[edited["Seleccionar"] == True]["__sheet_row"].astype(int).tolist() if not edited.empty else []
@@ -8603,10 +8704,6 @@ def render_reportes_guia_tab():
         guia = str(row.get("GUIA", "")).strip() or "SIN GUÍA"
         nombre = str(row.get("NOMBRE", "")).strip() or "SIN NOMBRE"
         return f"🧑‍💼 {vendedor} — 🚚 {guia} — 👤 {nombre}"
-
-    if modo_varios_entregado:
-        st.caption("Desactiva el check de varios como ENTREGADO si quieres asignar una acción rápida o fecha distinta por guía seleccionada.")
-        return
 
     opciones_fila = [_reportes_guia_row_label(r) for _, r in df_filtrado.iterrows()]
     selected_row_to_index = {int(r["__sheet_row"]): idx for idx, (_, r) in enumerate(df_filtrado.iterrows())}
