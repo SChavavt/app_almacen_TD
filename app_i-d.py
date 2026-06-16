@@ -5339,10 +5339,6 @@ def _persist_page_scroll(view_key: str, user_key: str = "", force_bottom: bool =
       const forceBottom = {str(force_bottom).lower()};
       const forceCenter = {str(force_center).lower()};
       const forceTableTop = {str(force_table_top).lower()};
-      if (forceTableTop) {{
-        try {{ if ('scrollRestoration' in target.history) target.history.scrollRestoration = 'manual'; }} catch (_) {{}}
-        try {{ target.sessionStorage?.removeItem(key); }} catch (_) {{}}
-      }}
       const scrollToBottom = () => {{
         const maxY = Math.max(root.scrollHeight - target.innerHeight, 0);
         target.scrollTo(0, maxY);
@@ -5353,11 +5349,11 @@ def _persist_page_scroll(view_key: str, user_key: str = "", force_bottom: bool =
       }};
       const scrollToTableTop = () => {{
         const anchor = doc.querySelector('#auto-tables-start');
-        const board = anchor || doc.querySelector('.board-wrap, .board-scroll');
+        const board = anchor || doc.querySelector('.board-wrap, .board-scroll, [data-testid="stHorizontalBlock"]');
         if (!board) return false;
         const rect = board.getBoundingClientRect();
         const absoluteY = (target.scrollY || root.scrollTop || 0) + rect.top - 8;
-        target.scrollTo({{ top: Math.max(absoluteY, 0), left: 0, behavior: 'auto' }});
+        target.scrollTo(0, Math.max(absoluteY, 0));
         return true;
       }};
 
@@ -5367,44 +5363,20 @@ def _persist_page_scroll(view_key: str, user_key: str = "", force_bottom: bool =
         setTimeout(scrollToBottom, 500);
       }} else if (forceTableTop) {{
         const tryTop = () => {{ if (!scrollToTableTop()) return; }};
-        const runSoon = () => {{
-          tryTop();
-          target.requestAnimationFrame?.(tryTop);
-          setTimeout(tryTop, 20);
-          setTimeout(tryTop, 120);
-          setTimeout(tryTop, 300);
-          setTimeout(tryTop, 700);
-          setTimeout(tryTop, 1200);
-        }};
-        runSoon();
-        target.addEventListener('load', runSoon, {{ once: true }});
-        target.addEventListener('pageshow', runSoon);
-        target.addEventListener('focus', runSoon);
-        doc.addEventListener('DOMContentLoaded', runSoon, {{ once: true }});
-        doc.addEventListener('visibilitychange', () => {{
-          if (doc.visibilityState === 'visible') runSoon();
-        }});
-        // Fully Kiosk/TV: durante el arranque Streamlit/Silk puede terminar de
-        // acomodar el DOM tarde; observamos cambios y reanclamos al inicio de
-        // las tablas para que PANTALLAF/PANTALLAL abran directamente ahí.
-        let lastObserverRun = 0;
-        const observer = new MutationObserver(() => {{
-          const now = Date.now();
-          if (now - lastObserverRun < 150) return;
-          lastObserverRun = now;
-          tryTop();
-        }});
-        try {{ observer.observe(doc.body || root, {{ childList: true, subtree: true }}); }} catch (_) {{}}
+        setTimeout(tryTop, 20);
+        setTimeout(tryTop, 220);
+        setTimeout(tryTop, 500);
+        setTimeout(tryTop, 900);
+        // Fully Kiosk/TV: durante los primeros segundos Streamlit/Silk puede
+        // terminar de acomodar el DOM tarde; reanclamos seguido y luego mantenemos
+        // el punto fijo con una corrección ligera periódica.
         const startedAt = Date.now();
         const burst = setInterval(() => {{
           tryTop();
-          if (Date.now() - startedAt > 30000) {{
-            clearInterval(burst);
-            try {{ observer.disconnect(); }} catch (_) {{}}
-          }}
+          if (Date.now() - startedAt > 10000) clearInterval(burst);
         }}, 250);
         if (!target.__tdTableTopResetInterval) {{
-          target.__tdTableTopResetInterval = setInterval(tryTop, 5000);
+          target.__tdTableTopResetInterval = setInterval(tryTop, 10000);
         }}
       }} else if (forceCenter) {{
         setTimeout(scrollToCenter, 20);
