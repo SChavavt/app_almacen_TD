@@ -201,56 +201,6 @@ def is_kiosk_user(user_key: str) -> bool:
 st.set_page_config(page_title="Panel de Almacén Integrado", layout="wide")
 
 
-def apply_kiosk_fullscreen_css() -> None:
-    """Bloquea la UI de Streamlit para una vista kiosko de pantalla completa sin scroll."""
-    st.markdown(
-        """
-        <style>
-        html, body, #root, .stApp, [data-testid="stAppViewContainer"],
-        [data-testid="stApp"], section.main, section.main > div, .block-container {
-            height: 100vh !important;
-            min-height: 100vh !important;
-            max-height: 100vh !important;
-            width: 100vw !important;
-            max-width: 100vw !important;
-            margin: 0 !important;
-            padding: 0 !important;
-            overflow: hidden !important;
-            background: #000 !important;
-        }
-        body { position: fixed !important; inset: 0 !important; }
-        #MainMenu, footer, header, [data-testid="stHeader"], [data-testid="stToolbar"],
-        [data-testid="stDecoration"], [data-testid="stStatusWidget"],
-        [data-testid="stSidebar"], [data-testid="collapsedControl"],
-        [data-testid="stHeaderActionElements"], div[data-testid="stSidebarNav"] {
-            display: none !important;
-            visibility: hidden !important;
-            height: 0 !important;
-        }
-        div[data-testid="stVerticalBlock"], div[data-testid="stVerticalBlock"] > div,
-        div[data-testid="element-container"] {
-            margin: 0 !important;
-            padding: 0 !important;
-        }
-        div[data-testid="stHorizontalBlock"] {
-            gap: 0.18rem !important;
-            margin: 0 !important;
-            padding: 0 !important;
-            height: 100vh !important;
-            overflow: hidden !important;
-        }
-        div[data-testid="stHorizontalBlock"] > div[data-testid="column"] {
-            padding: 0 !important;
-            height: 100vh !important;
-            overflow: hidden !important;
-        }
-        iframe { display: block !important; border: 0 !important; }
-        </style>
-        """,
-        unsafe_allow_html=True,
-    )
-
-
 def _render_tv_recycle_trampoline_if_needed() -> None:
     """Vista ultraligera para reciclar documento en Silk antes de volver al dashboard."""
     recycle_flag = st.query_params.get("__tv_recycle", "")
@@ -361,7 +311,11 @@ if is_tv_wall_view:
 current_time = datetime.now(TZ).strftime("%d/%m %H:%M:%S")
 
 if is_tv_wall_view:
-    apply_kiosk_fullscreen_css()
+    wall_title = "📦 Pedidos Locales en Tiempo Real" if is_pantalla_l_view else "🚚 Pedidos Foráneos en Tiempo Real"
+    st.markdown(
+        f'<div class="header-compact" style="margin-bottom:0.15rem;"><h2 style="color:white;">{wall_title}</h2><div class="header-meta">🕒 Última actualización: {current_time}</div></div>',
+        unsafe_allow_html=True,
+    )
 elif not is_dissurtidor_view:
     col_title, col_update, col_actions = st.columns([0.6, 0.2, 0.2])
     with col_title:
@@ -5072,7 +5026,20 @@ if not get_logged_user():
 logged_user = get_logged_user().upper()
 is_kiosk_mode = is_kiosk_user(logged_user)
 if is_kiosk_mode:
-    apply_kiosk_fullscreen_css()
+    st.markdown(
+        """
+        <style>
+        html, body, [data-testid="stAppViewContainer"] { overflow-x: hidden !important; background: #000 !important; }
+        #MainMenu, footer, [data-testid="stSidebar"], [data-testid="stHeaderActionElements"],
+        [data-testid="collapsedControl"] { display: none !important; }
+        section.main > div { padding-top: 0.25rem !important; padding-left: 0.18rem !important; padding-right: 0.18rem !important; max-width: none !important; width: 100vw !important; }
+        .block-container { padding: 0.1rem 0.18rem 0.2rem 0.18rem !important; max-width: none !important; width: 100vw !important; }
+        div[data-testid="stHorizontalBlock"] { gap: 0.22rem !important; }
+        div[data-testid="stHorizontalBlock"] > div[data-testid="column"] { padding-left: 0 !important; padding-right: 0 !important; }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
 # Matriz de vistas por usuario:
 # - SINAI: solo operación (Auto Foráneo, Auto Local y Asistente)
 # - DISSURTIDOR: Surtidores + Auditores
@@ -5256,10 +5223,28 @@ def _inject_keepalive_media(enabled: bool) -> None:
             const SOFT_RELOAD_MS = reloadMinutes * 60 * 1000;
             setInterval(() => recycleDocument('periodic'), SOFT_RELOAD_MS);
 
-            // Pulso no visual: la vista kiosko no debe mostrar captions/heartbeat.
-            const updateHeartbeat = () => { pulse(); };
+            // Heartbeat visual ligero para que el DOM no parezca congelado en Silk
+            let hb = document.getElementById('td-kiosk-heartbeat');
+            if (!hb) {
+              hb = document.createElement('div');
+              hb.id = 'td-kiosk-heartbeat';
+              hb.style.cssText = 'position:fixed;right:8px;bottom:6px;z-index:999999;font:600 14px/1.2 Arial,sans-serif;color:#8ff;background:rgba(0,0,0,.35);padding:4px 6px;border-radius:4px;';
+              hb.textContent = '--:--:-- · init';
+              document.body.appendChild(hb);
+            }
+
+            const updateHeartbeat = () => {
+              const now = new Date();
+              hb.textContent = `${now.toLocaleTimeString()} · alive`;
+            };
+            updateHeartbeat();
+
+            // Intervalo unificado: heartbeat visual + pulse de keepalive
             const HEARTBEAT_MS = 30000;
-            setInterval(updateHeartbeat, HEARTBEAT_MS);
+            setInterval(() => {
+              updateHeartbeat();
+              pulse();
+            }, HEARTBEAT_MS);
 
             // Intento de audio keepalive silencioso (puede ser bloqueado por autoplay en Silk).
             const armSilentAudio = () => {
@@ -5339,8 +5324,8 @@ def _inject_keepalive_media(enabled: bool) -> None:
     )
 
 
-def _persist_page_scroll(view_key: str, user_key: str = "", force_bottom: bool = False, force_center: bool = False) -> None:
-    """Guarda/restaura scroll vertical entre auto-recargas para usuarios normales."""
+def _persist_page_scroll(view_key: str, user_key: str = "", force_bottom: bool = False, force_center: bool = False, force_table_top: bool = False) -> None:
+    """Guarda/restaura scroll vertical entre auto-recargas por vista/usuario."""
     storage_key = sanitize_text(f"td_scroll::{user_key}::{view_key}")
     script = f"""
     <script>
@@ -5353,6 +5338,11 @@ def _persist_page_scroll(view_key: str, user_key: str = "", force_bottom: bool =
 
       const forceBottom = {str(force_bottom).lower()};
       const forceCenter = {str(force_center).lower()};
+      const forceTableTop = {str(force_table_top).lower()};
+      if (forceTableTop) {{
+        try {{ if ('scrollRestoration' in target.history) target.history.scrollRestoration = 'manual'; }} catch (_) {{}}
+        try {{ target.sessionStorage?.removeItem(key); }} catch (_) {{}}
+      }}
       const scrollToBottom = () => {{
         const maxY = Math.max(root.scrollHeight - target.innerHeight, 0);
         target.scrollTo(0, maxY);
@@ -5361,11 +5351,74 @@ def _persist_page_scroll(view_key: str, user_key: str = "", force_bottom: bool =
         const maxY = Math.max(root.scrollHeight - target.innerHeight, 0);
         target.scrollTo(0, Math.floor(maxY * 0.5));
       }};
+      const scrollToTableTop = () => {{
+        const anchor = doc.querySelector('#auto-tables-start');
+        const anchorY = anchor
+          ? (target.scrollY || root.scrollTop || 0) + anchor.getBoundingClientRect().top
+          : 0;
+        // Las tablas automáticas se renderizan dentro de iframes de components.html;
+        // por eso el DOM padre no puede ver .board-table. En kiosko apuntamos al
+        // primer iframe real que aparece después del ancla para evitar caer en el
+        // título/espacio superior de la app.
+        const frames = Array.from(doc.querySelectorAll('iframe'));
+        const tableFrame = frames.find((frame) => {{
+          const rect = frame.getBoundingClientRect();
+          const frameY = (target.scrollY || root.scrollTop || 0) + rect.top;
+          return rect.height > 80 && (!anchor || frameY >= anchorY - 4);
+        }});
+        const board = tableFrame || anchor;
+        if (!board) return false;
+        const rect = board.getBoundingClientRect();
+        const absoluteY = (target.scrollY || root.scrollTop || 0) + rect.top;
+        target.scrollTo({{ top: Math.max(absoluteY, 0), left: 0, behavior: 'auto' }});
+        return true;
+      }};
 
       if (forceBottom) {{
         setTimeout(scrollToBottom, 20);
         setTimeout(scrollToBottom, 220);
         setTimeout(scrollToBottom, 500);
+      }} else if (forceTableTop) {{
+        const tryTop = () => {{ if (!scrollToTableTop()) return; }};
+        const runSoon = () => {{
+          tryTop();
+          target.requestAnimationFrame?.(tryTop);
+          setTimeout(tryTop, 20);
+          setTimeout(tryTop, 120);
+          setTimeout(tryTop, 300);
+          setTimeout(tryTop, 700);
+          setTimeout(tryTop, 1200);
+        }};
+        runSoon();
+        target.addEventListener('load', runSoon, {{ once: true }});
+        target.addEventListener('pageshow', runSoon);
+        target.addEventListener('focus', runSoon);
+        doc.addEventListener('DOMContentLoaded', runSoon, {{ once: true }});
+        doc.addEventListener('visibilitychange', () => {{
+          if (doc.visibilityState === 'visible') runSoon();
+        }});
+        // Fully Kiosk/TV: durante el arranque Streamlit/Silk puede terminar de
+        // acomodar el DOM tarde; observamos cambios y reanclamos al inicio de
+        // las tablas para que PANTALLAF/PANTALLAL abran directamente ahí.
+        let lastObserverRun = 0;
+        const observer = new MutationObserver(() => {{
+          const now = Date.now();
+          if (now - lastObserverRun < 150) return;
+          lastObserverRun = now;
+          tryTop();
+        }});
+        try {{ observer.observe(doc.body || root, {{ childList: true, subtree: true }}); }} catch (_) {{}}
+        const startedAt = Date.now();
+        const burst = setInterval(() => {{
+          tryTop();
+          if (Date.now() - startedAt > 30000) {{
+            clearInterval(burst);
+            try {{ observer.disconnect(); }} catch (_) {{}}
+          }}
+        }}, 250);
+        if (!target.__tdTableTopResetInterval) {{
+          target.__tdTableTopResetInterval = setInterval(tryTop, 5000);
+        }}
       }} else if (forceCenter) {{
         setTimeout(scrollToCenter, 20);
         setTimeout(scrollToCenter, 220);
@@ -5383,7 +5436,7 @@ def _persist_page_scroll(view_key: str, user_key: str = "", force_bottom: bool =
 
       const save = () => {{
         if (!target.sessionStorage) return;
-        const y = root.scrollTop || target.scrollY || 0;
+        const y = forceTableTop ? 0 : (root.scrollTop || target.scrollY || 0);
         target.sessionStorage.setItem(key, String(y));
       }};
 
@@ -5402,12 +5455,26 @@ _inject_keepalive_media(logged_user in {"PANTALLAF", "PANTALLAL"})
 
 force_bottom_scroll = False
 force_center_scroll = False
-if not is_kiosk_mode:
-    _persist_page_scroll(
-        selected_tab_key,
-        logged_user,
-        force_bottom=force_bottom_scroll,
-        force_center=force_center_scroll,
+force_table_top_scroll = (
+    selected_tab_key in {"auto_local", "auto_foraneo"}
+    and logged_user in {"PANTALLAF", "PANTALLAL"}
+)
+_persist_page_scroll(
+    selected_tab_key,
+    logged_user,
+    force_bottom=force_bottom_scroll,
+    force_center=force_center_scroll,
+    force_table_top=force_table_top_scroll,
+)
+
+if is_kiosk_mode:
+    st.caption(
+        f"""
+heartbeat: OK
+last refresh: {datetime.now(TZ).strftime("%Y-%m-%d %H:%M:%S %Z")}
+reload count: controlado por frontend (td_tv_wall_telemetry)
+watchdog: active
+"""
     )
 
 # helper para "simular" tabs
@@ -5495,145 +5562,6 @@ if selected_tab_key in {"auto_local", "auto_foraneo", "surtidores", "auditores"}
         auto_foraneo_entries, st.session_state.surtidor_assignments
     )
     assign_display_numbers(auto_local_entries, auto_foraneo_entries, datetime.now(TZ).date())
-
-def render_kiosk_auto_local_view(auto_local_entries: list[dict]) -> None:
-    """Renderiza sólo las listas locales para PANTALLAL, sin encabezados ni scroll."""
-    apply_kiosk_fullscreen_css()
-    st_autorefresh(interval=60000, key="auto_refresh_local_kiosk")
-
-    today_local = datetime.now(TZ).date()
-    combined_entries = [e for e in auto_local_entries if _is_visible_auto_entry(e)]
-    combined_entries = keep_local_entries_prioritizing_today_or_overdue(
-        combined_entries, today_local
-    )
-
-    turno_priority = [
-        "☀️ Local Mañana",
-        "🌙 Local Tarde",
-        "🌵 Saltillo",
-        "📦 Pasa a Bodega",
-        "📍 Local (sin turno)",
-    ]
-    grouped: dict[str, list] = {label: [] for label in turno_priority}
-    for entry in combined_entries:
-        turno = normalize_turno_label(entry.get("turno", ""))
-        if turno in {"🌆 Local CDMX", "🎓 Recoge en Aula", "Recoge en Aula"}:
-            continue
-        if not turno:
-            turno = "📍 Local (sin turno)"
-        grouped.setdefault(turno, []).append(entry)
-
-    ordered_labels = [label for label in turno_priority if grouped.get(label)]
-    ordered_labels.extend(
-        sorted(label for label, entries in grouped.items() if label not in turno_priority and entries)
-    )
-
-    if not ordered_labels:
-        st.info("No hay pedidos locales activos por turno.")
-        return
-
-    col_left, col_right = st.columns(2, gap="small")
-    columns = [col_left, col_right]
-    for idx, label in enumerate(ordered_labels):
-        with columns[idx % 2]:
-            render_auto_list(
-                sort_entries_by_flow_number_desc(grouped[label]),
-                title="",
-                subtitle="",
-                max_rows=140,
-                start_number=1,
-                panel_height=220,
-                scroll_max_height=300,
-                show_header=False,
-                mode="local",
-                min_content_height=40,
-            )
-
-
-def render_kiosk_auto_foraneo_view(auto_foraneo_entries: list[dict]) -> None:
-    """Renderiza sólo las listas foráneas para PANTALLAF, sin encabezados ni scroll."""
-    apply_kiosk_fullscreen_css()
-    st_autorefresh(interval=60000, key="auto_refresh_foraneo_kiosk")
-
-    hoy = datetime.now(TZ).date()
-    combined_entries = list(auto_foraneo_entries)
-    visible_entries = [e for e in combined_entries if _is_visible_auto_entry(e)]
-    visible_entries = [
-        e
-        for e in visible_entries
-        if not (
-            sanitize_text(e.get("categoria", "")) == "🧰 Casos"
-            and _parse_foraneo_number(e.get("numero_foraneo", "")) is None
-        )
-    ]
-    visible_entries = [e for e in visible_entries if e.get("display_num") is not None]
-    visible_entries = dedupe_entries_preserve_order(visible_entries)
-
-    asignados = [
-        e for e in visible_entries if _parse_foraneo_number(e.get("numero_foraneo", "")) is not None
-    ]
-    asignados = sort_entries_by_flow_number_desc(asignados)
-    restantes = [
-        e for e in visible_entries if _parse_foraneo_number(e.get("numero_foraneo", "")) is None
-    ]
-    sin_numero = [e for e in restantes if _parse_foraneo_number(e.get("numero", "")) is None]
-    ant = [e for e in filter_entries_before_date(restantes, hoy) if e not in sin_numero]
-    ant = sort_entries_by_flow_number_desc(ant)
-    sin_fecha = [e for e in filter_entries_no_entrega_date(restantes) if e not in sin_numero]
-    sin_fecha = sort_entries_by_flow_number_desc(sin_fecha)
-    hoy_base = filter_entries_on_or_after(restantes, hoy)
-    hoy_entries = dedupe_entries_preserve_order(hoy_base + asignados + sin_numero)
-    hoy_entries = sort_entries_by_flow_number_desc(hoy_entries)
-    anteriores = sort_entries_by_flow_number_desc(dedupe_entries_preserve_order(ant + sin_fecha))
-
-    midpoint_hoy = int(np.ceil(max(len(hoy_entries), 1) / 2.0))
-    hoy_centro = hoy_entries[:midpoint_hoy]
-    hoy_derecha = hoy_entries[midpoint_hoy:]
-
-    col_left, col_center, col_right = st.columns([1, 1, 1], gap="small")
-    with col_left:
-        render_auto_list(
-            anteriores,
-            title="",
-            subtitle="",
-            max_rows=140,
-            panel_height=220,
-            show_header=False,
-            mode="foraneo",
-            min_content_height=40,
-        )
-    with col_center:
-        next_number = render_auto_list(
-            hoy_centro,
-            title="",
-            subtitle="",
-            max_rows=140,
-            start_number=1,
-            panel_height=220,
-            show_header=False,
-            mode="foraneo",
-            min_content_height=40,
-        )
-    with col_right:
-        render_auto_list(
-            hoy_derecha,
-            title="",
-            subtitle="",
-            max_rows=140,
-            start_number=next_number,
-            panel_height=220,
-            show_header=False,
-            mode="foraneo",
-            min_content_height=40,
-        )
-
-
-if is_kiosk_mode:
-    if logged_user == "PANTALLAL":
-        render_kiosk_auto_local_view(auto_local_entries)
-    elif logged_user == "PANTALLAF":
-        render_kiosk_auto_foraneo_view(auto_foraneo_entries)
-    st.stop()
 
 # ---------------------------
 # TAB 1: Asistente interno TD
@@ -5800,6 +5728,18 @@ if selected_tab_key == "assistant":
 # TAB 1: Auto Local (Casos asignados) — 2 columnas
 # ---------------------------
 if selected_tab_key == "auto_local":
+    if logged_user in {"PANTALLAF", "PANTALLAL"}:
+        st_autorefresh(interval=60000, key="auto_refresh_local_casos")
+    if logged_user in {"PANTALLAF", "PANTALLAL"}:
+        st.markdown(
+            """
+            <style>.tv-wall-tight-start{margin-top:-5.2rem;}</style>
+            <div class="tv-wall-tight-start"></div>
+            <div id="auto-tables-start"></div>
+            """,
+            unsafe_allow_html=True,
+        )
+
     today_local = datetime.now(TZ).date()
     combined_entries = [e for e in auto_local_entries if _is_visible_auto_entry(e)]
     combined_entries = keep_local_entries_prioritizing_today_or_overdue(
@@ -5858,6 +5798,18 @@ if selected_tab_key == "auto_local":
 # TAB 2: Auto Foráneo (Casos asignados) — 2 columnas
 # ---------------------------
 if selected_tab_key == "auto_foraneo":
+    if logged_user in {"PANTALLAF", "PANTALLAL"}:
+        st_autorefresh(interval=60000, key="auto_refresh_foraneo_cdmx")
+    if logged_user in {"PANTALLAF", "PANTALLAL"}:
+        st.markdown(
+            """
+            <style>.tv-wall-tight-start{margin-top:-5.2rem;}</style>
+            <div class="tv-wall-tight-start"></div>
+            <div id="auto-tables-start"></div>
+            """,
+            unsafe_allow_html=True,
+        )
+
     hoy = datetime.now(TZ).date()
 
 
