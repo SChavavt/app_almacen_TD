@@ -2197,6 +2197,7 @@ def render_auto_list(
     show_header: bool = True,
     mode: str = "local",
     min_content_height: Optional[int] = None,
+    compact_foraneo_overflow: bool = False,
 ):
     if not entries:
         st.info("No hay pedidos para mostrar.")
@@ -2222,12 +2223,18 @@ def render_auto_list(
         if not is_cancelado and has_explicit_number:
             display_number = e.get("display_num", fallback_number)
         number_label = f"#{display_number}" if display_number is not None else "—"
+        is_pantalla_f_foraneo_row = compact_foraneo_overflow and layout_user == "PANTALLAF" and mode == "foraneo"
         estado_text = sanitize_text(e.get('estado', ''))
-        estado_html = f"<span class='board-status'>{estado_text}</span>"
+        estado_display = estado_text.split(maxsplit=1)[0] if is_pantalla_f_foraneo_row and estado_text else estado_text
+        estado_html = f"<span class='board-status'>{estado_display}</span>"
 
         surtidor = sanitize_text(e.get("surtidor", ""))
+        surtidor_display = surtidor[:1].upper() if is_pantalla_f_foraneo_row and surtidor else surtidor
+        surtidor_style = surtidor_badge_style(surtidor)
+        if is_pantalla_f_foraneo_row:
+            surtidor_style = f"{surtidor_style};color:#000!important;"
         surtidor_html = (
-            f"<span class='surtidor-tag' style=\"{surtidor_badge_style(surtidor)}\">{surtidor}</span>"
+            f"<span class='surtidor-tag' style=\"{surtidor_style}\">{surtidor_display}</span>"
             if surtidor
             else ""
         )
@@ -2260,23 +2267,33 @@ def render_auto_list(
     list_id = f"board-{next(_AUTO_LIST_COUNTER)}"
     scroll_class = "board-scroll"
 
-    header_html = (
-        f"""
-    <div class=\"board-title\">
-        <div>{title}{sub}</div>
-        <div class=\"board-sub\">Mostrando {len(visible)}/{len(entries)}</div>
+    is_pantalla_f_foraneo_view = layout_user == "PANTALLAF" and mode == "foraneo"
+    is_compact_pantalla_f_foraneo_view = compact_foraneo_overflow and is_pantalla_f_foraneo_view
+    if show_header and is_compact_pantalla_f_foraneo_view:
+        compact_subtitle = f"{subtitle} · Mostrando {len(visible)}/{len(entries)}" if subtitle else f"Mostrando {len(visible)}/{len(entries)}"
+        header_html = f"""
+    <div class="board-title board-title-compact">
+        <div class="board-title-main">{title}</div>
+        <div class="board-sub board-sub-inline">{compact_subtitle}</div>
     </div>
     """
-        if show_header
-        else ""
-    )
+    else:
+        header_html = (
+            f"""
+    <div class="board-title">
+        <div>{title}{sub}</div>
+        <div class="board-sub">Mostrando {len(visible)}/{len(entries)}</div>
+    </div>
+    """
+            if show_header
+            else ""
+        )
 
-    is_pantalla_f_foraneo_view = layout_user == "PANTALLAF" and mode == "foraneo"
     is_pantalla_l_local_view = is_pantalla_l_view and mode == "local"
     is_large_auto_list_view = is_pantalla_l_view or is_pantalla_f_foraneo_view
 
     row_height_px = 64 if is_pantalla_l_local_view else (52 if is_large_auto_list_view else 38)
-    title_height_px = 58 if show_header else 10
+    title_height_px = 34 if show_header and is_compact_pantalla_f_foraneo_view else (58 if show_header else 10)
     min_content = min_content_height if min_content_height is not None else (140 if show_header else 100)
     safety_padding_px = 24
     content_height = max(
@@ -2285,10 +2302,10 @@ def render_auto_list(
     component_height = content_height
 
     compact_title_size = (
-        "1.34rem" if is_pantalla_l_local_view else ("1.2rem" if is_large_auto_list_view else "1.01rem")
+        "0.78rem" if is_compact_pantalla_f_foraneo_view else ("1.34rem" if is_pantalla_l_local_view else ("1.2rem" if is_large_auto_list_view else "1.01rem"))
     )
     compact_sub_size = (
-        "1.04rem" if is_pantalla_l_local_view else ("0.88rem" if is_large_auto_list_view else "0.72rem")
+        "0.56rem" if is_compact_pantalla_f_foraneo_view else ("1.04rem" if is_pantalla_l_local_view else ("0.88rem" if is_large_auto_list_view else "0.72rem"))
     )
     compact_head_size = (
         "1.02rem" if is_pantalla_l_local_view else ("0.92rem" if is_large_auto_list_view else "0.67rem")
@@ -2308,24 +2325,36 @@ def render_auto_list(
     compact_tag_size = (
         "1.05rem" if is_pantalla_l_local_view else ("0.86rem" if is_large_auto_list_view else "0.66rem")
     )
+    compact_side_align = "center" if is_compact_pantalla_f_foraneo_view else "left"
+    compact_surtidor_color_css = "color:#000!important;" if is_compact_pantalla_f_foraneo_view else ""
 
     colgroup_html = (
-        "<col style='width:8%'><col style='width:49%'><col style='width:19%'><col style='width:24%'>"
-        if layout_user == "PANTALLAF" and mode == "foraneo"
+        "<col style='width:3ch'><col style='width:16ch'><col style='width:4ch'><col style='width:3ch'>"
+        if is_compact_pantalla_f_foraneo_view
         else (
-            "<col style='width:6%'><col style='width:54%'><col style='width:20%'><col style='width:20%'>"
-            if mode in {"foraneo", "local"}
-            else "<col style='width:4%'><col style='width:70%'><col style='width:26%'>"
+            "<col style='width:8%'><col style='width:49%'><col style='width:19%'><col style='width:24%'>"
+            if is_pantalla_f_foraneo_view
+            else (
+                "<col style='width:6%'><col style='width:54%'><col style='width:20%'><col style='width:20%'>"
+                if mode in {"foraneo", "local"}
+                else "<col style='width:4%'><col style='width:70%'><col style='width:26%'>"
+            )
         )
     )
+    cliente_header = "Cliente"
+    surtidor_header = "Sur" if is_compact_pantalla_f_foraneo_view else "Surtidor"
+    estado_header = "Es" if is_compact_pantalla_f_foraneo_view else "Estado"
 
     html = f"""
     <style>
     .board-col{{flex:1;background:rgba(18,18,20,0.92);border-radius:0.9rem;padding:0.55rem 0.68rem;box-shadow:0 2px 12px rgba(0,0,0,0.25);height:100%;font-family:"Source Sans Pro", sans-serif;}}
     .board-title{{display:flex;justify-content:space-between;align-items:center;gap:0.6rem;margin-bottom:0.4rem;font-weight:600;font-size:{compact_title_size};color:#fff;letter-spacing:0.01em;}}
+    .board-title-compact{{flex-direction:column;align-items:flex-start;gap:0.04rem;margin-bottom:0.12rem;line-height:0.95;}}
+    .board-title-main{{max-width:100%;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}}
     .board-sub{{font-size:{compact_sub_size};opacity:0.8;font-weight:500;}}
+    .board-sub-inline{{max-width:100%;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}}
     .board-table{{width:100%;border-collapse:collapse;table-layout:fixed;}}
-    .board-head th{{font-size:{compact_head_size};letter-spacing:0.02em;text-transform:uppercase;color:#d7e6ff;font-weight:700;padding:0.2rem 0.2rem;border-bottom:1px solid rgba(140,180,255,0.38);text-align:left;background:rgba(65,105,180,0.16);}}
+    .board-head th{{font-size:{compact_head_size};letter-spacing:0.02em;text-transform:uppercase;color:#d7e6ff;font-weight:700;padding:0.2rem 0.2rem;border-bottom:1px solid rgba(140,180,255,0.38);text-align:left;background:rgba(65,105,180,0.16);white-space:nowrap;}}
     .board-head th:first-child{{border-top-left-radius:0.45rem;}}
     .board-head th:last-child{{border-top-right-radius:0.45rem;}}
     .board-row{{border-top:1px solid rgba(255,255,255,0.09);}}
@@ -2337,11 +2366,11 @@ def render_auto_list(
     .board-row td + td{{border-left:1px solid rgba(255,255,255,0.08);}}
     .board-n{{width:1.25rem;font-size:{compact_n_size};font-weight:800;white-space:nowrap;color:#fff;padding-left:0.16rem!important;padding-right:0.26rem!important;letter-spacing:-0.03em;}}
     .board-client{{width:auto;font-weight:600;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}}
-    .board-surtidor{{width:4.9rem;white-space:nowrap;text-align:left;font-weight:780;font-size:{compact_surtidor_size};overflow:hidden;text-overflow:ellipsis;}}
-    .board-state{{width:5.4rem;text-align:left;white-space:nowrap;overflow:visible;}}
+    .board-surtidor{{width:4.9rem;white-space:nowrap;text-align:{compact_side_align};font-weight:780;font-size:{compact_surtidor_size};overflow:hidden;text-overflow:ellipsis;}}
+    .board-state{{width:5.4rem;text-align:{compact_side_align};white-space:nowrap;overflow:visible;}}
     .board-status{{font-size:{compact_status_size};font-weight:700;white-space:nowrap;opacity:0.97;padding:0.04rem 0.22rem;border-radius:0.56rem;background:rgba(255,255,255,0.10);}}
     .surtidor-tag{{margin-left:0.1rem;padding:0.07rem 0.34rem;border-radius:0.7rem;background:rgba(114,190,255,0.18);color:#a9dcff;font-weight:650;font-size:{compact_tag_size};white-space:nowrap;}}
-    .board-surtidor .surtidor-tag{{display:inline-block;margin-left:0;padding:0.09rem 0.4rem;font-size:{compact_surtidor_size};font-weight:800;}}
+    .board-surtidor .surtidor-tag{{display:inline-block;margin-left:0;padding:0.09rem 0.4rem;font-size:{compact_surtidor_size};font-weight:800;{compact_surtidor_color_css}}}
     #{list_id} .board-scroll{{max-height:none;overflow:visible;position:relative;}}
     </style>
     <div class="board-col" id="{list_id}">
@@ -2354,9 +2383,9 @@ def render_auto_list(
             <thead class="board-head">
                 <tr>
                     <th>#</th>
-                    <th>Cliente</th>
-                    {"<th>Surtidor</th>" if mode in {"foraneo", "local"} else ""}
-                    <th>Estado</th>
+                    <th>{cliente_header}</th>
+                    {f"<th>{surtidor_header}</th>" if mode in {"foraneo", "local"} else ""}
+                    <th>{estado_header}</th>
                 </tr>
             </thead>
             {''.join(rows_html)}
@@ -5604,12 +5633,17 @@ def render_kiosk_auto_foraneo_view(auto_foraneo_entries: list[dict]) -> None:
     hoy_entries = sort_entries_by_flow_number_desc(hoy_entries)
     anteriores = sort_entries_by_flow_number_desc(dedupe_entries_preserve_order(ant + sin_fecha))
 
-    midpoint_hoy = int(np.ceil(max(len(hoy_entries), 1) / 2.0))
-    hoy_centro = hoy_entries[:midpoint_hoy]
-    hoy_derecha = hoy_entries[midpoint_hoy:]
+    hoy_chunk_count = 3 if len(hoy_entries) > 50 else 2
+    hoy_chunks = [list(chunk) for chunk in np.array_split(hoy_entries, hoy_chunk_count)]
 
-    col_left, col_center, col_right = st.columns([1, 1, 1], gap="small")
-    with col_left:
+    if hoy_chunk_count == 3:
+        col_left, col_center, col_right, col_far_right = st.columns([1, 1, 1, 1], gap="small")
+        columns = [col_left, col_center, col_right, col_far_right]
+    else:
+        col_left, col_center, col_right = st.columns([1, 1, 1], gap="small")
+        columns = [col_left, col_center, col_right]
+
+    with columns[0]:
         render_auto_list(
             anteriores,
             title="🚚 FORÁNEOS • ANTERIORES",
@@ -5619,31 +5653,29 @@ def render_kiosk_auto_foraneo_view(auto_foraneo_entries: list[dict]) -> None:
             show_header=True,
             mode="foraneo",
             min_content_height=40,
+            compact_foraneo_overflow=hoy_chunk_count == 3,
         )
-    with col_center:
-        next_number = render_auto_list(
-            hoy_centro,
-            title=f"🚚 FORÁNEOS • HOY/FUTURAS ({hoy.strftime('%d/%m')})",
-            subtitle="Todos los de hoy y fechas futuras",
-            max_rows=140,
-            start_number=1,
-            panel_height=220,
-            show_header=True,
-            mode="foraneo",
-            min_content_height=40,
-        )
-    with col_right:
-        render_auto_list(
-            hoy_derecha,
-            title=f"🚚 FORÁNEOS • HOY/FUTURAS ({hoy.strftime('%d/%m')})",
-            subtitle="Continuación del bloque central",
-            max_rows=140,
-            start_number=next_number,
-            panel_height=220,
-            show_header=True,
-            mode="foraneo",
-            min_content_height=40,
-        )
+
+    next_number = 1
+    subtitles = [
+        "Todos los de hoy y fechas futuras",
+        "Continuación del bloque central",
+        "Continuación del bloque derecho",
+    ]
+    for idx, chunk in enumerate(hoy_chunks):
+        with columns[idx + 1]:
+            next_number = render_auto_list(
+                chunk,
+                title=f"🚚 FORÁNEOS • HOY/FUTURAS ({hoy.strftime('%d/%m')})",
+                subtitle=subtitles[idx],
+                max_rows=140,
+                start_number=next_number,
+                panel_height=220,
+                show_header=True,
+                mode="foraneo",
+                min_content_height=40,
+                compact_foraneo_overflow=hoy_chunk_count == 3,
+            )
 
     st_autorefresh(interval=60000, key="auto_refresh_foraneo_kiosk")
 
@@ -5929,21 +5961,18 @@ if selected_tab_key == "auto_foraneo":
     anteriores = dedupe_entries_preserve_order(ant + sin_fecha)
     anteriores = sort_entries_by_flow_number_desc(anteriores)
 
-    # Distribución en 3 columnas:
-    # 1) Izquierda: anteriores.
-    # 2) Centro: hoy/futuros (primer bloque).
-    # 3) Derecha: hoy/futuros (continuación).
-    midpoint_hoy = int(np.ceil(max(len(hoy_entries), 1) / 2.0))
-    hoy_centro = hoy_entries[:midpoint_hoy]
-    hoy_derecha = hoy_entries[midpoint_hoy:]
+    # Distribución: PANTALLAF abre una 4ª columna cuando HOY/FUTURAS supera 50
+    # pedidos, dejando ANTERIORES aparte y partiendo HOY/FUTURAS en 3 bloques.
+    hoy_chunk_count = 3 if logged_user == "PANTALLAF" and len(hoy_entries) > 50 else 2
+    hoy_chunks = [list(chunk) for chunk in np.array_split(hoy_entries, hoy_chunk_count)]
 
-    # 2) Layout: tres columnas. En PANTALLAF usamos todo el ancho disponible
-    # y reducimos el espacio entre bloques para que no se compriman las filas.
     foraneo_gap = "small" if logged_user == "PANTALLAF" else "large"
-    col_left, col_center, col_right = st.columns([1, 1, 1], gap=foraneo_gap)
+    if hoy_chunk_count == 3:
+        columns = list(st.columns([1, 1, 1, 1], gap=foraneo_gap))
+    else:
+        columns = list(st.columns([1, 1, 1], gap=foraneo_gap))
 
-    # --- IZQUIERDA: ANTERIORES ---
-    with col_left:
+    with columns[0]:
         render_auto_list(
             anteriores,
             title="🚚 FORÁNEOS • ANTERIORES",
@@ -5952,31 +5981,28 @@ if selected_tab_key == "auto_foraneo":
             panel_height=220,
             mode="foraneo",
             min_content_height=40,
+            compact_foraneo_overflow=hoy_chunk_count == 3,
         )
 
-    # --- CENTRO: HOY + FUTUROS (INICIO) ---
-    with col_center:
-        next_number = render_auto_list(
-            hoy_centro,
-            title=f"🚚 FORÁNEOS • HOY/FUTURAS ({hoy.strftime('%d/%m')})",
-            subtitle="Todos los de hoy y fechas futuras",
-            max_rows=140,
-            start_number=1,
-            panel_height=220,
-            mode="foraneo",
-        )
-
-    # --- DERECHA: HOY + FUTUROS (CONTINUACIÓN) ---
-    with col_right:
-        render_auto_list(
-            hoy_derecha,
-            title=f"🚚 FORÁNEOS • HOY/FUTURAS ({hoy.strftime('%d/%m')})",
-            subtitle="Continuación del bloque central",
-            max_rows=140,
-            start_number=next_number,
-            panel_height=220,
-            mode="foraneo",
-        )
+    next_number = 1
+    subtitles = [
+        "Todos los de hoy y fechas futuras",
+        "Continuación del bloque central",
+        "Continuación del bloque derecho",
+    ]
+    for idx, chunk in enumerate(hoy_chunks):
+        with columns[idx + 1]:
+            next_number = render_auto_list(
+                chunk,
+                title=f"🚚 FORÁNEOS • HOY/FUTURAS ({hoy.strftime('%d/%m')})",
+                subtitle=subtitles[idx],
+                max_rows=140,
+                start_number=next_number,
+                panel_height=220,
+                mode="foraneo",
+                min_content_height=40,
+                compact_foraneo_overflow=hoy_chunk_count == 3,
+            )
 
 
 
