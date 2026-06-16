@@ -1977,6 +1977,9 @@ def _render_bulk_selector(row: Any) -> None:
     if str(row.get("Estado", "")).strip() != ESTADO_EN_PROCESO:
         return
 
+    if not pedido_tiene_surtidor(row):
+        return
+
     pedido_id = str(row.get("ID_Pedido", "")).strip()
     if not pedido_id:
         return
@@ -2002,6 +2005,15 @@ def _render_bulk_selector(row: Any) -> None:
     st.session_state["bulk_selected_pedidos"] = selected
 
 
+def pedido_tiene_surtidor(row_data: Any) -> bool:
+    """Indica si el pedido tiene asignado un surtidor real para poder completarse."""
+
+    surtidor = row_data.get("Surtidor", "") if hasattr(row_data, "get") else ""
+    if pd.isna(surtidor):
+        return False
+    return str(surtidor).strip() != ""
+
+
 def _pedido_es_completable_rapido(row_data: pd.Series) -> bool:
     tipo_envio = str(row_data.get("Tipo_Envio", "")).strip()
     es_local = tipo_envio == "📍 Pedido Local"
@@ -2009,7 +2021,8 @@ def _pedido_es_completable_rapido(row_data: pd.Series) -> bool:
     es_local_bodega = es_local and turno == "📦 Pasa a Bodega"
     pago_ok = (not es_local_bodega) or _estado_pago_es_pagado(row_data.get("Estado_Pago", ""))
     guia_ok = (not pedido_requiere_guia(row_data)) or pedido_tiene_guia_adjunta(row_data)
-    return pago_ok and guia_ok
+    surtidor_ok = pedido_tiene_surtidor(row_data)
+    return pago_ok and guia_ok and surtidor_ok
 
 
 _TAB_LABELS_BY_TIPO = {
@@ -5887,6 +5900,13 @@ def completar_pedido(
     """Marca un pedido como completado y preserva el estado visual - OPTIMIZADO."""
 
     estado_actual = str(row.get("Estado", "") or "").strip()
+    if not pedido_tiene_surtidor(row):
+        st.warning(
+            "⚠️ No se puede completar el pedido porque no tiene **Surtidor** asignado. "
+            "Asigna un surtidor antes de marcarlo como completado."
+        )
+        return False
+
     es_local = _es_pedido_local(row)
     estado_requerido = ESTADO_AUDITADO if es_local else ESTADO_EN_PROCESO
     if not allow_from_any_status and estado_actual != estado_requerido:
@@ -7392,6 +7412,7 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
         estado_actual_acciones = str(row.get("Estado", "")).strip()
         es_local_pedido = _es_pedido_local(row)
         puede_completar_por_pago = (not es_local_bodega) or pago_confirmado
+        tiene_surtidor_asignado = pedido_tiene_surtidor(row)
         puede_auditar_local = es_local_pedido and estado_actual_acciones == ESTADO_EN_PROCESO and not disabled_if_completed
         bloqueado_por_auditoria_local = (
             es_local_pedido
@@ -7399,7 +7420,7 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
             and estado_actual_acciones != ESTADO_AUDITADO
             and not disabled_if_completed
         )
-        disabled_complete_btn = disabled_if_completed or not puede_completar_por_pago or bloqueado_por_auditoria_local
+        disabled_complete_btn = disabled_if_completed or not puede_completar_por_pago or bloqueado_por_auditoria_local or not tiene_surtidor_asignado
         if puede_auditar_local:
             if col_print_btn.button(
                 "🔎 Marcar Auditado",
@@ -7426,6 +7447,8 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
 
         if bloqueado_por_auditoria_local:
             st.caption("ℹ️ Para pedidos locales, primero marca **🔎 Auditado** para habilitar **🟢 Completar**.")
+        if not tiene_surtidor_asignado and not disabled_if_completed:
+            st.caption("ℹ️ Asigna un **Surtidor** para habilitar **🟢 Completar**.")
 
 
         # Complete Button with streamlined confirmation
