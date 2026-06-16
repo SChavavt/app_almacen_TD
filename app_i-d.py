@@ -3268,6 +3268,11 @@ def refresh_main_sheet_handles() -> bool:
 
 
 # --- Carga de datos ---
+def _is_silent_kiosk_user() -> bool:
+    """Indica si la vista actual debe ocultar avisos operativos en pantallas kiosk."""
+    return is_kiosk_user(get_logged_user())
+
+
 def _fetch_with_retry(worksheet, cache_key: str, max_attempts: int = 4):
     """Lee datos de una worksheet con reintentos y respaldo local.
 
@@ -3297,15 +3302,16 @@ def _fetch_with_retry(worksheet, cache_key: str, max_attempts: int = 4):
                 raise
 
             wait_time = min(30, 2 ** attempt)
-            st.warning(
-                f"⚠️ Límite de lectura de Google Sheets alcanzado. "
-                f"Reintentando en {wait_time} s (intento {attempt}/{max_attempts})."
-            )
+            if not _is_silent_kiosk_user():
+                st.warning(
+                    f"⚠️ Límite de lectura de Google Sheets alcanzado. "
+                    f"Reintentando en {wait_time} s (intento {attempt}/{max_attempts})."
+                )
             time.sleep(wait_time)
         except Exception as e:
             last_error = e
             wait_time = min(10, 2 ** attempt)
-            if attempt == 1:
+            if attempt == 1 and not _is_silent_kiosk_user():
                 st.warning(
                     "⚠️ Error temporal de conexión al leer Google Sheets. "
                     "Reintentando automáticamente..."
@@ -3313,9 +3319,10 @@ def _fetch_with_retry(worksheet, cache_key: str, max_attempts: int = 4):
             time.sleep(wait_time)
 
     if last_success is not None:
-        st.info(
-            "ℹ️ Usando datos en caché debido al límite de cuota de Google Sheets."
-        )
+        if not _is_silent_kiosk_user():
+            st.info(
+                "ℹ️ Usando datos en caché debido al límite de cuota de Google Sheets."
+            )
         return last_success
 
     if last_error is not None:
@@ -3341,10 +3348,11 @@ def _open_worksheet_with_retry(
         last_notice = float(st.session_state.get(notice_key, 0))
         if now_ts - last_notice >= 30:
             remaining = int(blocked_until - now_ts)
-            st.warning(
-                f"⚠️ Google Sheets sigue inestable para '{sheet_name}'. "
-                f"Usando caché local; próximo intento en ~{remaining}s."
-            )
+            if not _is_silent_kiosk_user():
+                st.warning(
+                    f"⚠️ Google Sheets sigue inestable para '{sheet_name}'. "
+                    f"Usando caché local; próximo intento en ~{remaining}s."
+                )
             st.session_state[notice_key] = now_ts
         raise RuntimeError(f"Cooldown activo para la hoja '{sheet_name}'")
 
@@ -3357,7 +3365,7 @@ def _open_worksheet_with_retry(
         except gspread.exceptions.APIError as e:
             last_error = e
             wait_time = min(5, attempt)
-            if attempt == 1:
+            if attempt == 1 and not _is_silent_kiosk_user():
                 st.warning(
                     f"⚠️ Error temporal al abrir la hoja '{sheet_name}'. "
                     "Reintentando automáticamente..."
@@ -3366,7 +3374,7 @@ def _open_worksheet_with_retry(
         except Exception as e:
             last_error = e
             wait_time = min(5, attempt)
-            if attempt == 1:
+            if attempt == 1 and not _is_silent_kiosk_user():
                 st.warning(
                     f"⚠️ Error de red al abrir la hoja '{sheet_name}'. "
                     "Reintentando automáticamente..."
@@ -3385,7 +3393,7 @@ def _warn_and_get_dataframe_fallback(cache_key: str, label: str) -> pd.DataFrame
     warning_key = f"_warn_once_{cache_key}"
     now_ts = time.time()
     last_warn = float(st.session_state.get(warning_key, 0))
-    if now_ts - last_warn >= 30:
+    if now_ts - last_warn >= 30 and not _is_silent_kiosk_user():
         st.warning(
             f"⚠️ No se pudo actualizar {label} desde Google Sheets en este momento; se muestran los últimos datos disponibles si existen."
         )
@@ -4962,9 +4970,28 @@ if "show_grouped_panel_casos" not in globals():
                     )
 
 
+def refresh_kiosk_sources_once_per_minute(user_key: str) -> None:
+    """Fuerza lectura fresca para pantallas kiosk una sola vez por minuto."""
+    if not is_kiosk_user(user_key):
+        return
+
+    minute_key = datetime.now(TZ).strftime("%Y%m%d%H%M")
+    state_key = "_kiosk_sources_refresh_minute"
+    if st.session_state.get(state_key) == minute_key:
+        return
+
+    load_data_from_gsheets.clear()
+    load_casos_from_gsheets.clear()
+    st.session_state[state_key] = minute_key
+    st.session_state["_kiosk_sources_last_refresh"] = datetime.now(TZ).strftime(
+        "%Y-%m-%d %H:%M:%S %Z"
+    )
+
+
 # ===========================
 #        MAIN RENDER
 # ===========================
+refresh_kiosk_sources_once_per_minute(get_logged_user().upper())
 df_all = load_data_from_gsheets()
 
 # Tabs principales
@@ -5340,10 +5367,16 @@ def _persist_page_scroll(view_key: str, user_key: str = "", force_bottom: bool =
         setTimeout(tryTop, 220);
         setTimeout(tryTop, 500);
         setTimeout(tryTop, 900);
-        // Fully Kiosk/TV: aunque una recarga pesada o el motor mueva la página,
-        // reanclamos el tablero al inicio de las listas cada 60 segundos.
+        // Fully Kiosk/TV: durante los primeros segundos Streamlit/Silk puede
+        // terminar de acomodar el DOM tarde; reanclamos seguido y luego mantenemos
+        // el punto fijo con una corrección ligera periódica.
+        const startedAt = Date.now();
+        const burst = setInterval(() => {{
+          tryTop();
+          if (Date.now() - startedAt > 10000) clearInterval(burst);
+        }}, 250);
         if (!target.__tdTableTopResetInterval) {{
-          target.__tdTableTopResetInterval = setInterval(tryTop, 60000);
+          target.__tdTableTopResetInterval = setInterval(tryTop, 10000);
         }}
       }} else if (forceCenter) {{
         setTimeout(scrollToCenter, 20);
@@ -5654,14 +5687,14 @@ if selected_tab_key == "assistant":
 # TAB 1: Auto Local (Casos asignados) — 2 columnas
 # ---------------------------
 if selected_tab_key == "auto_local":
-    st_autorefresh(interval=60000, key="auto_refresh_local_casos")
     if logged_user in {"PANTALLAF", "PANTALLAL"}:
-        st.markdown('<div id="auto-tables-start"></div>', unsafe_allow_html=True)
+        st_autorefresh(interval=60000, key="auto_refresh_local_casos")
     if logged_user in {"PANTALLAF", "PANTALLAL"}:
         st.markdown(
             """
             <style>.tv-wall-tight-start{margin-top:-5.2rem;}</style>
             <div class="tv-wall-tight-start"></div>
+            <div id="auto-tables-start"></div>
             """,
             unsafe_allow_html=True,
         )
@@ -5724,14 +5757,14 @@ if selected_tab_key == "auto_local":
 # TAB 2: Auto Foráneo (Casos asignados) — 2 columnas
 # ---------------------------
 if selected_tab_key == "auto_foraneo":
-    st_autorefresh(interval=60000, key="auto_refresh_foraneo_cdmx")
     if logged_user in {"PANTALLAF", "PANTALLAL"}:
-        st.markdown('<div id="auto-tables-start"></div>', unsafe_allow_html=True)
+        st_autorefresh(interval=60000, key="auto_refresh_foraneo_cdmx")
     if logged_user in {"PANTALLAF", "PANTALLAL"}:
         st.markdown(
             """
             <style>.tv-wall-tight-start{margin-top:-5.2rem;}</style>
             <div class="tv-wall-tight-start"></div>
+            <div id="auto-tables-start"></div>
             """,
             unsafe_allow_html=True,
         )
