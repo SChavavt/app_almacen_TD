@@ -8641,16 +8641,7 @@ def render_reportes_guia_tab():
                 f"Se omitieron {guias_dhl_invalidas} guía(s) porque la columna GUIA no cumple el formato DHL. "
                 "Solo se consideran válidas las guías con números y espacios, y exactamente 10 dígitos sin contar espacios."
             )
-        if texto_dhl_sugerido:
-            st.text_area(
-                "🚚 Guías para DHL (máximo 10, separadas por coma)",
-                value=texto_dhl_sugerido,
-                height=80,
-                key="reportes_guia_dhl_texto",
-                help="DHL permite introducir hasta 10 números separados por coma.",
-            )
-            _render_copy_to_clipboard_button("📋 Copiar guías para DHL", texto_dhl_sugerido, "reportes_guia_copy_dhl")
-        else:
+        if not texto_dhl_sugerido:
             st.warning("No se encontraron guías válidas para copiar con el filtro actual.")
 
     modo_varios_entregado = st.checkbox(
@@ -8685,6 +8676,50 @@ def render_reportes_guia_tab():
     )
 
     seleccionadas = edited[edited["Seleccionar"] == True]["__sheet_row"].astype(int).tolist() if not edited.empty else []
+
+    if not df_filtrado.empty:
+        guias_seleccionadas = (
+            edited[edited["Seleccionar"] == True]["GUIA"].tolist()
+            if not edited.empty and "GUIA" in edited.columns
+            else []
+        )
+        texto_dhl_seleccionado = _reportes_guia_dhl_tracking_text(guias_seleccionadas)
+        guias_dhl_validas_seleccionadas = [
+            re.sub(r"\s+", "", str(guia or "").strip())
+            for guia in guias_seleccionadas
+            if _reportes_guia_es_guia_dhl_valida(guia)
+        ]
+        guias_dhl_validas_unicas = list(dict.fromkeys(guias_dhl_validas_seleccionadas))
+        guias_dhl_invalidas_seleccionadas = len(guias_seleccionadas) - len(guias_dhl_validas_seleccionadas)
+
+        if guias_dhl_invalidas_seleccionadas:
+            st.warning(
+                f"⚠️ Hay {guias_dhl_invalidas_seleccionadas} guía(s) seleccionada(s) que no cumplen el formato DHL; "
+                "no se incluirán en el texto para copiar."
+            )
+        if len(guias_dhl_validas_unicas) > 10:
+            st.warning(
+                f"⚠️ DHL acepta máximo 10 guías por consulta. Seleccionaste {len(guias_dhl_validas_unicas)} guías válidas; "
+                "abajo se muestran solo las primeras 10."
+            )
+
+        if texto_dhl_seleccionado:
+            texto_dhl_key_suffix = hashlib.md5(texto_dhl_seleccionado.encode("utf-8")).hexdigest()[:8]
+            st.text_area(
+                "🚚 Guías para DHL (máximo 10, separadas por coma)",
+                value=texto_dhl_seleccionado,
+                height=80,
+                key=f"reportes_guia_dhl_texto_{texto_dhl_key_suffix}",
+                help="Se actualiza con las filas marcadas en la tabla. DHL permite introducir hasta 10 números separados por coma.",
+            )
+            _render_copy_to_clipboard_button(
+                "📋 Copiar guías para DHL",
+                texto_dhl_seleccionado,
+                f"reportes_guia_copy_dhl_{texto_dhl_key_suffix}",
+            )
+        elif guias_seleccionadas:
+            st.warning("No hay guías seleccionadas válidas para copiar a DHL.")
+
     if modo_varios_entregado:
         st.caption("Marca todas las guías necesarias y confirma una sola vez para evitar actualizar al seleccionar cada fila.")
         if st.button(f"✅ Marcar seleccionadas como ENTREGADO ({len(seleccionadas)})", disabled=not seleccionadas, key="reportes_guia_bulk_entregado"):
