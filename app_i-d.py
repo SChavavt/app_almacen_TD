@@ -2044,10 +2044,10 @@ def add_missing_en_proceso_casos_for_surtidores(
         if col not in casos.columns:
             casos[col] = ""
 
-    mask_en_proceso = casos["Estado"].map(sanitize_text).str.lower().str.contains("en proceso", na=False)
+    mask_estado_surtidores = casos["Estado"].map(_is_surtidores_assignable_estado)
     mask_sin_surtidor = casos["Surtidor"].map(sanitize_text) == ""
     mask_no_limpiado = ~_completados_limpiado_has_si(casos["Completados_Limpiado"])
-    casos = casos[mask_en_proceso & mask_sin_surtidor & mask_no_limpiado].copy()
+    casos = casos[mask_estado_surtidores & mask_sin_surtidor & mask_no_limpiado].copy()
     if casos.empty:
         return local_entries, foraneo_entries
 
@@ -2408,6 +2408,11 @@ def _is_visible_auto_entry(entry: dict) -> bool:
     if not _is_done_estado(entry.get("estado", "")):
         return True
     return not _contains_si_completados_limpiado(entry.get("completados_limpiado", ""))
+
+
+def _is_surtidores_assignable_estado(estado: str) -> bool:
+    cleaned = sanitize_text(estado).lower()
+    return "en proceso" in cleaned or "auditado" in cleaned
 
 
 def _is_surtidor_visible_estado(estado: str) -> bool:
@@ -6245,7 +6250,6 @@ if selected_tab_key == "surtidores":
 
     st.markdown("### 🧑‍🔧 Asignación de surtidores")
     st.caption("Selecciona pedidos visibles y elige un surtidor para asignarlos.")
-
     surtidores_predefinidos = ["Baldo", "Alexis", "Enrique", "Cassandra", "Yaya", "Azucena", "Cecilia"]
     if "selected_surtidor_nombre" not in st.session_state:
         st.session_state.selected_surtidor_nombre = ""
@@ -6255,8 +6259,7 @@ if selected_tab_key == "surtidores":
     for entry in auto_local_entries:
         if not _is_visible_auto_entry(entry):
             continue
-        estado_normalizado = sanitize_text(entry.get("estado", "")).lower()
-        if "en proceso" not in estado_normalizado:
+        if not _is_surtidores_assignable_estado(entry.get("estado", "")):
             continue
         if entry.get("display_num") is None:
             continue
@@ -6272,8 +6275,7 @@ if selected_tab_key == "surtidores":
     for entry in auto_foraneo_entries:
         if not _is_visible_auto_entry(entry):
             continue
-        estado_normalizado = sanitize_text(entry.get("estado", "")).lower()
-        if "en proceso" not in estado_normalizado:
+        if not _is_surtidores_assignable_estado(entry.get("estado", "")):
             continue
         if entry.get("display_num") is None:
             continue
