@@ -9430,6 +9430,15 @@ if df_main is not None:
             st.markdown("### 🎓 Cursos y Eventos")
             _render_victor_cursos_eventos_tab()
 
+        def _victor_completed_section_label(row: pd.Series) -> str:
+            turno = str(row.get("Turno", "") or "").strip()
+            tipo_envio = str(row.get("Tipo_Envio", "") or "").strip()
+            if tipo_envio == _UBER_TIPO_ENVIO and turno in _UBER_TURNOS:
+                return f"🚗 Uber · {turno}"
+            if turno in ["🎓 Recoge en Aula", "Recoge en Aula"]:
+                return "🎓 Recoge en Aula"
+            return "🌆 Local CDMX"
+
         with victor_tabs[6]:
             st.markdown("### ✅ Completado CDMX (últimas 72 horas)")
             turno_comp_norm = df_main["Turno"].astype(str).str.strip()
@@ -9455,19 +9464,56 @@ if df_main is not None:
             if df_comp.empty:
                 st.info("No hay pedidos completados CDMX en las últimas 72 horas.")
             else:
-                df_comp = ordenar_pedidos_custom(df_comp)
-                for orden, (idx, row) in _render_paginated_iterrows(df_comp, "victor_completados_72h"):
-                    mostrar_pedido(
-                        df_main,
-                        idx,
-                        row,
-                        orden,
-                        "Completado CDMX",
-                        "✅ Completado CDMX (72h)",
-                        worksheet_main,
-                        headers_main,
-                        s3_client,
+                df_comp["Seccion_Completado_CDMX"] = df_comp.apply(_victor_completed_section_label, axis=1)
+                section_order = [
+                    "🌆 Local CDMX",
+                    "🚗 Uber · 👤 Cliente Uber",
+                    "🚗 Uber · 🏢 TD Uber",
+                    "🎓 Recoge en Aula",
+                ]
+                section_labels = [
+                    section
+                    for section in section_order
+                    if (df_comp["Seccion_Completado_CDMX"] == section).any()
+                ]
+                section_labels.extend(
+                    sorted(
+                        section
+                        for section in df_comp["Seccion_Completado_CDMX"].dropna().unique()
+                        if section not in section_labels
                     )
+                )
+
+                st.caption(
+                    "Pedidos separados por turno / tipo de envío para distinguirlos más rápido."
+                )
+                completed_section_tabs = st.tabs(
+                    [
+                        f"{section} ({int((df_comp['Seccion_Completado_CDMX'] == section).sum())})"
+                        for section in section_labels
+                    ]
+                )
+                for section_index, section in enumerate(section_labels):
+                    with completed_section_tabs[section_index]:
+                        df_section = df_comp[df_comp["Seccion_Completado_CDMX"] == section].copy()
+                        st.markdown(f"#### {section}")
+                        st.caption(f"{len(df_section)} pedido(s) completado(s) en las últimas 72 horas.")
+                        df_section = ordenar_pedidos_custom(df_section)
+                        for orden, (idx, row) in _render_paginated_iterrows(
+                            df_section,
+                            f"victor_completados_72h_{section_index}",
+                        ):
+                            mostrar_pedido(
+                                df_main,
+                                idx,
+                                row,
+                                orden,
+                                "Completado CDMX",
+                                "✅ Completado CDMX (72h)",
+                                worksheet_main,
+                                headers_main,
+                                s3_client,
+                            )
 
         st.stop()
 
