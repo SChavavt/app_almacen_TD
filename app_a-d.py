@@ -13,6 +13,7 @@ import re
 import gspread.utils
 import json # Import json for parsing credentials
 import os
+import math
 import uuid
 from pytz import timezone
 from urllib.parse import urlparse, unquote
@@ -4064,13 +4065,13 @@ def _ruta_opt_fix_municipio(municipio: str) -> str:
     return _RUTA_OPT_MUNICIPIO_FIXES.get(m, municipio)
 
 
-def _ruta_opt_geocode_nominatim(address: str) -> Optional[tuple[float, float]]:
+def _ruta_opt_geocode_nominatim(address: str) -> Optional[dict[str, Any]]:
     if not address:
         return None
     try:
         resp = requests.get(
             _RUTA_OPT_NOMINATIM_URL,
-            params={"q": address, "format": "jsonv2", "limit": 1, "countrycodes": "mx"},
+            params={"q": address, "format": "jsonv2", "limit": 1, "countrycodes": "mx", "addressdetails": 1},
             headers={"User-Agent": "app_almacen_td/1.0 (route_optimizer)"},
             timeout=12,
         )
@@ -4080,12 +4081,18 @@ def _ruta_opt_geocode_nominatim(address: str) -> Optional[tuple[float, float]]:
         if not data:
             return None
         first = data[0]
-        return float(first.get("lat")), float(first.get("lon"))
+        return {
+            "lat": float(first.get("lat")),
+            "lng": float(first.get("lon")),
+            "formatted_address": str(first.get("display_name", "")).strip(),
+            "type": str(first.get("type", "")).strip(),
+            "importance": float(first.get("importance", 0) or 0),
+        }
     except Exception:
         return None
 
 
-def _ruta_opt_geocode_google(address: str, api_key: str) -> Optional[tuple[float, float]]:
+def _ruta_opt_geocode_google(address: str, api_key: str) -> Optional[dict[str, Any]]:
     if not address or not api_key:
         return None
     try:
@@ -4099,10 +4106,58 @@ def _ruta_opt_geocode_google(address: str, api_key: str) -> Optional[tuple[float
         data = resp.json()
         if data.get("status") != "OK" or not data.get("results"):
             return None
-        loc = data["results"][0]["geometry"]["location"]
-        return float(loc.get("lat")), float(loc.get("lng"))
+        result = data["results"][0]
+        loc = result["geometry"]["location"]
+        address_types = {str(t).lower() for t in result.get("types", [])}
+        component_types = {
+            str(t).lower()
+            for comp in result.get("address_components", [])
+            for t in comp.get("types", [])
+        }
+        return {
+            "lat": float(loc.get("lat")),
+            "lng": float(loc.get("lng")),
+            "formatted_address": str(result.get("formatted_address", "")).strip(),
+            "location_type": str(result.get("geometry", {}).get("location_type", "")).strip().upper(),
+            "partial_match": bool(result.get("partial_match", False)),
+            "types": address_types,
+            "component_types": component_types,
+        }
     except Exception:
         return None
+
+
+def _ruta_opt_google_result_is_precise(result: dict[str, Any]) -> bool:
+    if not result or result.get("partial_match"):
+        return False
+    location_type = str(result.get("location_type", "")).upper()
+    precise_location = location_type in {"ROOFTOP", "RANGE_INTERPOLATED"}
+    component_types = set(result.get("component_types", set()))
+    result_types = set(result.get("types", set()))
+    has_specific_target = bool(
+        {"street_number", "premise", "subpremise", "establishment", "point_of_interest"}
+        & (component_types | result_types)
+    )
+    return precise_location and has_specific_target
+
+
+def _haversine_m(lat1: float, lng1: float, lat2: float, lng2: float) -> float:
+    radius_m = 6371000.0
+    phi1 = math.radians(lat1)
+    phi2 = math.radians(lat2)
+    d_phi = math.radians(lat2 - lat1)
+    d_lambda = math.radians(lng2 - lng1)
+    a = math.sin(d_phi / 2) ** 2 + math.cos(phi1) * math.cos(phi2) * math.sin(d_lambda / 2) ** 2
+    return radius_m * 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+
+
+def _ruta_opt_geocode_details_are_close(a: dict[str, Any], b: dict[str, Any], max_meters: float = 180.0) -> bool:
+    if not a or not b:
+        return False
+    return (
+        _haversine_m(float(a["lat"]), float(a["lng"]), float(b["lat"]), float(b["lng"]))
+        <= max_meters
+    )
 
 
 def _save_cliente_locales_coords(
@@ -4161,6 +4216,16 @@ def _save_cliente_locales_coords(
     return batch_update_gsheet_cells(ws, updates)
 
 
+def _ruta_opt_coord_is_route_safe(confianza: str, metodo: str, direccion: str) -> bool:
+    confianza_norm = str(confianza or "").strip().upper()
+    metodo_norm = str(metodo or "").strip().upper()
+    if not str(direccion or "").strip():
+        return False
+    if confianza_norm in {"OK_ALTO", "VALIDADO", "VALIDADA", "MANUAL", "CONFIRMADO", "CONFIRMADA"}:
+        return True
+    return confianza_norm.startswith("OK_ALTO") or "OSM_VALIDADO" in metodo_norm
+
+
 def _attempt_autogeocode_for_cliente(
     *,
     pedido: pd.Series,
@@ -4185,33 +4250,85 @@ def _attempt_autogeocode_for_cliente(
     with_zone = f"{basic}, {zone_city}"
     with_municipio_fix = f"{aggr}, {municipio_fix}, {zone_city}" if municipio_fix else f"{aggr}, {zone_city}"
 
-    attempts: list[tuple[str, str, str]] = [
-        ("FILTRO_1_OSM", base_addr, "OSM"),
-        ("FILTRO_2_OSM", basic, "OSM"),
-        ("FILTRO_SALTILLO_OSM" if zone_key == "saltillo" else "FILTRO_ZONA_OSM", with_zone, "OSM"),
-        ("FILTRO_3_OSM", aggr, "OSM"),
-        ("FILTRO_3_5_OSM", with_municipio_fix, "OSM"),
-        ("GOOGLE", with_municipio_fix, "GOOGLE"),
+    google_attempts: list[tuple[str, str]] = [
+        ("GOOGLE_DIRECCION_FINAL", base_addr),
+        ("GOOGLE_LIMPIA_ZONA", with_zone),
+        ("GOOGLE_MUNICIPIO", with_municipio_fix),
     ]
+    osm_attempts = [base_addr, basic, with_zone, aggr, with_municipio_fix]
 
-    for metodo, addr, engine in attempts:
-        result = _ruta_opt_geocode_google(addr, google_api_key) if engine == "GOOGLE" else _ruta_opt_geocode_nominatim(addr)
-        if not result:
+    best_google: Optional[tuple[str, str, dict[str, Any]]] = None
+    for metodo, addr in google_attempts:
+        result = _ruta_opt_geocode_google(addr, google_api_key)
+        if not result or not _coords_in_zone(float(result["lat"]), float(result["lng"]), zone_key):
             continue
-        lat, lng = result
-        if not _coords_in_zone(lat, lng, zone_key):
-            continue
-        confianza = "OK_ALTO" if engine == "GOOGLE" else "OK_REVISAR"
+        if _ruta_opt_google_result_is_precise(result):
+            best_google = (metodo, addr, result)
+            break
+        if best_google is None:
+            best_google = (f"{metodo}_REVISAR", addr, result)
+
+    if not best_google:
+        return None
+
+    metodo, addr, google_result = best_google
+    osm_match = None
+    for osm_addr in osm_attempts:
+        osm_result = _ruta_opt_geocode_nominatim(osm_addr)
+        if (
+            osm_result
+            and _coords_in_zone(float(osm_result["lat"]), float(osm_result["lng"]), zone_key)
+            and _ruta_opt_geocode_details_are_close(google_result, osm_result)
+        ):
+            osm_match = osm_result
+            break
+
+    google_precise = _ruta_opt_google_result_is_precise(google_result)
+    if not google_precise and not osm_match:
+        return None
+
+    confianza = "OK_ALTO" if google_precise and osm_match else "OK_REVISAR"
+    return {
+        "lat": float(google_result["lat"]),
+        "lng": float(google_result["lng"]),
+        "direccion": google_result.get("formatted_address") or addr,
+        "confianza": confianza,
+        "metodo": f"{metodo}+OSM_VALIDADO" if osm_match else metodo,
+    }
+
+
+
+def _attempt_user_confirmed_geocode(
+    address: str,
+    *,
+    zone_key: str,
+    google_api_key: str,
+) -> Optional[dict[str, Any]]:
+    address = normalize_sheet_text(address)
+    if not address:
+        return None
+
+    google_result = _ruta_opt_geocode_google(address, google_api_key)
+    if google_result and _coords_in_zone(float(google_result["lat"]), float(google_result["lng"]), zone_key):
         return {
-            "lat": lat,
-            "lng": lng,
-            "direccion": addr,
-            "confianza": confianza,
-            "metodo": metodo,
+            "lat": float(google_result["lat"]),
+            "lng": float(google_result["lng"]),
+            "direccion": google_result.get("formatted_address") or address,
+            "confianza": "CONFIRMADO",
+            "metodo": "USUARIO_CONFIRMADO_GOOGLE",
+        }
+
+    osm_result = _ruta_opt_geocode_nominatim(address)
+    if osm_result and _coords_in_zone(float(osm_result["lat"]), float(osm_result["lng"]), zone_key):
+        return {
+            "lat": float(osm_result["lat"]),
+            "lng": float(osm_result["lng"]),
+            "direccion": osm_result.get("formatted_address") or address,
+            "confianza": "CONFIRMADO",
+            "metodo": "USUARIO_CONFIRMADO_OSM",
         }
 
     return None
-
 
 def _collect_route_candidates(
     pedidos_fecha: pd.DataFrame,
@@ -4219,6 +4336,7 @@ def _collect_route_candidates(
     zone_key: str,
     google_api_key: str = "",
     include_all_status: bool = False,
+    user_confirmed_addresses: Optional[dict[int, str]] = None,
 ) -> tuple[list[dict[str, Any]], list[str], list[str], list[str], list[dict[str, Any]], list[dict[str, Any]]]:
     if include_all_status:
         pedidos_en_proceso = pedidos_fecha.copy()
@@ -4276,6 +4394,7 @@ def _collect_route_candidates(
     clientes_work = clientes_work.drop_duplicates(subset=["_cliente_norm"], keep="first")
     clientes_map = clientes_work.set_index("_cliente_norm")
     geocode_cache: dict[str, Optional[dict[str, Any]]] = {}
+    confirmed_address_map = user_confirmed_addresses or {}
 
     missing_clients: list[str] = []
     low_conf_clients: list[str] = []
@@ -4287,11 +4406,33 @@ def _collect_route_candidates(
     for _, pedido in pedidos_en_proceso.iterrows():
         cliente = str(pedido.get("Cliente", "")).strip()
         cliente_norm = _ruta_opt_normalize_cliente(cliente)
-        if not cliente_norm or cliente_norm not in clientes_map.index:
-            missing_clients.append(cliente or "(sin nombre)")
-            pending_clients.append(
-                {"cliente": cliente or "(sin nombre)", "pedido": pedido, "motivo": "Sin coordenadas en Clientes_Locales"}
+        row_idx = int(pedido.get("_gsheet_row_index", 0) or 0)
+        confirmed_address = normalize_sheet_text(confirmed_address_map.get(row_idx, ""))
+        confirmed_geo: Optional[dict[str, Any]] = None
+        if confirmed_address:
+            confirmed_geo = _attempt_user_confirmed_geocode(
+                confirmed_address,
+                zone_key=zone_key,
+                google_api_key=google_api_key,
             )
+
+        if not cliente_norm or cliente_norm not in clientes_map.index:
+            if confirmed_geo:
+                candidates.append(
+                    {
+                        "cliente": cliente,
+                        "cliente_norm": cliente_norm,
+                        "lat": float(confirmed_geo["lat"]),
+                        "lng": float(confirmed_geo["lng"]),
+                        "direccion": str(confirmed_geo["direccion"]),
+                        "pedido": pedido,
+                    }
+                )
+            else:
+                missing_clients.append(cliente or "(sin nombre)")
+                pending_clients.append(
+                    {"cliente": cliente or "(sin nombre)", "pedido": pedido, "motivo": "Sin coordenadas en Clientes_Locales"}
+                )
             continue
 
         cli_row = clientes_map.loc[cliente_norm]
@@ -4303,6 +4444,21 @@ def _collect_route_candidates(
         confianza = str(cli_row.get("Confianza_Final", "")).strip().upper()
         metodo = str(cli_row.get("Metodo_Final", "")).strip()
         direccion = str(cli_row.get("Direccion_Final", "")).strip()
+
+        if confirmed_geo:
+            lat = float(confirmed_geo["lat"])
+            lng = float(confirmed_geo["lng"])
+            direccion = str(confirmed_geo["direccion"])
+            confianza = str(confirmed_geo["confianza"])
+            metodo = str(confirmed_geo["metodo"])
+            found_coords_to_save_map[cliente_norm] = {
+                "cliente": cliente,
+                "lat": lat,
+                "lng": lng,
+                "direccion_final": direccion,
+                "confianza_final": confianza,
+                "metodo_final": metodo,
+            }
 
         if pd.isna(lat) or pd.isna(lng):
             if cliente_norm not in geocode_cache:
@@ -4345,6 +4501,17 @@ def _collect_route_candidates(
         )
         if low_conf:
             low_conf_clients.append(cliente or "(sin nombre)")
+
+        if not _ruta_opt_coord_is_route_safe(confianza, metodo, direccion):
+            low_conf_clients.append(cliente or "(sin nombre)")
+            pending_clients.append(
+                {
+                    "cliente": cliente or "(sin nombre)",
+                    "pedido": pedido,
+                    "motivo": "Coordenada sin validación suficiente; confirmar dirección antes de rutear",
+                }
+            )
+            continue
 
         if not _coords_in_zone(lat, lng, zone_key):
             out_zone_clients.append(cliente or "(sin nombre)")
@@ -12070,6 +12237,15 @@ if df_main is not None:
         with main_tabs[8]:  # 🗺️ Ruteo
             st.markdown("### 🗺️ Generar ruta optimizada")
             st.caption("Selecciona pedidos locales agrupados por turno y fecha de entrega; define prioridad: Leve o Máxima.")
+            with st.expander("🛡️ Cómo validamos direcciones antes de optimizar", expanded=False):
+                st.markdown(
+                    """
+                    - La ruta **usa coordenadas**, no texto libre de dirección; por eso sólo entran clientes con coordenada confiable.
+                    - Si falta coordenada, el sistema intenta geocodificar con Google y valida precisión del resultado; además compara contra OpenStreetMap cuando está disponible.
+                    - Se bloquean direcciones sin dirección final, sin validación alta, con coincidencia parcial o fuera de la zona esperada.
+                    - Sólo cuando una dirección quede pendiente aparecerá la validación manual: abre el mapa, corrige si hace falta, confirma y vuelve a generar la ruta.
+                    """
+                )
             # Para este tab de ruteo: incluir TODOS los locales sin filtrar por estado.
             pedidos_locales = df_main[
                 (df_main.get("Tipo_Envio", pd.Series(dtype=str)).astype(str).str.strip() == "📍 Pedido Local")
@@ -12085,6 +12261,10 @@ if df_main is not None:
                     ("saltillo", "⛰️ Saltillo", ["⛰️ saltillo", "🌵 saltillo", "saltillo"]),
                 ]
                 run_sinai = False
+                confirmed_addresses_key = "sinai_route_confirmed_addresses"
+                pending_review_key = "sinai_route_pending_review"
+                if confirmed_addresses_key not in st.session_state:
+                    st.session_state[confirmed_addresses_key] = {}
                 st.markdown(
                     """
                     <style>
@@ -12250,19 +12430,46 @@ if df_main is not None:
                                 zone_key="local",
                                 google_api_key=api_key,
                                 include_all_status=True,
+                                user_confirmed_addresses=st.session_state.get(confirmed_addresses_key, {}),
                             )
                             priority_row_set = {int(v) for v in priority_rows}
                             max_priority_row_set = {int(v) for v in max_priority_rows}
                             final_candidates = []
-                            if candidates:
+                            if pending_clients:
+                                progress_holder.empty()
+                                st.session_state["sinai_route_result"] = None
+                                st.session_state[pending_review_key] = [
+                                    {
+                                        "row_idx": int(item.get("pedido", {}).get("_gsheet_row_index", 0) or 0),
+                                        "cliente": str(item.get("cliente", "")).strip(),
+                                        "motivo": str(item.get("motivo", "")).strip(),
+                                        "direccion_sugerida": str(
+                                            item.get("pedido", {}).get("Direccion_Envio", "")
+                                            or item.get("pedido", {}).get("Municipio", "")
+                                        ).strip(),
+                                    }
+                                    for item in pending_clients
+                                ]
+                                st.error(
+                                    "❌ No se genera una ruta incompleta. Abajo puedes ver en mapa, corregir y confirmar "
+                                    "sólo los pedidos pendientes; después vuelve a generar la ruta."
+                                )
+                                st.dataframe(
+                                    pd.DataFrame(st.session_state[pending_review_key]),
+                                    use_container_width=True,
+                                    hide_index=True,
+                                )
+                            elif candidates:
+                                st.session_state[pending_review_key] = []
                                 if len(candidates) > _RUTA_OPT_MAX_WAYPOINTS:
-                                    st.warning(
-                                        f"⚠️ Se detectaron {len(candidates)} pedidos con coordenadas, "
-                                        f"pero Google Directions permite hasta {_RUTA_OPT_MAX_WAYPOINTS} waypoints por solicitud. "
-                                        f"Se usarán los primeros {_RUTA_OPT_MAX_WAYPOINTS}."
+                                    progress_holder.empty()
+                                    st.error(
+                                        f"❌ Se seleccionaron {len(candidates)} pedidos, pero Google Directions permite hasta "
+                                        f"{_RUTA_OPT_MAX_WAYPOINTS} paradas por solicitud. Divide la ruta para no omitir pedidos."
                                     )
-                                    candidates = candidates[:_RUTA_OPT_MAX_WAYPOINTS]
-                                progress_bar.progress(60, text="Optimizando ruta general (con prioridad suave)...")
+                                    candidates = []
+                                else:
+                                    progress_bar.progress(60, text="Optimizando ruta general (con prioridad suave)...")
                                 global_route = _call_directions_optimized_route(
                                     api_key,
                                     [f"{c['lat']},{c['lng']}" for c in candidates],
@@ -12503,6 +12710,58 @@ if df_main is not None:
                                     }
                                 else:
                                     progress_holder.empty()
+                pending_review = st.session_state.get(pending_review_key, [])
+                if pending_review:
+                    st.markdown("#### 🧭 Validar direcciones pendientes")
+                    st.info(
+                        "Sólo aparecen aquí los pedidos donde el sistema no estuvo seguro. "
+                        "Corrige la dirección si el mapa no es correcto; si el mapa ya es correcto, márcalo como confirmado. "
+                        "Después presiona de nuevo **📍 Generar ruta**."
+                    )
+                    with st.form("sinai_route_pending_address_form", clear_on_submit=False):
+                        confirmed_updates: dict[int, str] = {}
+                        for item in pending_review:
+                            row_idx_pending = int(item.get("row_idx", 0) or 0)
+                            if row_idx_pending <= 0:
+                                continue
+                            cliente_pending = str(item.get("cliente", "")).strip() or "Sin cliente"
+                            motivo_pending = str(item.get("motivo", "")).strip()
+                            default_pending_address = str(
+                                st.session_state.get(confirmed_addresses_key, {}).get(row_idx_pending)
+                                or item.get("direccion_sugerida", "")
+                            ).strip()
+                            st.markdown(f"**{cliente_pending}** · {motivo_pending}")
+                            edited_pending_address = st.text_input(
+                                "Dirección a validar",
+                                value=default_pending_address,
+                                key=f"sinai_pending_addr_{row_idx_pending}",
+                                placeholder="Calle y número, colonia, municipio, estado",
+                            )
+                            if normalize_sheet_text(edited_pending_address):
+                                maps_url = (
+                                    "https://www.google.com/maps/search/?api=1&query="
+                                    f"{requests.utils.quote(edited_pending_address)}"
+                                )
+                                st.markdown(f"[🗺️ Ver esta dirección en mapa]({maps_url})")
+                            confirm_pending = st.checkbox(
+                                "Confirmo que esta dirección/pin es correcto",
+                                key=f"sinai_pending_confirm_{row_idx_pending}",
+                            )
+                            if confirm_pending and normalize_sheet_text(edited_pending_address):
+                                confirmed_updates[row_idx_pending] = edited_pending_address
+                        save_pending = st.form_submit_button("✅ Guardar confirmaciones")
+                    if save_pending:
+                        if confirmed_updates:
+                            current_confirmed = dict(st.session_state.get(confirmed_addresses_key, {}))
+                            current_confirmed.update(confirmed_updates)
+                            st.session_state[confirmed_addresses_key] = current_confirmed
+                            st.success(
+                                "Direcciones confirmadas guardadas. Ahora presiona de nuevo 📍 Generar ruta "
+                                "para revalidar y armar la ruta completa."
+                            )
+                        else:
+                            st.warning("Edita una dirección y marca la confirmación antes de guardar.")
+
                 route_result = st.session_state.get("sinai_route_result")
                 if route_result:
                     st.success("✅ Ruta generada correctamente.")
