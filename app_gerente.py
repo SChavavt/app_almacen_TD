@@ -5235,7 +5235,7 @@ def render_cobranza_tab_gerente():
         return
 
     st.caption("Vista rápida de clientes con adeudos vencidos; puedes filtrar por periodo y ordenar por antigüedad o monto.")
-    with st.expander("📋 Clientes con saldo pendiente", expanded=True):
+    with st.expander("📋 Clientes con saldo pendiente", expanded=False):
         if base_df.empty:
             st.caption("No hay información base de cobranza para mostrar saldos.")
         else:
@@ -11273,6 +11273,7 @@ if "organizador" in tab_map:
                     lambda v: formatear_fecha_caso(v, "%d/%m/%Y") if str(v).strip() else ""
                 )
             tabla_casos = tabla_casos.rename(columns=columnas_tabla)
+            st.dataframe(tabla_casos, use_container_width=True)
 
             opciones_select = ["__none__"] + [str(idx) for idx in df_casos_filtrado.index.tolist()]
             labels_casos = {"__none__": "Selecciona un caso especial"}
@@ -11289,26 +11290,6 @@ if "organizador" in tab_map:
                 )
 
             select_key = "organizador_select_caso_especial"
-            evento_tabla_casos = st.dataframe(
-                tabla_casos,
-                use_container_width=True,
-                on_select="rerun",
-                selection_mode="single-row",
-                key="organizador_casos_tabla_selector",
-            )
-            try:
-                filas_tabla_sel = (
-                    (evento_tabla_casos.selection or {}).get("rows", [])
-                    if evento_tabla_casos is not None
-                    else []
-                )
-            except Exception:
-                filas_tabla_sel = []
-            if filas_tabla_sel:
-                pos_tabla_sel = int(filas_tabla_sel[0])
-                if 0 <= pos_tabla_sel < len(df_casos_filtrado):
-                    st.session_state[select_key] = str(df_casos_filtrado.index[pos_tabla_sel])
-
             selected_raw = st.session_state.get(select_key, "__none__")
             selected_norm = "__none__" if selected_raw in (None, "") else str(selected_raw)
             if selected_norm not in opciones_select:
