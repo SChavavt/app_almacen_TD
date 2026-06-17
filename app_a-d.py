@@ -5891,6 +5891,27 @@ def es_main_tab_pedidos_locales(current_main_tab_label: Any) -> bool:
     }
 
 
+def es_victor_devolucion_sin_guia(row: Any, origen_tab: Any, current_main_tab_label: Any) -> bool:
+    """Permite a VICTOR completar devoluciones sin pedir confirmación de guía."""
+
+    current_user = str(
+        st.session_state.get("app_usuario") or _get_query_param_value("usuario") or ""
+    ).strip().upper()
+    if current_user != "VICTOR" or _is_row_empty(row):
+        return False
+
+    context_text = " ".join(
+        str(value or "")
+        for value in (
+            origen_tab,
+            current_main_tab_label,
+            row.get("Tipo_Envio"),
+            row.get("Tipo_Caso"),
+        )
+    ).lower()
+    return "devoluci" in context_text or "devoluciones" in context_text
+
+
 def _mark_skip_demorado_check_once() -> None:
     """Evita el auto-cambio a Demorado en el rerun inmediato tras una acción manual."""
 
@@ -7470,7 +7491,14 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
 
         # Complete Button with streamlined confirmation
         if not es_local_no_entregado:
-            requires = False if is_local_main_tab else pedido_requiere_guia(row)
+            skip_guia_confirmation = es_victor_devolucion_sin_guia(
+                row, origen_tab, current_main_tab_label
+            )
+            requires = (
+                False
+                if is_local_main_tab or skip_guia_confirmation
+                else pedido_requiere_guia(row)
+            )
             has_file = pedido_tiene_guia_adjunta(row)
             is_tab_guias = es_tab_solicitudes_guia(origen_tab)
 
