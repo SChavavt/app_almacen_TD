@@ -9430,44 +9430,168 @@ if df_main is not None:
             st.markdown("### 🎓 Cursos y Eventos")
             _render_victor_cursos_eventos_tab()
 
-        with victor_tabs[6]:
-            st.markdown("### ✅ Completado CDMX (últimas 72 horas)")
-            turno_comp_norm = df_main["Turno"].astype(str).str.strip()
-            tipo_comp_norm = df_main.get("Tipo_Envio", pd.Series(index=df_main.index, dtype="object")).astype(str).str.strip()
-            df_comp = df_main[
-                (
-                    turno_comp_norm.isin(["🌆 Local CDMX", "Local CDMX", "🎓 Recoge en Aula", "Recoge en Aula"])
-                    | (tipo_comp_norm.eq(_UBER_TIPO_ENVIO) & turno_comp_norm.isin(_UBER_TURNOS))
-                )
-                & (df_main["Estado"].astype(str).str.strip() == "🟢 Completado")
+        def _filter_completed_last_72h(df_source: pd.DataFrame) -> pd.DataFrame:
+            df_completed = df_source[
+                df_source["Estado"].astype(str).str.strip() == "🟢 Completado"
             ].copy()
             # Normaliza a naive para evitar comparación tz-aware vs tz-naive.
-            fecha_comp_dt = pd.to_datetime(df_comp.get("Fecha_Completado"), errors="coerce")
+            fecha_comp_dt = pd.to_datetime(df_completed.get("Fecha_Completado"), errors="coerce")
             if hasattr(fecha_comp_dt.dt, "tz_localize"):
                 try:
                     fecha_comp_dt = fecha_comp_dt.dt.tz_localize(None)
                 except TypeError:
                     # Si ya viene con tz, remover zona de forma segura.
                     fecha_comp_dt = fecha_comp_dt.dt.tz_convert("America/Mexico_City").dt.tz_localize(None)
-            df_comp["Fecha_Completado_dt"] = fecha_comp_dt
+            df_completed["Fecha_Completado_dt"] = fecha_comp_dt
             limite_72h = (pd.Timestamp.now(tz="America/Mexico_City") - pd.Timedelta(hours=72)).tz_localize(None)
-            df_comp = df_comp[df_comp["Fecha_Completado_dt"] >= limite_72h]
-            if df_comp.empty:
-                st.info("No hay pedidos completados CDMX en las últimas 72 horas.")
-            else:
-                df_comp = ordenar_pedidos_custom(df_comp)
-                for orden, (idx, row) in _render_paginated_iterrows(df_comp, "victor_completados_72h"):
-                    mostrar_pedido(
-                        df_main,
-                        idx,
-                        row,
-                        orden,
-                        "Completado CDMX",
-                        "✅ Completado CDMX (72h)",
-                        worksheet_main,
-                        headers_main,
-                        s3_client,
+            return df_completed[df_completed["Fecha_Completado_dt"] >= limite_72h].copy()
+
+        def _render_victor_completed_section(
+            label: str,
+            df_section: pd.DataFrame,
+            df_source: pd.DataFrame,
+            worksheet,
+            headers,
+            pagination_key: str,
+        ) -> bool:
+            if df_section.empty:
+                return False
+
+            st.markdown(f"#### {label}")
+            st.caption(f"{len(df_section)} pedido(s) completado(s) en las últimas 72 horas.")
+            df_section = ordenar_pedidos_custom(df_section)
+            for orden, (idx, row) in _render_paginated_iterrows(df_section, pagination_key):
+                mostrar_pedido(
+                    df_source,
+                    idx,
+                    row,
+                    orden,
+                    label,
+                    "✅ Completado CDMX (72h)",
+                    worksheet,
+                    headers,
+                    s3_client,
+                )
+            st.divider()
+            return True
+
+        with victor_tabs[6]:
+            st.markdown("### ✅ Completado CDMX (últimas 72 horas)")
+            st.caption(
+                "Pedidos separados en esta misma pestaña por turno / tipo de envío. "
+                "Las secciones sin pedidos no se muestran."
+            )
+
+            df_main_completed = _filter_completed_last_72h(df_main)
+            turno_comp_norm = df_main_completed["Turno"].astype(str).str.strip()
+            tipo_comp_norm = df_main_completed.get(
+                "Tipo_Envio", pd.Series(index=df_main_completed.index, dtype="object")
+            ).astype(str).str.strip()
+
+            df_local_completed = df_main_completed[
+                turno_comp_norm.isin(["🌆 Local CDMX", "Local CDMX"])
+                & ~tipo_comp_norm.isin([_UBER_TIPO_ENVIO, "🎓 Cursos y Eventos"])
+            ].copy()
+            df_uber_completed = df_main_completed[
+                tipo_comp_norm.eq(_UBER_TIPO_ENVIO)
+                & turno_comp_norm.isin(_UBER_TURNOS)
+            ].copy()
+            df_aula_completed = df_main_completed[
+                turno_comp_norm.isin(["🎓 Recoge en Aula", "Recoge en Aula"])
+            ].copy()
+            df_cursos_completed = df_main_completed[
+                tipo_comp_norm.eq("🎓 Cursos y Eventos")
+                & turno_comp_norm.isin(["🌆 Local CDMX", "Local CDMX"])
+            ].copy()
+
+            df_casos_completed = _filter_completed_last_72h(df_casos)
+            tipo_casos_norm = df_casos_completed.get(
+                "Tipo_Envio", pd.Series(index=df_casos_completed.index, dtype="object")
+            ).astype(str).str.strip()
+            tipo_original_casos_norm = df_casos_completed.get(
+                "Tipo_Envio_Original", pd.Series(index=df_casos_completed.index, dtype="object")
+            ).astype(str).str.strip()
+            casos_cdmx_mask = tipo_original_casos_norm.isin(["🌆 Local CDMX", "Local CDMX"])
+            df_devoluciones_completed = df_casos_completed[
+                tipo_casos_norm.eq("🔁 Devolución") & casos_cdmx_mask
+            ].copy()
+            df_garantias_completed = df_casos_completed[
+                tipo_casos_norm.eq("🛠 Garantía") & casos_cdmx_mask
+            ].copy()
+
+            rendered_any_section = False
+            completed_sections = [
+                (
+                    "🏙️ Local CDMX",
+                    df_local_completed,
+                    df_main,
+                    worksheet_main,
+                    headers_main,
+                    "victor_completados_72h_local",
+                ),
+                (
+                    "🚗 Uber",
+                    df_uber_completed,
+                    df_main,
+                    worksheet_main,
+                    headers_main,
+                    "victor_completados_72h_uber",
+                ),
+                (
+                    "🎓 Recoge en Aula",
+                    df_aula_completed,
+                    df_main,
+                    worksheet_main,
+                    headers_main,
+                    "victor_completados_72h_aula",
+                ),
+                (
+                    "🔁 Devoluciones",
+                    df_devoluciones_completed,
+                    df_casos,
+                    worksheet_casos,
+                    headers_casos,
+                    "victor_completados_72h_devoluciones",
+                ),
+                (
+                    "🛠 Garantías",
+                    df_garantias_completed,
+                    df_casos,
+                    worksheet_casos,
+                    headers_casos,
+                    "victor_completados_72h_garantias",
+                ),
+                (
+                    "🎓 Cursos y Eventos",
+                    df_cursos_completed,
+                    df_main,
+                    worksheet_main,
+                    headers_main,
+                    "victor_completados_72h_cursos_eventos",
+                ),
+            ]
+            for (
+                section_label,
+                section_df,
+                section_source_df,
+                section_worksheet,
+                section_headers,
+                section_key,
+            ) in completed_sections:
+                rendered_any_section = (
+                    _render_victor_completed_section(
+                        section_label,
+                        section_df,
+                        section_source_df,
+                        section_worksheet,
+                        section_headers,
+                        section_key,
                     )
+                    or rendered_any_section
+                )
+
+            if not rendered_any_section:
+                st.info("No hay pedidos completados CDMX en las últimas 72 horas.")
 
         st.stop()
 
