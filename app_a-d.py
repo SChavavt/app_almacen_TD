@@ -7027,7 +7027,7 @@ def mostrar_pedido(df, idx, row, orden, origen_tab, current_main_tab_label, work
         if comentario:
             st.markdown("##### 💬 Comentario del Pedido")
             st.info(comentario)
-            if row.get("Estado") in ["🟡 Pendiente", "🔴 Demorado"]:
+            if row.get("Estado") in ["🟡 Pendiente", "🔴 Demorado"] and not is_victor_simple_flow:
                 st.caption("✅ El check **Enterado** se confirma junto al botón **⚙️ Procesar** para evitar recargas al cambiarlo.")
 
         if es_local_no_entregado:
