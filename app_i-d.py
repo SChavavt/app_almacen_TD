@@ -3570,18 +3570,18 @@ def persist_surtidor_to_sheets(entries: list[dict], surtidor: str) -> tuple[int,
             continue
 
         if not col_fecha_surtido_idx:
-            fail_count += len(updates)
             st.warning(
-                f"No se encontró la columna 'Fecha_Surtido' en la hoja '{sheet_name}'."
+                f"No se encontró la columna 'Fecha_Surtido' en la hoja '{sheet_name}'. "
+                "Se guardará el surtidor sin registrar la fecha de surtido."
             )
-            continue
 
         ws = _worksheet_by_name(sheet_name)
         sheet_fail = 0
         for row_idx, surtidor_value, fecha_value in updates:
             try:
                 ws.update_cell(row_idx, col_surtidor_idx, surtidor_value)
-                ws.update_cell(row_idx, col_fecha_surtido_idx, fecha_value)
+                if col_fecha_surtido_idx:
+                    ws.update_cell(row_idx, col_fecha_surtido_idx, fecha_value)
                 success_count += 1
             except gspread.exceptions.APIError:
                 fail_count += 1
@@ -6517,9 +6517,16 @@ if selected_tab_key == "surtidores":
                     for key in selected_keys
                     if key in selected_entry_map
                 ]
-                for key in selected_keys:
-                    st.session_state.surtidor_assignments[key] = nombre
+                if not selected_entries:
+                    st.error(
+                        "No pude resolver los pedidos seleccionados para guardarlos. "
+                        "Actualiza la página e intenta nuevamente."
+                    )
+                    st.stop()
                 ok_count, fail_count = persist_surtidor_to_sheets(selected_entries, nombre)
+                if ok_count:
+                    for key in selected_keys:
+                        st.session_state.surtidor_assignments[key] = nombre
                 if ok_count and not fail_count:
                     st.success("Asignación guardada y sincronizada con Google Sheets.")
                 elif ok_count and fail_count:
