@@ -7083,7 +7083,24 @@ if selected_tab_key == "dashboard":
             if vendedor_sel == "(Todos)"
             else f"Mostrando pedidos de {vendedor_sel} en flujo"
         )
-        st.dataframe(ultimos_filtrados, use_container_width=True, height=260, hide_index=True)
+        st.caption("Tip: selecciona una fila de la lista para cargar automáticamente ese pedido en el detalle.")
+        evento_ultimos = st.dataframe(
+            ultimos_filtrados,
+            use_container_width=True,
+            height=260,
+            hide_index=True,
+            on_select="rerun",
+            selection_mode="single-row",
+            key="dashboard_ultimos_pedidos_selector",
+        )
+        try:
+            filas_ultimos_sel = (evento_ultimos.selection or {}).get("rows", []) if evento_ultimos is not None else []
+        except Exception:
+            filas_ultimos_sel = []
+        if filas_ultimos_sel:
+            idx_pos = int(filas_ultimos_sel[0])
+            if 0 <= idx_pos < len(ultimos_filtrados):
+                st.session_state["dashboard_detalle_pedido_idx"] = ultimos_filtrados.index[idx_pos]
 
         st.markdown("##### 🔎 Ver detalle de un pedido")
         selector_df = ultimos_base.copy()
@@ -7133,9 +7150,13 @@ if selected_tab_key == "dashboard":
             axis=1,
         )
 
+        pedido_options = selector_df.index.tolist()
+        if st.session_state.get("dashboard_detalle_pedido_idx") not in pedido_options:
+            st.session_state["dashboard_detalle_pedido_idx"] = pedido_options[0]
+
         pedido_idx = st.selectbox(
             "🧭 Selecciona un pedido para ver más información",
-            options=selector_df.index.tolist(),
+            options=pedido_options,
             format_func=lambda idx: selector_df.loc[idx, "_pedido_label"],
             key="dashboard_detalle_pedido_idx",
         )
@@ -7332,7 +7353,24 @@ if selected_tab_key == "dashboard":
                     if vendedor_sel == "(Todos)"
                     else f"Mostrando pedidos históricos de {vendedor_sel}"
                 )
-                st.dataframe(vista_filtrada, use_container_width=True, hide_index=True, height=260)
+                st.caption("Tip: selecciona una fila del historial para cargar automáticamente ese pedido en el detalle.")
+                evento_historial = st.dataframe(
+                    vista_filtrada,
+                    use_container_width=True,
+                    hide_index=True,
+                    height=260,
+                    on_select="rerun",
+                    selection_mode="single-row",
+                    key="dashboard_historial_pedidos_selector",
+                )
+                try:
+                    filas_historial_sel = (evento_historial.selection or {}).get("rows", []) if evento_historial is not None else []
+                except Exception:
+                    filas_historial_sel = []
+                if filas_historial_sel:
+                    idx_pos = int(filas_historial_sel[0])
+                    if 0 <= idx_pos < len(vista_filtrada):
+                        st.session_state["dashboard_detalle_pedido_hist_idx"] = vista_filtrada.index[idx_pos]
 
                 st.markdown("##### 🔎 Ver detalle de un pedido histórico")
                 selector_hist = historial_filtrado.copy()
@@ -7379,9 +7417,13 @@ if selected_tab_key == "dashboard":
                     axis=1,
                 )
 
+                hist_options = selector_hist.index.tolist()
+                if st.session_state.get("dashboard_detalle_pedido_hist_idx") not in hist_options:
+                    st.session_state["dashboard_detalle_pedido_hist_idx"] = hist_options[0]
+
                 idx_hist = st.selectbox(
                     "🧭 Selecciona un pedido histórico para ver más información",
-                    options=selector_hist.index.tolist(),
+                    options=hist_options,
                     format_func=lambda idx: selector_hist.loc[idx, "_pedido_label"],
                     key="dashboard_detalle_pedido_hist_idx",
                 )
