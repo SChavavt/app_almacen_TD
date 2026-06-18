@@ -3570,18 +3570,18 @@ def persist_surtidor_to_sheets(entries: list[dict], surtidor: str) -> tuple[int,
             continue
 
         if not col_fecha_surtido_idx:
-            fail_count += len(updates)
             st.warning(
-                f"No se encontró la columna 'Fecha_Surtido' en la hoja '{sheet_name}'."
+                f"No se encontró la columna 'Fecha_Surtido' en la hoja '{sheet_name}'. "
+                "Se guardará el surtidor sin registrar la fecha de surtido."
             )
-            continue
 
         ws = _worksheet_by_name(sheet_name)
         sheet_fail = 0
         for row_idx, surtidor_value, fecha_value in updates:
             try:
                 ws.update_cell(row_idx, col_surtidor_idx, surtidor_value)
-                ws.update_cell(row_idx, col_fecha_surtido_idx, fecha_value)
+                if col_fecha_surtido_idx:
+                    ws.update_cell(row_idx, col_fecha_surtido_idx, fecha_value)
                 success_count += 1
             except gspread.exceptions.APIError:
                 fail_count += 1
@@ -6305,12 +6305,40 @@ if selected_tab_key == "surtidores":
         seen_foraneo.add(key)
         foraneo_hoy.append(entry)
 
+    def _entry_is_devolucion(entry) -> bool:
+        text = " ".join(
+            sanitize_text(entry.get(field, ""))
+            for field in ["tipo", "tipo_envio", "tipo_envio_original", "badges", "details"]
+        ).lower()
+        return "devol" in text
+
+    def _entry_search_text(entry) -> str:
+        values = [
+            entry.get("display_num", entry.get("numero", "")),
+            entry.get("cliente_nombre", ""),
+            entry.get("folio", ""),
+            entry.get("id_pedido", ""),
+            entry.get("estado", ""),
+            entry.get("turno", ""),
+            entry.get("tipo", ""),
+            entry.get("tipo_envio", ""),
+            entry.get("tipo_envio_original", ""),
+            " ".join(entry.get("badges", []) or []),
+            " ".join(entry.get("details", []) or []),
+        ]
+        return " ".join(sanitize_text(value).lower() for value in values)
+
     def _entry_label(entry) -> str:
         numero = entry.get("display_num", entry.get("numero", "—"))
-        cliente = sanitize_text(entry.get("cliente_nombre", ""))
+        cliente = sanitize_text(entry.get("cliente_nombre", "")) or sanitize_text(entry.get("cliente", ""))
+        folio = sanitize_text(entry.get("folio", ""))
         estado = sanitize_text(entry.get("estado", ""))
-        parts = [f"**#{numero}**", cliente, estado]
-        return " · ".join([p for p in parts if p])
+        turno = sanitize_text(entry.get("turno", ""))
+        tipo = sanitize_text(entry.get("tipo", ""))
+        tipo_envio = sanitize_text(entry.get("tipo_envio_original", "")) or sanitize_text(entry.get("tipo_envio", ""))
+        marcador_devolucion = "🔁 DEV" if _entry_is_devolucion(entry) else ""
+        parts = [f"**#{numero}**", marcador_devolucion, cliente, folio, tipo, tipo_envio, turno, estado]
+        return " · ".join([p for p in parts if p and p != "—"])
 
     local_hoy, foraneo_hoy = add_missing_en_proceso_casos_for_surtidores(local_hoy, foraneo_hoy)
 
@@ -6325,6 +6353,42 @@ if selected_tab_key == "surtidores":
     foraneo_sorted_keys = sorted(
         foraneo_options.keys(), key=lambda k: foraneo_order.get(k, float("inf"))
     )
+
+    all_entries_by_key = {
+        build_surtidor_key(entry): entry for entry in (local_hoy + foraneo_hoy)
+    }
+    devoluciones_sin_surtidor = [
+        key for key, entry in all_entries_by_key.items() if _entry_is_devolucion(entry)
+    ]
+    total_sin_surtidor = len(local_sorted_keys) + len(foraneo_sorted_keys)
+    if devoluciones_sin_surtidor:
+        st.info(
+            f"🔁 Hay {len(devoluciones_sin_surtidor)} devolución(es) sin surtidor. "
+            "Ahora aparecen marcadas como **🔁 DEV** y puedes filtrarlas escribiendo `dev`."
+        )
+
+    filtro_surtidores = sanitize_text(
+        st.text_input(
+            "Buscar pedido/devolución",
+            placeholder="Escribe cliente, folio, número, turno o dev",
+            help="Filtra Local y Foráneo antes de seleccionar. Usa `dev` para ver solo devoluciones.",
+            key="surtidores_busqueda",
+        )
+    ).lower()
+    if filtro_surtidores:
+        local_sorted_keys = [
+            key
+            for key in local_sorted_keys
+            if filtro_surtidores in _entry_search_text(all_entries_by_key.get(key, {}))
+        ]
+        foraneo_sorted_keys = [
+            key
+            for key in foraneo_sorted_keys
+            if filtro_surtidores in _entry_search_text(all_entries_by_key.get(key, {}))
+        ]
+        st.caption(
+            f"Mostrando {len(local_sorted_keys) + len(foraneo_sorted_keys)} de {total_sin_surtidor} pendientes sin surtidor."
+        )
 
     with st.form("surtidores_asignacion_form"):
         st.markdown("**Selección de surtidor**")
@@ -6517,9 +6581,16 @@ if selected_tab_key == "surtidores":
                     for key in selected_keys
                     if key in selected_entry_map
                 ]
-                for key in selected_keys:
-                    st.session_state.surtidor_assignments[key] = nombre
+                if not selected_entries:
+                    st.error(
+                        "No pude resolver los pedidos seleccionados para guardarlos. "
+                        "Actualiza la página e intenta nuevamente."
+                    )
+                    st.stop()
                 ok_count, fail_count = persist_surtidor_to_sheets(selected_entries, nombre)
+                if ok_count:
+                    for key in selected_keys:
+                        st.session_state.surtidor_assignments[key] = nombre
                 if ok_count and not fail_count:
                     st.success("Asignación guardada y sincronizada con Google Sheets.")
                 elif ok_count and fail_count:
