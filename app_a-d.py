@@ -5926,6 +5926,64 @@ def _normalize_urls(value):
     return normalized
 
 
+def render_case_file_links(
+    row,
+    s3_client_param,
+    *,
+    case_label: str = "caso",
+    include_principal_docs: bool = True,
+):
+    """Render attached case documents and shipping guides from a case row."""
+
+    adjuntos_urls = _normalize_urls(row.get("Adjuntos", ""))
+    guias_urls = _normalize_urls(row.get("Hoja_Ruta_Mensajero", ""))
+    dictamen_url = str(row.get("Dictamen_Garantia_URL", "")).strip()
+    nota_credito_url = str(row.get("Nota_Credito_URL", "")).strip()
+    principal_url = dictamen_url or nota_credito_url
+    doc_adic_url = str(row.get("Documento_Adicional_URL", "")).strip()
+
+    contenido = False
+    if adjuntos_urls:
+        contenido = True
+        st.markdown("**Facturas / Adjuntos:**")
+        for u in adjuntos_urls:
+            file_name = os.path.basename(urlparse(u).path) or u
+            file_name = unquote(file_name)
+            st.markdown(
+                f'- <a href="{resolve_storage_url(s3_client_param, u)}" target="_blank">{file_name}</a>',
+                unsafe_allow_html=True,
+            )
+
+    if guias_urls:
+        contenido = True
+        st.markdown("**Guías:**")
+        for g in guias_urls:
+            file_name = os.path.basename(urlparse(g).path) or g
+            file_name = unquote(file_name)
+            st.markdown(
+                f'- <a href="{resolve_storage_url(s3_client_param, g)}" target="_blank">{file_name}</a>',
+                unsafe_allow_html=True,
+            )
+
+    if include_principal_docs and principal_url and principal_url.lower() not in ("nan", "none", "n/a"):
+        contenido = True
+        label_p = "Dictamen de Garantía" if dictamen_url else "Nota de Crédito"
+        st.markdown(
+            f'- <a href="{resolve_storage_url(s3_client_param, principal_url)}" target="_blank">{label_p}</a>',
+            unsafe_allow_html=True,
+        )
+
+    if include_principal_docs and doc_adic_url and doc_adic_url.lower() not in ("nan", "none", "n/a"):
+        contenido = True
+        st.markdown(
+            f'- <a href="{resolve_storage_url(s3_client_param, doc_adic_url)}" target="_blank">Documento Adicional</a>',
+            unsafe_allow_html=True,
+        )
+
+    if not contenido:
+        st.info(f"No hay archivos registrados para este {case_label}.")
+
+
 def _merge_uploaded_urls(existing_value, new_urls: Sequence[str]) -> str:
     """Merge existing stored URLs with new ones, preserving order and removing blanks."""
 
@@ -11794,35 +11852,9 @@ if df_main is not None:
     
                 st.markdown("---")
     
-                # === Archivos del Caso (Adjuntos + Dictamen/Nota + Adicional) ===
+                # === Archivos del Caso (Adjuntos + Guías + Dictamen/Nota + Adicional) ===
                 with st.expander("📎 Archivos del Caso (Garantía)", expanded=False):
-                    adjuntos_urls = _normalize_urls(row.get("Adjuntos", ""))
-                    # Prioriza dictamen de garantía; si no existe, cae a Nota_Credito_URL
-                    dictamen_url = str(row.get("Dictamen_Garantia_URL", "")).strip()
-                    nota_credito_url = str(row.get("Nota_Credito_URL", "")).strip()
-                    principal_url = dictamen_url or nota_credito_url
-                    doc_adic_url = str(row.get("Documento_Adicional_URL", "")).strip()
-    
-                    items = []
-                    for u in adjuntos_urls:
-                        if u:
-                            file_name = os.path.basename(urlparse(u).path) or u
-                            file_name = unquote(file_name)
-                            items.append((file_name, resolve_storage_url(s3_client, u)))
-                    if principal_url and principal_url.lower() not in ("nan", "none", "n/a"):
-                        label_p = "Dictamen de Garantía" if dictamen_url else "Nota de Crédito"
-                        items.append((label_p, resolve_storage_url(s3_client, principal_url)))
-                    if doc_adic_url and doc_adic_url.lower() not in ("nan", "none", "n/a"):
-                        items.append(("Documento Adicional", resolve_storage_url(s3_client, doc_adic_url)))
-    
-                    if items:
-                        for label, url in items:
-                            st.markdown(
-                                f'- <a href="{url}" target="_blank">{label}</a>',
-                                unsafe_allow_html=True,
-                            )
-                    else:
-                        st.info("No hay archivos registrados para esta garantía.")
+                    render_case_file_links(row, s3_client, case_label="garantía")
     
                 st.markdown("---")
     
@@ -13026,28 +13058,13 @@ if df_main is not None:
                     monto = str(row.get("Monto_Devuelto", "")).strip()
                     if monto:
                         st.markdown(f"💵 Monto estimado: {monto}")
-                    adjuntos = _normalize_urls(row.get("Adjuntos", ""))
-                    guia = str(row.get("Hoja_Ruta_Mensajero", "")).strip()
                     with st.expander("📎 Archivos del Caso", expanded=False):
-                        contenido = False
-                        if adjuntos:
-                            contenido = True
-                            st.markdown("**Adjuntos:**")
-                            for u in adjuntos:
-                                nombre = os.path.basename(urlparse(u).path) or u
-                                nombre = unquote(nombre)
-                                url = resolve_storage_url(s3_client, u)
-                                st.markdown(f"- [{nombre}]({url})")
-                        if guia:
-                            contenido = True
-                            st.markdown("**Guía:**")
-                            guia_url = resolve_storage_url(s3_client, guia)
-                            if urlparse(guia_url).scheme in ("http", "https"):
-                                st.markdown(f"[Abrir guía]({guia_url})")
-                            else:
-                                st.markdown(guia_url)
-                        if not contenido:
-                            st.info("Sin archivos registrados en la hoja.")
+                        render_case_file_links(
+                            row,
+                            s3_client,
+                            case_label="caso",
+                            include_principal_docs=False,
+                        )
     
                 # Devoluciones completadas/canceladas
                 comp_dev = df_casos_completados[df_casos_completados[tipo_casos_col].astype(str).str.contains("Devoluci", case=False, na=False)]
