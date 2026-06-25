@@ -6839,21 +6839,28 @@ def mostrar_pedido_detalle(
                         )
                         return
 
+                if origen_tab == "Foráneo":
+                    reporte_ok = escribir_en_reporte_guias(
+                        cliente=row.get("Cliente", ""),
+                        vendedor=row.get("Vendedor_Registro", ""),
+                        tipo_envio=row.get("Tipo_Envio", ""),
+                        row=preflight_row,
+                        s3_client_param=s3_client_param,
+                    )
+                    if not reporte_ok:
+                        st.error(
+                            "❌ No se procesó el pedido porque no se pudo escribir "
+                            "en el Excel/REPORTE GUÍAS."
+                        )
+                        return
+
                 if batch_update_gsheet_cells(worksheet, updates, headers=headers):
                     df.at[idx, "Estado"] = "🔵 En Proceso"
                     df.at[idx, "Hora_Proceso"] = now_str
                     row["Estado"] = "🔵 En Proceso"
                     row["Hora_Proceso"] = now_str
 
-                    if origen_tab == "Foráneo":
-                        escribir_en_reporte_guias(
-                            cliente=row.get("Cliente", ""),
-                            vendedor=row.get("Vendedor_Registro", ""),
-                            tipo_envio=row.get("Tipo_Envio", ""),
-                            row=row,
-                            s3_client_param=s3_client_param,
-                        )
-                    elif _is_pasa_bodega_order(row, origen_tab):
+                    if _is_pasa_bodega_order(row, origen_tab):
                         _upsert_pasa_bodega_report_row(row)
 
                     st.toast("✅ Pedido marcado como 🔵 En Proceso", icon="✅")
