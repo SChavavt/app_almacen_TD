@@ -518,9 +518,13 @@ def _format_cantidad_sin_ceros(value: Any) -> str:
 
 
 def _resolve_hoja_ruta_sheet_name(origen_tab: Any, turno_value: Any) -> str:
+    # La hoja destino debe salir primero del turno real guardado en el pedido.
+    # ``origen_tab`` es solo el contexto visual desde donde se presionó la acción
+    # y puede quedar desfasado en reruns/cambios de fecha-turno; si se prioriza,
+    # un pedido "Local Mañana" puede terminar en la hoja de "Local Tarde".
     candidates = [
-        _normalize_turno_key(origen_tab),
         _normalize_turno_key(turno_value),
+        _normalize_turno_key(origen_tab),
     ]
     for candidate in candidates:
         if candidate in REPORTE_ALMACEN_SHEET_BY_TURNO:
@@ -530,14 +534,17 @@ def _resolve_hoja_ruta_sheet_name(origen_tab: Any, turno_value: Any) -> str:
 
 def _is_hoja_ruta_turno(origen_tab: Any, turno_value: Any) -> bool:
     candidates = [
-        _normalize_turno_key(origen_tab),
         _normalize_turno_key(turno_value),
+        _normalize_turno_key(origen_tab),
     ]
     return any(candidate in REPORTE_ALMACEN_SHEET_BY_TURNO for candidate in candidates)
 
 
 def _resolve_turno_label(origen_tab: Any, turno_value: Any) -> str:
-    normalized = _normalize_turno_key(origen_tab) or _normalize_turno_key(turno_value)
+    # Igual que la hoja destino, el título visible debe respetar el Turno del
+    # registro antes que el subtab/origen visual. Esto evita secciones con
+    # "(LOCAL TARDE)" para pedidos que ya tienen "☀️ Local Mañana" en Sheets.
+    normalized = _normalize_turno_key(turno_value) or _normalize_turno_key(origen_tab)
     if "tarde" in normalized:
         return "LOCAL TARDE"
     if "saltillo" in normalized:
