@@ -5617,6 +5617,14 @@ def render_kiosk_auto_local_view(auto_local_entries: list[dict]) -> None:
     st_autorefresh(interval=60000, key="auto_refresh_local_kiosk")
 
 
+FORANEO_FOUR_COLUMN_THRESHOLD = 55
+FORANEO_HIDE_HEADER_THRESHOLD = 28
+
+
+def _should_show_foraneo_header(entries: list[dict]) -> bool:
+    return len(entries) < FORANEO_HIDE_HEADER_THRESHOLD
+
+
 def render_kiosk_auto_foraneo_view(auto_foraneo_entries: list[dict]) -> None:
     """Renderiza sólo las listas foráneas para PANTALLAF, sin encabezados ni scroll."""
     apply_kiosk_fullscreen_css()
@@ -5652,7 +5660,7 @@ def render_kiosk_auto_foraneo_view(auto_foraneo_entries: list[dict]) -> None:
     hoy_entries = sort_entries_by_flow_number_desc(hoy_entries)
     anteriores = sort_entries_by_flow_number_desc(dedupe_entries_preserve_order(ant + sin_fecha))
 
-    hoy_chunk_count = 3 if len(hoy_entries) > 50 else 2
+    hoy_chunk_count = 3 if len(hoy_entries) >= FORANEO_FOUR_COLUMN_THRESHOLD else 2
     hoy_chunks = [list(chunk) for chunk in np.array_split(hoy_entries, hoy_chunk_count)]
 
     if hoy_chunk_count == 3:
@@ -5669,7 +5677,7 @@ def render_kiosk_auto_foraneo_view(auto_foraneo_entries: list[dict]) -> None:
             subtitle="Fechas previas + pedidos sin Fecha_Entrega",
             max_rows=140,
             panel_height=220,
-            show_header=True,
+            show_header=_should_show_foraneo_header(anteriores),
             mode="foraneo",
             min_content_height=40,
             compact_foraneo_overflow=hoy_chunk_count == 3,
@@ -5690,7 +5698,7 @@ def render_kiosk_auto_foraneo_view(auto_foraneo_entries: list[dict]) -> None:
                 max_rows=140,
                 start_number=next_number,
                 panel_height=220,
-                show_header=True,
+                show_header=_should_show_foraneo_header(chunk),
                 mode="foraneo",
                 min_content_height=40,
                 compact_foraneo_overflow=hoy_chunk_count == 3,
@@ -5980,9 +5988,9 @@ if selected_tab_key == "auto_foraneo":
     anteriores = dedupe_entries_preserve_order(ant + sin_fecha)
     anteriores = sort_entries_by_flow_number_desc(anteriores)
 
-    # Distribución: PANTALLAF abre una 4ª columna cuando HOY/FUTURAS supera 50
+    # Distribución: PANTALLAF abre una 4ª columna cuando HOY/FUTURAS llega a 55
     # pedidos, dejando ANTERIORES aparte y partiendo HOY/FUTURAS en 3 bloques.
-    hoy_chunk_count = 3 if logged_user == "PANTALLAF" and len(hoy_entries) > 50 else 2
+    hoy_chunk_count = 3 if logged_user == "PANTALLAF" and len(hoy_entries) >= FORANEO_FOUR_COLUMN_THRESHOLD else 2
     hoy_chunks = [list(chunk) for chunk in np.array_split(hoy_entries, hoy_chunk_count)]
 
     foraneo_gap = "small" if logged_user == "PANTALLAF" else "large"
@@ -5998,6 +6006,7 @@ if selected_tab_key == "auto_foraneo":
             subtitle=f"Fechas previas + pedidos sin Fecha_Entrega",
             max_rows=140,
             panel_height=220,
+            show_header=_should_show_foraneo_header(anteriores),
             mode="foraneo",
             min_content_height=40,
             compact_foraneo_overflow=hoy_chunk_count == 3,
@@ -6018,6 +6027,7 @@ if selected_tab_key == "auto_foraneo":
                 max_rows=140,
                 start_number=next_number,
                 panel_height=220,
+                show_header=_should_show_foraneo_header(chunk),
                 mode="foraneo",
                 min_content_height=40,
                 compact_foraneo_overflow=hoy_chunk_count == 3,
