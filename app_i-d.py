@@ -2293,41 +2293,54 @@ def render_auto_list(
     is_pantalla_l_local_view = is_pantalla_l_view and mode == "local"
     is_large_auto_list_view = is_pantalla_l_view or is_pantalla_f_foraneo_view
 
-    row_height_px = 64 if is_pantalla_l_local_view else (52 if is_large_auto_list_view else 38)
-    title_height_px = 34 if show_header and is_compact_pantalla_f_foraneo_view else (58 if show_header else 10)
-    min_content = min_content_height if min_content_height is not None else (140 if show_header else 100)
-    safety_padding_px = 24
+    # PANTALLAL se muestra en una TV más chica que PANTALLAF. Usamos una
+    # altura intermedia: compacta para no dejar huecos entre tableros, pero con
+    # suficiente aire para que el iframe no recorte encabezados ni filas.
+    row_height_px = 31 if is_pantalla_l_local_view else (52 if is_large_auto_list_view else 38)
+    title_height_px = (
+        34
+        if show_header and is_compact_pantalla_f_foraneo_view
+        else (88 if show_header and is_pantalla_l_local_view else (58 if show_header else 10))
+    )
+    default_min_content = 132 if is_pantalla_l_local_view else (140 if show_header else 100)
+    min_content = min_content_height if min_content_height is not None else default_min_content
+    safety_padding_px = 16 if is_pantalla_l_local_view else 24
     content_height = max(
         min_content, (len(visible) * row_height_px) + title_height_px + safety_padding_px
     )
     component_height = content_height
 
     compact_title_size = (
-        "0.78rem" if is_compact_pantalla_f_foraneo_view else ("1.34rem" if is_pantalla_l_local_view else ("1.2rem" if is_large_auto_list_view else "1.01rem"))
+        "0.78rem" if is_compact_pantalla_f_foraneo_view else ("1.06rem" if is_pantalla_l_local_view else ("1.2rem" if is_large_auto_list_view else "1.01rem"))
     )
     compact_sub_size = (
-        "0.56rem" if is_compact_pantalla_f_foraneo_view else ("1.04rem" if is_pantalla_l_local_view else ("0.88rem" if is_large_auto_list_view else "0.72rem"))
+        "0.56rem" if is_compact_pantalla_f_foraneo_view else ("0.78rem" if is_pantalla_l_local_view else ("0.88rem" if is_large_auto_list_view else "0.72rem"))
     )
     compact_head_size = (
-        "1.02rem" if is_pantalla_l_local_view else ("0.92rem" if is_large_auto_list_view else "0.67rem")
+        "0.78rem" if is_pantalla_l_local_view else ("0.92rem" if is_large_auto_list_view else "0.67rem")
     )
     compact_td_size = (
-        "1.22rem" if is_pantalla_l_local_view else ("1.0rem" if is_large_auto_list_view else "0.78rem")
+        "0.92rem" if is_pantalla_l_local_view else ("1.0rem" if is_large_auto_list_view else "0.78rem")
     )
     compact_n_size = (
-        "1.32rem" if is_pantalla_l_local_view else ("1.04rem" if is_large_auto_list_view else "0.77rem")
+        "0.98rem" if is_pantalla_l_local_view else ("1.04rem" if is_large_auto_list_view else "0.77rem")
     )
     compact_surtidor_size = (
-        "1.16rem" if is_pantalla_l_local_view else ("0.92rem" if is_large_auto_list_view else "0.75rem")
+        "0.88rem" if is_pantalla_l_local_view else ("0.92rem" if is_large_auto_list_view else "0.75rem")
     )
     compact_status_size = (
-        "1.08rem" if is_pantalla_l_local_view else ("0.9rem" if is_large_auto_list_view else "0.68rem")
+        "0.84rem" if is_pantalla_l_local_view else ("0.9rem" if is_large_auto_list_view else "0.68rem")
     )
     compact_tag_size = (
-        "1.05rem" if is_pantalla_l_local_view else ("0.86rem" if is_large_auto_list_view else "0.66rem")
+        "0.82rem" if is_pantalla_l_local_view else ("0.86rem" if is_large_auto_list_view else "0.66rem")
     )
     compact_side_align = "center" if is_compact_pantalla_f_foraneo_view else "left"
     compact_surtidor_color_css = "color:#000!important;" if is_compact_pantalla_f_foraneo_view else ""
+    compact_board_padding = "0.28rem 0.38rem" if is_pantalla_l_local_view else "0.55rem 0.68rem"
+    compact_title_margin = "0.18rem" if is_pantalla_l_local_view else "0.4rem"
+    compact_head_padding = "0.12rem 0.16rem" if is_pantalla_l_local_view else "0.2rem 0.2rem"
+    compact_cell_padding = "0.08rem 0.12rem" if is_pantalla_l_local_view else "0.14rem 0.16rem"
+    compact_cell_line_height = "0.92rem" if is_pantalla_l_local_view else "1.02rem"
 
     colgroup_html = (
         "<col style='width:3ch'><col style='width:16ch'><col style='width:4ch'><col style='width:3ch'>"
@@ -2348,21 +2361,21 @@ def render_auto_list(
 
     html = f"""
     <style>
-    .board-col{{flex:1;background:rgba(18,18,20,0.92);border-radius:0.9rem;padding:0.55rem 0.68rem;box-shadow:0 2px 12px rgba(0,0,0,0.25);height:100%;font-family:"Source Sans Pro", sans-serif;}}
-    .board-title{{display:flex;justify-content:space-between;align-items:center;gap:0.6rem;margin-bottom:0.4rem;font-weight:600;font-size:{compact_title_size};color:#fff;letter-spacing:0.01em;}}
+    .board-col{{flex:1;background:rgba(18,18,20,0.92);border-radius:0.9rem;padding:{compact_board_padding};box-shadow:0 2px 12px rgba(0,0,0,0.25);height:100%;font-family:"Source Sans Pro", sans-serif;}}
+    .board-title{{display:flex;justify-content:space-between;align-items:center;gap:0.6rem;margin-bottom:{compact_title_margin};font-weight:600;font-size:{compact_title_size};color:#fff;letter-spacing:0.01em;}}
     .board-title-compact{{flex-direction:column;align-items:flex-start;gap:0.04rem;margin-bottom:0.12rem;line-height:0.95;}}
     .board-title-main{{max-width:100%;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}}
     .board-sub{{font-size:{compact_sub_size};opacity:0.8;font-weight:500;}}
     .board-sub-inline{{max-width:100%;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}}
     .board-table{{width:100%;border-collapse:collapse;table-layout:fixed;}}
-    .board-head th{{font-size:{compact_head_size};letter-spacing:0.02em;text-transform:uppercase;color:#d7e6ff;font-weight:700;padding:0.2rem 0.2rem;border-bottom:1px solid rgba(140,180,255,0.38);text-align:left;background:rgba(65,105,180,0.16);white-space:nowrap;}}
+    .board-head th{{font-size:{compact_head_size};letter-spacing:0.02em;text-transform:uppercase;color:#d7e6ff;font-weight:700;padding:{compact_head_padding};border-bottom:1px solid rgba(140,180,255,0.38);text-align:left;background:rgba(65,105,180,0.16);white-space:nowrap;}}
     .board-head th:first-child{{border-top-left-radius:0.45rem;}}
     .board-head th:last-child{{border-top-right-radius:0.45rem;}}
     .board-row{{border-top:1px solid rgba(255,255,255,0.09);}}
     .board-row-priority{{background:rgba(128,0,255,0.42)!important;}}
     .board-row-mod-material{{background:rgba(249,115,22,0.50)!important;}}
     .board-row:first-child{{border-top:none;}}
-    .board-row td{{padding:0.18rem 0.18rem;vertical-align:middle;font-size:{compact_td_size};color:#fff;line-height:1.08rem;}}
+    .board-row td{{padding:{compact_cell_padding};vertical-align:middle;font-size:{compact_td_size};color:#fff;line-height:{compact_cell_line_height};}}
     .board-head th + th{{border-left:1px solid rgba(136,176,255,0.3);}}
     .board-row td + td{{border-left:1px solid rgba(255,255,255,0.08);}}
     .board-n{{width:1.25rem;font-size:{compact_n_size};font-weight:800;white-space:nowrap;color:#fff;padding-left:0.16rem!important;padding-right:0.26rem!important;letter-spacing:-0.03em;}}
