@@ -4661,9 +4661,26 @@ def parse_antiguedad_cobranza_excel(file, mes: str = "") -> pd.DataFrame:
 
 
 
-def _mark_cobranza_transient_failure(cooldown_seconds: int = 25):
-    """Registra un cooldown para evitar golpear Google Sheets durante un 429 transitorio."""
-    st.session_state["ger_cob_retry_after_ts"] = time.time() + max(1, cooldown_seconds)
+def _mark_cobranza_transient_failure(cooldown_seconds: int | None = None):
+    """Registra un cooldown incremental para evitar golpear Google Sheets durante un 429 transitorio."""
+    attempts = int(st.session_state.get("ger_cob_transient_attempts", 0) or 0) + 1
+    st.session_state["ger_cob_transient_attempts"] = attempts
+
+    if cooldown_seconds is None:
+        # Backoff exponencial: cada error/rerun consecutivo espera más, hasta 5 minutos.
+        cooldown_seconds = min(300, 20 * (2 ** min(attempts - 1, 4)))
+
+    retry_after = time.time() + max(1, int(cooldown_seconds))
+    st.session_state["ger_cob_retry_after_ts"] = max(
+        float(st.session_state.get("ger_cob_retry_after_ts", 0) or 0),
+        retry_after,
+    )
+
+
+def _clear_cobranza_transient_failure():
+    """Limpia el backoff cuando Cobranza logró reconectar correctamente."""
+    st.session_state.pop("ger_cob_retry_after_ts", None)
+    st.session_state.pop("ger_cob_transient_attempts", None)
 
 
 def _cobranza_retry_cooldown_remaining() -> int:
@@ -4672,7 +4689,7 @@ def _cobranza_retry_cooldown_remaining() -> int:
     return max(0, int(retry_after - time.time()))
 
 
-def reset_cobranza_connection_state(clear_session: bool = True):
+def reset_cobranza_connection_state(clear_session: bool = True, clear_cooldown: bool = False):
     """Limpia caches de Cobranza para forzar una reconexión fresca a Google Sheets."""
     global _COBRANZA_SPREADSHEET_CACHE, _COBRANZA_WS_CACHE, _COBRANZA_VALUES_CACHE
 
@@ -4686,9 +4703,11 @@ def reset_cobranza_connection_state(clear_session: bool = True):
             "ger_cob_force_refresh",
             "ger_cob_stats",
             "ger_cob_missing",
-            "ger_cob_retry_after_ts",
         ]:
             st.session_state.pop(key, None)
+
+        if clear_cooldown:
+            _clear_cobranza_transient_failure()
 
 
 def _render_cobranza_retry_box(message: str, *, error: Exception | None = None, key_suffix: str = ""):
@@ -4712,7 +4731,7 @@ def _render_cobranza_retry_box(message: str, *, error: Exception | None = None, 
         st.write("")
         btn_label = "⏳ Espera para reintentar" if cooldown > 0 else "🔄 Recargar conexión"
         if st.button(btn_label, key=retry_key, disabled=cooldown > 0):
-            reset_cobranza_connection_state()
+            reset_cobranza_connection_state(clear_cooldown=True)
             st.rerun()
 
 
@@ -4740,6 +4759,7 @@ def get_cobranza_worksheets_safe():
         ws_venc = _retry_gspread_api_call(lambda: ss.worksheet("cobranza_vencimientos"), retries=4, base_delay=0.9)
         ws_com = _retry_gspread_api_call(lambda: ss.worksheet("cobranza_comentarios"), retries=4, base_delay=0.9)
         _COBRANZA_WS_CACHE = (ws_base, ws_venc, ws_com)
+        _clear_cobranza_transient_failure()
         return _COBRANZA_WS_CACHE
     except gspread.exceptions.WorksheetNotFound:
         st.error("❌ Faltan pestañas requeridas en el Google Sheet de Cobranza.")
@@ -5067,11 +5087,15 @@ def _cobranza_texto_seguimiento_para_calendario(row) -> str:
 def render_cobranza_tab_gerente():
     st.subheader("📒 Cobranza")
 
+    cooldown = _cobranza_retry_cooldown_remaining()
     top_actions_col, _ = st.columns([1, 5])
     with top_actions_col:
-        if st.button("🔄 Recargar conexión", key="ger_cob_top_retry"):
-            reset_cobranza_connection_state()
+        btn_label = "⏳ Espera para reintentar" if cooldown > 0 else "🔄 Recargar conexión"
+        if st.button(btn_label, key="ger_cob_top_retry", disabled=cooldown > 0):
+            reset_cobranza_connection_state(clear_cooldown=True)
             st.rerun()
+        if cooldown > 0:
+            st.caption(f"Reintento disponible en ~{cooldown}s.")
 
     ws_base, ws_venc, ws_com = get_cobranza_worksheets_safe()
     if not ws_base or not ws_venc or not ws_com:
@@ -5220,6 +5244,8 @@ def render_cobranza_tab_gerente():
     try:
         base_df, venc_df, com_df = _load_cobranza_data(force_refresh=force_refresh)
     except gspread.exceptions.APIError as e:
+        if _is_transient_gspread_error(e):
+            _mark_cobranza_transient_failure()
         _render_cobranza_retry_box(
             "⚠️ No se pudieron leer los datos de Cobranza desde Google Sheets en este momento.",
             error=e,
