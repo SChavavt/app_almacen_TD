@@ -2293,8 +2293,16 @@ def render_auto_list(
     is_pantalla_l_local_view = is_pantalla_l_view and mode == "local"
     is_large_auto_list_view = is_pantalla_l_view or is_pantalla_f_foraneo_view
 
-    row_height_px = 64 if is_pantalla_l_local_view else (52 if is_large_auto_list_view else 38)
-    title_height_px = 34 if show_header and is_compact_pantalla_f_foraneo_view else (58 if show_header else 10)
+    # PANTALLAL se muestra en una TV más chica que PANTALLAF; si usamos el
+    # tamaño grande original, las listas locales se ven amontonadas y con
+    # sensación de zoom. Mantenerla compacta permite leer dos tableros completos
+    # lado a lado, similar a la densidad visual de PANTALLAF.
+    row_height_px = 42 if is_pantalla_l_local_view else (52 if is_large_auto_list_view else 38)
+    title_height_px = (
+        34
+        if show_header and is_compact_pantalla_f_foraneo_view
+        else (44 if show_header and is_pantalla_l_local_view else (58 if show_header else 10))
+    )
     min_content = min_content_height if min_content_height is not None else (140 if show_header else 100)
     safety_padding_px = 24
     content_height = max(
@@ -2303,28 +2311,28 @@ def render_auto_list(
     component_height = content_height
 
     compact_title_size = (
-        "0.78rem" if is_compact_pantalla_f_foraneo_view else ("1.34rem" if is_pantalla_l_local_view else ("1.2rem" if is_large_auto_list_view else "1.01rem"))
+        "0.78rem" if is_compact_pantalla_f_foraneo_view else ("1.06rem" if is_pantalla_l_local_view else ("1.2rem" if is_large_auto_list_view else "1.01rem"))
     )
     compact_sub_size = (
-        "0.56rem" if is_compact_pantalla_f_foraneo_view else ("1.04rem" if is_pantalla_l_local_view else ("0.88rem" if is_large_auto_list_view else "0.72rem"))
+        "0.56rem" if is_compact_pantalla_f_foraneo_view else ("0.78rem" if is_pantalla_l_local_view else ("0.88rem" if is_large_auto_list_view else "0.72rem"))
     )
     compact_head_size = (
-        "1.02rem" if is_pantalla_l_local_view else ("0.92rem" if is_large_auto_list_view else "0.67rem")
+        "0.78rem" if is_pantalla_l_local_view else ("0.92rem" if is_large_auto_list_view else "0.67rem")
     )
     compact_td_size = (
-        "1.22rem" if is_pantalla_l_local_view else ("1.0rem" if is_large_auto_list_view else "0.78rem")
+        "0.92rem" if is_pantalla_l_local_view else ("1.0rem" if is_large_auto_list_view else "0.78rem")
     )
     compact_n_size = (
-        "1.32rem" if is_pantalla_l_local_view else ("1.04rem" if is_large_auto_list_view else "0.77rem")
+        "0.98rem" if is_pantalla_l_local_view else ("1.04rem" if is_large_auto_list_view else "0.77rem")
     )
     compact_surtidor_size = (
-        "1.16rem" if is_pantalla_l_local_view else ("0.92rem" if is_large_auto_list_view else "0.75rem")
+        "0.88rem" if is_pantalla_l_local_view else ("0.92rem" if is_large_auto_list_view else "0.75rem")
     )
     compact_status_size = (
-        "1.08rem" if is_pantalla_l_local_view else ("0.9rem" if is_large_auto_list_view else "0.68rem")
+        "0.84rem" if is_pantalla_l_local_view else ("0.9rem" if is_large_auto_list_view else "0.68rem")
     )
     compact_tag_size = (
-        "1.05rem" if is_pantalla_l_local_view else ("0.86rem" if is_large_auto_list_view else "0.66rem")
+        "0.82rem" if is_pantalla_l_local_view else ("0.86rem" if is_large_auto_list_view else "0.66rem")
     )
     compact_side_align = "center" if is_compact_pantalla_f_foraneo_view else "left"
     compact_surtidor_color_css = "color:#000!important;" if is_compact_pantalla_f_foraneo_view else ""
@@ -2362,7 +2370,7 @@ def render_auto_list(
     .board-row-priority{{background:rgba(128,0,255,0.42)!important;}}
     .board-row-mod-material{{background:rgba(249,115,22,0.50)!important;}}
     .board-row:first-child{{border-top:none;}}
-    .board-row td{{padding:0.18rem 0.18rem;vertical-align:middle;font-size:{compact_td_size};color:#fff;line-height:1.08rem;}}
+    .board-row td{{padding:0.14rem 0.16rem;vertical-align:middle;font-size:{compact_td_size};color:#fff;line-height:1.02rem;}}
     .board-head th + th{{border-left:1px solid rgba(136,176,255,0.3);}}
     .board-row td + td{{border-left:1px solid rgba(255,255,255,0.08);}}
     .board-n{{width:1.25rem;font-size:{compact_n_size};font-weight:800;white-space:nowrap;color:#fff;padding-left:0.16rem!important;padding-right:0.26rem!important;letter-spacing:-0.03em;}}
